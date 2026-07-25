@@ -12,7 +12,7 @@ import {
   Switch,
   Tag
 } from "antd";
-import { FlaskConical, ShieldAlert } from "lucide-react";
+import { BellRing, FlaskConical, Info, ShieldAlert } from "lucide-react";
 
 import { fetchAdminUsers } from "../admin/api";
 import { fetchAgentModes } from "../capability-center/api";
@@ -48,10 +48,10 @@ function optionFilter(input: string, option?: SelectOption) {
 }
 
 function scoreTone(score: number, settings: SystemSettingsConversationSecurityReview) {
-  if (score >= settings.thresholds.critical) return "critical";
-  if (score >= settings.thresholds.notify) return "high";
-  if (score >= settings.thresholds.record) return "suspicious";
-  return "normal";
+  if (score >= settings.thresholds.critical) return "严重";
+  if (score >= settings.thresholds.notify) return "高风险";
+  if (score >= settings.thresholds.record) return "可疑";
+  return "正常";
 }
 
 function engineLabel(settings: SystemSettingsConversationSecurityReview) {
@@ -185,49 +185,26 @@ export function ConversationSecurityReviewSettingsView({
 
   return (
     <>
-      <section className="conversation-security-review-heading">
-        <div>
-          <div className="conversation-security-review-title-line">
-            <h3>对话安全审查</h3>
-            {value.observationMode ? <Tag color="gold">观察模式</Tag> : <Tag color="blue">告警生效</Tag>}
-          </div>
-          <p>异步分析问题链、身份与企业上下文，在风险升级时通知管理员。</p>
-        </div>
-        <label className="conversation-security-review-master">
-          <span>启用对话安全审查</span>
-          <Switch
-            checked={value.enabled}
-            disabled={disabled}
-            onChange={(enabled) => onChange({ enabled })}
-          />
-        </label>
-      </section>
-
-      <Alert
-        type="info"
-        showIcon
-        className="conversation-security-review-info"
-        message="审核在回答链路之外运行"
-        description="不会向客户智能体追加提示词，也不会延长正常回答。Codex Runtime 使用独立只读会话；LLM 模式只发送配置允许的审核上下文。"
-      />
-
       {optionsError ? (
-        <Alert type="warning" showIcon message="部分配置选项未加载" description={optionsError} />
+        <Alert
+          type="warning"
+          showIcon
+          className="conversation-security-review-options-error"
+          message="部分配置选项未加载"
+          description={optionsError}
+        />
       ) : null}
 
       <div className="conversation-security-review-layout">
         <div className="conversation-security-review-main">
           <section className="conversation-security-review-card">
             <div className="conversation-security-review-card-heading">
-              <span className="conversation-security-review-step">1</span>
-              <div>
-                <h4>审查范围</h4>
-                <p>内部、外部用户可独立启用；空的智能体或资料集范围表示全部。</p>
-              </div>
+              <h4><span>1.</span> 审查范围</h4>
+              <p>内外部用户独立启用；智能体或资料集留空表示全部。</p>
             </div>
 
             <div className="conversation-security-review-audience-grid">
-              <label className="conversation-security-review-audience">
+              <label className={`conversation-security-review-audience ${value.audiences.externalUsers ? "enabled" : ""}`}>
                 <Switch
                   checked={value.audiences.externalUsers}
                   disabled={disabled}
@@ -240,7 +217,7 @@ export function ConversationSecurityReviewSettingsView({
                   <small>客户企业账号和外部成员</small>
                 </span>
               </label>
-              <label className="conversation-security-review-audience">
+              <label className={`conversation-security-review-audience ${value.audiences.internalUsers ? "enabled" : ""}`}>
                 <Switch
                   checked={value.audiences.internalUsers}
                   disabled={disabled}
@@ -255,9 +232,9 @@ export function ConversationSecurityReviewSettingsView({
               </label>
             </div>
 
-            <div className="conversation-security-review-form-grid">
-              <label className="field">
-                <span className="field-label">渠道</span>
+            <div className="conversation-security-review-scope-grid">
+              <label className="conversation-security-review-compact-field">
+                <span>渠道</span>
                 <Checkbox
                   checked={value.channels.portal}
                   disabled={disabled}
@@ -267,10 +244,9 @@ export function ConversationSecurityReviewSettingsView({
                 >
                   Web Portal
                 </Checkbox>
-                <span className="field-help">当前版本只接入 Web 对话，后续渠道可沿用同一审核任务。</span>
               </label>
-              <label className="field">
-                <span className="field-label">智能体范围</span>
+              <label className="conversation-security-review-compact-field">
+                <span>智能体</span>
                 <Select
                   mode="multiple"
                   allowClear
@@ -281,11 +257,12 @@ export function ConversationSecurityReviewSettingsView({
                   value={value.agentModeIds}
                   options={agentOptions}
                   filterOption={optionFilter}
+                  maxTagCount="responsive"
                   onChange={(agentModeIds) => onChange({ agentModeIds })}
                 />
               </label>
-              <label className="field conversation-security-review-span-2">
-                <span className="field-label">资料集范围</span>
+              <label className="conversation-security-review-compact-field">
+                <span>资料集</span>
                 <Select
                   mode="multiple"
                   allowClear
@@ -296,46 +273,39 @@ export function ConversationSecurityReviewSettingsView({
                   value={value.knowledgeSetIds}
                   options={knowledgeOptions}
                   filterOption={optionFilter}
+                  maxTagCount="responsive"
                   onChange={(knowledgeSetIds) => onChange({ knowledgeSetIds })}
                 />
               </label>
             </div>
+            <p className="conversation-security-review-footnote">
+              <Info size={13} aria-hidden="true" />
+              审核异步运行，不向客户智能体追加提示词，也不延长正常回答。
+            </p>
           </section>
 
           <section className="conversation-security-review-card">
             <div className="conversation-security-review-card-heading">
-              <span className="conversation-security-review-step">2</span>
-              <div>
-                <h4>审核引擎</h4>
-                <p>Codex 复用现有登录或 Provider；LLM 模式适合独立模型与成本控制。</p>
-              </div>
-              <Button
-                icon={<FlaskConical size={15} aria-hidden="true" />}
-                disabled={disabled}
-                onClick={() => {
-                  setTestError("");
-                  setTestResult(null);
-                  setTestOpen(true);
-                }}
-              >
-                测试审核
-              </Button>
+              <h4><span>2.</span> 审核引擎</h4>
+              <p>选择隔离 Codex Runtime，或使用独立 LLM Provider。</p>
             </div>
 
-            <Radio.Group
-              className="conversation-security-review-engine"
-              value={value.engine}
-              disabled={disabled}
-              onChange={(event) => onChange({ engine: event.target.value })}
-            >
-              <Radio.Button value="codex_runtime">Codex Runtime</Radio.Button>
-              <Radio.Button value="llm">可配置 LLM</Radio.Button>
-            </Radio.Group>
-
-            <div className="conversation-security-review-form-grid">
+            <div className="conversation-security-review-engine-row">
+              <label className="conversation-security-review-compact-field">
+                <span>引擎</span>
+                <Select
+                  value={value.engine}
+                  disabled={disabled}
+                  options={[
+                    { value: "codex_runtime", label: "Codex Runtime（活动 Provider）" },
+                    { value: "llm", label: "可配置 LLM" }
+                  ]}
+                  onChange={(engine) => onChange({ engine })}
+                />
+              </label>
               {value.engine === "llm" ? (
-                <label className="field">
-                  <span className="field-label">LLM Provider</span>
+                <label className="conversation-security-review-compact-field">
+                  <span>Provider</span>
                   <Select
                     value={value.llmProvider}
                     disabled={disabled}
@@ -349,26 +319,24 @@ export function ConversationSecurityReviewSettingsView({
                   />
                 </label>
               ) : (
-                <div className="field">
-                  <span className="field-label">运行来源</span>
+                <div className="conversation-security-review-compact-field">
+                  <span>Provider</span>
                   <div className="conversation-security-review-static-field">活动 Codex Provider</div>
-                  <span className="field-help">创建无知识库、无附加目录的独立只读审核会话。</span>
                 </div>
               )}
-              <label className="field">
-                <span className="field-label">模型</span>
+              <label className="conversation-security-review-compact-field">
+                <span>模型</span>
                 <Input
                   value={value.llmModel}
                   disabled={disabled}
                   spellCheck={false}
-                  placeholder={value.engine === "codex_runtime" ? "留空使用活动 Provider 默认模型" : "输入模型或部署名"}
+                  placeholder="Provider 默认"
                   aria-invalid={Boolean(modelError)}
                   onChange={(event) => onChange({ llmModel: event.target.value })}
                 />
-                {modelError ? <span className="field-error">{modelError}</span> : null}
               </label>
-              <label className="field">
-                <span className="field-label">推理强度</span>
+              <label className="conversation-security-review-compact-field">
+                <span>推理强度</span>
                 <Select
                   value={value.reasoningEffort}
                   disabled={disabled}
@@ -376,9 +344,25 @@ export function ConversationSecurityReviewSettingsView({
                   onChange={(reasoningEffort) => onChange({ reasoningEffort })}
                 />
               </label>
-              {value.engine === "llm" ? (
-                <label className="field">
-                  <span className="field-label">API 模式</span>
+              <Button
+                className="conversation-security-review-test-button"
+                icon={<FlaskConical size={15} aria-hidden="true" />}
+                disabled={disabled}
+                onClick={() => {
+                  setTestError("");
+                  setTestResult(null);
+                  setTestOpen(true);
+                }}
+              >
+                测试审核
+              </Button>
+            </div>
+            {modelError ? <span className="field-error">{modelError}</span> : null}
+
+            {value.engine === "llm" ? (
+              <div className="conversation-security-review-provider-details">
+                <label className="conversation-security-review-compact-field">
+                  <span>API 模式</span>
                   <Select
                     value={value.llmApiMode}
                     disabled={disabled}
@@ -390,69 +374,75 @@ export function ConversationSecurityReviewSettingsView({
                     onChange={(llmApiMode) => onChange({ llmApiMode })}
                   />
                 </label>
-              ) : null}
-              {value.engine === "llm" && value.llmProvider !== "active_codex_provider" ? (
-                <>
-                  <label className="field conversation-security-review-span-2">
-                    <span className="field-label">Base URL</span>
-                    <Input
-                      value={value.llmBaseUrl}
-                      disabled={disabled}
-                      spellCheck={false}
-                      placeholder="https://api.openai.com/v1"
-                      onChange={(event) => onChange({ llmBaseUrl: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">API Key 环境变量</span>
-                    <Input
-                      value={value.llmApiKeyEnv}
-                      disabled={disabled}
-                      spellCheck={false}
-                      onChange={(event) => onChange({ llmApiKeyEnv: event.target.value })}
-                    />
-                  </label>
-                  {value.llmProvider === "azure_openai" ? (
-                    <label className="field">
-                      <span className="field-label">Azure API Version</span>
+                {value.llmProvider !== "active_codex_provider" ? (
+                  <>
+                    <label className="conversation-security-review-compact-field conversation-security-review-provider-url">
+                      <span>Base URL</span>
                       <Input
-                        value={value.llmAzureApiVersion}
+                        value={value.llmBaseUrl}
                         disabled={disabled}
                         spellCheck={false}
-                        onChange={(event) => onChange({ llmAzureApiVersion: event.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                        onChange={(event) => onChange({ llmBaseUrl: event.target.value })}
                       />
                     </label>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+                    <label className="conversation-security-review-compact-field">
+                      <span>Key 环境变量</span>
+                      <Input
+                        value={value.llmApiKeyEnv}
+                        disabled={disabled}
+                        spellCheck={false}
+                        onChange={(event) => onChange({ llmApiKeyEnv: event.target.value })}
+                      />
+                    </label>
+                    {value.llmProvider === "azure_openai" ? (
+                      <label className="conversation-security-review-compact-field">
+                        <span>API Version</span>
+                        <Input
+                          value={value.llmAzureApiVersion}
+                          disabled={disabled}
+                          spellCheck={false}
+                          onChange={(event) => onChange({ llmAzureApiVersion: event.target.value })}
+                        />
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            <p className="conversation-security-review-footnote">
+              <Info size={13} aria-hidden="true" />
+              Codex Runtime 创建无知识库、无附加目录、无网络的独立只读会话。
+            </p>
           </section>
 
           <section className="conversation-security-review-card">
             <div className="conversation-security-review-card-heading">
-              <span className="conversation-security-review-step">3</span>
+              <h4><span>3.</span> 提示词与上下文</h4>
+              <p>审核提示词独立于客户智能体，不改变客户回答行为。</p>
+            </div>
+
+            <div className="conversation-security-review-prompt-row">
+              <div className="conversation-security-review-prompt-label">
+                <strong>安全审核提示词</strong>
+                <small>系统提示词</small>
+              </div>
               <div>
-                <h4>提示词与上下文</h4>
-                <p>审核提示词独立于客户智能体，不改变客户回答行为。</p>
+                <Input.TextArea
+                  value={value.prompt}
+                  disabled={disabled}
+                  rows={6}
+                  aria-invalid={Boolean(promptError)}
+                  onChange={(event) => onChange({ prompt: event.target.value })}
+                />
+                {promptError ? <span className="field-error">{promptError}</span> : null}
               </div>
             </div>
 
-            <label className="field">
-              <span className="field-label">安全审核提示词</span>
-              <Input.TextArea
-                value={value.prompt}
-                disabled={disabled}
-                rows={8}
-                aria-invalid={Boolean(promptError)}
-                onChange={(event) => onChange({ prompt: event.target.value })}
-              />
-              <span className="field-help">系统会在其后追加固定 JSON 输出约束和经过裁剪的上下文。</span>
-              {promptError ? <span className="field-error">{promptError}</span> : null}
-            </label>
-
-            <div className="conversation-security-review-context-grid">
-              <label className="field">
-                <span className="field-label">当前会话</span>
+            <div className="conversation-security-review-context-row">
+              <strong>上下文窗口</strong>
+              <label>
+                当前会话
                 <InputNumber
                   min={1}
                   max={20}
@@ -462,8 +452,8 @@ export function ConversationSecurityReviewSettingsView({
                   onChange={(next) => updateContext({ currentThreadTurns: next ?? 8 })}
                 />
               </label>
-              <label className="field">
-                <span className="field-label">跨会话窗口</span>
+              <label>
+                跨会话
                 <InputNumber
                   min={0}
                   max={720}
@@ -473,8 +463,8 @@ export function ConversationSecurityReviewSettingsView({
                   onChange={(next) => updateContext({ crossThreadHours: next ?? 24 })}
                 />
               </label>
-              <label className="field">
-                <span className="field-label">历史风险条数</span>
+              <label>
+                历史风险
                 <InputNumber
                   min={0}
                   max={50}
@@ -486,7 +476,8 @@ export function ConversationSecurityReviewSettingsView({
               </label>
             </div>
 
-            <div className="conversation-security-review-checkboxes" role="group" aria-label="包含的审核上下文">
+            <div className="conversation-security-review-include-row" role="group" aria-label="包含的审核上下文">
+              <strong>包含上下文</strong>
               <Checkbox
                 checked={value.context.includeUserIdentity}
                 disabled={disabled}
@@ -520,14 +511,12 @@ export function ConversationSecurityReviewSettingsView({
 
           <section className="conversation-security-review-card">
             <div className="conversation-security-review-card-heading">
-              <span className="conversation-security-review-step">4</span>
-              <div>
-                <h4>风险与通知</h4>
-                <p>先记录，再按阈值通知；观察模式下不发送钉钉。</p>
-              </div>
+              <h4><span>4.</span> 风险与通知</h4>
+              <p>达到记录阈值进入告警中心；观察模式不发送钉钉。</p>
             </div>
 
-            <div className="conversation-security-review-thresholds">
+            <div className="conversation-security-review-threshold-row">
+              <strong>风险阈值（分）</strong>
               <label>
                 <span className="conversation-security-review-dot normal" aria-hidden="true" />
                 记录
@@ -565,44 +554,37 @@ export function ConversationSecurityReviewSettingsView({
             </div>
             {thresholdError ? <p className="field-error">{thresholdError}</p> : null}
 
-            <div className="conversation-security-review-notification-grid">
-              <label className="field">
-                <span className="field-label">通知冷却期</span>
-                <InputNumber
-                  min={0}
-                  max={10080}
-                  value={value.notification.cooldownMinutes}
-                  disabled={disabled}
-                  suffix="分钟"
-                  onChange={(next) => updateNotification({ cooldownMinutes: next ?? 45 })}
-                />
-              </label>
-              <label className="field conversation-security-review-inline-switch">
-                <span>
-                  <span className="field-label">钉钉通知</span>
-                  <span className="field-help">投递结果写入通知记录。</span>
-                </span>
+            <div className="conversation-security-review-notify-row">
+              <strong>通知冷却期</strong>
+              <InputNumber
+                min={0}
+                max={10080}
+                value={value.notification.cooldownMinutes}
+                disabled={disabled}
+                suffix="分钟"
+                onChange={(next) => updateNotification({ cooldownMinutes: next ?? 45 })}
+              />
+              <small>冷却期内同一用户的重复告警将合并。</small>
+              <label className="conversation-security-review-switch-control">
                 <Switch
                   checked={value.notification.dingtalkEnabled}
                   disabled={disabled}
                   onChange={(dingtalkEnabled) => updateNotification({ dingtalkEnabled })}
                 />
+                钉钉通知
               </label>
-              <label className="field conversation-security-review-inline-switch">
-                <span>
-                  <span className="field-label">观察模式</span>
-                  <span className="field-help">只记录风险，不发送外部通知。</span>
-                </span>
+              <label className="conversation-security-review-switch-control">
                 <Switch
                   checked={value.observationMode}
                   disabled={disabled}
                   onChange={(observationMode) => onChange({ observationMode })}
                 />
+                观察模式
               </label>
             </div>
 
-            <div className="field">
-              <span className="field-label">接收范围</span>
+            <div className="conversation-security-review-recipient-row">
+              <strong>接收范围</strong>
               <Radio.Group
                 value={value.notification.recipientMode}
                 disabled={disabled}
@@ -611,10 +593,7 @@ export function ConversationSecurityReviewSettingsView({
                 <Radio value="all_super_admins">所有超级管理员</Radio>
                 <Radio value="specified_users">指定用户</Radio>
               </Radio.Group>
-            </div>
-            {value.notification.recipientMode === "specified_users" ? (
-              <label className="field">
-                <span className="field-label">接收用户</span>
+              {value.notification.recipientMode === "specified_users" ? (
                 <Select
                   mode="multiple"
                   showSearch
@@ -625,11 +604,17 @@ export function ConversationSecurityReviewSettingsView({
                   filterOption={optionFilter}
                   status={recipientError ? "error" : undefined}
                   placeholder="选择已绑定钉钉的内部用户"
+                  maxTagCount="responsive"
                   onChange={(recipientUserIds) => updateNotification({ recipientUserIds })}
                 />
-                {recipientError ? <span className="field-error">{recipientError}</span> : null}
-              </label>
-            ) : null}
+              ) : (
+                <span className="conversation-security-review-recipient-hint">
+                  <BellRing size={13} aria-hidden="true" />
+                  通知所有已绑定钉钉的超级管理员
+                </span>
+              )}
+            </div>
+            {recipientError ? <span className="field-error">{recipientError}</span> : null}
 
             <div className="conversation-security-review-repeat-rule">
               <Checkbox
@@ -672,7 +657,7 @@ export function ConversationSecurityReviewSettingsView({
 
         <aside className="conversation-security-review-summary" aria-label="当前生效策略">
           <div className="conversation-security-review-summary-heading">
-            <ShieldAlert size={18} aria-hidden="true" />
+            <ShieldAlert size={17} aria-hidden="true" />
             <h4>当前生效策略</h4>
           </div>
           <dl>
@@ -686,15 +671,23 @@ export function ConversationSecurityReviewSettingsView({
             </div>
             <div>
               <dt>审查范围</dt>
-              <dd>Web Portal</dd>
+              <dd>
+                Web Portal
+                <small>
+                  智能体：{effective.agentModeIds.length || "全部"}<br />
+                  资料集：{effective.knowledgeSetIds.length || "全部"}
+                </small>
+              </dd>
             </div>
             <div>
               <dt>引擎</dt>
-              <dd>{engineLabel(effective)}</dd>
-            </div>
-            <div>
-              <dt>模型</dt>
-              <dd className="conversation-security-review-mono">{effective.llmModel || "Provider 默认"}</dd>
+              <dd>
+                {engineLabel(effective)}
+                <small>
+                  模型：<span className="conversation-security-review-mono">{effective.llmModel || "Provider 默认"}</span><br />
+                  推理强度：{effective.reasoningEffort}
+                </small>
+              </dd>
             </div>
             <div>
               <dt>上下文</dt>
@@ -702,7 +695,10 @@ export function ConversationSecurityReviewSettingsView({
             </div>
             <div>
               <dt>通知</dt>
-              <dd>{effective.notification.recipientMode === "all_super_admins" ? "超级管理员" : `${effective.notification.recipientUserIds.length} 个指定用户`}</dd>
+              <dd>
+                {effective.notification.recipientMode === "all_super_admins" ? "超级管理员" : `${effective.notification.recipientUserIds.length} 个指定用户`}
+                <small>冷却期：{effective.notification.cooldownMinutes} 分钟</small>
+              </dd>
             </div>
           </dl>
 

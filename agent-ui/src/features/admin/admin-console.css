@@ -3560,8 +3560,9 @@
 .admin-settings-layout {
   display: flex;
   gap: 24px;
-  height: calc(100vh - 180px);
-  min-height: 500px;
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 .admin-settings-sidebar {
@@ -3663,6 +3664,21 @@
   align-items: center;
 }
 
+.admin-settings-page-title-line,
+.admin-settings-header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.admin-settings-page-title-line {
+  gap: 8px;
+}
+
+.admin-settings-header-actions {
+  justify-content: flex-end;
+  gap: 14px;
+}
+
 .admin-settings-content-scroll {
   flex: 1;
   overflow-y: auto;
@@ -3687,25 +3703,31 @@
   display: none; /* Replaced by floating action bar */
 }
 
-.conversation-security-review-heading,
-.conversation-security-review-title-line,
+.admin-settings-content.conversation-security-review-active .admin-settings-content-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--admin-color-border);
+}
+
+.admin-settings-content.conversation-security-review-active .admin-settings-content-scroll {
+  padding: 12px 20px 20px;
+}
+
+.admin-settings-content.conversation-security-review-active .admin-floating-action-bar {
+  padding: 12px 20px;
+  background: var(--admin-color-surface-solid);
+}
+
 .conversation-security-review-master,
 .conversation-security-review-card-heading,
 .conversation-security-review-summary-heading,
-.conversation-security-review-inline-switch,
-.conversation-security-review-test-result > div:first-child {
+.conversation-security-review-footnote,
+.conversation-security-review-test-result > div:first-child,
+.conversation-security-review-switch-control,
+.conversation-security-review-recipient-hint {
   display: flex;
   align-items: center;
 }
 
-.conversation-security-review-heading {
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 18px;
-}
-
-.conversation-security-review-heading h3,
-.conversation-security-review-heading p,
 .conversation-security-review-card h4,
 .conversation-security-review-card p,
 .conversation-security-review-summary h4,
@@ -3713,116 +3735,93 @@
   margin: 0;
 }
 
-.conversation-security-review-title-line {
-  gap: 10px;
-}
-
-.conversation-security-review-heading h3 {
-  color: var(--admin-color-text);
-  font-size: 22px;
-  line-height: 1.3;
-}
-
-.conversation-security-review-heading p,
-.conversation-security-review-card-heading p {
-  margin-top: 5px;
-  color: var(--admin-color-subtle);
-  font-size: 13px;
-}
-
 .conversation-security-review-master {
   flex: 0 0 auto;
-  gap: 12px;
-  font-size: 13px;
+  gap: 10px;
+  color: var(--admin-color-text);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.conversation-security-review-info {
-  margin-bottom: 18px;
+.conversation-security-review-options-error {
+  margin-bottom: 10px;
 }
 
 .conversation-security-review-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 270px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 244px;
+  gap: 12px;
   align-items: start;
-  margin-top: 18px;
 }
 
 .conversation-security-review-main {
   display: grid;
-  gap: 16px;
+  gap: 10px;
   min-width: 0;
 }
 
 .conversation-security-review-card,
 .conversation-security-review-summary {
   border: 1px solid var(--admin-color-border);
-  border-radius: var(--admin-radius-md);
+  border-radius: 8px;
   background: var(--admin-color-surface-solid);
-  box-shadow: var(--admin-shadow-sm);
 }
 
 .conversation-security-review-card {
-  padding: 20px;
+  padding: 12px 14px;
+  min-width: 0;
 }
 
 .conversation-security-review-card-heading {
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.conversation-security-review-card-heading > div {
-  flex: 1;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
 }
 
 .conversation-security-review-card-heading h4 {
   color: var(--admin-color-text);
-  font-size: 15px;
+  font-size: 16px;
+  line-height: 1.3;
 }
 
-.conversation-security-review-step {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--admin-radius-full);
-  background: var(--admin-color-accent-soft);
+.conversation-security-review-card-heading h4 span {
   color: var(--admin-color-accent);
-  font-size: 12px;
-  font-weight: 700;
 }
 
-.conversation-security-review-audience-grid,
-.conversation-security-review-form-grid,
-.conversation-security-review-context-grid,
-.conversation-security-review-notification-grid {
-  display: grid;
-  gap: 14px;
+.conversation-security-review-card-heading p {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .conversation-security-review-audience-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-bottom: 18px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .conversation-security-review-audience {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-height: 72px;
-  padding: 14px;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
   border: 1px solid var(--admin-color-border);
   border-radius: var(--admin-radius-sm);
-  background: var(--admin-color-bg);
+  background: rgba(17, 24, 39, 0.025);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.conversation-security-review-audience.enabled {
+  border-color: color-mix(in srgb, var(--admin-color-accent) 34%, var(--admin-color-border));
+  background: var(--admin-color-accent-soft);
 }
 
 .conversation-security-review-audience span {
   display: grid;
-  gap: 4px;
+  gap: 1px;
 }
 
 .conversation-security-review-audience strong {
@@ -3832,74 +3831,171 @@
 
 .conversation-security-review-audience small {
   color: var(--admin-color-subtle);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
-.conversation-security-review-form-grid,
-.conversation-security-review-notification-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.conversation-security-review-span-2 {
-  grid-column: span 2;
-}
-
-.conversation-security-review-engine {
-  margin-bottom: 18px;
-}
-
-.conversation-security-review-static-field {
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  padding: 4px 11px;
-  border: 1px solid var(--admin-color-border);
-  border-radius: 6px;
-  background: var(--admin-color-bg);
-  color: var(--admin-color-text);
-  font-size: 13px;
-}
-
-.conversation-security-review-context-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 18px;
-}
-
-.conversation-security-review-context-grid .ant-input-number,
-.conversation-security-review-notification-grid .ant-input-number {
-  width: 100%;
-}
-
-.conversation-security-review-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 22px;
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: var(--admin-radius-sm);
-  background: var(--admin-color-bg);
-}
-
-.conversation-security-review-thresholds {
+.conversation-security-review-scope-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(180px, 1.2fr) minmax(180px, 1.2fr);
+  gap: 8px;
 }
 
-.conversation-security-review-thresholds label {
+.conversation-security-review-compact-field {
   display: grid;
-  grid-template-columns: auto 1fr minmax(74px, 96px);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: center;
+  min-width: 0;
   color: var(--admin-color-subtle);
   font-size: 12px;
 }
 
+.conversation-security-review-compact-field > span:first-child {
+  white-space: nowrap;
+}
+
+.conversation-security-review-static-field {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 6px;
+  background: rgba(17, 24, 39, 0.025);
+  color: var(--admin-color-text);
+  font-size: 11px;
+}
+
+.conversation-security-review-engine-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.7fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.conversation-security-review-engine-row .conversation-security-review-compact-field {
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
+.conversation-security-review-test-button {
+  align-self: end;
+}
+
+.conversation-security-review-provider-details {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(240px, 1.5fr) minmax(180px, 1fr) minmax(140px, 0.8fr);
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--admin-color-border);
+}
+
+.conversation-security-review-provider-details .conversation-security-review-compact-field {
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
+.conversation-security-review-provider-url {
+  grid-column: span 1;
+}
+
+.conversation-security-review-footnote {
+  gap: 5px;
+  margin-top: 8px !important;
+  color: var(--admin-color-subtle);
+  font-size: 11px !important;
+  line-height: 1.4;
+}
+
+.conversation-security-review-prompt-row {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.conversation-security-review-prompt-label {
+  display: grid;
+  gap: 2px;
+  padding-top: 5px;
+}
+
+.conversation-security-review-prompt-label strong,
+.conversation-security-review-context-row > strong,
+.conversation-security-review-include-row > strong,
+.conversation-security-review-threshold-row > strong,
+.conversation-security-review-notify-row > strong,
+.conversation-security-review-recipient-row > strong {
+  color: var(--admin-color-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.conversation-security-review-prompt-label small {
+  color: var(--admin-color-subtle);
+  font-size: 10px;
+}
+
+.conversation-security-review-prompt-row textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.conversation-security-review-context-row,
+.conversation-security-review-include-row,
+.conversation-security-review-threshold-row,
+.conversation-security-review-notify-row,
+.conversation-security-review-recipient-row,
+.conversation-security-review-repeat-rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 10px;
+  margin-top: 8px;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.conversation-security-review-context-row,
+.conversation-security-review-include-row,
+.conversation-security-review-notify-row,
+.conversation-security-review-recipient-row,
+.conversation-security-review-repeat-rule {
+  padding-top: 8px;
+  border-top: 1px solid var(--admin-color-border);
+}
+
+.conversation-security-review-context-row > strong,
+.conversation-security-review-include-row > strong,
+.conversation-security-review-threshold-row > strong,
+.conversation-security-review-notify-row > strong,
+.conversation-security-review-recipient-row > strong {
+  min-width: 84px;
+}
+
+.conversation-security-review-context-row label,
+.conversation-security-review-threshold-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversation-security-review-context-row .ant-input-number {
+  width: 104px;
+}
+
+.conversation-security-review-threshold-row .ant-input-number {
+  width: 78px;
+}
+
 .conversation-security-review-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: var(--admin-radius-full);
   background: #22c55e;
 }
@@ -3912,34 +4008,40 @@
   background: #ef4444;
 }
 
-.conversation-security-review-inline-switch {
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--admin-color-border);
-  border-radius: var(--admin-radius-sm);
+.conversation-security-review-notify-row > .ant-input-number {
+  width: 112px;
 }
 
-.conversation-security-review-inline-switch > span:first-child {
-  display: grid;
-  gap: 2px;
+.conversation-security-review-notify-row small {
+  margin-right: auto;
+  color: var(--admin-color-subtle);
+  font-size: 11px;
+}
+
+.conversation-security-review-switch-control,
+.conversation-security-review-recipient-hint {
+  gap: 6px;
+}
+
+.conversation-security-review-recipient-row .ant-select {
+  flex: 1;
+  min-width: 220px;
+}
+
+.conversation-security-review-recipient-hint {
+  color: var(--admin-color-subtle);
+  font-size: 11px;
 }
 
 .conversation-security-review-repeat-rule {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 12px 14px;
+  padding: 8px 10px;
   border: 1px dashed var(--admin-color-border);
   border-radius: var(--admin-radius-sm);
-  color: var(--admin-color-subtle);
-  font-size: 12px;
+  background: rgba(17, 24, 39, 0.02);
 }
 
 .conversation-security-review-repeat-rule .ant-input-number {
-  width: 116px;
+  width: 104px;
 }
 
 .conversation-security-review-summary {
@@ -3949,8 +4051,8 @@
 }
 
 .conversation-security-review-summary-heading {
-  gap: 9px;
-  padding: 16px 18px;
+  gap: 7px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--admin-color-border);
   color: var(--admin-color-accent);
 }
@@ -3962,14 +4064,14 @@
 
 .conversation-security-review-summary dl {
   margin: 0;
-  padding: 8px 18px;
+  padding: 5px 14px;
 }
 
 .conversation-security-review-summary dl > div {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 8px;
-  padding: 9px 0;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 7px;
+  padding: 7px 0;
   border-bottom: 1px solid var(--admin-color-border);
   font-size: 12px;
 }
@@ -3986,16 +4088,24 @@
   text-align: right;
 }
 
+.conversation-security-review-summary dd small {
+  display: block;
+  margin-top: 3px;
+  color: var(--admin-color-subtle);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .conversation-security-review-mono {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 .conversation-security-review-ladder {
-  padding: 14px 18px 18px;
+  padding: 10px 14px 13px;
 }
 
 .conversation-security-review-ladder h5 {
-  margin-bottom: 12px;
+  margin-bottom: 7px;
   color: var(--admin-color-text);
   font-size: 12px;
 }
@@ -4003,11 +4113,11 @@
 .conversation-security-review-ladder-row {
   position: relative;
   display: grid;
-  grid-template-columns: 42px 52px 1fr;
-  gap: 8px;
-  padding: 7px 0 7px 16px;
+  grid-template-columns: 37px 44px 1fr;
+  gap: 6px;
+  padding: 6px 0 6px 13px;
   color: var(--admin-color-subtle);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .conversation-security-review-ladder-row strong {
@@ -4020,10 +4130,10 @@
 
 .conversation-security-review-ladder-marker {
   position: absolute;
-  top: 11px;
+  top: 9px;
   left: 0;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--admin-radius-full);
   background: #22c55e;
 }
@@ -4041,8 +4151,8 @@
 }
 
 .conversation-security-review-test-result {
-  margin-top: 16px;
-  padding: 14px;
+  margin-top: 12px;
+  padding: 12px;
   border: 1px solid var(--admin-color-border);
   border-radius: var(--admin-radius-sm);
   background: var(--admin-color-bg);
@@ -4050,11 +4160,11 @@
 
 .conversation-security-review-test-result > div:first-child {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .conversation-security-review-test-result p {
-  margin: 12px 0;
+  margin: 10px 0;
   color: var(--admin-color-text);
 }
 
@@ -4319,9 +4429,44 @@
   font-size: 12px;
 }
 
+@media (max-width: 1360px) {
+  .conversation-security-review-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-security-review-summary {
+    position: static;
+  }
+
+  .conversation-security-review-summary dl {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0 16px;
+  }
+
+  .conversation-security-review-ladder {
+    display: grid;
+    grid-template-columns: 150px repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    align-items: center;
+  }
+
+  .conversation-security-review-ladder h5 {
+    margin: 0;
+  }
+}
+
 @media (max-width: 1280px) {
   .admin-page-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .conversation-security-review-engine-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .conversation-security-review-test-button {
+    justify-self: start;
   }
 }
 
@@ -4401,12 +4546,9 @@
     min-height: 420px;
   }
 
-  .conversation-security-review-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .conversation-security-review-summary {
-    position: static;
+  .conversation-security-review-summary dl,
+  .conversation-security-review-ladder {
+    display: block;
   }
 }
 
@@ -4440,8 +4582,13 @@
     flex-direction: column;
   }
 
-  .conversation-security-review-heading,
   .conversation-security-review-card-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-settings-content.conversation-security-review-active .admin-settings-content-header,
+  .admin-settings-header-actions {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -4452,14 +4599,31 @@
   }
 
   .conversation-security-review-audience-grid,
-  .conversation-security-review-form-grid,
-  .conversation-security-review-context-grid,
-  .conversation-security-review-notification-grid,
-  .conversation-security-review-thresholds {
+  .conversation-security-review-scope-grid,
+  .conversation-security-review-engine-row,
+  .conversation-security-review-provider-details {
     grid-template-columns: 1fr;
   }
 
-  .conversation-security-review-span-2 {
-    grid-column: auto;
+  .conversation-security-review-prompt-row {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-security-review-card-heading p {
+    text-align: left;
+  }
+
+  .conversation-security-review-context-row > strong,
+  .conversation-security-review-include-row > strong,
+  .conversation-security-review-threshold-row > strong,
+  .conversation-security-review-notify-row > strong,
+  .conversation-security-review-recipient-row > strong {
+    flex-basis: 100%;
+  }
+
+  .admin-settings-content.conversation-security-review-active .admin-floating-action-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
   }
 }

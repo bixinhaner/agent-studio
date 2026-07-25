@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
+import { Alert, Button, Tabs, Typography, Tag, Space, Spin, Switch } from "antd";
 import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge, ScanSearch } from "lucide-react";
 
 import { useBranding } from "../branding/BrandingProvider";
@@ -390,12 +390,23 @@ export function SystemSettingsShell() {
       </div>
 
       {/* Main Content Area */}
-      <div className="admin-settings-content">
+      <div
+        className={`admin-settings-content ${
+          section === "conversation-security-review" ? "conversation-security-review-active" : ""
+        }`}
+      >
         <div className="admin-settings-content-header">
           <div>
-            <Typography.Title level={4} style={{ margin: '0 0 4px 0', fontSize: 20 }}>
-              {currentSectionItem?.label}
-            </Typography.Title>
+            <div className="admin-settings-page-title-line">
+              <Typography.Title level={4} style={{ margin: '0 0 4px 0', fontSize: 20 }}>
+                {currentSectionItem?.label}
+              </Typography.Title>
+              {section === "conversation-security-review" ? (
+                <Tag color={draftPayload.conversationSecurityReview.observationMode ? "gold" : "blue"}>
+                  {draftPayload.conversationSecurityReview.observationMode ? "观察模式" : "告警生效"}
+                </Tag>
+              ) : null}
+            </div>
             {isDraftBackedSection ? (
               <Space size={16}>
                 <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>草稿 {formatVersionLabel(draftMeta)}</span>
@@ -405,11 +416,23 @@ export function SystemSettingsShell() {
               <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>即时生效配置，不进入草稿发布流</span>
             )}
           </div>
-          {isDraftBackedSection && changedAreaCount > 0 && (
-            <Tag color="processing" style={{ borderRadius: 12 }}>
-              有 {changedAreaCount} 项未发布变更
-            </Tag>
-          )}
+          <div className="admin-settings-header-actions">
+            {isDraftBackedSection && changedAreaCount > 0 && (
+              <Tag color="processing" style={{ borderRadius: 12 }}>
+                有 {changedAreaCount} 项未发布变更
+              </Tag>
+            )}
+            {section === "conversation-security-review" ? (
+              <label className="conversation-security-review-master">
+                <span>启用对话安全审查</span>
+                <Switch
+                  checked={draftPayload.conversationSecurityReview.enabled}
+                  disabled={saving || publishing}
+                  onChange={(enabled) => updateDraftConversationSecurityReview({ enabled })}
+                />
+              </label>
+            ) : null}
+          </div>
         </div>
 
         <div className="admin-settings-content-scroll">
