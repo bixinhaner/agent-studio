@@ -4,6 +4,7 @@ export type SystemSettingsSection =
   | "retention-upload"
   | "artifact-access"
   | "safety"
+  | "conversation-security-review"
   | "organization-defaults"
   | "usage-governance"
   | "publish-history";
@@ -75,6 +76,55 @@ export type SystemSettingsSafety = {
   allowCustomAdditionalDirectories: boolean;
   allowFilesystemMutations: boolean;
   showAdminOperationsAndConversationMenus: boolean;
+};
+
+export type SystemSettingsConversationSecurityReview = {
+  enabled: boolean;
+  observationMode: boolean;
+  engine: "codex_runtime" | "llm";
+  audiences: {
+    externalUsers: boolean;
+    internalUsers: boolean;
+  };
+  channels: {
+    portal: boolean;
+  };
+  agentModeIds: string[];
+  knowledgeSetIds: string[];
+  llmProvider: "active_codex_provider" | "openai_responses" | "openai_compatible" | "azure_openai";
+  llmApiMode: "auto" | "responses" | "chat_completions";
+  llmModel: string;
+  llmBaseUrl: string;
+  llmApiKeyEnv: string;
+  llmAzureApiVersion: string;
+  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+  prompt: string;
+  context: {
+    currentThreadTurns: number;
+    crossThreadHours: number;
+    maxCrossThreadReviews: number;
+    includeUserIdentity: boolean;
+    includeEnterpriseContext: boolean;
+    includeAgentAndKnowledgeScope: boolean;
+    includeAssistantResponse: boolean;
+  };
+  thresholds: {
+    record: number;
+    notify: number;
+    critical: number;
+  };
+  repeatedRisk: {
+    enabled: boolean;
+    minimumScore: number;
+    count: number;
+    windowHours: number;
+  };
+  notification: {
+    dingtalkEnabled: boolean;
+    recipientMode: "all_super_admins" | "specified_users";
+    recipientUserIds: string[];
+    cooldownMinutes: number;
+  };
 };
 
 export type SystemSettingsOrganizationDefaults = {
@@ -175,6 +225,7 @@ export type SystemSettingsPayload = {
   uploads: SystemSettingsUploads;
   artifactAccess: SystemSettingsArtifactAccess;
   safety: SystemSettingsSafety;
+  conversationSecurityReview: SystemSettingsConversationSecurityReview;
   organizationDefaults: SystemSettingsOrganizationDefaults;
   codexMemory: SystemSettingsCodexMemory;
   enterpriseContext: SystemSettingsEnterpriseContext;

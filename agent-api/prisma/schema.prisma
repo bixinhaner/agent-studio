@@ -1867,6 +1867,46 @@ model NotificationRecord {
   @@map("notification_records")
 }
 
+model ConversationSecurityReview {
+  id                  String    @id @default(cuid())
+  organizationId      String?   @map("organization_id")
+  userId              String    @map("user_id")
+  threadId            String    @map("thread_id")
+  userMessageId       String    @map("user_message_id")
+  channel             String    @default("portal")
+  audience            String
+  status              String    @default("pending")
+  attempts            Int       @default(0)
+  nextAttemptAt       DateTime  @default(now()) @map("next_attempt_at")
+  lockedAt            DateTime? @map("locked_at")
+  reviewerProvider    String?   @map("reviewer_provider")
+  reviewerModel       String?   @map("reviewer_model")
+  riskLevel           String?   @map("risk_level")
+  riskScore           Int?      @map("risk_score")
+  confidence          Float?
+  categories          Json?
+  evidenceMessageIds  Json?     @map("evidence_message_ids")
+  reason              String?
+  assistantExposure   String?   @map("assistant_exposure")
+  recommendedAction   String?   @map("recommended_action")
+  contextSnapshot     Json?     @map("context_snapshot")
+  resultJson          Json?     @map("result_json")
+  errorMessage        String?   @map("error_message")
+  alertEventId        String?   @map("alert_event_id")
+  notifiedAt          DateTime? @map("notified_at")
+  completedAt         DateTime? @map("completed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, nextAttemptAt])
+  @@unique([threadId, userMessageId])
+  @@index([userId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([organizationId, riskScore, createdAt])
+  @@index([alertEventId])
+  @@map("conversation_security_reviews")
+}
+
 model ConversationRecoveryCase {
   id                   String    @id @default(cuid())
   recoveryKey          String    @unique @map("recovery_key")

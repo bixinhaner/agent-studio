@@ -49,6 +49,7 @@ export function sectionForFieldPath(path: string): SystemSettingsSection {
   if (path.startsWith("retention.") || path.startsWith("uploads.")) return "retention-upload";
   if (path.startsWith("artifactAccess.")) return "artifact-access";
   if (path.startsWith("safety.")) return "safety";
+  if (path.startsWith("conversationSecurityReview.")) return "conversation-security-review";
   if (path.startsWith("organizationDefaults.")) return "organization-defaults";
   return "publish-history";
 }

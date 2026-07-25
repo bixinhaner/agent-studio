@@ -1,6 +1,10 @@
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 
-import type { SystemSettingsPayload, SystemSettingsResponse } from "./types";
+import type {
+  SystemSettingsConversationSecurityReview,
+  SystemSettingsPayload,
+  SystemSettingsResponse
+} from "./types";
 
 export type BrandingAssetKind =
   | "logo"
@@ -36,6 +40,29 @@ export async function saveSystemSettingsDraft(payload: SystemSettingsPayload): P
 export async function publishSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings/publish", {
     method: "POST"
+  });
+}
+
+export async function testConversationSecurityReview(input: {
+  question: string;
+  settings: SystemSettingsConversationSecurityReview;
+}): Promise<{
+  decision: {
+    riskLevel: string;
+    score: number;
+    confidence?: number;
+    categories: string[];
+    evidenceMessageIds: string[];
+    reason: string;
+    assistantExposure: string;
+    recommendedAction: string;
+  };
+  provider: string;
+  model: string;
+}> {
+  return api("/api/admin/system-settings/conversation-security-review/test", {
+    method: "POST",
+    json: input
   });
 }
 

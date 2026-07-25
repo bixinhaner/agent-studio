@@ -216,6 +216,7 @@ describe("ManagedCodexProviderResolver", () => {
                 allowFilesystemMutations: true,
                 showAdminOperationsAndConversationMenus: true
               },
+              conversationSecurityReview: createDefaultSystemSettingsPayload().conversationSecurityReview,
               organizationDefaults: {
                 orgSyncIntervalMinutes: 60
               },
@@ -366,6 +367,7 @@ describe("resolveManagedCodexDefaults", () => {
             allowFilesystemMutations: true,
             showAdminOperationsAndConversationMenus: true
           },
+          conversationSecurityReview: createDefaultSystemSettingsPayload().conversationSecurityReview,
           organizationDefaults: {
             orgSyncIntervalMinutes: 60
           },

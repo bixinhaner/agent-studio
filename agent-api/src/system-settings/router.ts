@@ -3,7 +3,10 @@ import multer, { MulterError } from "multer";
 import { z } from "zod";
 
 import { parseBrandingAssetKind, type BrandingAssetStorage } from "./branding-assets.js";
-import { parseSystemSettingsPayloadPatch } from "./types.js";
+import {
+  parseSystemSettingsPayloadPatch,
+  systemSettingsConversationSecurityReviewSchema
+} from "./types.js";
 import type { SystemSettingsState, SystemSettingsService } from "./service.js";
 import type { ExternalWebAccessService } from "../external-web-access.js";
 
@@ -12,6 +15,12 @@ type SystemSettingsRouterOptions = {
   requirePermission(permissionKey: string): RequestHandler;
   assetStorage?: Pick<BrandingAssetStorage, "save">;
   externalWebAccess?: Pick<ExternalWebAccessService, "getState" | "setMaintenanceEnabled">;
+  conversationSecurityReviewTest?: (input: {
+    settings: z.infer<typeof systemSettingsConversationSecurityReviewSchema>;
+    question: string;
+    actorUserId: string;
+    organizationId?: string;
+  }) => Promise<unknown>;
 };
 
 const brandingAssetUpload = multer({
@@ -115,6 +124,34 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
     try {
       sendState(res, await options.service.read());
     } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/conversation-security-review/test", requireWrite, async (req: Request, res: Response) => {
+    if (!requireCurrentUser(req, res)) return;
+    if (!options.conversationSecurityReviewTest) {
+      res.status(501).json({ detail: "对话安全审查测试未配置" });
+      return;
+    }
+    try {
+      const input = z
+        .object({
+          question: z.string().trim().min(1).max(8000),
+          settings: systemSettingsConversationSecurityReviewSchema
+        })
+        .strict()
+        .parse(req.body ?? {});
+      res.json(await options.conversationSecurityReviewTest({
+        ...input,
+        actorUserId: req.currentUser.id,
+        organizationId: req.currentOrganization?.id
+      }));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        sendValidationError(res, error);
+        return;
+      }
       res.status(500).json({ detail: detailFromError(error) });
     }
   });

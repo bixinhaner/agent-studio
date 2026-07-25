@@ -290,6 +290,13 @@ import {
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
+import {
+  ConversationSecurityReviewScheduler,
+  ConversationSecurityReviewService
+} from "./security-review/service.js";
+import {
+  ConversationSecurityReviewRepository
+} from "./security-review/repository.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
@@ -467,6 +474,7 @@ const alertEvents = new AlertEventRepository(db as unknown as AlertEventReposito
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
 const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
 const notificationRecords = new NotificationRecordRepository(db as unknown as NotificationRecordRepositoryDb);
+const conversationSecurityReviews = new ConversationSecurityReviewRepository(db as never);
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const broadcasts = new BroadcastRepository(db as unknown as BroadcastRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
@@ -851,6 +859,116 @@ const usageIngestion = new UsageIngestionService({
   afterRecord: rebuildUsageRollupForEvent
 });
 const usageRecorder = new UsageRecorder({ usageIngestion });
+const conversationSecurityReview = new ConversationSecurityReviewService({
+  db,
+  reviews: conversationSecurityReviews,
+  systemSettings,
+  providerSnapshot: () => codexProviders.resolveActiveProviderSnapshot(),
+  runCodexReview: async (input) => {
+    const providerSnapshot = await codexProviders.resolveActiveProviderSnapshot();
+    const reviewRuntime = createRuntimeForProviderSnapshot(providerSnapshot);
+    const model = input.model ?? providerSnapshot.config.defaultModel;
+    const workspace = path.join(appConfig.sessionWorkspaceRoot, ".conversation-security-review");
+    try {
+      await fs.mkdir(workspace, { recursive: true });
+      const runtimeThread = await reviewRuntime.startThreadWithOptions({
+        model,
+        reasoningEffort: input.reasoningEffort,
+        workspace,
+        codexRunConfig: {
+          sandboxMode: "read-only",
+          approvalPolicy: "never",
+          networkAccessEnabled: false,
+          webSearchMode: "disabled",
+          additionalDirectories: []
+        }
+      });
+      const result = await codexExecution.collectFromRuntime({
+        runtime: reviewRuntime,
+        thread: runtimeThread,
+        prompt: input.prompt,
+        workspace
+      });
+      await usageRecorder.recordCodexUsage({
+        organizationId: input.review.organizationId,
+        userId: input.review.userId,
+        threadId: input.review.threadId,
+        model,
+        featureType: "security_review",
+        usage: result.usage,
+        codexThreadId: result.usage?.codexThreadId,
+        resultStatus: "success",
+        metadata: {
+          source: "conversation_security_review",
+          reviewId: input.review.id,
+          provider: providerSnapshot.kind,
+          engine: "codex_runtime"
+        }
+      });
+      return {
+        text: result.answer,
+        provider: `codex_runtime:${providerSnapshot.kind}`,
+        model,
+        codexUsage: result.usage
+      };
+    } catch (error) {
+      await usageRecorder.recordCodexUsage({
+        organizationId: input.review.organizationId,
+        userId: input.review.userId,
+        threadId: input.review.threadId,
+        model,
+        featureType: "security_review",
+        resultStatus: "failed",
+        metadata: {
+          source: "conversation_security_review",
+          reviewId: input.review.id,
+          provider: providerSnapshot.kind,
+          engine: "codex_runtime"
+        }
+      }).catch(() => undefined);
+      throw error;
+    }
+  },
+  usageRecorder,
+  alertEvents,
+  notifyDingTalk: async (input) => {
+    const notification = await notificationRecords.create({
+      organizationId: input.review.organizationId,
+      channelType: "dingtalk",
+      targetRef: input.event.id,
+      eventType: "conversation_security_review",
+      status: "pending",
+      payload: {
+        alertEventId: input.event.id,
+        reviewId: input.review.id,
+        threadId: input.review.threadId,
+        recipientUserIds: input.recipientDingTalkUserIds
+      }
+    });
+    try {
+      await sendActiveDingTalkWorkNotice({
+        userIds: input.recipientDingTalkUserIds,
+        message: input.message
+      });
+      await notificationRecords.update({
+        id: notification.id,
+        changes: { status: "sent", errorMessage: null }
+      });
+      return true;
+    } catch (error) {
+      await notificationRecords.update({
+        id: notification.id,
+        changes: {
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : "DingTalk notification failed"
+        }
+      });
+      return false;
+    }
+  },
+  logger: console
+});
+const conversationSecurityReviewScheduler = new ConversationSecurityReviewScheduler(conversationSecurityReview);
 
 async function resolveZendeskDingTalkMentionTarget(input: {
   zendeskUser?: ZendeskRequesterPayload;
@@ -10092,7 +10210,8 @@ registerCommonApiRoutes(app, {
     }),
     recoveryRouter: createConversationRecoveryRouter(conversationRecovery),
     securityDomains,
-    securityDomainAccess
+    securityDomainAccess,
+    conversationSecurityReviewTest: (input) => conversationSecurityReview.testReview(input)
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
@@ -11716,6 +11835,23 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       })
     );
     portalUserMessageId = persistedPortalUserMessageId;
+    await timing.time("chat_stream.enqueue_security_review", async () => {
+      try {
+        await conversationSecurityReview.enqueuePortalTurn({
+          organizationId: currentUser.organizationId,
+          userId: currentUser.id,
+          threadId: currentSession.threadId!,
+          userMessageId: persistedPortalUserMessageId,
+          audience: isExternalActor(currentUser) ? "external" : "internal"
+        });
+      } catch (error) {
+        console.warn("conversation security review enqueue failed", {
+          threadId: currentSession.threadId,
+          userMessageId: persistedPortalUserMessageId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
     attachPortalActiveChatRun({
       sessionId: currentSession.sessionId,
       userId: currentUser.id,
@@ -12113,6 +12249,7 @@ async function bootstrap() {
     }
     orgSyncScheduler.start();
     zendeskAiReviewEmailReminderScheduler.start();
+    conversationSecurityReviewScheduler.start();
   }
   if (runsChatService) {
     dingtalkBotStream.start();

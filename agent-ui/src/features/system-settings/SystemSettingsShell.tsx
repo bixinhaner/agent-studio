@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
-import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge } from "lucide-react";
+import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge, ScanSearch } from "lucide-react";
 
 import { useBranding } from "../branding/BrandingProvider";
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
@@ -11,6 +11,7 @@ import { OrganizationDefaultsView } from "./OrganizationDefaultsView";
 import { PublishHistoryView } from "./PublishHistoryView";
 import { RetentionUploadView } from "./RetentionUploadView";
 import { SafetySettingsView } from "./SafetySettingsView";
+import { ConversationSecurityReviewSettingsView } from "./ConversationSecurityReviewSettingsView";
 import { UsageGovernanceSettingsView } from "./UsageGovernanceSettingsView";
 import type {
   SystemSettingsFieldErrors,
@@ -28,6 +29,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; gro
   { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
   { id: "artifact-access", label: "外部文件访问", icon: FileCheck2, group: 'Security & Data' },
   { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
+  { id: "conversation-security-review", label: "对话安全审查", icon: ScanSearch, group: 'Security & Data' },
   { id: "usage-governance", label: "用量治理", icon: Gauge, group: 'Operations' },
   { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
 ];
@@ -47,6 +49,20 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
       }))
     },
     safety: { ...payload.safety },
+    conversationSecurityReview: {
+      ...payload.conversationSecurityReview,
+      audiences: { ...payload.conversationSecurityReview.audiences },
+      channels: { ...payload.conversationSecurityReview.channels },
+      agentModeIds: [...payload.conversationSecurityReview.agentModeIds],
+      knowledgeSetIds: [...payload.conversationSecurityReview.knowledgeSetIds],
+      context: { ...payload.conversationSecurityReview.context },
+      thresholds: { ...payload.conversationSecurityReview.thresholds },
+      repeatedRisk: { ...payload.conversationSecurityReview.repeatedRisk },
+      notification: {
+        ...payload.conversationSecurityReview.notification,
+        recipientUserIds: [...payload.conversationSecurityReview.notification.recipientUserIds]
+      }
+    },
     organizationDefaults: { ...payload.organizationDefaults },
     codexMemory: { ...payload.codexMemory },
     enterpriseContext: {
@@ -214,6 +230,24 @@ export function SystemSettingsShell() {
     updateDraft(c => ({ ...c, payload: { ...c.payload, safety: { ...c.payload.safety, ...patch } } }), fieldPaths("safety", patch));
   }
 
+  function updateDraftConversationSecurityReview(
+    patch: Partial<SystemSettingsPayload["conversationSecurityReview"]>
+  ) {
+    updateDraft(
+      c => ({
+        ...c,
+        payload: {
+          ...c.payload,
+          conversationSecurityReview: {
+            ...c.payload.conversationSecurityReview,
+            ...patch
+          }
+        }
+      }),
+      fieldPaths("conversationSecurityReview", patch)
+    );
+  }
+
   function updateDraftOrganization(patch: Partial<SystemSettingsPayload["organizationDefaults"]>) {
     updateDraft(c => ({ ...c, payload: { ...c.payload, organizationDefaults: { ...c.payload.organizationDefaults, ...patch } } }), fieldPaths("organizationDefaults", patch));
   }
@@ -312,6 +346,10 @@ export function SystemSettingsShell() {
     isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null),
     isPayloadSectionChanged(draftPayload.artifactAccess, publishedPayload?.artifactAccess),
     isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety),
+    isPayloadSectionChanged(
+      draftPayload.conversationSecurityReview,
+      publishedPayload?.conversationSecurityReview
+    ),
     isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults),
     isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior)
   ].filter(Boolean).length;
@@ -400,6 +438,15 @@ export function SystemSettingsShell() {
           )}
           {section === "safety" && (
             <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} />
+          )}
+          {section === "conversation-security-review" && (
+            <ConversationSecurityReviewSettingsView
+              value={draftPayload.conversationSecurityReview}
+              publishedValue={publishedPayload?.conversationSecurityReview}
+              fieldErrors={fieldErrors}
+              disabled={saving || publishing}
+              onChange={updateDraftConversationSecurityReview}
+            />
           )}
           {section === "organization-defaults" && (
             <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />

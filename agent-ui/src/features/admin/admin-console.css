@@ -3687,6 +3687,377 @@
   display: none; /* Replaced by floating action bar */
 }
 
+.conversation-security-review-heading,
+.conversation-security-review-title-line,
+.conversation-security-review-master,
+.conversation-security-review-card-heading,
+.conversation-security-review-summary-heading,
+.conversation-security-review-inline-switch,
+.conversation-security-review-test-result > div:first-child {
+  display: flex;
+  align-items: center;
+}
+
+.conversation-security-review-heading {
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-heading h3,
+.conversation-security-review-heading p,
+.conversation-security-review-card h4,
+.conversation-security-review-card p,
+.conversation-security-review-summary h4,
+.conversation-security-review-summary h5 {
+  margin: 0;
+}
+
+.conversation-security-review-title-line {
+  gap: 10px;
+}
+
+.conversation-security-review-heading h3 {
+  color: var(--admin-color-text);
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.conversation-security-review-heading p,
+.conversation-security-review-card-heading p {
+  margin-top: 5px;
+  color: var(--admin-color-subtle);
+  font-size: 13px;
+}
+
+.conversation-security-review-master {
+  flex: 0 0 auto;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.conversation-security-review-info {
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 20px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.conversation-security-review-main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.conversation-security-review-card,
+.conversation-security-review-summary {
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-md);
+  background: var(--admin-color-surface-solid);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.conversation-security-review-card {
+  padding: 20px;
+}
+
+.conversation-security-review-card-heading {
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-card-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-security-review-card-heading h4 {
+  color: var(--admin-color-text);
+  font-size: 15px;
+}
+
+.conversation-security-review-step {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--admin-radius-full);
+  background: var(--admin-color-accent-soft);
+  color: var(--admin-color-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.conversation-security-review-audience-grid,
+.conversation-security-review-form-grid,
+.conversation-security-review-context-grid,
+.conversation-security-review-notification-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.conversation-security-review-audience-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-audience {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-color-bg);
+}
+
+.conversation-security-review-audience span {
+  display: grid;
+  gap: 4px;
+}
+
+.conversation-security-review-audience strong {
+  color: var(--admin-color-text);
+  font-size: 13px;
+}
+
+.conversation-security-review-audience small {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.conversation-security-review-form-grid,
+.conversation-security-review-notification-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.conversation-security-review-span-2 {
+  grid-column: span 2;
+}
+
+.conversation-security-review-engine {
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-static-field {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 4px 11px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 6px;
+  background: var(--admin-color-bg);
+  color: var(--admin-color-text);
+  font-size: 13px;
+}
+
+.conversation-security-review-context-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.conversation-security-review-context-grid .ant-input-number,
+.conversation-security-review-notification-grid .ant-input-number {
+  width: 100%;
+}
+
+.conversation-security-review-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-color-bg);
+}
+
+.conversation-security-review-thresholds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.conversation-security-review-thresholds label {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(74px, 96px);
+  gap: 8px;
+  align-items: center;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.conversation-security-review-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--admin-radius-full);
+  background: #22c55e;
+}
+
+.conversation-security-review-dot.suspicious {
+  background: #f59e0b;
+}
+
+.conversation-security-review-dot.critical {
+  background: #ef4444;
+}
+
+.conversation-security-review-inline-switch {
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+}
+
+.conversation-security-review-inline-switch > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.conversation-security-review-repeat-rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.conversation-security-review-repeat-rule .ant-input-number {
+  width: 116px;
+}
+
+.conversation-security-review-summary {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+}
+
+.conversation-security-review-summary-heading {
+  gap: 9px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--admin-color-border);
+  color: var(--admin-color-accent);
+}
+
+.conversation-security-review-summary-heading h4 {
+  color: var(--admin-color-text);
+  font-size: 14px;
+}
+
+.conversation-security-review-summary dl {
+  margin: 0;
+  padding: 8px 18px;
+}
+
+.conversation-security-review-summary dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--admin-color-border);
+  font-size: 12px;
+}
+
+.conversation-security-review-summary dt {
+  color: var(--admin-color-subtle);
+}
+
+.conversation-security-review-summary dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--admin-color-text);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.conversation-security-review-mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.conversation-security-review-ladder {
+  padding: 14px 18px 18px;
+}
+
+.conversation-security-review-ladder h5 {
+  margin-bottom: 12px;
+  color: var(--admin-color-text);
+  font-size: 12px;
+}
+
+.conversation-security-review-ladder-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px 52px 1fr;
+  gap: 8px;
+  padding: 7px 0 7px 16px;
+  color: var(--admin-color-subtle);
+  font-size: 11px;
+}
+
+.conversation-security-review-ladder-row strong {
+  color: var(--admin-color-text);
+}
+
+.conversation-security-review-ladder-row small {
+  grid-column: 2 / -1;
+}
+
+.conversation-security-review-ladder-marker {
+  position: absolute;
+  top: 11px;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--admin-radius-full);
+  background: #22c55e;
+}
+
+.conversation-security-review-ladder-row.suspicious .conversation-security-review-ladder-marker {
+  background: #f59e0b;
+}
+
+.conversation-security-review-ladder-row.high .conversation-security-review-ladder-marker {
+  background: #f97316;
+}
+
+.conversation-security-review-ladder-row.critical .conversation-security-review-ladder-marker {
+  background: #ef4444;
+}
+
+.conversation-security-review-test-result {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-color-bg);
+}
+
+.conversation-security-review-test-result > div:first-child {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conversation-security-review-test-result p {
+  margin: 12px 0;
+  color: var(--admin-color-text);
+}
+
 .admin-sync-job-item {
   padding: 16px;
   border: 1px solid var(--admin-color-border);
@@ -4029,6 +4400,14 @@
   .admin-settings-content {
     min-height: 420px;
   }
+
+  .conversation-security-review-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-security-review-summary {
+    position: static;
+  }
 }
 
 @media (max-width: 640px) {
@@ -4059,5 +4438,28 @@
 
   .admin-entity-card-actions {
     flex-direction: column;
+  }
+
+  .conversation-security-review-heading,
+  .conversation-security-review-card-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .conversation-security-review-master {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .conversation-security-review-audience-grid,
+  .conversation-security-review-form-grid,
+  .conversation-security-review-context-grid,
+  .conversation-security-review-notification-grid,
+  .conversation-security-review-thresholds {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-security-review-span-2 {
+    grid-column: auto;
   }
 }

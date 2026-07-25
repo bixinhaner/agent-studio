@@ -28,6 +28,7 @@ import type { QuotaEvaluationService } from "../operations/quota-evaluation-serv
 import { createSecurityDomainAdminRouter } from "../security-domains/admin-router.js";
 import type { SecurityDomainService } from "../security-domains/service.js";
 import type { SecurityDomainAccessControl } from "../security-domains/access-control.js";
+import type { SystemSettingsConversationSecurityReview } from "../system-settings/types.js";
 
 type AdminDb =
   UserRepositoryDb &
@@ -82,6 +83,12 @@ type AdminRouterOptions = {
   securityDomains?: SecurityDomainService;
   securityDomainAccess?: SecurityDomainAccessControl;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
+  conversationSecurityReviewTest?: (input: {
+    settings: SystemSettingsConversationSecurityReview;
+    question: string;
+    actorUserId: string;
+    organizationId?: string;
+  }) => Promise<unknown>;
 };
 
 type UserRow = {
@@ -697,7 +704,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
             externalWebAccess: new ExternalWebAccessService(
               db as never,
               new AdminAuditLogRepository(db as never)
-            )
+            ),
+            conversationSecurityReviewTest: options.conversationSecurityReviewTest
           });
         }
         return systemSettingsRouter;
