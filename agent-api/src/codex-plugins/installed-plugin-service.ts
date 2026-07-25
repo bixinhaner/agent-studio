@@ -45,7 +45,14 @@ export type InstalledPluginRecord = {
   defaultPrompts: string[];
   skillNames: string[];
   enabled: true;
-  readiness: "ready";
+  readiness: "ready" | "degraded" | "unavailable";
+  visibleToUsers: boolean;
+  capabilityHealth: Array<{
+    id: string;
+    label: string;
+    status: "ready" | "unavailable";
+    detail?: string;
+  }>;
 };
 
 type InstalledPluginServiceOptions = {
@@ -64,6 +71,78 @@ function text(value: unknown): string | undefined {
 function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map(text).filter((item): item is string => Boolean(item));
+}
+
+function pluginRuntimeProfile(name: string): Pick<
+  InstalledPluginRecord,
+  "readiness" | "visibleToUsers" | "capabilityHealth"
+> {
+  const unavailable = (id: string, label: string, detail: string) => ({
+    id,
+    label,
+    status: "unavailable" as const,
+    detail
+  });
+  const ready = (id: string, label: string) => ({ id, label, status: "ready" as const });
+  switch (name.toLowerCase()) {
+    case "documents":
+      return {
+        readiness: "degraded",
+        visibleToUsers: true,
+        capabilityHealth: [
+          ready("local-documents", "本地 Word 文档生成与渲染"),
+          unavailable("connected-documents", "在线文档连接器", "保密运行模式已关闭 Codex Apps")
+        ]
+      };
+    case "presentations":
+      return {
+        readiness: "degraded",
+        visibleToUsers: true,
+        capabilityHealth: [
+          ready("local-presentations", "本地演示文稿生成与渲染"),
+          unavailable("connected-slides", "在线幻灯片连接器", "保密运行模式已关闭 Codex Apps")
+        ]
+      };
+    case "spreadsheets":
+      return {
+        readiness: "degraded",
+        visibleToUsers: true,
+        capabilityHealth: [
+          ready("local-spreadsheets", "本地表格生成与分析"),
+          unavailable("connected-sheets", "在线表格与 Excel 会话", "保密运行模式已关闭 Codex Apps")
+        ]
+      };
+    case "product-design":
+      return {
+        readiness: "unavailable",
+        visibleToUsers: false,
+        capabilityHealth: [
+          unavailable("browser-capture", "浏览器页面采集", "保密运行模式未提供 Browser"),
+          unavailable("sites-publish", "Sites 原型发布", "保密运行模式未提供 Sites")
+        ]
+      };
+    case "visualize":
+      return {
+        readiness: "ready",
+        visibleToUsers: true,
+        capabilityHealth: [ready("inline-visualization", "对话内交互式可视化")]
+      };
+    case "pdf":
+      return {
+        readiness: "ready",
+        visibleToUsers: true,
+        capabilityHealth: [
+          ready("local-pdf", "PDF 生成、解析与渲染"),
+          ready("ocr", "中英文扫描件 OCR")
+        ]
+      };
+    default:
+      return {
+        readiness: "ready",
+        visibleToUsers: true,
+        capabilityHealth: [ready("local-skill", "本地 Skill 能力")]
+      };
+  }
 }
 
 function parseInstalledPluginLine(line: string): {
@@ -134,6 +213,7 @@ export class InstalledPluginService {
       const manifestName = text(manifest.name) ?? name;
       const manifestVersion = text(manifest.version) ?? installed.version;
       const interfaceConfig = manifest.interface ?? {};
+      const runtimeProfile = pluginRuntimeProfile(manifestName);
       records.push({
         name: manifestName,
         pluginRef: installed.pluginRef,
@@ -150,7 +230,7 @@ export class InstalledPluginService {
         defaultPrompts: stringList(interfaceConfig.defaultPrompt),
         skillNames: await listSkillNames(installed.sourcePath, text(manifest.skills)),
         enabled: true,
-        readiness: "ready"
+        ...runtimeProfile
       });
     }
 

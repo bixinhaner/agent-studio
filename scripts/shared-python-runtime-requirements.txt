@@ -4,6 +4,7 @@ python-docx
 python-pptx
 pypdf
 pdfplumber
+pdf2image
 reportlab
 pymupdf
 pillow

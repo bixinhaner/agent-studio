@@ -123,7 +123,7 @@ import {
   MARKDOWN_REMARK_PLUGINS,
   MarkdownTable
 } from "../markdown/markdown-rendering";
-import { stripAssistantControlDirectives } from "../markdown/control-directives";
+import { expandAssistantControlDirectives } from "../markdown/control-directives";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalBillingPanel } from "./PortalBillingPanel";
@@ -142,7 +142,10 @@ import { getBrandInitials } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
 import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
-import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
+import {
+  prepareInteractiveHtmlPreview,
+  PreviewWorkbenchPanel
+} from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
 import { PortalSelectedSkillBar, PortalSkillPicker } from "./workbench/SkillPicker";
 import {
@@ -611,12 +614,88 @@ function normalizeMarkdownAssetTarget(value: string): string {
 
 function preprocessAssistantMarkdown(text: string): string {
   return normalizeLatexDelimiters(
-    stripAssistantControlDirectives(text).replace(
+    expandAssistantControlDirectives(text).replace(
       RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN,
       (_match, prefix, destination, suffix) => {
         return `${prefix}<${destination}>${suffix}`;
       }
     )
+  );
+}
+
+function resolveInlineVisualizationPath(href?: string): string {
+  if (!href) return "";
+  try {
+    const parsed = new URL(href, window.location.origin);
+    if (parsed.origin !== window.location.origin || parsed.pathname !== "/__codex-inline-vis") return "";
+    return normalizePreviewFilePath(parsed.searchParams.get("file") || "");
+  } catch {
+    return "";
+  }
+}
+
+function InlineVisualization(props: { filePath: string; label: ReactNode }) {
+  const { filePath, label } = props;
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const requestPreview = useContext(PreviewRequestContext);
+  const [html, setHtml] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setHtml("");
+    setError("");
+    if (!activeThreadId || !filePath) {
+      setError("可视化文件不可用");
+      return () => controller.abort();
+    }
+    const query = new URLSearchParams({ path: filePath, disposition: "inline" });
+    fetch(
+      `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId)}/artifacts/content?${query.toString()}`,
+      {
+        credentials: "include",
+        headers: authHeaders(),
+        signal: controller.signal
+      }
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          notifyAuthInvalidStatus(response.status);
+          throw new Error(`可视化文件读取失败（${response.status}）`);
+        }
+        const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        if (!contentType.includes("html")) throw new Error("仅支持内联展示 HTML 可视化");
+        return response.text();
+      })
+      .then((content) => setHtml(prepareInteractiveHtmlPreview(content)))
+      .catch((reason) => {
+        if ((reason as Error).name !== "AbortError") {
+          setError(reason instanceof Error ? reason.message : "可视化加载失败");
+        }
+      });
+    return () => controller.abort();
+  }, [activeThreadId, filePath]);
+
+  return (
+    <section className="assistant-inline-vis" aria-label="交互式可视化">
+      <header className="assistant-inline-vis-header">
+        <span>{label}</span>
+        <button type="button" onClick={() => requestPreview(filePath)}>
+          在预览区打开
+        </button>
+      </header>
+      {error ? <div className="assistant-inline-vis-state" role="alert">{error}</div> : null}
+      {!error && !html ? <div className="assistant-inline-vis-state">正在加载可视化…</div> : null}
+      {html ? (
+        <iframe
+          className="assistant-inline-vis-frame"
+          title={typeof label === "string" ? label : "交互式可视化"}
+          srcDoc={html}
+          sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -923,6 +1002,10 @@ function AssistantMarkdownLink(props: {
   const { href, className, children, ...rest } = props;
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
+  const inlineVisualizationPath = resolveInlineVisualizationPath(href);
+  if (inlineVisualizationPath) {
+    return <InlineVisualization filePath={inlineVisualizationPath} label={children} />;
+  }
   const previewPath = typeof href === "string" ? resolveThreadPreviewPathFromHref(href, activeThreadId) : null;
   const linkBehavior =
     typeof href === "string" && !previewPath
@@ -3248,15 +3331,7 @@ function reviveMessage(message: unknown, persistedCreatedAt?: string | null): un
   };
 
   if (role === "assistant") {
-    const visibleContent = (revived.content as unknown[]).map((part) => {
-      const item = asRecord(part);
-      if (item?.type !== "text" || typeof item.text !== "string") return part;
-      return {
-        ...item,
-        text: stripAssistantControlDirectives(item.text)
-      };
-    });
-    revived.content = consolidateCodexFileChangeParts(visibleContent);
+    revived.content = consolidateCodexFileChangeParts(revived.content as unknown[]);
     if (!("unstable_state" in fixedMetadata)) fixedMetadata.unstable_state = {};
     if (!Array.isArray(fixedMetadata.unstable_annotations)) fixedMetadata.unstable_annotations = [];
     if (!Array.isArray(fixedMetadata.unstable_data)) fixedMetadata.unstable_data = [];
@@ -7875,10 +7950,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const item = asRecord(part);
             if (!item) return { ...part };
             if (item.type === "text" && typeof item.text === "string") {
-              return {
-                ...part,
-                text: stripAssistantControlDirectives(item.text)
-              };
+              return { ...part };
             }
             if (item.type !== "data") return { ...part };
             const payload = asRecord(item.data);

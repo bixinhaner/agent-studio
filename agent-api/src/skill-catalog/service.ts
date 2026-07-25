@@ -139,7 +139,9 @@ export class SkillCatalogService {
           capabilities: plugin.capabilities,
           skillNames: plugin.skillNames,
           enabled: plugin.enabled,
-          readiness: plugin.readiness
+          readiness: plugin.readiness,
+          visibleToUsers: plugin.visibleToUsers,
+          capabilityHealth: plugin.capabilityHealth
         }
       });
       await this.repository.ensureEntry({

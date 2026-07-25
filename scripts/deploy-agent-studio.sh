@@ -747,7 +747,11 @@ check_plugin_runtime() {
     "$APP_HOME/.codex"
     "$APP_API_DIR/temp/codex-homes"
   )
+  local runtime_path="$SHARED_CODEX_RUNTIME_ROOT/dependencies/bin/override:$SHARED_CODEX_RUNTIME_ROOT/dependencies/node/bin:$PATH:$SHARED_CODEX_RUNTIME_ROOT/dependencies/bin/fallback"
   local command=(
+    env
+    "PATH=$runtime_path"
+    "FONTCONFIG_FILE=$SHARED_CODEX_RUNTIME_ROOT/dependencies/fontconfig/fonts.conf"
     node "$script_dir/check-plugin-runtime.mjs"
     --requirements "$script_dir/plugin-runtime-requirements.json"
     --node-modules "$SHARED_CODEX_RUNTIME_NODE_MODULES"
@@ -759,7 +763,13 @@ check_plugin_runtime() {
     [[ -e "$root" ]] || continue
     command+=(--plugin-root "$root")
   done
-  run_as_app_user "${command[@]}"
+  run_as_app_user "${command[@]}" &&
+    run_as_app_user env \
+      "PATH=$runtime_path" \
+      "FONTCONFIG_FILE=$SHARED_CODEX_RUNTIME_ROOT/dependencies/fontconfig/fonts.conf" \
+      node "$script_dir/smoke-shared-plugin-runtime.mjs" \
+      --runtime-root "$SHARED_CODEX_RUNTIME_ROOT" \
+      --python-root "$SHARED_PYTHON_RUNTIME_ROOT"
 }
 
 install_shared_codex_runtime_archive() {

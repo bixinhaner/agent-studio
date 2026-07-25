@@ -25,11 +25,19 @@ type NativeCodexSkillServiceOptions = {
   baseHome: string;
   sessionHomeRoot: string;
   sharedPluginMarketplaces?: string[];
+  sharedPluginNames?: string[];
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const MAX_SKILL_SCAN_DEPTH = 5;
 const DEFAULT_SHARED_PLUGIN_MARKETPLACES = ["agentstudio-office"];
+const DEFAULT_SHARED_PLUGIN_NAMES = [
+  "documents",
+  "pdf",
+  "presentations",
+  "spreadsheets",
+  "visualize"
+];
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -187,6 +195,7 @@ export class NativeCodexSkillService {
   private readonly skillsRoot: string;
   private readonly sessionHomeRoot: string;
   private readonly sharedPluginMarketplaces: string[];
+  private readonly sharedPluginNames: Set<string>;
 
   constructor(options: NativeCodexSkillServiceOptions) {
     this.baseHome = path.resolve(options.baseHome);
@@ -200,6 +209,11 @@ export class NativeCodexSkillService {
           .map((name) => sanitizePathSegment(name, "marketplace"))
       )
     ];
+    this.sharedPluginNames = new Set(
+      (options.sharedPluginNames ?? DEFAULT_SHARED_PLUGIN_NAMES)
+        .map((name) => trimOrUndefined(name)?.toLowerCase())
+        .filter((name): name is string => Boolean(name))
+    );
   }
 
   getBaseHome(): string {
@@ -327,11 +341,40 @@ export class NativeCodexSkillService {
 
       const destinationPath = path.join(sessionPluginCacheRoot, marketplace);
       const destinationStat = await fs.lstat(destinationPath).catch(() => undefined);
-      if (destinationStat?.isSymbolicLink()) {
-        const target = await fs.readlink(destinationPath).catch(() => undefined);
-        if (target && path.resolve(path.dirname(destinationPath), target) === sourcePath) continue;
+      if (destinationStat?.isSymbolicLink() || (destinationStat && !destinationStat.isDirectory())) {
+        await fs.rm(destinationPath, { recursive: true, force: true });
       }
-      await replaceSymlinkOrCopy(sourcePath, destinationPath);
+      await fs.mkdir(destinationPath, { recursive: true });
+
+      for (const entry of await fs.readdir(destinationPath, { withFileTypes: true }).catch(() => [])) {
+        if (!this.sharedPluginNames.has(entry.name.toLowerCase())) {
+          await fs.rm(path.join(destinationPath, entry.name), { recursive: true, force: true });
+        }
+      }
+      for (const entry of await fs.readdir(sourcePath, { withFileTypes: true }).catch(() => [])) {
+        if (
+          (!entry.isDirectory() && !entry.isSymbolicLink()) ||
+          !this.sharedPluginNames.has(entry.name.toLowerCase())
+        ) {
+          continue;
+        }
+        const pluginSourcePath = path.join(sourcePath, entry.name);
+        const pluginDestinationPath = path.join(destinationPath, entry.name);
+        const pluginDestinationStat = await fs.lstat(pluginDestinationPath).catch(() => undefined);
+        if (pluginDestinationStat?.isSymbolicLink()) {
+          const target = await fs.readlink(pluginDestinationPath).catch(() => undefined);
+          if (
+            target &&
+            path.resolve(path.dirname(pluginDestinationPath), target) === pluginSourcePath
+          ) {
+            continue;
+          }
+        }
+        await replaceSymlinkOrCopy(
+          pluginSourcePath,
+          pluginDestinationPath
+        );
+      }
     }
   }
 

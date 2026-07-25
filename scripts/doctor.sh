@@ -156,7 +156,11 @@ check_document_render_runtime() {
 }
 
 check_plugin_runtime() {
+  local runtime_path="$SHARED_CODEX_RUNTIME_ROOT/dependencies/bin/override:$SHARED_CODEX_RUNTIME_ROOT/dependencies/node/bin:$PATH:$SHARED_CODEX_RUNTIME_ROOT/dependencies/bin/fallback"
   local command=(
+    env
+    "PATH=$runtime_path"
+    "FONTCONFIG_FILE=$SHARED_CODEX_RUNTIME_ROOT/dependencies/fontconfig/fonts.conf"
     node "$APP_REPO_DIR/scripts/check-plugin-runtime.mjs"
     --requirements "$APP_REPO_DIR/scripts/plugin-runtime-requirements.json"
     --node-modules "$SHARED_CODEX_RUNTIME_NODE_MODULES"
@@ -167,7 +171,13 @@ check_plugin_runtime() {
     [[ -e "$root" ]] || continue
     command+=(--plugin-root "$root")
   done
-  run_as_app_user "${command[@]}"
+  run_as_app_user "${command[@]}" &&
+    run_as_app_user env \
+      "PATH=$runtime_path" \
+      "FONTCONFIG_FILE=$SHARED_CODEX_RUNTIME_ROOT/dependencies/fontconfig/fonts.conf" \
+      node "$APP_REPO_DIR/scripts/smoke-shared-plugin-runtime.mjs" \
+      --runtime-root "$SHARED_CODEX_RUNTIME_ROOT" \
+      --python-root "$SHARED_PYTHON_RUNTIME_ROOT"
 }
 
 check_build_outputs() {

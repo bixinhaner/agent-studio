@@ -59,7 +59,14 @@ export type SkillCatalogSourceSnapshot = {
     capabilities: string[];
     skillNames: string[];
     enabled: boolean;
-    readiness: "ready";
+    readiness: "ready" | "degraded" | "unavailable";
+    visibleToUsers: boolean;
+    capabilityHealth: Array<{
+      id: string;
+      label: string;
+      status: "ready" | "unavailable";
+      detail?: string;
+    }>;
   };
 };
 

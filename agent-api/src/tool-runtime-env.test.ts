@@ -59,22 +59,37 @@ describe("tool runtime env", () => {
         ".cache",
         "codex-runtimes",
         "codex-primary-runtime"
-      )
+      ),
+      dependencies: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies"),
+      overrideBin: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "bin", "override"),
+      fallbackBin: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "bin", "fallback"),
+      nodeBin: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "node", "bin"),
+      nodeModules: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "node", "node_modules"),
+      fontConfig: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "fontconfig", "fonts.conf")
     });
     await expect(fs.stat(paths!.home)).resolves.toBeTruthy();
     await expect(fs.stat(paths!.cache)).resolves.toBeTruthy();
     await expect(fs.stat(paths!.config)).resolves.toBeTruthy();
   });
 
-  it("injects only generic tool cache environment variables", async () => {
+  it("injects shared runtime commands, packages, and fonts", async () => {
     const workspace = await makeTempDir("agent-studio-tool-runtime-env-");
-    const env = buildToolRuntimeEnv({ workspace });
-
-    expect(env).toEqual({
-      HOME: path.join(workspace, ".agent-studio", "tmp", "home"),
-      XDG_CACHE_HOME: path.join(workspace, ".agent-studio", "tmp", "cache"),
-      XDG_CONFIG_HOME: path.join(workspace, ".agent-studio", "tmp", "config")
+    const paths = toolRuntimeEnvPaths(workspace)!;
+    const env = buildToolRuntimeEnv({
+      workspace,
+      baseEnv: { PATH: "/usr/bin", NODE_PATH: "/custom/node_modules" }
     });
+
+    expect(env.HOME).toBe(paths.home);
+    expect(env.XDG_CACHE_HOME).toBe(paths.cache);
+    expect(env.XDG_CONFIG_HOME).toBe(paths.config);
+    expect(env.CODEX_RUNTIME_DEPENDENCIES).toBe(paths.dependencies);
+    expect(env.CODEX_WORKSPACE_DEPENDENCIES).toBe(paths.dependencies);
+    expect(env.PATH).toBe(
+      [paths.overrideBin, paths.nodeBin, "/usr/bin", paths.fallbackBin].join(path.delimiter)
+    );
+    expect(env.NODE_PATH).toBe([paths.nodeModules, "/custom/node_modules"].join(path.delimiter));
+    expect(env.FONTCONFIG_FILE).toBe(paths.fontConfig);
     expect(env).not.toHaveProperty("CODEX_HOME");
   });
 

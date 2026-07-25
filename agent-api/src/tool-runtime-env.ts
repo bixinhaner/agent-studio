@@ -7,6 +7,12 @@ export type ToolRuntimeEnvPaths = {
   cache: string;
   config: string;
   codexRuntimeLink: string;
+  dependencies: string;
+  overrideBin: string;
+  fallbackBin: string;
+  nodeBin: string;
+  nodeModules: string;
+  fontConfig: string;
 };
 
 export const TOOL_RUNTIME_FRESHNESS_HINT = [
@@ -21,18 +27,26 @@ export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | u
   const normalized = workspace?.trim();
   if (!normalized) return undefined;
   const root = path.join(normalized, ".agent-studio", "tmp");
+  const codexRuntimeLink = path.join(
+    root,
+    "home",
+    ".cache",
+    "codex-runtimes",
+    "codex-primary-runtime"
+  );
+  const dependencies = path.join(codexRuntimeLink, "dependencies");
   return {
     root,
     home: path.join(root, "home"),
     cache: path.join(root, "cache"),
     config: path.join(root, "config"),
-    codexRuntimeLink: path.join(
-      root,
-      "home",
-      ".cache",
-      "codex-runtimes",
-      "codex-primary-runtime"
-    )
+    codexRuntimeLink,
+    dependencies,
+    overrideBin: path.join(dependencies, "bin", "override"),
+    fallbackBin: path.join(dependencies, "bin", "fallback"),
+    nodeBin: path.join(dependencies, "node", "bin"),
+    nodeModules: path.join(dependencies, "node", "node_modules"),
+    fontConfig: path.join(dependencies, "fontconfig", "fonts.conf")
   };
 }
 
@@ -140,12 +154,26 @@ export async function ensureToolRuntimeEnvDirs(
   return paths;
 }
 
-export function buildToolRuntimeEnv(input: { workspace?: string }): Record<string, string> {
+export function buildToolRuntimeEnv(input: {
+  workspace?: string;
+  baseEnv?: NodeJS.ProcessEnv;
+}): Record<string, string> {
   const paths = toolRuntimeEnvPaths(input.workspace);
   if (!paths) return {};
+  const baseEnv = input.baseEnv ?? process.env;
   return {
     HOME: paths.home,
     XDG_CACHE_HOME: paths.cache,
-    XDG_CONFIG_HOME: paths.config
+    XDG_CONFIG_HOME: paths.config,
+    CODEX_RUNTIME_DEPENDENCIES: paths.dependencies,
+    CODEX_WORKSPACE_DEPENDENCIES: paths.dependencies,
+    NODE_PATH: [paths.nodeModules, baseEnv.NODE_PATH].filter(Boolean).join(path.delimiter),
+    PATH: [
+      paths.overrideBin,
+      paths.nodeBin,
+      baseEnv.PATH,
+      paths.fallbackBin
+    ].filter(Boolean).join(path.delimiter),
+    FONTCONFIG_FILE: paths.fontConfig
   };
 }

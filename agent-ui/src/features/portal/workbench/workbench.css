@@ -3185,6 +3185,54 @@ button.session-rail-new-btn:active,
   flex: 0 0 auto;
 }
 
+.assistant-inline-vis {
+  width: min(100%, 920px);
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-primary);
+}
+
+.assistant-inline-vis-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assistant-inline-vis-header button {
+  border: 0;
+  background: transparent;
+  color: var(--text-link);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.assistant-inline-vis-frame {
+  display: block;
+  width: 100%;
+  height: min(62vh, 560px);
+  min-height: 360px;
+  border: 0;
+  background: #fff;
+}
+
+.assistant-inline-vis-state {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 @media (max-width: 640px) {
   .assistant-file-change-item {
     align-items: stretch;

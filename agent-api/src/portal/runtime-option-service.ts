@@ -308,6 +308,7 @@ function toAutomaticPluginRuntimeSkill(
   catalogEntries: SkillCatalogEntryRecord[],
   locale: string | undefined
 ): PortalRuntimeOptionSkill | undefined {
+  if (!plugin.visibleToUsers || plugin.readiness === "unavailable") return undefined;
   const catalogEntry = selectCatalogEntry({
     entries: catalogEntries,
     sourceType: "plugin",

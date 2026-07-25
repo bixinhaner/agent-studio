@@ -2,15 +2,15 @@
   "schemaVersion": 1,
   "plugins": {
     "documents": {
-      "commands": ["python3", "soffice", "pdftoppm"],
-      "pythonImports": ["docx", "PIL"]
+      "commands": ["python3", "soffice", "pdftoppm", "pdfinfo"],
+      "pythonImports": ["docx", "PIL", "lxml", "openpyxl", "pdf2image"]
     },
     "pdf": {
-      "commands": ["python3", "pdftoppm", "pdfinfo"],
+      "commands": ["python3", "pdftoppm", "pdfinfo", "tesseract"],
       "pythonImports": ["reportlab", "pdfplumber", "pypdf"]
     },
     "presentations": {
-      "commands": ["node", "python3", "soffice", "pdftoppm", "pdfinfo"],
+      "commands": ["node", "python3", "soffice", "pdftoppm", "pdfinfo", "unzip", "heif-convert", "dot"],
       "nodePackages": [
         {
           "name": "@oai/artifact-tool",
@@ -20,9 +20,21 @@
         {
           "name": "lucide",
           "entrypoints": ["dist/cjs/lucide.js", "dist/umd/lucide.js", "dist/esm/lucide.js"]
+        },
+        {
+          "name": "sharp",
+          "minimumVersion": "0.34.5"
+        },
+        {
+          "name": "@viz-js/viz",
+          "minimumVersion": "3.28.0"
+        },
+        {
+          "name": "tesseract.js",
+          "minimumVersion": "7.0.0"
         }
       ],
-      "pythonImports": ["PIL"]
+      "pythonImports": ["PIL", "numpy", "pptx", "pdf2image"]
     },
     "spreadsheets": {
       "commands": ["node", "python3"],
@@ -38,6 +50,12 @@
     "template-creator": {
       "commands": ["python3", "soffice", "pdftoppm", "pdfinfo"],
       "pythonImports": ["docx", "pptx", "openpyxl", "PIL"]
+    },
+    "product-design": {
+      "commands": []
+    },
+    "visualize": {
+      "commands": ["python3"]
     }
   }
 }

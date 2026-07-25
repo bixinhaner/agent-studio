@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { stripAssistantControlDirectives } from "./control-directives";
+import { expandAssistantControlDirectives, stripAssistantControlDirectives } from "./control-directives";
 
 describe("stripAssistantControlDirectives", () => {
   it("removes standalone inline visualization directives", () => {
@@ -30,5 +30,18 @@ describe("stripAssistantControlDirectives", () => {
   it("does not alter ordinary Markdown", () => {
     const markdown = "## 报告\n\n- 文件已生成\n- 可以预览";
     expect(stripAssistantControlDirectives(markdown)).toBe(markdown);
+  });
+});
+
+describe("expandAssistantControlDirectives", () => {
+  it("turns a visualization directive into a reserved inline link", () => {
+    expect(expandAssistantControlDirectives('::codex-inline-vis{file="reports/趋势图.html"}')).toBe(
+      "[交互式可视化](/__codex-inline-vis?file=reports%2F%E8%B6%8B%E5%8A%BF%E5%9B%BE.html)"
+    );
+  });
+
+  it("does not activate examples inside fenced code blocks", () => {
+    const markdown = '```text\n::codex-inline-vis{file="example.html"}\n```';
+    expect(expandAssistantControlDirectives(markdown)).toBe(markdown);
   });
 });

@@ -271,7 +271,9 @@ describe("PortalRuntimeOptionService", () => {
         defaultPrompts: ["Create a memo"],
         skillNames: ["documents"],
         enabled: true,
-        readiness: "ready"
+        readiness: "ready",
+        visibleToUsers: true,
+        capabilityHealth: [{ id: "local-documents", label: "本地文档", status: "ready" }]
       }],
       catalogEntries: [catalogEntry({
         id: "plugin-documents",
@@ -309,6 +311,54 @@ describe("PortalRuntimeOptionService", () => {
       })
     ]);
     expect(result.modes[0]?.availableSkills).toEqual([]);
+  });
+
+  it("does not expose a plugin when its secure runtime channels are unavailable", async () => {
+    const service = createService({
+      installedPlugins: [{
+        name: "product-design",
+        pluginRef: "product-design@office",
+        marketplace: "office",
+        version: "1.0.0",
+        sourcePath: "/plugins/product-design",
+        displayName: "Product Design",
+        capabilities: ["Browser", "Sites"],
+        defaultPrompts: [],
+        skillNames: ["product-design"],
+        enabled: true,
+        readiness: "unavailable",
+        visibleToUsers: false,
+        capabilityHealth: [{
+          id: "browser-capture",
+          label: "浏览器页面采集",
+          status: "unavailable",
+          detail: "保密运行模式未提供 Browser"
+        }]
+      }],
+      catalogEntries: [catalogEntry({
+        id: "plugin-product-design",
+        sourceType: "plugin",
+        sourceRef: "product-design",
+        canonicalName: "product-design",
+        published: true,
+        displayName: "产品设计",
+        summary: "产品设计工作流"
+      })],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: []
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(result.modes[0]?.automaticSkills).toEqual([]);
   });
 
   it("inherits a published native presentation for an unpublished managed catalog placeholder", async () => {

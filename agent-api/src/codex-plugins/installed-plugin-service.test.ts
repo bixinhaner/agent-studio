@@ -48,7 +48,12 @@ printf '%s\\n' 'pdf@office not installed /tmp/pdf'
         capabilities: ["Interactive", "Write"],
         defaultPrompts: ["Create a memo"],
         skillNames: ["documents"],
-        readiness: "ready"
+        readiness: "degraded",
+        visibleToUsers: true,
+        capabilityHealth: expect.arrayContaining([
+          expect.objectContaining({ id: "local-documents", status: "ready" }),
+          expect.objectContaining({ id: "connected-documents", status: "unavailable" })
+        ])
       })
     ]);
   });

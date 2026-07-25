@@ -260,6 +260,11 @@ export function SkillCatalogManagementView() {
 
 function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; onEdit: () => void }) {
   const content = displayContent(entry);
+  const runtimeLabel = entry.plugin?.readiness === "ready"
+    ? "全部能力可用"
+    : entry.plugin?.readiness === "degraded"
+      ? "部分能力可用"
+      : "当前不可用";
   return (
     <aside className="skill-admin-side-panel">
       <div className="skill-admin-side-heading"><strong>Skill 详情</strong><button type="button" aria-label="折叠详情"><ChevronDown size={17} /></button></div>
@@ -268,7 +273,7 @@ function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; on
         <div><dt>用途名（默认语言 {entry.defaultLocale}）</dt><dd>{content.displayName || "未配置"}<button type="button" onClick={onEdit}>编辑</button></dd></div>
         <div><dt>默认语言</dt><dd>{entry.defaultLocale}</dd></div>
         <div><dt>来源</dt><dd>{entry.sourceLabel}（{entryScopeLabel(entry)}）</dd></div>
-        {entry.plugin ? <><div><dt>运行版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>运行状态</dt><dd><span className="skill-admin-status is-published">已安装并自动可用</span></dd></div><div><dt>包含能力</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></> : null}
+        {entry.plugin ? <><div><dt>运行版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>运行状态</dt><dd><span className={`skill-admin-status ${entry.plugin.readiness !== "unavailable" ? "is-published" : ""}`}>{runtimeLabel}</span></dd></div><div><dt>Portal 展示</dt><dd>{entry.plugin.visibleToUsers ? "显示" : "隐藏"}</dd></div><div><dt>能力状态</dt><dd>{entry.plugin.capabilityHealth.map((capability) => `${capability.label}：${capability.status === "ready" ? "可用" : capability.detail || "不可用"}`).join("；") || "—"}</dd></div><div><dt>包含 Skill</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></> : null}
         <div><dt>当前发布</dt><dd>{localDate(entry.publishedAt)}</dd></div>
         <div><dt>状态</dt><dd><span className={`skill-admin-status ${entry.publishedAt ? "is-published" : ""}`}>{entry.publishedAt ? "已发布" : "未发布"}</span></dd></div>
       </dl>
@@ -420,11 +425,16 @@ function SkillCatalogEditor({ entry, onBack, onUpdated }: { entry: SkillCatalogE
 
 function BaseSettings({ entry, draft, onChange }: { entry: SkillCatalogEntry; draft: SkillCatalogDraft; onChange: (updater: (current: SkillCatalogDraft) => SkillCatalogDraft) => void }) {
   const patchBase = (patch: Partial<SkillCatalogDraft["baseConfig"]>) => onChange((current) => ({ ...current, baseConfig: { ...current.baseConfig, ...patch } }));
+  const runtimeLabel = entry.plugin?.readiness === "ready"
+    ? "全部能力可用"
+    : entry.plugin?.readiness === "degraded"
+      ? "部分能力可用"
+      : "当前不可用";
   return (
     <div className="skill-admin-form-section">
       <h2>基础信息</h2><p>原名来自能力本身，不可翻译；展示配置只决定 Portal 如何解释和排序。</p>
       <label><span>{entry.sourceType === "plugin" ? "插件原名" : "Skill 原名"}</span><Input value={entry.canonicalName} disabled /><small>来自 {entry.sourceLabel}，不能在这里修改</small></label>
-      {entry.plugin ? <div className="skill-admin-runtime-info"><strong>只读运行信息</strong><dl><div><dt>插件标识</dt><dd><code>{entry.plugin.pluginRef}</code></dd></div><div><dt>版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>状态</dt><dd>已安装并自动可用</dd></div><div><dt>包含能力</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></dl><small>运行状态由系统管理；这里仅配置用户看到的介绍内容。</small></div> : null}
+      {entry.plugin ? <div className="skill-admin-runtime-info"><strong>只读运行信息</strong><dl><div><dt>插件标识</dt><dd><code>{entry.plugin.pluginRef}</code></dd></div><div><dt>版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>状态</dt><dd>{runtimeLabel}</dd></div><div><dt>Portal 展示</dt><dd>{entry.plugin.visibleToUsers ? "显示" : "隐藏"}</dd></div><div><dt>能力状态</dt><dd>{entry.plugin.capabilityHealth.map((capability) => `${capability.label}：${capability.status === "ready" ? "可用" : capability.detail || "不可用"}`).join("；") || "—"}</dd></div><div><dt>包含 Skill</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></dl><small>运行状态由系统根据共享运行时与安全隔离策略管理；这里仅配置用户看到的介绍内容。</small></div> : null}
       <label><span>默认语言</span><Select value={draft.baseConfig.defaultLocale} onChange={(value) => patchBase({ defaultLocale: value })} options={[{ value: "zh-CN", label: "简体中文 (zh-CN)" }, { value: "en-US", label: "English (en-US)" }]} /></label>
       <label><span>图标</span><Select value={draft.baseConfig.iconKey} onChange={(value) => patchBase({ iconKey: value })} options={Object.keys(ICON_BY_KEY).map((value) => ({ value, label: value }))} /></label>
       <label><span>排序</span><Input type="number" value={draft.baseConfig.sortOrder} onChange={(event) => patchBase({ sortOrder: Number(event.target.value) || 0 })} /></label>

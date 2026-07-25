@@ -92,25 +92,23 @@ describe("NativeCodexSkillService", () => {
       const sessionHomeRoot = path.join(tempRoot, "session-homes");
       const sharedPluginRoot = path.join(baseHome, "plugins", "cache", "agentstudio-office");
       await fs.mkdir(path.join(baseHome, "skills"), { recursive: true });
-      await fs.mkdir(sharedPluginRoot, { recursive: true });
-      await fs.writeFile(path.join(sharedPluginRoot, "marker.txt"), "shared", "utf8");
+      await fs.mkdir(path.join(sharedPluginRoot, "documents", "1.0.0"), { recursive: true });
+      await fs.mkdir(path.join(sharedPluginRoot, "product-design", "1.0.0"), { recursive: true });
+      await fs.writeFile(path.join(sharedPluginRoot, "documents", "1.0.0", "marker.txt"), "shared", "utf8");
 
       const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot });
       const firstHome = await service.materializeSessionHome({ scopeId: "user-1", enabledSkills: [] });
       const secondHome = await service.materializeSessionHome({ scopeId: "user-2", enabledSkills: [] });
       const firstMount = path.join(firstHome, "plugins", "cache", "agentstudio-office");
       const secondMount = path.join(secondHome, "plugins", "cache", "agentstudio-office");
-      const realSharedPluginRoot = await fs.realpath(sharedPluginRoot);
+      expect((await fs.lstat(firstMount)).isDirectory()).toBe(true);
+      expect((await fs.lstat(secondMount)).isDirectory()).toBe(true);
+      await expect(fs.readFile(path.join(firstMount, "documents", "1.0.0", "marker.txt"), "utf8")).resolves.toBe("shared");
+      await expect(fs.access(path.join(firstMount, "product-design"))).rejects.toThrow();
 
-      expect((await fs.lstat(firstMount)).isSymbolicLink()).toBe(true);
-      expect((await fs.lstat(secondMount)).isSymbolicLink()).toBe(true);
-      await expect(fs.realpath(firstMount)).resolves.toBe(realSharedPluginRoot);
-      await expect(fs.realpath(secondMount)).resolves.toBe(realSharedPluginRoot);
-      await expect(fs.readFile(path.join(firstMount, "marker.txt"), "utf8")).resolves.toBe("shared");
-
-      await fs.unlink(firstMount);
+      await fs.rm(path.join(firstMount, "documents"), { recursive: true, force: true });
       await service.materializeSessionHome({ scopeId: "user-1", enabledSkills: [] });
-      await expect(fs.realpath(firstMount)).resolves.toBe(realSharedPluginRoot);
+      await expect(fs.readFile(path.join(firstMount, "documents", "1.0.0", "marker.txt"), "utf8")).resolves.toBe("shared");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
