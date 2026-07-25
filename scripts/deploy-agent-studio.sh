@@ -793,7 +793,7 @@ install_shared_codex_runtime_archive() {
     die "shared Codex runtime archive has an invalid layout: $SHARED_CODEX_RUNTIME_ARCHIVE"
   run_as_root chown -R root:root "$staging"
   run_as_root chmod -R a+rX,a-w "$staging"
-  if [[ -e "$SHARED_CODEX_RUNTIME_ROOT" ]]; then
+  if run_as_root test -e "$SHARED_CODEX_RUNTIME_ROOT"; then
     run_as_root mv "$SHARED_CODEX_RUNTIME_ROOT" "$previous"
   fi
   run_as_root mv "$staging" "$SHARED_CODEX_RUNTIME_ROOT"
@@ -802,7 +802,7 @@ install_shared_codex_runtime_archive() {
     return 0
   fi
   run_as_root rm -rf "$SHARED_CODEX_RUNTIME_ROOT"
-  if [[ -e "$previous" ]]; then
+  if run_as_root test -e "$previous"; then
     run_as_root mv "$previous" "$SHARED_CODEX_RUNTIME_ROOT"
   fi
   die "installed plugin runtime check failed after shared runtime installation"
