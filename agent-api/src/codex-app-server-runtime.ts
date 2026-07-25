@@ -80,10 +80,10 @@ const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_TURN_IDLE_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_TURN_MAX_MS = 90 * 60_000;
-const DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+const DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS = [2_000, 5_000, 10_000] as const;
 const TRANSIENT_OVERLOAD_RETRY_DELAYS_ENV = "CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS";
 const TRANSIENT_OVERLOAD_RECOVERY_MESSAGE = "continue";
-const MAX_TRANSIENT_OVERLOAD_RETRIES = 2;
+const MAX_TRANSIENT_OVERLOAD_RETRIES = 3;
 const MAX_DIAGNOSTIC_EVENTS = 20;
 const MAX_BUFFERED_PRE_START_EVENTS = 50;
 const TOML_DRIVER_APP_SERVER = "app_server";
@@ -254,24 +254,25 @@ class CodexAppServerTurnError extends Error {
   }
 }
 
-function isTransientModelOverloadPayload(message: string, raw?: unknown): boolean {
+function isTransientAiServiceFailurePayload(message: string, raw?: unknown): boolean {
   const rawRecord = asRecord(raw);
   const nestedError = asRecord(rawRecord?.error);
   const codexErrorInfo = trimOrUndefined(nestedError?.codexErrorInfo)?.toLowerCase();
   if (codexErrorInfo === "serveroverloaded") return true;
 
   const text = `${message}\n${jsonPreview(raw, 4_000)}`.toLowerCase();
-  return text.includes("selected model is at capacity");
+  return text.includes("selected model is at capacity")
+    || text.includes("biscuit_baker_service_me_circuit_open");
 }
 
-function isTransientModelOverloadEvent(event: CodexStreamEvent): boolean {
+function isTransientAiServiceFailureEvent(event: CodexStreamEvent): boolean {
   return event.type === "error"
-    && isTransientModelOverloadPayload(event.text || "", event.raw);
+    && isTransientAiServiceFailurePayload(event.text || "", event.raw);
 }
 
-function isTransientModelOverload(error: unknown): boolean {
+function isTransientAiServiceFailure(error: unknown): boolean {
   const raw = error instanceof CodexAppServerTurnError ? error.raw : undefined;
-  return isTransientModelOverloadPayload(
+  return isTransientAiServiceFailurePayload(
     error instanceof Error ? error.message : String(error),
     raw
   );
@@ -1225,7 +1226,7 @@ class CodexAppServerManager {
       if (isRetryableRuntimeError(event)) {
         return;
       }
-      if (!isTransientModelOverloadEvent(event)) {
+      if (!isTransientAiServiceFailureEvent(event)) {
         queue.push(event);
       }
       if (event.type === "turn.completed") {
@@ -1412,15 +1413,15 @@ export class CodexAppServerRuntime {
         }
         return;
       } catch (error) {
-        const transientOverload = isTransientModelOverload(error);
+        const transientServiceFailure = isTransientAiServiceFailure(error);
         const delayMs = retryDelays[attempt];
-        if (options.signal?.aborted || !transientOverload) {
+        if (options.signal?.aborted || !transientServiceFailure) {
           throw error;
         }
         if (delayMs === undefined) {
           throw new CodexRuntimeUserError(CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY, error);
         }
-        console.warn("codex app-server retrying transient model overload", {
+        console.warn("codex app-server retrying transient AI service failure", {
           threadId: thread.id,
           model: thread.options.model,
           retryAttempt: attempt + 1,

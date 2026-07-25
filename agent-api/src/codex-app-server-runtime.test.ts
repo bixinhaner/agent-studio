@@ -64,6 +64,19 @@ function notifyModelCapacity(threadId, turnId) {
   });
 }
 
+function notifyBiscuitBakerUnavailable(threadId, turnId) {
+  notify("error", {
+    threadId,
+    turnId,
+    error: {
+      message: "unexpected status 503 Service Unavailable: Service Unavailable, url: https://chatgpt.com/backend-api/codex/responses, auth error: 503, auth error code: biscuit_baker_service_me_circuit_open",
+      codexErrorInfo: "other",
+      additionalDetails: null
+    },
+    willRetry: false
+  });
+}
+
 rl.on("line", (line) => {
   const message = JSON.parse(line);
   if (!Object.prototype.hasOwnProperty.call(message, "id")) {
@@ -222,6 +235,16 @@ rl.on("line", (line) => {
         notifyModelCapacity(threadId, turnId);
         return;
       }
+      if (inputText === "biscuit-baker-unavailable-then-success") {
+        overloadRecoveryModeByThread.set(threadId, "recover");
+        notifyBiscuitBakerUnavailable(threadId, turnId);
+        return;
+      }
+      if (inputText === "biscuit-baker-unavailable-always") {
+        overloadRecoveryModeByThread.set(threadId, "biscuit-exhaust");
+        notifyBiscuitBakerUnavailable(threadId, turnId);
+        return;
+      }
       if (inputText === "overload-after-final-delta") {
         overloadRecoveryModeByThread.set(threadId, "recover");
         notify("item/agentMessage/delta", {
@@ -237,6 +260,10 @@ rl.on("line", (line) => {
         return;
       }
       if (inputText === "continue") {
+        if (overloadRecoveryModeByThread.get(threadId) === "biscuit-exhaust") {
+          notifyBiscuitBakerUnavailable(threadId, turnId);
+          return;
+        }
         if (overloadRecoveryModeByThread.get(threadId) === "exhaust") {
           notifyModelCapacity(threadId, turnId);
           return;
@@ -394,7 +421,7 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS = "2";
     process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "";
     process.env.CODEX_APP_SERVER_TURN_MAX_MS = "";
-    process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0";
+    process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0,0";
   });
 
   afterEach(() => {
@@ -646,12 +673,45 @@ describe("Codex app-server runtime", () => {
     expect(events.some((event) => event.type === "error")).toBe(false);
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
     expect(warnSpy).toHaveBeenCalledWith(
-      "codex app-server retrying transient model overload",
+      "codex app-server retrying transient AI service failure",
       expect.objectContaining({
         threadId: thread.id,
         model: "gpt-5.6-sol",
         retryAttempt: 1,
-        maxAttempts: 3,
+        maxAttempts: 4,
+        delayMs: 0
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("continues the same thread after the upstream auth service circuit opens", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-biscuit-baker-retry") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "biscuit-baker-unavailable-then-success")) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Hello");
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server retrying transient AI service failure",
+      expect.objectContaining({
+        threadId: thread.id,
+        model: "gpt-5.6-sol",
+        retryAttempt: 1,
+        maxAttempts: 4,
         delayMs: 0
       })
     );
@@ -679,7 +739,7 @@ describe("Codex app-server runtime", () => {
     expect(observedEvents.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
       .toBe("Partial final answerHello");
     expect(warnSpy).toHaveBeenCalledWith(
-      "codex app-server retrying transient model overload",
+      "codex app-server retrying transient AI service failure",
       expect.objectContaining({ retryAttempt: 1 })
     );
     warnSpy.mockRestore();
@@ -706,8 +766,34 @@ describe("Codex app-server runtime", () => {
       retryable: true,
       message: CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY
     } satisfies Partial<CodexRuntimeUserError>);
-    expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient model overload"))
-      .toHaveLength(2);
+    expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient AI service failure"))
+      .toHaveLength(3);
+    warnSpy.mockRestore();
+  });
+
+  it("returns a friendly retryable error after upstream auth recovery is exhausted", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-biscuit-baker-exhausted") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    await expect(async () => {
+      for await (const _event of runtime.runStreamed(thread, "biscuit-baker-unavailable-always")) {
+        // drain until all recovery attempts are exhausted
+      }
+    }).rejects.toMatchObject({
+      name: "CodexRuntimeUserError",
+      code: CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY,
+      retryable: true,
+      message: CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY
+    } satisfies Partial<CodexRuntimeUserError>);
+    expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient AI service failure"))
+      .toHaveLength(3);
     warnSpy.mockRestore();
   });
 
@@ -728,7 +814,7 @@ describe("Codex app-server runtime", () => {
       }
     }).rejects.toThrow(/sandbox denied/);
     expect(warnSpy).not.toHaveBeenCalledWith(
-      "codex app-server retrying transient model overload",
+      "codex app-server retrying transient AI service failure",
       expect.anything()
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
