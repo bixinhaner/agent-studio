@@ -637,7 +637,6 @@ function resolveInlineVisualizationPath(href?: string): string {
 function InlineVisualization(props: { filePath: string; label: ReactNode }) {
   const { filePath, label } = props;
   const activeThreadId = useContext(ActiveThreadIdContext);
-  const requestPreview = useContext(PreviewRequestContext);
   const [html, setHtml] = useState("");
   const [error, setError] = useState("");
 
@@ -649,9 +648,9 @@ function InlineVisualization(props: { filePath: string; label: ReactNode }) {
       setError("可视化文件不可用");
       return () => controller.abort();
     }
-    const query = new URLSearchParams({ path: filePath, disposition: "inline" });
+    const query = new URLSearchParams({ file: filePath });
     fetch(
-      `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId)}/artifacts/content?${query.toString()}`,
+      `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId)}/visualizations/content?${query.toString()}`,
       {
         credentials: "include",
         headers: authHeaders(),
@@ -680,9 +679,6 @@ function InlineVisualization(props: { filePath: string; label: ReactNode }) {
     <section className="assistant-inline-vis" aria-label="交互式可视化">
       <header className="assistant-inline-vis-header">
         <span>{label}</span>
-        <button type="button" onClick={() => requestPreview(filePath)}>
-          在预览区打开
-        </button>
       </header>
       {error ? <div className="assistant-inline-vis-state" role="alert">{error}</div> : null}
       {!error && !html ? <div className="assistant-inline-vis-state">正在加载可视化…</div> : null}

@@ -39,6 +39,11 @@ import {
   type ResolvedArtifactAccessPolicy
 } from "./artifacts/thread-artifact-policy.js";
 import {
+  InlineVisualizationArtifactError,
+  readInlineVisualizationArtifact,
+  selectInlineVisualizationArtifact
+} from "./artifacts/inline-visualization-artifact.js";
+import {
   collectRuntimeGeneratedImageChanges,
   extractRuntimeFileChanges,
   materializeRuntimeGeneratedImageChanges,
@@ -2314,6 +2319,10 @@ const artifactContentQuerySchema = z.object({
 
 const artifactPathContentQuerySchema = artifactResolveQuerySchema.extend({
   disposition: z.enum(["inline", "attachment"]).optional()
+});
+
+const inlineVisualizationContentQuerySchema = z.object({
+  file: z.string().trim().min(1).max(255)
 });
 
 type SessionOptions = {
@@ -10576,6 +10585,79 @@ app.get("/api/threads/:threadId/artifacts/content", async (req: Request, res: Re
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read artifact";
     res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/visualizations/content", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const query = inlineVisualizationContentQuerySchema.parse({
+      file: typeof req.query.file === "string" ? req.query.file : ""
+    });
+    const [thread, policy] = await Promise.all([
+      getPortalOwnedThread(threadId, currentUser),
+      resolveArtifactPolicyForActor(currentUser)
+    ]);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    if (!policy.enabled || !policy.previewEnabled) {
+      res.status(403).json({ detail: "Artifact preview is disabled" });
+      return;
+    }
+    const workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      res.status(404).json({ detail: "Thread workspace does not exist" });
+      return;
+    }
+    const artifacts = await threadArtifacts.listForThread(threadId);
+    const artifact = selectInlineVisualizationArtifact(artifacts, query.file);
+    if (!artifact) {
+      res.status(404).json({ detail: "Visualization artifact does not exist" });
+      return;
+    }
+    const { buffer, fileName } = await readInlineVisualizationArtifact({
+      workspacePath,
+      artifact,
+      maxFileBytes: policy.maxFileBytes
+    });
+    const blockedReason =
+      buffer.length <= 2 * 1024 * 1024 ? detectSecretLikeContent(buffer) : undefined;
+    if (blockedReason) {
+      await resourceAccessLogs.record({
+        organizationId: currentUser.organizationId,
+        userId: currentUser.id,
+        threadId,
+        resourceType: "thread_artifact",
+        resourceId: artifact.id,
+        actionType: "artifact.visualization_preview",
+        resultStatus: "denied",
+        metadata: { reason: blockedReason }
+      });
+      res.status(403).json({ detail: `Visualization preview is blocked: ${blockedReason}` });
+      return;
+    }
+    await resourceAccessLogs.record({
+      organizationId: currentUser.organizationId,
+      userId: currentUser.id,
+      threadId,
+      resourceType: "thread_artifact",
+      resourceId: artifact.id,
+      actionType: "artifact.visualization_preview",
+      resultStatus: "success",
+      metadata: { protected_visualization_path: true }
+    });
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.type("text/html; charset=utf-8");
+    res.status(200).send(buffer);
+  } catch (error) {
+    const status = error instanceof InlineVisualizationArtifactError ? error.status : 400;
+    const detail = error instanceof Error ? error.message : "Failed to read visualization";
+    res.status(status).json({ detail });
   }
 });
 
