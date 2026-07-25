@@ -789,7 +789,7 @@ install_shared_codex_runtime_archive() {
     die "shared Codex runtime archive contains an unsafe path: $SHARED_CODEX_RUNTIME_ARCHIVE"
   fi
   run_as_root tar -xzf "$SHARED_CODEX_RUNTIME_ARCHIVE" -C "$staging"
-  [[ -d "$staging/dependencies/node/node_modules" ]] ||
+  run_as_root test -d "$staging/dependencies/node/node_modules" ||
     die "shared Codex runtime archive has an invalid layout: $SHARED_CODEX_RUNTIME_ARCHIVE"
   run_as_root chown -R root:root "$staging"
   run_as_root chmod -R a+rX,a-w "$staging"
