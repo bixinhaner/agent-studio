@@ -837,15 +837,29 @@ build_backend() {
 }
 
 migrate_portal_user_workspaces() {
-  local workspace_storage_root
-  workspace_storage_root="$(run_as_app_user_shell "cd '$APP_API_DIR' && node --input-type=module -e \"import('./dist/config.js').then(({ appConfig }) => process.stdout.write(appConfig.userWorkspaceStorageRoot))\"")"
+  local workspace_storage_root legacy_workspace_storage_root legacy_import_marker
+  workspace_storage_root="$(run_as_app_user_shell "cd '$APP_API_DIR' && NODE_ENV=production node --input-type=module -e \"import('./dist/config.js').then(({ appConfig }) => process.stdout.write(appConfig.userWorkspaceStorageRoot))\"")"
   [[ -n "$workspace_storage_root" && "$workspace_storage_root" == /* && "$workspace_storage_root" != "/" ]] ||
     die "resolved user workspace storage root is unsafe"
   log_step "Preparing persistent Portal workspace storage"
   run_as_root install -d -o "$APP_USER" -g "$APP_GROUP" -m 750 "$workspace_storage_root"
 
+  # The first rollout of persistent workspaces could resolve the development
+  # fallback while the deployment shell itself had no NODE_ENV. Preserve any
+  # already-migrated immutable objects by copying them once into the production
+  # root; never remove or overwrite the source during recovery.
+  legacy_workspace_storage_root="$APP_API_DIR/temp/user-workspaces"
+  legacy_import_marker="$workspace_storage_root/.legacy-runtime-root-imported"
+  if [[ "$legacy_workspace_storage_root" != "$workspace_storage_root" ]] &&
+    run_as_root test -d "$legacy_workspace_storage_root" &&
+    ! run_as_root test -f "$legacy_import_marker"; then
+    log_step "Recovering previously migrated workspace objects into the production storage root"
+    run_as_app_user_shell "cp -a '$legacy_workspace_storage_root/.' '$workspace_storage_root/'"
+    run_as_app_user_shell "touch '$legacy_import_marker'"
+  fi
+
   log_step "Adapting historical Portal tasks and files into user workspaces"
-  run_as_app_user_shell "cd '$APP_API_DIR' && npm run workspace:migrate"
+  run_as_app_user_shell "cd '$APP_API_DIR' && NODE_ENV=production npm run workspace:migrate"
 }
 
 seed_rbac() {
