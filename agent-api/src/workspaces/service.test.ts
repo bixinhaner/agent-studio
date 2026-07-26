@@ -185,3 +185,67 @@ describe("PortalWorkspaceService.resolveTaskOutputTarget", () => {
     });
   });
 });
+
+describe("PortalWorkspaceService.revertChangeSet", () => {
+  it("keeps the original parent so an undone created file can be restored in place", async () => {
+    const now = new Date("2026-07-27T00:00:00.000Z");
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "workspace-1",
+          status: "active"
+        })
+      },
+      workspaceChangeSet: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "change-set-1",
+          workspaceId: "workspace-1",
+          status: "applied",
+          changes: [
+            {
+              id: "change-1",
+              kind: "create",
+              fileId: "file-1",
+              beforeVersionId: null
+            }
+          ]
+        }),
+        update: vi.fn().mockResolvedValue({
+          id: "change-set-1",
+          status: "reverted",
+          revertedAt: now
+        })
+      },
+      workspaceNode: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "file-1",
+          parentId: "folder-1"
+        }),
+        update: vi.fn().mockResolvedValue({})
+      },
+      workspaceChange: {
+        update: vi.fn().mockResolvedValue({})
+      }
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    const result = await service.revertChangeSet({
+      actor,
+      changeSetId: "change-set-1"
+    });
+
+    expect(result).toEqual({
+      id: "change-set-1",
+      status: "reverted",
+      reverted_at: now.toISOString()
+    });
+    expect(db.workspaceNode.update).toHaveBeenCalledWith({
+      where: { id: "file-1" },
+      data: {
+        state: "trashed",
+        originalParentId: "folder-1",
+        trashedAt: expect.any(Date)
+      }
+    });
+  });
+});

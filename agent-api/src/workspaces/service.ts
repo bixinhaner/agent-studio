@@ -1246,13 +1246,20 @@ export class PortalWorkspaceService {
     if (!changeSet) throw new Error("Workspace change set is not available for revert");
     for (const change of changeSet.changes) {
       if (change.kind === "create" && change.fileId) {
-        await this.db.workspaceNode.updateMany({
+        const createdFile = await this.db.workspaceNode.findFirst({
           where: { id: change.fileId, workspaceId: workspace.id },
-          data: {
-            state: "trashed",
-            trashedAt: new Date()
-          }
+          select: { id: true, parentId: true }
         });
+        if (createdFile) {
+          await this.db.workspaceNode.update({
+            where: { id: createdFile.id },
+            data: {
+              state: "trashed",
+              originalParentId: createdFile.parentId,
+              trashedAt: new Date()
+            }
+          });
+        }
       } else if (change.beforeVersionId && change.fileId) {
         await this.restoreVersion({
           actor: input.actor,
