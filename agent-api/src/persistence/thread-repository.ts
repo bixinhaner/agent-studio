@@ -29,6 +29,8 @@ export type ThreadRecord = {
   organizationId?: string;
   userId?: string;
   securityDomainId?: string;
+  userWorkspaceId?: string;
+  workspaceFolderId?: string;
   channel?: string;
   externalId?: string;
   status: ThreadStatus;
@@ -51,6 +53,8 @@ type CreateThreadPayload = {
   organizationId?: string;
   userId?: string;
   securityDomainId?: string;
+  userWorkspaceId?: string;
+  workspaceFolderId?: string;
   channel?: string;
   title?: string;
   externalId?: string;
@@ -72,6 +76,8 @@ type UpdateThreadPayload = Partial<{
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
+  userWorkspaceId: string | null;
+  workspaceFolderId: string | null;
   codexRunConfig: Record<string, unknown> | undefined;
   codexThreadId: string | undefined;
   sessionId: string | undefined;
@@ -83,6 +89,8 @@ type ThreadRow = {
   organizationId: string | null;
   userId: string | null;
   securityDomainId?: string | null;
+  userWorkspaceId?: string | null;
+  workspaceFolderId?: string | null;
   channel?: string | null;
   externalId: string | null;
   title: string | null;
@@ -119,7 +127,14 @@ type ThreadTable = {
   count(args?: unknown): Promise<number>;
   findUnique(args: { where: { id: string } } | { where: { externalId: string } }): Promise<ThreadRow | null>;
   findMany(args?: {
-    where?: { status?: "active" | "archived"; userId?: string | null; organizationId?: string | null; securityDomainId?: string | null };
+    where?: {
+      status?: "active" | "archived";
+      userId?: string | null;
+      organizationId?: string | null;
+      securityDomainId?: string | null;
+      userWorkspaceId?: string | null;
+      workspaceFolderId?: string | null;
+    };
     orderBy?: { updatedAt: "asc" | "desc" };
   }): Promise<ThreadRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<ThreadRow>;
@@ -329,6 +344,8 @@ export class ThreadRepository {
         organizationId: trimOrUndefined(payload.organizationId) ?? null,
         userId: trimOrUndefined(payload.userId) ?? null,
         securityDomainId: trimOrUndefined(payload.securityDomainId) ?? null,
+        userWorkspaceId: trimOrUndefined(payload.userWorkspaceId) ?? null,
+        workspaceFolderId: trimOrUndefined(payload.workspaceFolderId) ?? null,
         channel: trimOrUndefined(payload.channel) ?? null,
         externalId: trimOrUndefined(payload.externalId) ?? null,
         title: title ?? null,
@@ -361,6 +378,8 @@ export class ThreadRepository {
           organizationId: trimOrUndefined(record.organizationId) ?? null,
           userId: trimOrUndefined(record.userId) ?? null,
           securityDomainId: trimOrUndefined(record.securityDomainId) ?? null,
+          userWorkspaceId: trimOrUndefined(record.userWorkspaceId) ?? null,
+          workspaceFolderId: trimOrUndefined(record.workspaceFolderId) ?? null,
           channel: trimOrUndefined(record.channel) ?? null,
           externalId: record.externalId ?? null,
           title: record.title ?? null,
@@ -438,6 +457,12 @@ export class ThreadRepository {
     if (patch.model !== undefined) data.model = patch.model;
     if (patch.reasoningEffort !== undefined) data.reasoningEffort = patch.reasoningEffort;
     if (patch.workspace !== undefined) data.workspace = patch.workspace;
+    if (patch.userWorkspaceId !== undefined) {
+      data.userWorkspaceId = trimOrUndefined(patch.userWorkspaceId ?? undefined) ?? null;
+    }
+    if (patch.workspaceFolderId !== undefined) {
+      data.workspaceFolderId = trimOrUndefined(patch.workspaceFolderId ?? undefined) ?? null;
+    }
     if (patch.codexRunConfig !== undefined) data.codexRunConfig = patch.codexRunConfig ?? null;
     if (patch.codexThreadId !== undefined) data.codexThreadId = trimOrUndefined(patch.codexThreadId) ?? null;
     if (patch.headId !== undefined) data.headId = patch.headId;
@@ -661,6 +686,8 @@ export class ThreadRepository {
       organizationId: trimOrUndefined(row.organizationId ?? undefined),
       userId: row.userId ?? undefined,
       securityDomainId: trimOrUndefined(row.securityDomainId ?? undefined),
+      userWorkspaceId: trimOrUndefined(row.userWorkspaceId ?? undefined),
+      workspaceFolderId: trimOrUndefined(row.workspaceFolderId ?? undefined),
       channel: trimOrUndefined(row.channel ?? undefined),
       externalId: row.externalId ?? undefined,
       status: mapThreadStatusFromDb(row.status),

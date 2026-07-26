@@ -26,6 +26,7 @@ const schema = z.object({
   DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_WORKSPACE_ROOT: z.string().optional(),
+  USER_WORKSPACE_STORAGE_ROOT: z.string().optional(),
   SESSION_TTL_MINUTES: z.string().default("0"),
   SESSION_COOKIE_NAME: z.string().default("agent_studio_session"),
   SESSION_COOKIE_SECRET: z.string().optional(),
@@ -90,6 +91,14 @@ const sessionWorkspaceRoot = sessionWorkspaceRootInput
     ? sessionWorkspaceRootInput
     : path.resolve(process.cwd(), sessionWorkspaceRootInput)
   : defaultSessionWorkspaceRoot;
+const userWorkspaceStorageRootInput = (env.USER_WORKSPACE_STORAGE_ROOT || "").trim();
+const userWorkspaceStorageRoot = userWorkspaceStorageRootInput
+  ? path.isAbsolute(userWorkspaceStorageRootInput)
+    ? userWorkspaceStorageRootInput
+    : path.resolve(process.cwd(), userWorkspaceStorageRootInput)
+  : env.NODE_ENV === "production"
+    ? "/var/lib/agent-studio/workspaces"
+    : path.resolve(process.cwd(), "./temp/user-workspaces");
 const whitelist = env.WORKSPACE_WHITELIST.split(",")
   .map((item) => item.trim())
   .filter(Boolean)
@@ -209,6 +218,7 @@ export const appConfig = {
   defaultReasoningEffort,
   defaultWorkspace,
   sessionWorkspaceRoot,
+  userWorkspaceStorageRoot,
   sessionTtlMs: ttlMs,
   sessionCookie: {
     name: (env.SESSION_COOKIE_NAME || "").trim() || "agent_studio_session",

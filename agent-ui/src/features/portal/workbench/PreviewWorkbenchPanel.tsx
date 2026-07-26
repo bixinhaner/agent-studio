@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Spin } from "antd";
+import { Button, Spin } from "antd";
+import { FileSearch } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-import { apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
+import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
 import {
   extractMermaidCodeFromPreChildren,
   MARKDOWN_REMARK_PLUGINS,
@@ -75,6 +76,28 @@ type ThreadArtifactPolicyApiRecord = {
   preview_enabled: boolean;
   download_enabled: boolean;
 };
+
+type WorkspaceFileVersionApiRecord = {
+  id: string;
+  file_id: string;
+  version_no: number;
+  mime_type: string | null;
+  size_bytes: number;
+  created_by_type: string;
+  change_type: string;
+  created_at: string;
+};
+
+function formatWorkspaceVersionDate(value: string, locale: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(parsed);
+}
 
 const TEXT_LIKE_EXTENSIONS = new Set([
   "txt",
@@ -558,6 +581,34 @@ async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<
         if (typeof payload.detail === "string" && payload.detail.trim()) {
           detail = payload.detail.trim();
         }
+      } catch {
+        // ignore non-json response body
+      }
+    }
+    throw new Error(detail);
+  }
+  return response;
+}
+
+async function fetchWorkspaceFileBlob(fileId: string, versionId?: string): Promise<Response> {
+  const query = new URLSearchParams();
+  if (versionId) query.set("version_id", versionId);
+  const response = await fetch(
+    `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(fileId)}/content${query.toString() ? `?${query.toString()}` : ""}`,
+    {
+      method: "GET",
+      credentials: "include",
+      headers: authHeaders()
+    }
+  );
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    const text = await response.text();
+    let detail = `Failed to read workspace file (${response.status})`;
+    if (text) {
+      try {
+        const payload = JSON.parse(text) as { detail?: string };
+        if (typeof payload.detail === "string" && payload.detail.trim()) detail = payload.detail.trim();
       } catch {
         // ignore non-json response body
       }
@@ -1136,8 +1187,11 @@ export function PreviewWorkbenchPanel(props: {
   requestNonce?: number;
   allowDownload?: boolean;
   externalArtifactMode?: boolean;
+  workspaceFileId?: string;
+  workspaceFileName?: string;
+  workspaceFileMimeType?: string;
 }) {
-  const { t } = usePortalI18n();
+  const { locale, t } = usePortalI18n();
   const requestedTarget = useMemo(
     () => splitPreviewTarget(asString(props.requestedFilePath)),
     [props.requestedFilePath]
@@ -1148,6 +1202,9 @@ export function PreviewWorkbenchPanel(props: {
   const [selectedAnchor, setSelectedAnchor] = useState("");
   const [anchorJumpToken, setAnchorJumpToken] = useState(0);
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
+  const [workspaceVersions, setWorkspaceVersions] = useState<WorkspaceFileVersionApiRecord[]>([]);
+  const [selectedWorkspaceVersionId, setSelectedWorkspaceVersionId] = useState("");
+  const [restoringWorkspaceVersion, setRestoringWorkspaceVersion] = useState(false);
   const previewObjectUrlRef = useRef("");
   const navigatePreviewTarget = useCallback((target: { filePath: string; anchor: string }) => {
     const normalizedFilePath = normalizeFilePath(target.filePath);
@@ -1189,7 +1246,41 @@ export function PreviewWorkbenchPanel(props: {
     setAnchorJumpToken((value) => value + 1);
   }, [props.requestNonce, requestedAnchor, requestedFilePath]);
 
+  useEffect(() => {
+    const fileId = String(props.workspaceFileId || "").trim();
+    if (!fileId) {
+      setWorkspaceVersions([]);
+      setSelectedWorkspaceVersionId("");
+      return;
+    }
+    let cancelled = false;
+    void api<{ versions: WorkspaceFileVersionApiRecord[] }>(
+      `/api/portal/workspace/files/${encodeURIComponent(fileId)}/versions`
+    )
+      .then((out) => {
+        if (cancelled) return;
+        setWorkspaceVersions(Array.isArray(out.versions) ? out.versions : []);
+        setSelectedWorkspaceVersionId("");
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceVersions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.workspaceFileId]);
+
   const activeFile = useMemo(() => {
+    if (String(props.workspaceFileId || "").trim()) {
+      const displayName = String(props.workspaceFileName || "").trim() || t("files.untitled");
+      return {
+        filePath: displayName,
+        displayName,
+        mimeType: String(props.workspaceFileMimeType || "").trim(),
+        source: "file_change" as const,
+        updatedAt: Date.now()
+      };
+    }
     const normalizedSelected = normalizeFilePath(selectedFilePath);
     if (!normalizedSelected) return null;
     return {
@@ -1199,7 +1290,7 @@ export function PreviewWorkbenchPanel(props: {
       source: "file_change" as const,
       updatedAt: Date.now()
     };
-  }, [selectedFilePath]);
+  }, [props.workspaceFileId, props.workspaceFileMimeType, props.workspaceFileName, selectedFilePath, t]);
   const activeFilePath = useMemo(() => normalizeFilePath(activeFile?.filePath || ""), [activeFile?.filePath]);
   const activeFileDisplayName = activeFile?.displayName || fileNameFromPath(activeFilePath);
   const activeFileMimeType = activeFile?.mimeType || "";
@@ -1226,13 +1317,14 @@ export function PreviewWorkbenchPanel(props: {
     };
 
     const loadPreview = async () => {
+      const workspaceFileId = String(props.workspaceFileId || "").trim();
       if (!activeFilePath) {
         setPreview({ status: "idle" });
         return;
       }
       const filePath = activeFilePath;
       const isKnowledgeSetFile = isKnowledgeSetFilePath(filePath);
-      if (!isKnowledgeSetFile && !props.threadId.trim()) {
+      if (!workspaceFileId && !isKnowledgeSetFile && !props.threadId.trim()) {
         setPreview({ status: "idle" });
         return;
       }
@@ -1241,7 +1333,12 @@ export function PreviewWorkbenchPanel(props: {
         let response: Response;
         let fileForKind = activeFileForKind;
         let downloadUrl = "";
-        if (isKnowledgeSetFile) {
+        if (workspaceFileId) {
+          response = await fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined);
+          const query = new URLSearchParams({ disposition: "attachment" });
+          if (selectedWorkspaceVersionId) query.set("version_id", selectedWorkspaceVersionId);
+          downloadUrl = `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(workspaceFileId)}/content?${query.toString()}`;
+        } else if (isKnowledgeSetFile) {
           response = await fetchPortalResourceFileBlob(filePath);
         } else if (props.externalArtifactMode) {
           const resolved = await resolveThreadArtifact(props.threadId, filePath);
@@ -1417,22 +1514,64 @@ export function PreviewWorkbenchPanel(props: {
       cancelled = true;
       releaseObjectUrl();
     };
-  }, [activeFileForKind, activeFilePath, props.externalArtifactMode, props.threadId, t]);
+  }, [
+    activeFileForKind,
+    activeFilePath,
+    props.externalArtifactMode,
+    props.threadId,
+    props.workspaceFileId,
+    selectedWorkspaceVersionId,
+    t
+  ]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
   const previewKind = activePreview?.kind ?? (activeFile ? preview.status : "idle");
   const downloadHref = activePreview?.downloadUrl || (!props.externalArtifactMode ? activePreview?.objectUrl : "");
+  const latestWorkspaceVersionId = workspaceVersions[0]?.id || "";
+  const selectedWorkspaceVersion =
+    workspaceVersions.find((version) => version.id === selectedWorkspaceVersionId) ?? workspaceVersions[0];
+
+  const restoreWorkspaceVersion = async (requestedVersionId?: string) => {
+    const fileId = String(props.workspaceFileId || "").trim();
+    const versionId = String(requestedVersionId || selectedWorkspaceVersionId).trim();
+    if (!fileId || !versionId || versionId === latestWorkspaceVersionId) return;
+    setRestoringWorkspaceVersion(true);
+    try {
+      await api(
+        `/api/portal/workspace/files/${encodeURIComponent(fileId)}/versions/${encodeURIComponent(versionId)}/restore`,
+        {
+          method: "POST",
+          json: props.threadId ? { thread_id: props.threadId } : {}
+        }
+      );
+      const out = await api<{ versions: WorkspaceFileVersionApiRecord[] }>(
+        `/api/portal/workspace/files/${encodeURIComponent(fileId)}/versions`
+      );
+      setWorkspaceVersions(Array.isArray(out.versions) ? out.versions : []);
+      setSelectedWorkspaceVersionId("");
+    } finally {
+      setRestoringWorkspaceVersion(false);
+    }
+  };
 
   return (
     <div className="preview-workbench-shell">
       <section className="preview-workbench-viewer" data-preview-kind={previewKind}>
         {!activeFile ? (
-          <div className="preview-workbench-placeholder">{t("preview.openHint")}</div>
+          <div className="preview-workbench-placeholder">
+            <FileSearch size={42} strokeWidth={1.5} />
+            <span>{t("preview.openHint")}</span>
+          </div>
         ) : (
           <>
             <header className="preview-viewer-head">
               <div className="preview-viewer-title-group">
                 <h4>{activeFile.displayName}</h4>
+                {props.workspaceFileId && selectedWorkspaceVersion ? (
+                  <span className="preview-workspace-version-meta">
+                    {t("workspace.versionLabel", { version: selectedWorkspaceVersion.version_no })}
+                  </span>
+                ) : null}
                 {selectedAnchor ? (
                   <button
                     type="button"
@@ -1550,6 +1689,47 @@ export function PreviewWorkbenchPanel(props: {
                 <div className="preview-unsupported">{activePreview.reason}</div>
               ) : null}
             </div>
+            {props.workspaceFileId && workspaceVersions.length > 0 ? (
+              <section className="preview-version-history" aria-label={t("workspace.versionHistory")}>
+                <header>
+                  <h5>{t("workspace.versionHistory")}</h5>
+                  <span>{t("workspace.versionCount", { count: workspaceVersions.length })}</span>
+                </header>
+                <div className="preview-version-list">
+                  {workspaceVersions.map((version, index) => {
+                    const current = index === 0;
+                    const selected =
+                      current ? !selectedWorkspaceVersionId : selectedWorkspaceVersionId === version.id;
+                    return (
+                      <article key={version.id} className={selected ? "preview-version-row is-selected" : "preview-version-row"}>
+                        <button
+                          type="button"
+                          className="preview-version-main"
+                          onClick={() => setSelectedWorkspaceVersionId(current ? "" : version.id)}
+                        >
+                          <strong>{t("workspace.versionLabel", { version: version.version_no })}</strong>
+                          <span>
+                            {current
+                              ? t("workspace.currentVersion")
+                              : formatWorkspaceVersionDate(version.created_at, locale)}
+                          </span>
+                        </button>
+                        {!current ? (
+                          <Button
+                            type="link"
+                            size="small"
+                            loading={restoringWorkspaceVersion && selectedWorkspaceVersionId === version.id}
+                            onClick={() => void restoreWorkspaceVersion(version.id)}
+                          >
+                            {t("workspace.restoreVersion")}
+                          </Button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
           </>
         )}
       </section>

@@ -323,6 +323,9 @@ import {
 } from "./external-web-access.js";
 import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
+import { createPortalWorkspaceRouter } from "./workspaces/router.js";
+import { PortalWorkspaceService } from "./workspaces/service.js";
+import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
@@ -452,6 +455,8 @@ const codexExecution = new CodexExecutionService({
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
+const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
+const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage);
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
@@ -2362,6 +2367,7 @@ const createThreadSchema = z.object({
   reasoning_effort: reasoningEffortSchema.optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional(),
+  folder_id: z.string().trim().min(1).nullable().optional(),
   start_session: z.boolean().optional()
 });
 
@@ -2370,7 +2376,8 @@ const patchThreadSchema = z.object({
   status: z.enum(["regular", "archived"]).optional(),
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
-  codex_run_config: z.record(z.unknown()).optional()
+  codex_run_config: z.record(z.unknown()).optional(),
+  folder_id: z.string().trim().min(1).nullable().optional()
 });
 
 const updateThreadSkillsSchema = z.object({
@@ -2715,7 +2722,8 @@ function threadOut(thread: ThreadRecord) {
     external_id: thread.externalId,
     model: thread.model,
     reasoning_effort: thread.reasoningEffort,
-    workspace: thread.workspace,
+    workspace_id: thread.userWorkspaceId ?? null,
+    folder_id: thread.workspaceFolderId ?? null,
     enabled_skills: enabledSkillSelectionsFromRunConfig(thread.codexRunConfig).map((skill) => ({
       id: skill.id,
       name: skill.name,
@@ -5825,12 +5833,13 @@ async function allocateUserAgentWorkspacePath(input: {
   currentUser: CurrentActor;
   modeHint?: string;
   securityDomainId?: string;
+  threadId?: string;
 }): Promise<ModeSelection & { workspacePath: string }> {
   const selection = await resolveModeSelection({
     currentUser: input.currentUser,
     modeHint: input.modeHint
   });
-  const workspacePath = buildUserAgentWorkspacePath({
+  const baseWorkspacePath = buildUserAgentWorkspacePath({
     rootPath: selection.workspaceRootPath,
     actor: {
       organizationId: input.currentUser.organizationId,
@@ -5840,6 +5849,9 @@ async function allocateUserAgentWorkspacePath(input: {
     modeId: selection.modeId,
     securityDomainId: input.securityDomainId
   });
+  const workspacePath = input.threadId
+    ? path.join(baseWorkspacePath, `thread-${sanitizePathSegment(input.threadId, "thread")}`)
+    : baseWorkspacePath;
   await fs.mkdir(workspacePath, { recursive: true });
   return {
     ...selection,
@@ -5851,8 +5863,9 @@ function userAgentWorkspacePathForSelection(input: {
   currentUser: CurrentActor;
   selection: ModeSelection;
   securityDomainId?: string;
+  threadId?: string;
 }): string {
-  return buildUserAgentWorkspacePath({
+  const baseWorkspacePath = buildUserAgentWorkspacePath({
     rootPath: input.selection.workspaceRootPath,
     actor: {
       organizationId: input.currentUser.organizationId,
@@ -5862,6 +5875,9 @@ function userAgentWorkspacePathForSelection(input: {
     modeId: input.selection.modeId,
     securityDomainId: input.securityDomainId
   });
+  return input.threadId
+    ? path.join(baseWorkspacePath, `thread-${sanitizePathSegment(input.threadId, "thread")}`)
+    : baseWorkspacePath;
 }
 
 async function materializeUserAgentCodexHomeForRunConfig(input: {
@@ -6159,6 +6175,42 @@ async function applyWorkspaceAgentsMdForMode(
   return { fingerprint: fingerprintWorkspaceAgentsMdContent(content) };
 }
 
+const PORTAL_WORKSPACE_INSTRUCTIONS_START = "<!-- agent-studio:portal-workspace:start -->";
+const PORTAL_WORKSPACE_INSTRUCTIONS_END = "<!-- agent-studio:portal-workspace:end -->";
+
+async function applyPortalWorkspaceInstructions(
+  workspacePath: string,
+  materialized: { directoryName: string; fileCount: number; truncated: boolean }
+): Promise<void> {
+  const agentsMdPath = path.join(workspacePath, "AGENTS.md");
+  const existing = await fs.readFile(agentsMdPath, "utf8").catch(() => "");
+  const managedSectionPattern = new RegExp(
+    `\\n?${PORTAL_WORKSPACE_INSTRUCTIONS_START}[\\s\\S]*?${PORTAL_WORKSPACE_INSTRUCTIONS_END}\\n?`,
+    "g"
+  );
+  const base = existing.replace(managedSectionPattern, "\n").trimEnd();
+  const managedSection = [
+    PORTAL_WORKSPACE_INSTRUCTIONS_START,
+    "## Portal user workspace",
+    "",
+    `The files selected by the user for this task are materialized in \`${materialized.directoryName}/\`.`,
+    "Treat that directory like the user's working folder: read its files for context and edit them when the task requires it.",
+    "New deliverables may be created in the runtime workspace; Agent Studio will version and surface eligible outputs in the task's file panel.",
+    `Currently materialized files: ${materialized.fileCount}.`,
+    ...(materialized.truncated
+      ? [
+          "The selected folder exceeded the safe per-run materialization limit. If a needed file is missing, ask the user to move it into a smaller folder or attach it to the task."
+        ]
+      : []),
+    PORTAL_WORKSPACE_INSTRUCTIONS_END
+  ].join("\n");
+  await fs.writeFile(
+    agentsMdPath,
+    base ? `${base}\n\n${managedSection}\n` : `${managedSection}\n`,
+    "utf8"
+  );
+}
+
 async function resolveSessionOptions(
   input: {
     model?: string;
@@ -6340,20 +6392,35 @@ async function ensureThreadSession(
   const scopedWorkspacePath = userAgentWorkspacePathForSelection({
     currentUser,
     selection: modeSelection,
+    securityDomainId: thread.securityDomainId,
+    threadId
+  });
+  const legacyScopedWorkspacePath = userAgentWorkspacePathForSelection({
+    currentUser,
+    selection: modeSelection,
     securityDomainId: thread.securityDomainId
   });
   const existingWorkspacePath = trimOrUndefined(thread.workspace);
-  const workspacePath = thread.securityDomainId ? scopedWorkspacePath : existingWorkspacePath || scopedWorkspacePath;
+  const workspacePath =
+    enforcePortalSecurityDomain
+      ? scopedWorkspacePath
+      : thread.securityDomainId &&
+          existingWorkspacePath &&
+          path.resolve(existingWorkspacePath) !== path.resolve(legacyScopedWorkspacePath) &&
+          path.basename(path.resolve(existingWorkspacePath)) !== `thread-${sanitizePathSegment(threadId, "thread")}`
+        ? legacyScopedWorkspacePath
+        : existingWorkspacePath || scopedWorkspacePath;
   if (
+    !enforcePortalSecurityDomain &&
     thread.securityDomainId &&
     existingWorkspacePath &&
-    path.resolve(existingWorkspacePath) !== path.resolve(scopedWorkspacePath)
+    path.resolve(existingWorkspacePath) !== path.resolve(workspacePath)
   ) {
     await time("ensure_thread_session.migrate_security_domain_workspace", async () => {
       const existingStat = await fs.stat(existingWorkspacePath).catch(() => undefined);
       if (existingStat?.isDirectory()) {
-        await fs.mkdir(scopedWorkspacePath, { recursive: true });
-        await fs.cp(existingWorkspacePath, scopedWorkspacePath, {
+        await fs.mkdir(workspacePath, { recursive: true });
+        await fs.cp(existingWorkspacePath, workspacePath, {
           recursive: true,
           force: false,
           errorOnExist: false
@@ -6401,6 +6468,22 @@ async function ensureThreadSession(
   );
   await time("ensure_thread_session.apply_workspace_agents_md", () =>
     applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath)
+  );
+  const materializedPortalWorkspace = await time(
+    "ensure_thread_session.materialize_portal_workspace",
+    () =>
+      portalWorkspaces.materializeTaskWorkspace({
+        actor: {
+          userId: currentUser.id,
+          organizationId: currentUser.organizationId,
+          securityDomainId: thread.securityDomainId
+        },
+        threadId,
+        runtimeWorkspacePath: workspacePath
+      })
+  );
+  await time("ensure_thread_session.apply_portal_workspace_instructions", () =>
+    applyPortalWorkspaceInstructions(workspacePath, materializedPortalWorkspace)
   );
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
   const existingThreadCodexHome = codexHomeFromRunConfig(thread.codexRunConfig);
@@ -9233,6 +9316,8 @@ function artifactOut(artifact: ThreadArtifactRecord) {
     preview_status: artifact.previewStatus,
     download_status: artifact.downloadStatus,
     blocked_reason: artifact.blockedReason ?? null,
+    workspace_file_id: artifact.workspaceFileId ?? null,
+    workspace_file_version_id: artifact.workspaceFileVersionId ?? null,
     expires_at: artifact.expiresAt ?? null,
     created_at: artifact.createdAt,
     updated_at: artifact.updatedAt
@@ -9267,6 +9352,8 @@ function artifactContentPartForArtifacts(
       path: filePath,
       kind: "ready",
       artifact_id: artifact.id,
+      workspace_file_id: artifact.workspaceFileId ?? null,
+      workspace_file_version_id: artifact.workspaceFileVersionId ?? null,
       preview_status: artifact.previewStatus,
       download_status: artifact.downloadStatus,
       can_preview: canPreview,
@@ -9591,24 +9678,98 @@ async function registerGeneratedArtifactsForThread(input: {
         if (value !== undefined) artifactMetadata[key] = value;
       }
     }
-    registered.push(
-      await threadArtifacts.upsertForThreadPath({
-        organizationId: input.thread.organizationId ?? input.actor.organizationId,
-        threadId,
-        userId: input.thread.userId ?? input.actor.id,
-        source: "assistant_generated",
-        relativePath: resolved.relativePath,
-        displayName: path.basename(resolved.relativePath),
-        mimeType: mimeTypeForArtifactPath(resolved.relativePath),
-        sizeBytes: inspection.sizeBytes,
-        checksum: inspection.checksum,
-        previewStatus: status,
-        downloadStatus: status,
-        blockedReason: inspection.blockedReason,
-        metadata: artifactMetadata,
-        expiresAt: addDays(new Date(), policy.retentionDays)
-      })
-    );
+    const previousArtifact = await threadArtifacts.getByThreadPath(threadId, resolved.relativePath);
+    let artifact = await threadArtifacts.upsertForThreadPath({
+      organizationId: input.thread.organizationId ?? input.actor.organizationId,
+      threadId,
+      userId: input.thread.userId ?? input.actor.id,
+      source: "assistant_generated",
+      relativePath: resolved.relativePath,
+      displayName: path.basename(resolved.relativePath),
+      mimeType: mimeTypeForArtifactPath(resolved.relativePath),
+      sizeBytes: inspection.sizeBytes,
+      checksum: inspection.checksum,
+      previewStatus: status,
+      downloadStatus: status,
+      blockedReason: inspection.blockedReason,
+      metadata: artifactMetadata,
+      expiresAt: addDays(new Date(), policy.retentionDays)
+    });
+
+    const ownerUserId = trimOrUndefined(input.thread.userId);
+    if (status === "ready" && inspection.fileBuffer && ownerUserId) {
+      const workspaceActor = {
+        userId: ownerUserId,
+        organizationId: trimOrUndefined(input.thread.organizationId) ?? input.actor.organizationId,
+        securityDomainId: trimOrUndefined(input.thread.securityDomainId)
+      };
+      try {
+        const scope = await portalWorkspaces.resolveTaskScope({
+          actor: workspaceActor,
+          folderId: input.thread.workspaceFolderId
+        });
+        if (
+          input.thread.userWorkspaceId !== scope.workspaceId ||
+          input.thread.workspaceFolderId !== scope.folderId
+        ) {
+          await threads.update(threadId, {
+            userWorkspaceId: scope.workspaceId,
+            workspaceFolderId: scope.folderId
+          });
+        }
+        const displayName = path.basename(resolved.relativePath);
+        const outputTarget = await portalWorkspaces.resolveTaskOutputTarget({
+          actor: workspaceActor,
+          threadId,
+          relativePath: resolved.relativePath
+        });
+        const preferredFileId =
+          outputTarget.preferredFileId ??
+          previousArtifact?.workspaceFileId ??
+          await portalWorkspaces.latestBoundFileForThreadName({
+            actor: workspaceActor,
+            threadId,
+            name: displayName
+          });
+        const beforeVersionId =
+          outputTarget.previousVersionId ??
+          previousArtifact?.workspaceFileVersionId;
+        const saved = await portalWorkspaces.saveFile({
+          actor: workspaceActor,
+          parentId: outputTarget.parentId,
+          name: displayName,
+          content: inspection.fileBuffer,
+          mimeType: mimeTypeForArtifactPath(resolved.relativePath),
+          conflict: preferredFileId ? "replace" : "keep_both",
+          createdByType: "agent",
+          threadId,
+          role: "output",
+          preferredFileId
+        });
+        await portalWorkspaces.recordAppliedChange({
+          actor: workspaceActor,
+          threadId,
+          fileId: saved.file.id,
+          versionId: saved.version.id,
+          kind: beforeVersionId ? "update" : "create",
+          beforeVersionId,
+          summary: beforeVersionId
+            ? `智能体更新了 ${saved.file.name}`
+            : `智能体创建了 ${saved.file.name}`
+        });
+        artifact = await threadArtifacts.linkWorkspaceFile(
+          artifact.id,
+          saved.file.id,
+          saved.version.id
+        );
+      } catch (error) {
+        console.warn(
+          `[workspace] Failed to persist generated artifact ${artifact.id}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+    registered.push(artifact);
   }
 
   return registered;
@@ -9763,16 +9924,15 @@ async function sendThreadArtifactContent(input: {
     return;
   }
 
-  const workspacePath = trimOrUndefined(thread.workspace);
-  if (!workspacePath) {
-    input.res.status(404).json({ detail: "Thread workspace does not exist" });
-    return;
-  }
-
   let artifact: ThreadArtifactRecord | undefined;
   if (artifactId) {
     artifact = await threadArtifacts.getForThread(threadId, artifactId);
   } else if (filePath) {
+    const workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      input.res.status(404).json({ detail: "Thread workspace does not exist" });
+      return;
+    }
     const resolvedForLookup = resolveWorkspaceFilePath({ workspacePath, filePath });
     artifact = await threadArtifacts.getByThreadPath(threadId, resolvedForLookup.relativePath);
   }
@@ -9782,6 +9942,76 @@ async function sendThreadArtifactContent(input: {
     return;
   }
 
+  if (artifact.expiresAt) {
+    const expiresAt = new Date(artifact.expiresAt);
+    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
+      await recordAccess(artifact.id, "denied", { reason: "artifact_expired" });
+      input.res.status(410).json({ detail: "This file is no longer available. Ask the assistant to generate it again." });
+      return;
+    }
+  }
+
+  if (artifact.workspaceFileId) {
+    if (
+      artifact.blockedReason ||
+      (actionType === "download" ? artifact.downloadStatus : artifact.previewStatus) !== "ready"
+    ) {
+      await recordAccess(artifact.id, "denied", {
+        reason: artifact.blockedReason ?? "artifact_not_ready",
+        stable_workspace_file: true
+      });
+      input.res.status(403).json({
+        detail: artifact.blockedReason
+          ? `This file cannot be downloaded: ${artifact.blockedReason}`
+          : "This file is not available"
+      });
+      return;
+    }
+    try {
+      const stableFile = await portalWorkspaces.getFile({
+        actor: {
+          userId: input.currentUser.id,
+          organizationId: input.currentUser.organizationId,
+          securityDomainId: thread.securityDomainId
+        },
+        fileId: artifact.workspaceFileId,
+        versionId: artifact.workspaceFileVersionId
+      });
+      const fileName = artifact.displayName || stableFile.file.name;
+      await recordAccess(artifact.id, "success", {
+        disposition: actionType,
+        stable_workspace_file: true,
+        workspace_file_id: stableFile.file.id,
+        workspace_file_version_id: stableFile.version.id,
+        checksum: stableFile.version.checksum
+      });
+      input.res.setHeader("Cache-Control", "private, no-store");
+      input.res.setHeader("X-Content-Type-Options", "nosniff");
+      input.res.setHeader(
+        "Content-Disposition",
+        `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      input.res.type(
+        stableFile.version.mimeType ||
+        stableFile.file.mimeType ||
+        artifact.mimeType ||
+        path.extname(fileName) ||
+        "application/octet-stream"
+      );
+      input.res.status(200).send(stableFile.content);
+      return;
+    } catch (error) {
+      console.warn(`[workspace] Stable artifact ${artifact.id} is unavailable; trying the legacy path:`, {
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  const workspacePath = trimOrUndefined(thread.workspace);
+  if (!workspacePath) {
+    input.res.status(404).json({ detail: "Thread workspace does not exist" });
+    return;
+  }
   const resolved = resolveWorkspaceFilePath({ workspacePath, filePath: artifact.relativePath });
   if (resolved.relativePath !== artifact.relativePath) {
     await recordAccess(artifact.id, "denied", { reason: "artifact_path_mismatch" });
@@ -9861,15 +10091,6 @@ async function sendThreadArtifactContent(input: {
     input.res.status(409).json({ detail: "This file is not ready to download yet. Try again in a moment." });
     return;
   }
-  if (artifact.expiresAt) {
-    const expiresAt = new Date(artifact.expiresAt);
-    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
-      await recordAccess(artifact.id, "denied", { reason: "artifact_expired" });
-      input.res.status(410).json({ detail: "This file is no longer available. Ask the assistant to generate it again." });
-      return;
-    }
-  }
-
   const fileName = artifact.displayName || path.basename(resolved.absolutePath);
   await recordAccess(artifact.id, "success", {
     disposition: actionType,
@@ -10318,6 +10539,21 @@ registerCommonApiRoutes(app, {
   })
 });
 
+app.use(
+  "/api/portal/workspace",
+  createPortalWorkspaceRouter({
+    service: portalWorkspaces,
+    async resolveActor(req) {
+      const currentUser = currentActorFromRequest(req);
+      return {
+        userId: currentUser.id,
+        organizationId: currentUser.organizationId,
+        securityDomainId: await portalSecurityDomainIdForActor(currentUser)
+      };
+    }
+  })
+);
+
 app.use("/api/admin", createAdminBillingRouter(billingService));
 app.use(
   "/api/portal",
@@ -10458,7 +10694,8 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
       const allocated = await allocateUserAgentWorkspacePath({
         currentUser,
         modeHint: modeIdFromRunConfig(thread.codexRunConfig),
-        securityDomainId: thread.securityDomainId
+        securityDomainId: thread.securityDomainId,
+        threadId
       });
       workspacePath = allocated.workspacePath;
       await applyWorkspaceAgentsMdForMode(allocated.modeId, workspacePath);
@@ -10472,6 +10709,35 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     const storedName = `${Date.now()}-${id}-${safeName}`;
     const absolutePath = path.join(uploadDir, storedName);
     await fs.writeFile(absolutePath, payload);
+    const workspaceActor = {
+      userId: currentUser.id,
+      organizationId: currentUser.organizationId,
+      securityDomainId: thread.securityDomainId
+    };
+    const scope = await portalWorkspaces.resolveTaskScope({
+      actor: workspaceActor,
+      folderId: thread.workspaceFolderId
+    });
+    if (
+      thread.userWorkspaceId !== scope.workspaceId ||
+      thread.workspaceFolderId !== scope.folderId
+    ) {
+      await threads.update(threadId, {
+        userWorkspaceId: scope.workspaceId,
+        workspaceFolderId: scope.folderId
+      });
+    }
+    const savedWorkspaceFile = await portalWorkspaces.saveFile({
+      actor: workspaceActor,
+      parentId: scope.folderId,
+      name: safeName,
+      content: payload,
+      mimeType,
+      conflict: "keep_both",
+      createdByType: "user",
+      threadId,
+      role: "input"
+    });
 
     const relativePath = normalizeRelativePath(path.relative(uploadDir, absolutePath));
     res.json({
@@ -10480,9 +10746,10 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
         name: safeName,
         mime_type: mimeType,
         bytes: payload.length,
-        path: absolutePath,
+        path: normalizeRelativePath(path.relative(workspacePath, absolutePath)),
         relative_path: relativePath,
-        upload_dir: uploadDir
+        workspace_file_id: savedWorkspaceFile.file.id,
+        workspace_file_version_id: savedWorkspaceFile.version.id
       }
     });
   } catch (error) {
@@ -10867,18 +11134,31 @@ app.post("/api/session", async (req: Request, res: Response) => {
             const scopedWorkspace = userAgentWorkspacePathForSelection({
               currentUser,
               selection,
+              securityDomainId,
+              threadId: ownedThread.id
+            });
+            const legacyScopedWorkspace = userAgentWorkspacePathForSelection({
+              currentUser,
+              selection,
               securityDomainId
             });
-            workspace = ownedThread.securityDomainId ? scopedWorkspace : existingWorkspace || scopedWorkspace;
+            workspace =
+              ownedThread.securityDomainId &&
+              existingWorkspace &&
+              path.resolve(existingWorkspace) !== path.resolve(legacyScopedWorkspace) &&
+              path.basename(path.resolve(existingWorkspace)) !==
+                `thread-${sanitizePathSegment(ownedThread.id, "thread")}`
+                ? legacyScopedWorkspace
+                : existingWorkspace || scopedWorkspace;
             if (
               ownedThread.securityDomainId &&
               existingWorkspace &&
-              path.resolve(existingWorkspace) !== path.resolve(scopedWorkspace)
+              path.resolve(existingWorkspace) !== path.resolve(workspace)
             ) {
               const existingStat = await fs.stat(existingWorkspace).catch(() => undefined);
               if (existingStat?.isDirectory()) {
-                await fs.mkdir(scopedWorkspace, { recursive: true });
-                await fs.cp(existingWorkspace, scopedWorkspace, { recursive: true, force: false, errorOnExist: false });
+                await fs.mkdir(workspace, { recursive: true });
+                await fs.cp(existingWorkspace, workspace, { recursive: true, force: false, errorOnExist: false });
               }
             }
             await fs.mkdir(workspace, { recursive: true });
@@ -11108,14 +11388,21 @@ app.get(
 app.get("/api/threads", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
   const securityDomainId = await portalSecurityDomainIdForActor(currentUser);
+  await portalWorkspaces.ensureWorkspace({
+    userId: currentUser.id,
+    organizationId: currentUser.organizationId,
+    securityDomainId
+  });
   const list = await threads.listForUserInSecurityDomain(
     currentUser.id,
     currentUser.organizationId,
     securityDomainId ?? null,
     true
   );
+  const requestedFolderId = typeof req.query.folder_id === "string" ? req.query.folder_id.trim() : "";
+  const filtered = requestedFolderId ? list.filter((thread) => thread.workspaceFolderId === requestedFolderId) : list;
   res.json({
-    threads: list.map((thread) => threadOut(thread))
+    threads: filtered.map((thread) => threadOut(thread))
   });
 });
 
@@ -11136,12 +11423,23 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     const securityDomainId = await timing.time("create_thread.resolve_security_domain", () =>
       portalSecurityDomainIdForActor(currentUser)
     );
+    const workspaceScope = await timing.time("create_thread.resolve_user_workspace", () =>
+      portalWorkspaces.resolveTaskScope({
+        actor: {
+          userId: currentUser.id,
+          organizationId: currentUser.organizationId,
+          securityDomainId
+        },
+        folderId: input.folder_id ?? undefined
+      })
+    );
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
     const allocated = await timing.time("create_thread.allocate_workspace", () =>
       allocateUserAgentWorkspacePath({
         currentUser,
         modeHint,
-        securityDomainId
+        securityDomainId,
+        threadId
       }),
       { modeHint }
     );
@@ -11174,6 +11472,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         organizationId: currentUser.organizationId,
         userId: currentUser.id,
         securityDomainId,
+        userWorkspaceId: workspaceScope.workspaceId,
+        workspaceFolderId: workspaceScope.folderId,
         channel: "portal",
         title: input.title?.trim() || undefined,
         externalId: input.external_id?.trim() || undefined,
@@ -11244,7 +11544,34 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
       );
     }
     if (input.codex_run_config !== undefined) patch.codexRunConfig = input.codex_run_config;
-    const updated = await threads.update(threadId, patch);
+    let updated = await threads.update(threadId, patch);
+    if (input.folder_id !== undefined) {
+      const securityDomainId = await portalSecurityDomainIdForActor(currentUser);
+      if (input.folder_id === null) {
+        const scope = await portalWorkspaces.resolveTaskScope({
+          actor: {
+            userId: currentUser.id,
+            organizationId: currentUser.organizationId,
+            securityDomainId
+          }
+        });
+        updated = await threads.update(threadId, {
+          userWorkspaceId: scope.workspaceId,
+          workspaceFolderId: scope.folderId
+        });
+      } else {
+        await portalWorkspaces.moveThread({
+          actor: {
+            userId: currentUser.id,
+            organizationId: currentUser.organizationId,
+            securityDomainId
+          },
+          threadId,
+          folderId: input.folder_id
+        });
+        updated = (await threads.get(threadId, currentUser.organizationId)) ?? updated;
+      }
+    }
     res.json({ thread: threadOut(updated) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to update thread";

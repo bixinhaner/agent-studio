@@ -836,6 +836,18 @@ build_backend() {
   run_as_app_user_shell "cd '$APP_API_DIR' && npm run build"
 }
 
+migrate_portal_user_workspaces() {
+  local workspace_storage_root
+  workspace_storage_root="$(run_as_app_user_shell "cd '$APP_API_DIR' && node --input-type=module -e \"import('./dist/config.js').then(({ appConfig }) => process.stdout.write(appConfig.userWorkspaceStorageRoot))\"")"
+  [[ -n "$workspace_storage_root" && "$workspace_storage_root" == /* && "$workspace_storage_root" != "/" ]] ||
+    die "resolved user workspace storage root is unsafe"
+  log_step "Preparing persistent Portal workspace storage"
+  run_as_root install -d -o "$APP_USER" -g "$APP_GROUP" -m 750 "$workspace_storage_root"
+
+  log_step "Adapting historical Portal tasks and files into user workspaces"
+  run_as_app_user_shell "cd '$APP_API_DIR' && npm run workspace:migrate"
+}
+
 seed_rbac() {
   if [[ "$SKIP_RBAC_SEED" == "1" ]]; then
     log_info "Skipping RBAC seed"
@@ -932,6 +944,7 @@ main() {
   fi
   if deploy_builds_backend; then
     build_backend
+    migrate_portal_user_workspaces
   fi
   if deploy_restarts_admin; then
     seed_rbac

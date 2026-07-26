@@ -68,7 +68,10 @@ import {
   ZapIcon,
   CreditCardIcon,
   LinkIcon,
-  ExternalLinkIcon
+  ExternalLinkIcon,
+  Folder,
+  ChevronRight,
+  ChevronLeft
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -140,7 +143,14 @@ import {
 import type { CodexManagedSkill, CodexSkillDraft } from "../skills/types";
 import { getBrandInitials } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
-import { SessionRail } from "./workbench/SessionRail";
+import {
+  WorkspaceRail,
+  AGENT_OUTPUTS_WORKSPACE_VIEW,
+  RECENT_WORKSPACE_VIEW,
+  TRASH_WORKSPACE_VIEW
+} from "./workbench/WorkspaceRail";
+import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
+import { WorkspaceTaskFilesPanel } from "./workbench/WorkspaceTaskFilesPanel";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import {
   prepareInteractiveHtmlPreview,
@@ -159,6 +169,15 @@ import { PORTAL_ANTD_THEME } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
+import {
+  createPortalWorkspaceFolder,
+  fetchPortalWorkspace,
+  fetchPortalWorkspaceNode,
+  fetchPortalWorkspaceNodes,
+  type PortalWorkspaceNode,
+  type PortalWorkspaceSummary,
+  type PortalWorkspaceTask
+} from "./workspace";
 import "./workbench/workbench.css";
 
 type SessionOut = {
@@ -177,7 +196,8 @@ type ThreadOut = {
   external_id?: string;
   model: string;
   reasoning_effort: ReasoningEffort;
-  workspace: string;
+  workspace_id?: string | null;
+  folder_id?: string | null;
   enabled_skills?: Array<{
     id: string;
     name: string;
@@ -495,6 +515,9 @@ type FeedbackCommentDraftStore = {
 const FeedbackCommentDraftContext = createContext<MutableRefObject<FeedbackCommentDraftStore> | null>(null);
 const feedbackCommentMemory = new Map<string, string>();
 const PORTAL_THREAD_SEARCH_PARAM = "thread";
+const PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM = "folder";
+const PORTAL_WORKSPACE_FILE_SEARCH_PARAM = "file";
+const PORTAL_WORKSPACE_QUERY_SEARCH_PARAM = "q";
 const PORTAL_BILLING_SEARCH_PARAM = "billing";
 type PortalBillingIntent = "renew" | "success" | "cancel";
 
@@ -2399,12 +2422,12 @@ const MobileAwareComposer: FC = () => {
   );
 };
 
-const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label }) => {
+const SessionRailNewThreadButton: FC<{ label?: string; onClick?: () => void }> = ({ label, onClick }) => {
   const { t } = usePortalI18n();
   const resolvedLabel = label ?? t("sessions.new");
   return (
     <ThreadListPrimitive.New asChild>
-      <button type="button" className="session-rail-new-btn" aria-label={resolvedLabel}>
+      <button type="button" className="session-rail-new-btn" aria-label={resolvedLabel} onClick={onClick}>
         <PlusIcon size={16} />
         <span>{resolvedLabel}</span>
       </button>
@@ -3068,6 +3091,48 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
 function readPortalThreadIdFromLocation(search: string): string {
   const params = new URLSearchParams(search);
   return params.get(PORTAL_THREAD_SEARCH_PARAM)?.trim() || "";
+}
+
+function readPortalWorkspaceLocation(search: string): {
+  folderId: string;
+  fileId: string;
+  query: string;
+} {
+  const params = new URLSearchParams(search);
+  return {
+    folderId: params.get(PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM)?.trim() || RECENT_WORKSPACE_VIEW,
+    fileId: params.get(PORTAL_WORKSPACE_FILE_SEARCH_PARAM)?.trim() || "",
+    query: params.get(PORTAL_WORKSPACE_QUERY_SEARCH_PARAM)?.trim() || ""
+  };
+}
+
+function writePortalWorkspaceLocation(
+  input: {
+    folderId?: string;
+    threadId?: string;
+    fileId?: string;
+    query?: string;
+  },
+  mode: "push" | "replace" = "replace"
+): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  params.set("view", "workspace");
+  const writeValue = (key: string, value: string | undefined) => {
+    if (value?.trim()) params.set(key, value.trim());
+    else params.delete(key);
+  };
+  writeValue(PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM, input.folderId);
+  writeValue(PORTAL_THREAD_SEARCH_PARAM, input.threadId);
+  writeValue(PORTAL_WORKSPACE_FILE_SEARCH_PARAM, input.fileId);
+  writeValue(PORTAL_WORKSPACE_QUERY_SEARCH_PARAM, input.query);
+  const nextSearch = params.toString();
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+  window.history[mode === "push" ? "pushState" : "replaceState"](
+    window.history.state,
+    document.title,
+    nextUrl
+  );
 }
 
 function readPortalBillingIntentFromLocation(search: string): PortalBillingIntent | null {
@@ -4907,7 +4972,7 @@ const AgentAssistantMessage: FC = () => {
   );
 };
 
-const AgentThreadListItem: FC = () => {
+const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void }> = ({ onSelectThread }) => {
   const aui = useAui();
   const { locale, t } = usePortalI18n();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
@@ -5063,7 +5128,10 @@ const AgentThreadListItem: FC = () => {
         ) : (
           <ThreadListItemPrimitive.Trigger
             className="aui-thread-list-item-trigger"
-            onClick={() => clearCompletedThreadNotice(...identityKeys)}
+            onClick={() => {
+              clearCompletedThreadNotice(...identityKeys);
+              onSelectThread?.(remoteId || externalId || localId);
+            }}
           >
             <p className="aui-thread-list-item-title">
               <ThreadListItemPrimitive.Title fallback={t("sessions.newConversation")} />
@@ -5177,7 +5245,11 @@ const ThreadListItemByIdProvider: FC<PropsWithChildren<{ threadId: string }>> = 
   return <AuiProvider value={aui}>{children}</AuiProvider>;
 };
 
-const StableThreadListItems: FC = () => {
+const StableThreadListItems: FC<{
+  visibleRemoteIds?: ReadonlySet<string>;
+  maxItems?: number;
+  onSelectThread?: (threadId: string) => void;
+}> = ({ visibleRemoteIds, maxItems, onSelectThread }) => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const stableThreadIds = useMemo(() => {
@@ -5191,17 +5263,19 @@ const StableThreadListItems: FC = () => {
         .map((value) => String(value || "").trim())
         .filter(Boolean);
       if (identities.length === 0 || identities.some((identity) => seen.has(identity))) continue;
+      if (visibleRemoteIds && !identities.some((identity) => visibleRemoteIds.has(identity))) continue;
       identities.forEach((identity) => seen.add(identity));
       result.push(threadId);
+      if (maxItems && result.length >= maxItems) break;
     }
     return result;
-  }, [threadIds, threadItems]);
+  }, [maxItems, threadIds, threadItems, visibleRemoteIds]);
 
   return (
     <>
       {stableThreadIds.map((threadId) => (
         <ThreadListItemByIdProvider key={threadId} threadId={threadId}>
-          <AgentThreadListItem />
+          <AgentThreadListItem onSelectThread={onSelectThread} />
         </ThreadListItemByIdProvider>
       ))}
     </>
@@ -6139,6 +6213,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     };
   });
   const isMobile = useIsNarrowScreen(768);
+  const isCompactDesktop = useIsNarrowScreen(1279) && !isMobile;
 
   useEffect(() => {
     document.body.classList.add("portal-workbench-mode");
@@ -6151,7 +6226,31 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     if (!isMobile) return;
     setLayoutState((prev) => (prev.isSessionRailCollapsed ? prev : { ...prev, isSessionRailCollapsed: true }));
   }, [isMobile]);
-  const [sessionSearchValue, setSessionSearchValue] = useState("");
+
+  useEffect(() => {
+    if (!isCompactDesktop) return;
+    setLayoutState((prev) => (prev.isRightDrawerOpen ? closeWorkbenchDrawer(prev) : prev));
+  }, [isCompactDesktop]);
+  const [sessionSearchValue, setSessionSearchValue] = useState(
+    typeof window === "undefined" ? "" : readPortalWorkspaceLocation(window.location.search).query
+  );
+  const [portalWorkspace, setPortalWorkspace] = useState<PortalWorkspaceSummary | null>(null);
+  const [workspaceRootNodes, setWorkspaceRootNodes] = useState<PortalWorkspaceNode[]>([]);
+  const [workspaceThreads, setWorkspaceThreads] = useState<ThreadOut[]>([]);
+  const [selectedWorkspaceFolderId, setSelectedWorkspaceFolderId] = useState(
+    typeof window === "undefined"
+      ? RECENT_WORKSPACE_VIEW
+      : readPortalWorkspaceLocation(window.location.search).folderId
+  );
+  const [selectedWorkspaceFolderLabel, setSelectedWorkspaceFolderLabel] = useState("");
+  const [selectedWorkspaceFolderPath, setSelectedWorkspaceFolderPath] = useState<PortalWorkspaceNode[]>([]);
+  const [workspaceMainView, setWorkspaceMainView] = useState<"folder" | "task">(
+    typeof window !== "undefined" && readPortalThreadIdFromLocation(window.location.search) ? "task" : "folder"
+  );
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceErrorText, setWorkspaceErrorText] = useState("");
+  const [selectedWorkspaceFile, setSelectedWorkspaceFile] = useState<PortalWorkspaceNode | null>(null);
+  const [workspaceRefreshToken, setWorkspaceRefreshToken] = useState(0);
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
     groupHeaderByRemoteId: {}
   });
@@ -6270,6 +6369,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const runningStageWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const enabledSkillIdsRef = useRef(enabledSkillIds);
+  const selectedWorkspaceFolderIdRef = useRef(selectedWorkspaceFolderId);
+  const portalWorkspaceRef = useRef<PortalWorkspaceSummary | null>(portalWorkspace);
   const hydratedSkillThreadIdRef = useRef("");
   const skillHydrationRef = useRef<{ threadId: string; promise: Promise<void> } | null>(null);
   const knowledgeSetSelectionInitializedRef = useRef(false);
@@ -6308,6 +6409,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       setContextUsage(null);
       return;
     }
+    setWorkspaceMainView("task");
+    setSelectedWorkspaceFile(null);
     setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
   }, []);
 
@@ -6322,6 +6425,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   runningStageKindRef.current = runningStageKind;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
   enabledSkillIdsRef.current = enabledSkillIds;
+  selectedWorkspaceFolderIdRef.current = selectedWorkspaceFolderId;
+  portalWorkspaceRef.current = portalWorkspace;
   activeThreadIdentityRef.current = activeThreadIdentity;
   productFeedbackImagesRef.current = productFeedbackImages;
   threadCollaborationRef.current = threadCollaboration;
@@ -6339,6 +6444,33 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     },
     []
   );
+
+  useEffect(() => {
+    if (!props.currentUser) {
+      setPortalWorkspace(null);
+      setWorkspaceRootNodes([]);
+      setWorkspaceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceLoading(true);
+    setWorkspaceErrorText("");
+    void fetchPortalWorkspace()
+      .then((out) => {
+        if (cancelled) return;
+        setPortalWorkspace(out.workspace);
+        setWorkspaceRootNodes(Array.isArray(out.nodes) ? out.nodes : []);
+      })
+      .catch((error) => {
+        if (!cancelled) setWorkspaceErrorText(error instanceof Error ? error.message : t("workspace.loadFailed"));
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.activeOrganization?.id, props.currentUser?.id, t, workspaceRefreshToken]);
 
   const refreshPortalSubscriptionStatus = useCallback(async (options?: { silent?: boolean }) => {
     if (!props.currentUser) {
@@ -6897,6 +7029,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     () => ({
       async list() {
         const out = await api<ThreadListOut>("/api/threads");
+        setWorkspaceThreads(Array.isArray(out.threads) ? out.threads : []);
         const groupHeaderByRemoteId: Record<string, string> = {};
         let previousGroupLabel = "";
         for (const thread of out.threads || []) {
@@ -6924,6 +7057,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
         let created: ThreadCreateOut;
         try {
+          const selectedFolderId = selectedWorkspaceFolderIdRef.current;
+          const folderId =
+            selectedFolderId &&
+            selectedFolderId !== RECENT_WORKSPACE_VIEW &&
+            selectedFolderId !== AGENT_OUTPUTS_WORKSPACE_VIEW &&
+            selectedFolderId !== TRASH_WORKSPACE_VIEW
+              ? selectedFolderId
+              : portalWorkspaceRef.current?.history_folder_id;
           created = await api<ThreadCreateOut>("/api/threads", {
             method: "POST",
             json: {
@@ -6931,6 +7072,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               model: cfg.model,
               reasoning_effort: cfg.reasoningEffort,
               knowledge_set_ids: knowledgeSetIds,
+              folder_id: folderId || undefined,
               codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills),
               start_session: false
             }
@@ -6945,6 +7087,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
+        setWorkspaceThreads((current) => [
+          created.thread,
+          ...current.filter((thread) => thread.id !== created.thread.id)
+        ]);
         const groupLabel = formatThreadGroupLabel(
           created.thread.updated_at || created.thread.created_at || new Date().toISOString(),
           localeRef.current
@@ -6965,26 +7111,41 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           method: "PATCH",
           json: { title: newTitle }
         });
+        setWorkspaceThreads((current) =>
+          current.map((thread) => thread.id === remoteId ? { ...thread, title: newTitle } : thread)
+        );
       },
       async archive(remoteId: string) {
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "archived" }
         });
+        setWorkspaceThreads((current) =>
+          current.map((thread) => thread.id === remoteId ? { ...thread, status: "archived" } : thread)
+        );
       },
       async unarchive(remoteId: string) {
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "regular" }
         });
+        setWorkspaceThreads((current) =>
+          current.map((thread) => thread.id === remoteId ? { ...thread, status: "regular" } : thread)
+        );
       },
       async delete(remoteId: string) {
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
-          method: "DELETE"
+          method: "PATCH",
+          json: { status: "archived" }
         });
+        setWorkspaceThreads((current) => current.filter((thread) => thread.id !== remoteId));
       },
       async fetch(threadId: string) {
         const out = await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`);
+        setWorkspaceThreads((current) => [
+          out.thread,
+          ...current.filter((thread) => thread.id !== out.thread.id)
+        ]);
         return {
           status: out.thread.status,
           remoteId: out.thread.id,
@@ -7077,6 +7238,111 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     setSelectedKnowledgeSetIds(ids);
   }, []);
   const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
+  useEffect(() => {
+    if (!activeRemoteThreadId || workspaceMainView !== "task") return;
+    const activeThread = workspaceThreads.find(
+      (thread) => thread.id === activeRemoteThreadId || thread.external_id === activeRemoteThreadId
+    );
+    if (activeThread?.folder_id && activeThread.folder_id !== selectedWorkspaceFolderId) {
+      setSelectedWorkspaceFolderId(activeThread.folder_id);
+      writePortalWorkspaceLocation({
+        folderId: activeThread.folder_id,
+        threadId: activeRemoteThreadId
+      });
+    }
+  }, [activeRemoteThreadId, selectedWorkspaceFolderId, workspaceMainView, workspaceThreads]);
+  const selectedWorkspaceFolder = useMemo(
+    () => workspaceRootNodes.find((node) => node.id === selectedWorkspaceFolderId) ?? null,
+    [selectedWorkspaceFolderId, workspaceRootNodes]
+  );
+  useEffect(() => {
+    if (selectedWorkspaceFolderId.startsWith("__")) {
+      setSelectedWorkspaceFolderLabel("");
+      setSelectedWorkspaceFolderPath([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const chain: PortalWorkspaceNode[] = [];
+      let nodeId: string | null = selectedWorkspaceFolderId;
+      for (let depth = 0; nodeId && depth < 20; depth += 1) {
+        const rootNode = workspaceRootNodes.find((node) => node.id === nodeId);
+        const node: PortalWorkspaceNode = rootNode ?? await fetchPortalWorkspaceNode(nodeId);
+        if (node.kind !== "folder") break;
+        chain.unshift(node);
+        nodeId = node.parent_id;
+      }
+      if (!cancelled) {
+        setSelectedWorkspaceFolderLabel(chain.at(-1)?.name || "");
+        setSelectedWorkspaceFolderPath(chain);
+      }
+    })()
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedWorkspaceFolderLabel(selectedWorkspaceFolder?.name || "");
+          setSelectedWorkspaceFolderPath(selectedWorkspaceFolder ? [selectedWorkspaceFolder] : []);
+        }
+      })
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorkspaceFolder, selectedWorkspaceFolderId, workspaceRootNodes]);
+  const selectedWorkspaceFolderName =
+    selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
+      ? t("workspace.recent")
+      : selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
+        ? t("workspace.agentOutputs")
+      : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
+        ? t("workspace.trash")
+      : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
+  const visibleWorkspaceThreadIds = useMemo(() => {
+    const candidates = workspaceThreads
+      .filter((thread) => thread.status === "regular")
+      .filter((thread) =>
+        selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
+          ? true
+          : selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
+            ? true
+          : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
+            ? false
+          : thread.folder_id === selectedWorkspaceFolderId
+      )
+      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime())
+      .slice(
+        0,
+        selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW ||
+          selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
+          ? 50
+          : 200
+      );
+    return new Set(candidates.map((thread) => thread.id));
+  }, [selectedWorkspaceFolderId, workspaceThreads]);
+  const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
+    setSelectedWorkspaceFolderId(folderId);
+    setSelectedWorkspaceFolderLabel(folderName || "");
+    setSessionSearchValue("");
+    setWorkspaceMainView("folder");
+    setSelectedWorkspaceFile(null);
+    setRequestedPreviewPath("");
+    writePortalWorkspaceLocation({ folderId }, "push");
+    if (isMobile) {
+      setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
+    }
+  }, [isMobile]);
+  const createRootWorkspaceFolder = useCallback(async () => {
+    const name = window.prompt(t("workspace.folderNamePrompt"))?.trim();
+    if (!name) return;
+    try {
+      const folder = await createPortalWorkspaceFolder(name);
+      setWorkspaceRootNodes((current) => [
+        ...current.filter((node) => node.id !== folder.id),
+        folder
+      ]);
+      selectWorkspaceFolder(folder.id, folder.name);
+    } catch (error) {
+      setWorkspaceErrorText(error instanceof Error ? error.message : t("workspace.createFolderFailed"));
+    }
+  }, [selectWorkspaceFolder, t]);
   const activeThreadCollaboration =
     threadCollaboration && threadCollaboration.threadId === activeRemoteThreadId ? threadCollaboration : null;
   const sharedThreadReadonly = Boolean(
@@ -7357,6 +7623,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const requestPreviewForPath = useCallback((filePath: string) => {
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
+    setSelectedWorkspaceFile(null);
     setRequestedPreviewPath(normalizedPath);
     setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
@@ -8673,6 +8940,82 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }
   });
 
+  const openWorkspaceTask = useCallback(async (task: PortalWorkspaceTask | { id: string; folder_id?: string | null }) => {
+    const folderId = task.folder_id || selectedWorkspaceFolderId;
+    if (task.folder_id) setSelectedWorkspaceFolderId(task.folder_id);
+    setWorkspaceMainView("task");
+    setSelectedWorkspaceFile(null);
+    writePortalWorkspaceLocation({ folderId, threadId: task.id }, "push");
+    try {
+      await runtime.threads.switchToThread(task.id);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Failed to open task");
+    }
+  }, [runtime, selectedWorkspaceFolderId]);
+
+  const startWorkspaceTask = useCallback(async () => {
+    setWorkspaceMainView("task");
+    setSelectedWorkspaceFile(null);
+    try {
+      await runtime.threads.switchToNewThread();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Failed to create task");
+    }
+  }, [runtime]);
+
+  const openWorkspaceFile = useCallback((file: PortalWorkspaceNode) => {
+    setSelectedWorkspaceFile(file);
+    setRequestedPreviewPath("");
+    writePortalWorkspaceLocation({
+      folderId: selectedWorkspaceFolderId,
+      threadId: workspaceMainView === "task" ? activeRemoteThreadId || undefined : undefined,
+      fileId: file.id,
+      query: sessionSearchValue
+    }, "push");
+    setLayoutState((prev) => openWorkbenchDrawer(prev, "preview"));
+  }, [activeRemoteThreadId, selectedWorkspaceFolderId, sessionSearchValue, workspaceMainView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const restoreFromLocation = () => {
+      const location = readPortalWorkspaceLocation(window.location.search);
+      const threadId = readPortalThreadIdFromLocation(window.location.search);
+      setSelectedWorkspaceFolderId(location.folderId);
+      setSessionSearchValue(location.query);
+      setRequestedPreviewPath("");
+      const restoreFile = () => {
+        if (!location.fileId || location.folderId.startsWith("__")) {
+          setSelectedWorkspaceFile(null);
+          return;
+        }
+        void fetchPortalWorkspaceNodes(location.folderId)
+          .then((nodes) => {
+            const file = nodes.find((node) => node.id === location.fileId && node.kind === "file");
+            setSelectedWorkspaceFile(file || null);
+            if (file) setLayoutState((previous) => openWorkbenchDrawer(previous, "preview"));
+          })
+          .catch(() => setSelectedWorkspaceFile(null));
+      };
+      if (threadId) {
+        setWorkspaceMainView("task");
+        setSelectedWorkspaceFile(null);
+        void runtime.threads.switchToThread(threadId).catch((error) => {
+          setErrorText(error instanceof Error ? error.message : "Failed to restore task");
+        });
+        restoreFile();
+        return;
+      }
+      setWorkspaceMainView("folder");
+      restoreFile();
+    };
+    window.addEventListener("popstate", restoreFromLocation);
+    const initialLocation = readPortalWorkspaceLocation(window.location.search);
+    if (initialLocation.fileId || readPortalThreadIdFromLocation(window.location.search)) {
+      restoreFromLocation();
+    }
+    return () => window.removeEventListener("popstate", restoreFromLocation);
+  }, [runtime]);
+
   useEffect(() => {
     const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
       | {
@@ -8938,6 +9281,142 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     </div>
   );
 
+  const workspaceRailFooter = props.currentUser ? (
+    <UserIdentitySummary
+      user={props.currentUser}
+      compact
+      onSignOut={props.onSignOut}
+      locale={locale === "zh-CN" ? "zh" : "en"}
+      accessStatus={subscriptionStatus}
+      accessStatusLoading={subscriptionStatusLoading}
+      accessStatusError={subscriptionStatusError}
+      onOpenAccessStatus={() => {
+        void refreshPortalSubscriptionStatus();
+      }}
+    />
+  ) : (
+    <p className="session-rail-user-fallback">{currentUserName}</p>
+  );
+
+  const workspaceTaskList = (
+    <SessionSearchContext.Provider value={sessionSearchValue}>
+      <SessionGroupLabelContext.Provider value={{ groupHeaderByRemoteId: {} }}>
+        <RunningThreadIdsContext.Provider value={runningThreadIds}>
+          <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
+            <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+              <StableThreadListItems
+                visibleRemoteIds={visibleWorkspaceThreadIds}
+                maxItems={
+                  selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW ||
+                  selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
+                    ? 50
+                    : 5
+                }
+                onSelectThread={(threadId) => {
+                  setWorkspaceMainView("task");
+                  setSelectedWorkspaceFile(null);
+                  const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
+                  if (thread?.folder_id) setSelectedWorkspaceFolderId(thread.folder_id);
+                }}
+              />
+            </ActiveThreadIdContext.Provider>
+          </ThreadCompletionNoticeContext.Provider>
+        </RunningThreadIdsContext.Provider>
+      </SessionGroupLabelContext.Provider>
+    </SessionSearchContext.Provider>
+  );
+
+  const workspaceRail = (
+    <WorkspaceRail
+      workspace={portalWorkspace}
+      rootNodes={workspaceRootNodes}
+      selectedFolderId={selectedWorkspaceFolderId}
+      searchValue={sessionSearchValue}
+      loading={workspaceLoading}
+      errorText={workspaceErrorText}
+      taskList={workspaceTaskList}
+      footer={workspaceRailFooter}
+      newThreadSlot={
+        <SessionRailNewThreadButton
+          label={t("workspace.newTask")}
+          onClick={() => {
+            setWorkspaceMainView("task");
+            setSelectedWorkspaceFile(null);
+          }}
+        />
+      }
+      onSearchChange={(value) => {
+        setSessionSearchValue(value);
+        writePortalWorkspaceLocation({
+          folderId: selectedWorkspaceFolderId,
+          query: value,
+          fileId: undefined,
+          threadId: undefined
+        });
+        if (value.trim()) {
+          setWorkspaceMainView("folder");
+          setSelectedWorkspaceFile(null);
+          setRequestedPreviewPath("");
+        }
+      }}
+      onSelectFolder={selectWorkspaceFolder}
+      onCreateFolder={() => void createRootWorkspaceFolder()}
+    />
+  );
+
+  const workspaceCenterContent =
+    workspaceMainView === "folder" ? (
+      <WorkspaceFolderHome
+        key={`${selectedWorkspaceFolderId}-${workspaceRefreshToken}`}
+        folderId={selectedWorkspaceFolderId}
+        folderName={selectedWorkspaceFolderName}
+        folderPath={selectedWorkspaceFolderPath}
+        activeThreadId={activeRemoteThreadId || undefined}
+        searchQuery={sessionSearchValue}
+        rootFolders={workspaceRootNodes}
+        onOpenFolder={(folder) => selectWorkspaceFolder(folder.id, folder.name)}
+        onOpenFile={openWorkspaceFile}
+        onOpenTask={(task) => void openWorkspaceTask(task)}
+        onNewTask={() => void startWorkspaceTask()}
+        onWorkspaceChanged={() => setWorkspaceRefreshToken((value) => value + 1)}
+      />
+    ) : (
+      <div className="workspace-task-shell">
+        <div className="workspace-task-breadcrumb" aria-label={t("workspace.taskLocation")}>
+          <Folder size={15} />
+          <span>{selectedWorkspaceFolderName}</span>
+          <ChevronRight size={14} />
+          <strong>
+            {workspaceThreads.find((thread) => thread.id === activeRemoteThreadId)?.title ||
+              t("workspace.newTask")}
+          </strong>
+        </div>
+        <div className="thread-wrap">
+          {canUpload && !sharedThreadReadonly ? (
+            <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+          ) : (
+            threadContent
+          )}
+        </div>
+      </div>
+    );
+
+  const workspacePreviewPanel =
+    workspaceMainView === "task" && activeRemoteThreadId && !selectedWorkspaceFile && !requestedPreviewPath ? (
+      <WorkspaceTaskFilesPanel threadId={activeRemoteThreadId} onOpenFile={openWorkspaceFile} />
+    ) : (
+      <PreviewWorkbenchPanel
+        threadId={activeRemoteThreadId}
+        requestedFilePath={selectedWorkspaceFile ? undefined : requestedPreviewPath}
+        requestNonce={previewRequestNonce}
+        allowDownload
+        externalArtifactMode={isExternalPortalUser && !selectedWorkspaceFile}
+        workspaceFileId={selectedWorkspaceFile?.id}
+        workspaceFileName={selectedWorkspaceFile?.name}
+        workspaceFileMimeType={selectedWorkspaceFile?.mime_type || undefined}
+      />
+    );
+
 
 
   return (
@@ -8992,71 +9471,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   <div className="mobile-workbench-layout">
                     <Drawer
                       placement="left"
-                      title={t("sessions.title")}
+                      title={portalWorkspace?.name || t("workspace.mine")}
                       open={!layoutState.isSessionRailCollapsed}
-                      width="min(360px, calc(100vw - 24px))"
+                      width="100%"
                       styles={{ header: { padding: "12px 16px" }, body: { padding: 0 } }}
                       closable
+                      closeIcon={<ChevronLeft size={22} />}
                       push={false}
                       rootClassName="workbench-mobile-session-drawer"
                       onClose={() => setLayoutState((prev) => toggleSessionRail(prev))}
                     >
-                      <ThreadList.Root>
-                        <SessionRail
-                          collapsed={layoutState.isSessionRailCollapsed}
-                          userName={currentUserName}
-                          searchValue={sessionSearchValue}
-                          onSearchChange={setSessionSearchValue}
-                          onCreateThread={() => undefined}
-                          onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
-                          newThreadSlot={<SessionRailNewThreadButton />}
-                          footer={
-                            <div className="session-rail-footer-stack">
-                              {props.currentUser ? (
-                                <UserIdentitySummary
-                                  user={props.currentUser}
-                                  compact
-                                  onSignOut={props.onSignOut}
-                                  locale={locale === "zh-CN" ? "zh" : "en"}
-                                  accessStatus={subscriptionStatus}
-                                  accessStatusLoading={subscriptionStatusLoading}
-                                  accessStatusError={subscriptionStatusError}
-                                  onOpenAccessStatus={() => {
-                                    void refreshPortalSubscriptionStatus();
-                                  }}
-                                />
-                              ) : (
-                                <p className="session-rail-user-fallback">{currentUserName}</p>
-                              )}
-                            </div>
-                          }
-                        >
-                          <SessionSearchContext.Provider value={sessionSearchValue}>
-                            <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
-                              <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
-                                  <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-                                    <StableThreadListItems />
-                                  </ActiveThreadIdContext.Provider>
-                                </ThreadCompletionNoticeContext.Provider>
-                              </RunningThreadIdsContext.Provider>
-                            </SessionGroupLabelContext.Provider>
-                          </SessionSearchContext.Provider>
-                        </SessionRail>
-                      </ThreadList.Root>
+                      <ThreadList.Root>{workspaceRail}</ThreadList.Root>
                     </Drawer>
 
                     <main className="portal-workbench-chat flex-1" style={{ minHeight: 0 }}>
-                      <div className="thread-wrap">
-                        {canUpload && !sharedThreadReadonly ? (
-                          <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
-                        ) : (
-                          threadContent
-                        )}
-                      </div>
+                      {workspaceCenterContent}
                     </main>
 
-                    {layoutState.isRightDrawerOpen && (!isExternalPortalUser || requestedPreviewPath) && (
+                    {layoutState.isRightDrawerOpen && (!isExternalPortalUser || requestedPreviewPath || selectedWorkspaceFile) && (
                       <Drawer
                         placement="right"
                         open={layoutState.isRightDrawerOpen}
@@ -9070,106 +9502,67 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         <RightWorkbenchDrawer
                           open={layoutState.isRightDrawerOpen}
                           onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-                          previewContent={
-                            <PreviewWorkbenchPanel
-                              threadId={activeRemoteThreadId}
-                              requestedFilePath={requestedPreviewPath}
-                              requestNonce={previewRequestNonce}
-                              allowDownload
-                              externalArtifactMode={isExternalPortalUser}
-                            />
-                          }
+                          previewContent={workspacePreviewPanel}
                           mobile
                         />
                       </Drawer>
                     )}
                   </div>
                 ) : (
-                  <PanelGroup orientation="horizontal" className="portal-workbench-layout">
-                  {!layoutState.isSessionRailCollapsed && (
-                    <>
-                      <Panel defaultSize="20" minSize="15" maxSize="30" collapsible>
-                        <ThreadList.Root>
-                          <SessionRail
-                            collapsed={layoutState.isSessionRailCollapsed}
-                            userName={currentUserName}
-                          searchValue={sessionSearchValue}
-                          onSearchChange={setSessionSearchValue}
-                          onCreateThread={() => undefined}
-                          onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
-                          newThreadSlot={<SessionRailNewThreadButton />}
-                          footer={
-                            <div className="session-rail-footer-stack">
-                              {props.currentUser ? (
-                                <UserIdentitySummary
-                                    user={props.currentUser}
-                                    compact
-                                    onSignOut={props.onSignOut}
-                                    locale={locale === "zh-CN" ? "zh" : "en"}
-                                    accessStatus={subscriptionStatus}
-                                    accessStatusLoading={subscriptionStatusLoading}
-                                    accessStatusError={subscriptionStatusError}
-                                    onOpenAccessStatus={() => {
-                                      void refreshPortalSubscriptionStatus();
-                                    }}
-                                  />
-                                ) : (
-                                  <p className="session-rail-user-fallback">{currentUserName}</p>
-                                )}
-                              </div>
-                            }
-                        >
-                          <SessionSearchContext.Provider value={sessionSearchValue}>
-                            <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
-                              <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
-                                  <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-                                    <StableThreadListItems />
-                                  </ActiveThreadIdContext.Provider>
-                                </ThreadCompletionNoticeContext.Provider>
-                              </RunningThreadIdsContext.Provider>
-                            </SessionGroupLabelContext.Provider>
-                          </SessionSearchContext.Provider>
-                        </SessionRail>
-                      </ThreadList.Root>
-                    </Panel>
-                      <PanelResizeHandle className="Resizer" />
-                    </>
-                  )}
+                  <>
+                    <PanelGroup orientation="horizontal" className="portal-workbench-layout">
+                      {!layoutState.isSessionRailCollapsed && (
+                        <>
+                          <Panel defaultSize="20" minSize="15" maxSize="30" collapsible>
+                            <ThreadList.Root>{workspaceRail}</ThreadList.Root>
+                          </Panel>
+                          <PanelResizeHandle className="Resizer" />
+                        </>
+                      )}
 
-                  <Panel minSize="30">
-                    <main className="portal-workbench-chat">
-                      <div className="thread-wrap">
-                        {canUpload && !sharedThreadReadonly ? (
-                          <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
-                        ) : (
-                          threadContent
-                        )}
-                      </div>
-                    </main>
-                  </Panel>
-
-                  {layoutState.isRightDrawerOpen && (!isExternalPortalUser || requestedPreviewPath) && (
-                    <>
-                      <PanelResizeHandle className="Resizer" />
-                      <Panel defaultSize="37.5" minSize="20" maxSize="40" className="right-drawer-panel">
-                        <RightWorkbenchDrawer
-                          open={layoutState.isRightDrawerOpen}
-                          onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-                          previewContent={
-                            <PreviewWorkbenchPanel
-                              threadId={activeRemoteThreadId}
-                              requestedFilePath={requestedPreviewPath}
-                              requestNonce={previewRequestNonce}
-                              allowDownload
-                              externalArtifactMode={isExternalPortalUser}
-                            />
-                          }
-                        />
+                      <Panel minSize="30">
+                        <main className="portal-workbench-chat">
+                          {workspaceCenterContent}
+                        </main>
                       </Panel>
-                    </>
-                  )}
-                </PanelGroup>
+
+                      {!isCompactDesktop &&
+                        layoutState.isRightDrawerOpen &&
+                        (!isExternalPortalUser || requestedPreviewPath || selectedWorkspaceFile) && (
+                          <>
+                            <PanelResizeHandle className="Resizer" />
+                            <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
+                              <RightWorkbenchDrawer
+                                open={layoutState.isRightDrawerOpen}
+                                onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                                previewContent={workspacePreviewPanel}
+                              />
+                            </Panel>
+                          </>
+                        )}
+                    </PanelGroup>
+
+                    {isCompactDesktop &&
+                      layoutState.isRightDrawerOpen &&
+                      (!isExternalPortalUser || requestedPreviewPath || selectedWorkspaceFile) && (
+                        <Drawer
+                          placement="right"
+                          open={layoutState.isRightDrawerOpen}
+                          width={440}
+                          styles={{ body: { padding: 0 } }}
+                          closable={false}
+                          push={false}
+                          rootClassName="workbench-compact-right-drawer"
+                          onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                        >
+                          <RightWorkbenchDrawer
+                            open={layoutState.isRightDrawerOpen}
+                            onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                            previewContent={workspacePreviewPanel}
+                          />
+                        </Drawer>
+                      )}
+                  </>
               )}
             </div>
 

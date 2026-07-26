@@ -65,6 +65,9 @@ model User {
   crestDelegationCredential CrestDelegationCredential?
   enterpriseProfile EnterpriseUserProfile?
   securityDomainMembership SecurityDomainMember?
+  ownedWorkspaces UserWorkspace[] @relation("UserWorkspaceOwner")
+  createdWorkspaceNodes WorkspaceNode[] @relation("WorkspaceNodeCreatedBy")
+  createdWorkspaceVersions WorkspaceFileVersion[] @relation("WorkspaceVersionCreatedBy")
 
   @@index([email])
   @@index([status, role])
@@ -91,6 +94,7 @@ model Organization {
   accessRequests  AccessRequest[]             @relation("AccessRequestTargetOrganization")
   securityDomains SecurityDomain[]
   securityDomainAccessPolicy SecurityDomainAccessPolicy?
+  userWorkspaces UserWorkspace[] @relation("UserWorkspaceOrganization")
 
   @@index([type, status])
   @@map("organizations")
@@ -119,6 +123,7 @@ model SecurityDomain {
   rules          SecurityDomainRule[]
   members        SecurityDomainMember[]
   threads        Thread[]
+  userWorkspaces UserWorkspace[] @relation("UserWorkspaceSecurityDomain")
 
   @@unique([organizationId, name])
   @@index([organizationId, status])
@@ -702,6 +707,8 @@ model Thread {
   organizationId  String?           @map("organization_id")
   userId          String?           @map("user_id")
   securityDomainId String?           @map("security_domain_id")
+  userWorkspaceId String?            @map("user_workspace_id")
+  workspaceFolderId String?          @map("workspace_folder_id")
   channel         String?
   title           String?
   status          ThreadStatus      @default(active)
@@ -729,10 +736,18 @@ model Thread {
   inboxItems      InboxItem[]
   knowledgeCaptureMark KnowledgeCaptureMark?
   productFeedback ProductFeedback[] @relation("ProductFeedbackThread")
+  workspaceFileBindings ThreadFileBinding[]
+  userWorkspace UserWorkspace? @relation(fields: [userWorkspaceId], references: [id], onDelete: SetNull)
+  workspaceFolder WorkspaceNode? @relation("ThreadWorkspaceFolder", fields: [workspaceFolderId], references: [id], onDelete: SetNull)
+  workspaceNodesCreated WorkspaceNode[] @relation("WorkspaceNodeSourceThread")
+  workspaceVersionsCreated WorkspaceFileVersion[] @relation("WorkspaceVersionCreatedByThread")
+  workspaceChangeSets WorkspaceChangeSet[] @relation("WorkspaceChangeSetThread")
 
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
   @@index([securityDomainId, createdAt])
+  @@index([userWorkspaceId, workspaceFolderId, updatedAt])
+  @@index([workspaceFolderId, status, updatedAt])
   @@index([channel, createdAt])
   @@index([userId])
   @@map("threads")
@@ -749,6 +764,8 @@ model ThreadArtifact {
   mimeType       String?   @map("mime_type")
   sizeBytes      BigInt?   @map("size_bytes")
   checksum       String?
+  workspaceFileId String?   @map("workspace_file_id")
+  workspaceFileVersionId String? @map("workspace_file_version_id")
   previewStatus  String    @default("ready") @map("preview_status")
   downloadStatus String    @default("ready") @map("download_status")
   blockedReason  String?   @map("blocked_reason")
@@ -758,13 +775,177 @@ model ThreadArtifact {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   thread         Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  workspaceFile WorkspaceNode? @relation("ThreadArtifactWorkspaceFile", fields: [workspaceFileId], references: [id], onDelete: SetNull)
+  workspaceFileVersion WorkspaceFileVersion? @relation("ThreadArtifactWorkspaceFileVersion", fields: [workspaceFileVersionId], references: [id], onDelete: SetNull)
 
   @@unique([threadId, relativePath])
   @@index([organizationId, threadId, createdAt])
   @@index([threadId, createdAt])
   @@index([userId, createdAt])
+  @@index([workspaceFileId, createdAt])
   @@index([previewStatus, downloadStatus])
   @@map("thread_artifacts")
+}
+
+model UserWorkspace {
+  id               String   @id @default(cuid())
+  scopeKey         String   @unique @map("scope_key")
+  organizationId   String?  @map("organization_id")
+  securityDomainId String?  @map("security_domain_id")
+  ownerUserId      String   @map("owner_user_id")
+  name             String   @default("我的工作区")
+  status           String   @default("active")
+  storageRootKey   String   @map("storage_root_key")
+  quotaBytes       BigInt   @default(10737418240) @map("quota_bytes")
+  usedBytes        BigInt   @default(0) @map("used_bytes")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  organization     Organization? @relation("UserWorkspaceOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  securityDomain   SecurityDomain? @relation("UserWorkspaceSecurityDomain", fields: [securityDomainId], references: [id], onDelete: SetNull)
+  owner            User @relation("UserWorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  nodes            WorkspaceNode[]
+  fileVersions     WorkspaceFileVersion[]
+  threads          Thread[]
+  changeSets       WorkspaceChangeSet[]
+
+  @@index([organizationId, ownerUserId])
+  @@index([securityDomainId, ownerUserId])
+  @@index([ownerUserId, status])
+  @@map("user_workspaces")
+}
+
+model WorkspaceNode {
+  id               String    @id @default(cuid())
+  workspaceId      String    @map("workspace_id")
+  parentId         String?   @map("parent_id")
+  kind             String
+  name             String
+  normalizedName   String    @map("normalized_name")
+  systemKey        String?   @map("system_key")
+  storageKey       String?   @map("storage_key")
+  mimeType         String?   @map("mime_type")
+  sizeBytes        BigInt?   @map("size_bytes")
+  checksum         String?
+  state            String    @default("active")
+  trashedAt        DateTime? @map("trashed_at")
+  originalParentId String?   @map("original_parent_id")
+  createdByType    String    @default("user") @map("created_by_type")
+  createdByUserId  String?   @map("created_by_user_id")
+  sourceThreadId   String?   @map("source_thread_id")
+  metadata         Json?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  workspace        UserWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent           WorkspaceNode? @relation("WorkspaceNodeParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children         WorkspaceNode[] @relation("WorkspaceNodeParent")
+  originalParent   WorkspaceNode? @relation("WorkspaceNodeOriginalParent", fields: [originalParentId], references: [id], onDelete: SetNull)
+  originalChildren WorkspaceNode[] @relation("WorkspaceNodeOriginalParent")
+  createdByUser    User? @relation("WorkspaceNodeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  sourceThread     Thread? @relation("WorkspaceNodeSourceThread", fields: [sourceThreadId], references: [id], onDelete: SetNull)
+  versions         WorkspaceFileVersion[]
+  threadBindings   ThreadFileBinding[]
+  folderThreads    Thread[] @relation("ThreadWorkspaceFolder")
+  artifacts        ThreadArtifact[] @relation("ThreadArtifactWorkspaceFile")
+  fileChanges      WorkspaceChange[] @relation("WorkspaceChangeFile")
+  beforeParentChanges WorkspaceChange[] @relation("WorkspaceChangeBeforeParent")
+  afterParentChanges WorkspaceChange[] @relation("WorkspaceChangeAfterParent")
+
+  @@unique([workspaceId, systemKey])
+  @@index([workspaceId, parentId, state, name])
+  @@index([workspaceId, kind, updatedAt])
+  @@index([sourceThreadId])
+  @@map("workspace_nodes")
+}
+
+model WorkspaceFileVersion {
+  id                String   @id @default(cuid())
+  workspaceId       String   @map("workspace_id")
+  fileId            String   @map("file_id")
+  versionNo         Int      @map("version_no")
+  storageKey        String   @map("storage_key")
+  mimeType          String?  @map("mime_type")
+  sizeBytes         BigInt   @map("size_bytes")
+  checksum          String
+  createdByType     String   @default("user") @map("created_by_type")
+  createdByUserId   String?  @map("created_by_user_id")
+  createdByThreadId String?  @map("created_by_thread_id")
+  changeType        String   @default("create") @map("change_type")
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  workspace         UserWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  file              WorkspaceNode @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdByUser     User? @relation("WorkspaceVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByThread   Thread? @relation("WorkspaceVersionCreatedByThread", fields: [createdByThreadId], references: [id], onDelete: SetNull)
+  threadBindings    ThreadFileBinding[]
+  artifacts         ThreadArtifact[] @relation("ThreadArtifactWorkspaceFileVersion")
+  beforeChanges     WorkspaceChange[] @relation("WorkspaceChangeBeforeVersion")
+  afterChanges      WorkspaceChange[] @relation("WorkspaceChangeAfterVersion")
+
+  @@unique([fileId, versionNo])
+  @@index([workspaceId, createdAt])
+  @@index([createdByThreadId, createdAt])
+  @@map("workspace_file_versions")
+}
+
+model ThreadFileBinding {
+  id        String   @id @default(cuid())
+  threadId  String   @map("thread_id")
+  fileId    String   @map("file_id")
+  versionId String?  @map("version_id")
+  role      String
+  createdAt DateTime @default(now()) @map("created_at")
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  file      WorkspaceNode @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  version   WorkspaceFileVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@unique([threadId, fileId, versionId, role])
+  @@index([threadId, role, createdAt])
+  @@index([fileId, createdAt])
+  @@map("thread_file_bindings")
+}
+
+model WorkspaceChangeSet {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  threadId    String?   @map("thread_id")
+  runId       String?   @map("run_id")
+  status      String    @default("pending")
+  summary     String?
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  appliedAt   DateTime? @map("applied_at")
+  revertedAt  DateTime? @map("reverted_at")
+  workspace   UserWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  thread      Thread? @relation("WorkspaceChangeSetThread", fields: [threadId], references: [id], onDelete: SetNull)
+  changes      WorkspaceChange[]
+
+  @@index([workspaceId, createdAt])
+  @@index([threadId, createdAt])
+  @@map("workspace_change_sets")
+}
+
+model WorkspaceChange {
+  id                 String   @id @default(cuid())
+  changeSetId        String   @map("change_set_id")
+  fileId             String?  @map("file_id")
+  kind               String
+  beforeVersionId    String?  @map("before_version_id")
+  afterVersionId     String?  @map("after_version_id")
+  beforeParentId     String?  @map("before_parent_id")
+  afterParentId      String?  @map("after_parent_id")
+  riskLevel          String   @default("low") @map("risk_level")
+  status             String   @default("pending")
+  createdAt          DateTime @default(now()) @map("created_at")
+  changeSet          WorkspaceChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+  file               WorkspaceNode? @relation("WorkspaceChangeFile", fields: [fileId], references: [id], onDelete: SetNull)
+  beforeVersion      WorkspaceFileVersion? @relation("WorkspaceChangeBeforeVersion", fields: [beforeVersionId], references: [id], onDelete: SetNull)
+  afterVersion       WorkspaceFileVersion? @relation("WorkspaceChangeAfterVersion", fields: [afterVersionId], references: [id], onDelete: SetNull)
+  beforeParent       WorkspaceNode? @relation("WorkspaceChangeBeforeParent", fields: [beforeParentId], references: [id], onDelete: SetNull)
+  afterParent        WorkspaceNode? @relation("WorkspaceChangeAfterParent", fields: [afterParentId], references: [id], onDelete: SetNull)
+
+  @@index([changeSetId, createdAt])
+  @@index([fileId, createdAt])
+  @@map("workspace_changes")
 }
 
 model ProductFeedback {

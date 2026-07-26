@@ -115,6 +115,7 @@ Backend configuration lives in `agent-api/.env`. The most important settings are
 | `DEFAULT_WORKSPACE` | Default filesystem workspace used by runtime sessions |
 | `WORKSPACE_WHITELIST` | Comma-separated workspace roots the API may access |
 | `SESSION_WORKSPACE_ROOT` | Root directory for per-session workspaces |
+| `USER_WORKSPACE_STORAGE_ROOT` | Root directory for persistent Portal user files and immutable versions |
 | `SESSION_COOKIE_SECRET` | Secret for signed session cookies |
 | `APP_BASE_URL` | Public base URL used in links and emails |
 | `SMTP_*` / `AUTH_EMAIL_FROM` | Email delivery settings |

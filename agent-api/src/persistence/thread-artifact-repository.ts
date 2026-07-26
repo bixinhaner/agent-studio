@@ -15,6 +15,8 @@ export type ThreadArtifactRecord = {
   downloadStatus: ThreadArtifactStatus | string;
   blockedReason?: string;
   metadata?: unknown;
+  workspaceFileId?: string;
+  workspaceFileVersionId?: string;
   expiresAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -34,6 +36,8 @@ export type UpsertThreadArtifactInput = {
   downloadStatus: ThreadArtifactStatus | string;
   blockedReason?: string;
   metadata?: unknown;
+  workspaceFileId?: string;
+  workspaceFileVersionId?: string;
   expiresAt?: Date;
 };
 
@@ -52,6 +56,8 @@ type ThreadArtifactRow = {
   downloadStatus: string;
   blockedReason: string | null;
   metadata: unknown;
+  workspaceFileId: string | null;
+  workspaceFileVersionId: string | null;
   expiresAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -70,6 +76,10 @@ type ThreadArtifactTable = {
     where: { threadId_relativePath: { threadId: string; relativePath: string } };
     update: Record<string, unknown>;
     create: Record<string, unknown>;
+  }): Promise<ThreadArtifactRow>;
+  update(args: {
+    where: { id: string };
+    data: Record<string, unknown>;
   }): Promise<ThreadArtifactRow>;
 };
 
@@ -112,6 +122,8 @@ function mapThreadArtifact(row: ThreadArtifactRow): ThreadArtifactRecord {
     downloadStatus: row.downloadStatus,
     blockedReason: trimOrUndefined(row.blockedReason),
     metadata: row.metadata ?? undefined,
+    workspaceFileId: trimOrUndefined(row.workspaceFileId),
+    workspaceFileVersionId: trimOrUndefined(row.workspaceFileVersionId),
     expiresAt: toIsoString(row.expiresAt),
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updatedAt) ?? new Date().toISOString()
@@ -171,7 +183,7 @@ export class ThreadArtifactRepository {
     if (!relativePath) throw new Error("artifact relativePath is required");
     if (!displayName) throw new Error("artifact displayName is required");
 
-    const data = {
+    const sharedData = {
       organizationId: trimOrUndefined(input.organizationId) ?? null,
       threadId,
       userId: trimOrUndefined(input.userId) ?? null,
@@ -187,6 +199,18 @@ export class ThreadArtifactRepository {
       metadata: input.metadata ?? null,
       expiresAt: input.expiresAt ?? null
     };
+    const createData = {
+      ...sharedData,
+      workspaceFileId: trimOrUndefined(input.workspaceFileId) ?? null,
+      workspaceFileVersionId: trimOrUndefined(input.workspaceFileVersionId) ?? null
+    };
+    const workspaceLinkUpdate =
+      input.workspaceFileId !== undefined || input.workspaceFileVersionId !== undefined
+        ? {
+            workspaceFileId: trimOrUndefined(input.workspaceFileId) ?? null,
+            workspaceFileVersionId: trimOrUndefined(input.workspaceFileVersionId) ?? null
+          }
+        : {};
 
     const row = await this.db.threadArtifact.upsert({
       where: {
@@ -195,9 +219,32 @@ export class ThreadArtifactRepository {
           relativePath
         }
       },
-      create: data,
+      create: createData,
       update: {
-        ...data,
+        ...sharedData,
+        ...workspaceLinkUpdate,
+        updatedAt: new Date()
+      }
+    });
+    return mapThreadArtifact(row);
+  }
+
+  async linkWorkspaceFile(
+    artifactId: string,
+    workspaceFileId: string,
+    workspaceFileVersionId: string
+  ): Promise<ThreadArtifactRecord> {
+    const normalizedArtifactId = trimOrUndefined(artifactId);
+    const normalizedFileId = trimOrUndefined(workspaceFileId);
+    const normalizedVersionId = trimOrUndefined(workspaceFileVersionId);
+    if (!normalizedArtifactId) throw new Error("artifactId is required");
+    if (!normalizedFileId) throw new Error("workspaceFileId is required");
+    if (!normalizedVersionId) throw new Error("workspaceFileVersionId is required");
+    const row = await this.db.threadArtifact.update({
+      where: { id: normalizedArtifactId },
+      data: {
+        workspaceFileId: normalizedFileId,
+        workspaceFileVersionId: normalizedVersionId,
         updatedAt: new Date()
       }
     });
