@@ -14,6 +14,7 @@
     "build:local-codex-usage-report": "node scripts/build-local-codex-usage-report.mjs",
     "report:portal-chat-startup": "tsx src/ops/portal-chat-startup-report.ts",
     "usage:backfill-long-context": "tsx src/ops/backfill-codex-long-context-costs.ts",
+    "usage:backfill-cumulative": "tsx src/ops/backfill-codex-cumulative-usage.ts",
     "workspace:migrate": "node dist/ops/migrate-portal-user-workspaces.js",
     "workspace:migrate:dry-run": "tsx src/ops/migrate-portal-user-workspaces.ts --dry-run",
     "prisma:generate": "prisma generate",

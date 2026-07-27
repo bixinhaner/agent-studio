@@ -717,4 +717,72 @@ describe("UsageIngestionService", () => {
     expect(created.cachedInputTokens).toBe(2000);
     expect(created.outputTokens).toBe(200);
   });
+
+  it("deduplicates cumulative snapshots across Agent Studio sessions for the same Codex thread", async () => {
+    let previous: Awaited<ReturnType<UsageIngestionService["record"]>> | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return [];
+        },
+        async create(input) {
+          throw new Error(`unexpected non-transactional create for ${input.sessionId}`);
+        },
+        async createCodexCumulative(input) {
+          const eventInput = input.buildInput(previous);
+          previous = {
+            id: previous ? "usage-2" : "usage-1",
+            organizationId: eventInput.organizationId,
+            userId: eventInput.userId,
+            departmentIdSnapshot: eventInput.departmentIdSnapshot,
+            threadId: eventInput.threadId,
+            sessionId: eventInput.sessionId,
+            model: eventInput.model,
+            featureType: eventInput.featureType,
+            inputTokens: eventInput.inputTokens ?? 0,
+            cachedInputTokens: eventInput.cachedInputTokens ?? 0,
+            cacheWriteTokens: eventInput.cacheWriteTokens ?? 0,
+            outputTokens: eventInput.outputTokens ?? 0,
+            estimatedCost: eventInput.estimatedCost ?? "0.000000",
+            internalCost: eventInput.internalCost ?? "0.000000",
+            resultStatus: eventInput.resultStatus,
+            metadata: eventInput.metadata,
+            createdAt: previous ? "2026-07-27T02:00:00.000Z" : "2026-07-27T01:00:00.000Z"
+          };
+          return previous;
+        }
+      }
+    });
+
+    await service.recordCodexRuntimeUsage({
+      sessionId: "agent-session-old",
+      model: "gpt-5.4",
+      featureType: "chat",
+      codexThreadId: "codex-thread-shared",
+      inputTokens: 10_000,
+      cachedInputTokens: 8_000,
+      outputTokens: 500
+    });
+    const resumed = await service.recordCodexRuntimeUsage({
+      sessionId: "agent-session-new",
+      model: "gpt-5.4",
+      featureType: "chat",
+      codexThreadId: "codex-thread-shared",
+      inputTokens: 11_200,
+      cachedInputTokens: 8_900,
+      outputTokens: 560
+    });
+
+    expect(resumed).toMatchObject({
+      sessionId: "agent-session-new",
+      inputTokens: 1200,
+      cachedInputTokens: 900,
+      outputTokens: 60
+    });
+  });
 });

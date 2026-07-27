@@ -104,6 +104,18 @@ type UsageEventTable = {
 
 export type UsageEventRepositoryDb = {
   usageEvent: UsageEventTable;
+  $transaction?<T>(callback: (transaction: UsageEventTransaction) => Promise<T>): Promise<T>;
+};
+
+type UsageEventTransaction = {
+  usageEvent: UsageEventTable;
+  $queryRawUnsafe<T>(query: string, ...values: unknown[]): Promise<T>;
+};
+
+export type CreateCodexCumulativeUsageInput = {
+  codexThreadId: string;
+  featureType: string;
+  buildInput: (previous: UsageEventRecord | undefined) => CreateUsageEventInput;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -169,6 +181,67 @@ export class UsageEventRepository {
   constructor(private readonly db: UsageEventRepositoryDb) {}
 
   async create(input: CreateUsageEventInput): Promise<UsageEventRecord> {
+    const created = await this.db.usageEvent.create({ data: this.createData(input) });
+    return mapUsageEvent(created);
+  }
+
+  async createCodexCumulative(input: CreateCodexCumulativeUsageInput): Promise<UsageEventRecord> {
+    const codexThreadId = trimOrUndefined(input.codexThreadId);
+    const featureType = trimOrUndefined(input.featureType);
+    if (!codexThreadId || !featureType) {
+      throw new Error("codexThreadId and featureType are required for cumulative usage");
+    }
+    if (!this.db.$transaction) {
+      throw new Error("database transactions are required for cumulative Codex usage");
+    }
+
+    return this.db.$transaction(async (transaction) => {
+      const lockKey = `codex-usage:${featureType}:${codexThreadId}`;
+      await transaction.$queryRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        lockKey
+      );
+      const rows = await transaction.$queryRawUnsafe<UsageEventRow[]>(
+        `SELECT
+          id,
+          organization_id AS "organizationId",
+          user_id AS "userId",
+          department_id_snapshot AS "departmentIdSnapshot",
+          thread_id AS "threadId",
+          session_id AS "sessionId",
+          model,
+          feature_type AS "featureType",
+          input_tokens AS "inputTokens",
+          cached_input_tokens AS "cachedInputTokens",
+          cache_write_tokens AS "cacheWriteTokens",
+          output_tokens AS "outputTokens",
+          estimated_cost AS "estimatedCost",
+          internal_cost AS "internalCost",
+          result_status AS "resultStatus",
+          metadata,
+          created_at AS "createdAt"
+        FROM usage_events
+        WHERE feature_type = $1
+          AND COALESCE(
+            metadata -> '_codexRuntimeUsage' ->> 'codexThreadId',
+            metadata ->> 'codexThreadId'
+          ) = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+        featureType,
+        codexThreadId
+      );
+      const previous = rows[0] ? mapUsageEvent(rows[0]) : undefined;
+      return this.createWithTable(transaction.usageEvent, input.buildInput(previous));
+    });
+  }
+
+  private async createWithTable(table: UsageEventTable, input: CreateUsageEventInput): Promise<UsageEventRecord> {
+    const created = await table.create({ data: this.createData(input) });
+    return mapUsageEvent(created);
+  }
+
+  private createData(input: CreateUsageEventInput): Record<string, unknown> {
     const model = trimOrUndefined(input.model);
     const featureType = trimOrUndefined(input.featureType);
     const resultStatus = trimOrUndefined(input.resultStatus);
@@ -176,29 +249,25 @@ export class UsageEventRepository {
       throw new Error("usage event model, featureType, and resultStatus are required");
     }
 
-    const created = await this.db.usageEvent.create({
-      data: {
-        id: trimOrUndefined(input.id),
-        organizationId: trimOrUndefined(input.organizationId) ?? null,
-        userId: trimOrUndefined(input.userId) ?? null,
-        departmentIdSnapshot: trimOrUndefined(input.departmentIdSnapshot) ?? null,
-        threadId: trimOrUndefined(input.threadId) ?? null,
-        sessionId: trimOrUndefined(input.sessionId) ?? null,
-        model,
-        featureType,
-        inputTokens: input.inputTokens ?? 0,
-        cachedInputTokens: input.cachedInputTokens ?? 0,
-        cacheWriteTokens: input.cacheWriteTokens ?? 0,
-        outputTokens: input.outputTokens ?? 0,
-        estimatedCost: trimOrUndefined(input.estimatedCost) ?? "0.000000",
-        internalCost: trimOrUndefined(input.internalCost) ?? "0.000000",
-        resultStatus,
-        metadata: input.metadata ?? null,
-        createdAt: input.createdAt instanceof Date ? input.createdAt : input.createdAt ? new Date(input.createdAt) : undefined
-      }
-    });
-
-    return mapUsageEvent(created);
+    return {
+      id: trimOrUndefined(input.id),
+      organizationId: trimOrUndefined(input.organizationId) ?? null,
+      userId: trimOrUndefined(input.userId) ?? null,
+      departmentIdSnapshot: trimOrUndefined(input.departmentIdSnapshot) ?? null,
+      threadId: trimOrUndefined(input.threadId) ?? null,
+      sessionId: trimOrUndefined(input.sessionId) ?? null,
+      model,
+      featureType,
+      inputTokens: input.inputTokens ?? 0,
+      cachedInputTokens: input.cachedInputTokens ?? 0,
+      cacheWriteTokens: input.cacheWriteTokens ?? 0,
+      outputTokens: input.outputTokens ?? 0,
+      estimatedCost: trimOrUndefined(input.estimatedCost) ?? "0.000000",
+      internalCost: trimOrUndefined(input.internalCost) ?? "0.000000",
+      resultStatus,
+      metadata: input.metadata ?? null,
+      createdAt: input.createdAt instanceof Date ? input.createdAt : input.createdAt ? new Date(input.createdAt) : undefined
+    };
   }
 
   async list(input: ListUsageEventsInput = {}): Promise<UsageEventRecord[]> {

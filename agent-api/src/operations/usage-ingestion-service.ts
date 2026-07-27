@@ -385,7 +385,8 @@ export function calculateEstimatedCost(input: {
 export class UsageIngestionService {
   constructor(
     private readonly dependencies: {
-      usageEvents: Pick<UsageEventRepository, "create" | "list">;
+      usageEvents: Pick<UsageEventRepository, "create" | "list"> &
+        Partial<Pick<UsageEventRepository, "createCodexCumulative">>;
       costProfiles: Pick<CostProfileRepository, "getActiveByModel">;
       afterRecord?: (event: UsageEventRecord) => Promise<void>;
     }
@@ -402,6 +403,17 @@ export class UsageIngestionService {
       organizationId: trimOrUndefined(input.organizationId),
       model
     });
+    const created = await this.createPricedEvent(input, profile);
+    await this.dependencies.afterRecord?.(created);
+    return created;
+  }
+
+  private createPricedEvent(input: RecordUsageInput, profile: CostProfileRecord | null): Promise<UsageEventRecord> {
+    const model = trimOrUndefined(input.model);
+    const featureType = trimOrUndefined(input.featureType);
+    if (!model || !featureType) {
+      throw new Error("usage event model and featureType are required");
+    }
     const usage = sanitizeUsage({
       inputTokens: input.inputTokens,
       cachedInputTokens: input.cachedInputTokens,
@@ -421,7 +433,7 @@ export class UsageIngestionService {
         : "aggregate_request"
     });
 
-    const created = await this.dependencies.usageEvents.create({
+    return this.dependencies.usageEvents.create({
       ...input,
       model,
       featureType,
@@ -439,8 +451,6 @@ export class UsageIngestionService {
         pricing: costs
       })
     });
-    await this.dependencies.afterRecord?.(created);
-    return created;
   }
 
   async recordCodexRuntimeUsage(input: RecordUsageInput): Promise<UsageEventRecord> {
@@ -476,46 +486,85 @@ export class UsageIngestionService {
       });
     }
 
+    const buildDeltaInput = (previousEvent: UsageEventRecord | undefined): RecordUsageInput => {
+      const previousSnapshot = snapshotFromMetadata(previousEvent?.metadata) ?? (
+        previousEvent
+          ? codexRuntimeUsageMetadata({
+              inputTokens: previousEvent.inputTokens,
+              cachedInputTokens: previousEvent.cachedInputTokens,
+              cacheWriteTokens: previousEvent.cacheWriteTokens,
+              outputTokens: previousEvent.outputTokens
+            })
+          : undefined
+      );
+      return {
+        ...input,
+        inputTokens: deltaFromCumulative(currentSnapshot.inputTokens, previousSnapshot?.inputTokens),
+        cachedInputTokens: deltaFromCumulative(currentSnapshot.cachedInputTokens, previousSnapshot?.cachedInputTokens),
+        cacheWriteTokens:
+          currentSnapshot.cacheWriteTokens === undefined
+            ? undefined
+            : deltaFromCumulative(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
+        outputTokens: deltaFromCumulative(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
+        codexRuntimeModelInvocations: input.codexRuntimeModelInvocations ?? [],
+        metadata: metadataWithCodexRuntimeSnapshot({
+          metadata: {
+            ...(asRecord(input.metadata) ?? {}),
+            ...(codexThreadId ? { codexThreadId } : {})
+          },
+          snapshot: currentSnapshot
+        })
+      };
+    };
+
+    const profile = await this.dependencies.costProfiles.getActiveByModel({
+      organizationId: trimOrUndefined(input.organizationId),
+      model: trimOrUndefined(input.model) ?? ""
+    });
+    if (codexThreadId && this.dependencies.usageEvents.createCodexCumulative) {
+      const created = await this.dependencies.usageEvents.createCodexCumulative({
+        codexThreadId,
+        featureType: input.featureType,
+        buildInput: (previous) => {
+          const deltaInput = buildDeltaInput(previous);
+          const usage = sanitizeUsage(deltaInput);
+          const costs = calculateEstimatedCost({
+            profile,
+            ...usage,
+            cacheWriteTelemetryAvailable: deltaInput.cacheWriteTokens !== undefined,
+            modelInvocations: deltaInput.codexRuntimeModelInvocations,
+            longContextPricingBasis: "model_invocation"
+          });
+          return {
+            ...deltaInput,
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+            outputTokens: usage.outputTokens,
+            estimatedCost: costs.estimatedCost,
+            internalCost: costs.internalCost,
+            resultStatus: trimOrUndefined(deltaInput.resultStatus) ?? "success",
+            metadata: metadataWithCostProfile({
+              metadata: deltaInput.metadata,
+              profile,
+              cacheWriteTelemetryAvailable: deltaInput.cacheWriteTokens !== undefined,
+              pricing: costs
+            })
+          };
+        }
+      });
+      await this.dependencies.afterRecord?.(created);
+      return created;
+    }
+
     const sessionId = trimOrUndefined(input.sessionId);
     const previousEvents = sessionId
-      ? await this.dependencies.usageEvents.list({
-          sessionId,
-          featureType: input.featureType,
-          take: 50
-        })
+      ? await this.dependencies.usageEvents.list({ sessionId, featureType: input.featureType, take: 50 })
       : [];
     const previousEvent = codexThreadId
       ? previousEvents.find((event) => codexThreadIdFromMetadata(event.metadata) === codexThreadId) ??
         (previousEvents.some((event) => codexThreadIdFromMetadata(event.metadata)) ? undefined : previousEvents[0])
       : previousEvents[0];
-    const previousSnapshot = snapshotFromMetadata(previousEvent?.metadata) ?? (
-      previousEvent
-        ? codexRuntimeUsageMetadata({
-            inputTokens: previousEvent.inputTokens,
-            cachedInputTokens: previousEvent.cachedInputTokens,
-            cacheWriteTokens: previousEvent.cacheWriteTokens,
-            outputTokens: previousEvent.outputTokens
-          })
-        : undefined
-    );
-
-    return this.record({
-      ...input,
-      inputTokens: deltaFromCumulative(currentSnapshot.inputTokens, previousSnapshot?.inputTokens),
-      cachedInputTokens: deltaFromCumulative(currentSnapshot.cachedInputTokens, previousSnapshot?.cachedInputTokens),
-      cacheWriteTokens:
-        currentSnapshot.cacheWriteTokens === undefined
-          ? undefined
-          : deltaFromCumulative(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
-      outputTokens: deltaFromCumulative(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
-      codexRuntimeModelInvocations: input.codexRuntimeModelInvocations ?? [],
-      metadata: metadataWithCodexRuntimeSnapshot({
-        metadata: {
-          ...(asRecord(input.metadata) ?? {}),
-          ...(codexThreadId ? { codexThreadId } : {})
-        },
-        snapshot: currentSnapshot
-      })
-    });
+    return this.record(buildDeltaInput(previousEvent));
   }
 }
