@@ -1,7 +1,23 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { PassThrough } from "node:stream";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
-import { estimatedCost, usageForLocalModelCall } from "./local-codex-usage-report.js";
+import {
+  estimatedCost,
+  streamJsonlRecords,
+  streamJsonlRecordsFromReadable,
+  usageForLocalModelCall
+} from "./local-codex-usage-report.js";
+
+const tempDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
+});
 
 function snapshot(input: {
   totalInput: number;
@@ -115,5 +131,55 @@ describe("local Codex usage report pricing", () => {
 
     expect(usageForLocalModelCall(usage, state, "thread-1")).toBeDefined();
     expect(usageForLocalModelCall(usage, state, "thread-1")).toBeUndefined();
+  });
+});
+
+describe("local Codex usage report session streaming", () => {
+  it("yields records before the input stream finishes", async () => {
+    const input = new PassThrough();
+    const records = streamJsonlRecordsFromReadable(input);
+    const iterator = records[Symbol.asyncIterator]();
+    input.write(`${JSON.stringify({ type: "session_meta", payload: { id: "thread-1" } })}\n`);
+
+    const first = await Promise.race([
+      iterator.next(),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("stream did not yield")), 250))
+    ]);
+
+    expect(first.done).toBe(false);
+    expect(first.value?.type).toBe("session_meta");
+    input.end();
+    expect((await iterator.next()).done).toBe(true);
+  });
+
+  it("streams JSONL records and skips malformed or blank lines", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "local-codex-usage-"));
+    tempDirectories.push(directory);
+    const filePath = path.join(directory, "rollout.jsonl");
+    await fs.writeFile(filePath, [
+      JSON.stringify({ type: "session_meta", payload: { id: "thread-1" } }),
+      "",
+      "{malformed",
+      JSON.stringify({ type: "event_msg", payload: { type: "token_count" } }),
+      ""
+    ].join("\n"), "utf8");
+
+    const records: Array<Record<string, unknown>> = [];
+    for await (const record of streamJsonlRecords(filePath)) records.push(record);
+
+    expect(records).toHaveLength(2);
+    expect(records.map((record) => record.type)).toEqual(["session_meta", "event_msg"]);
+  });
+
+  it("reports the file path instead of silently skipping stream failures", async () => {
+    const missingPath = path.join(os.tmpdir(), "missing-codex-rollout.jsonl");
+
+    const consume = async () => {
+      for await (const _record of streamJsonlRecords(missingPath)) {
+        // Consume the generator so the underlying stream error is observed.
+      }
+    };
+
+    await expect(consume()).rejects.toThrow(`Failed to stream session file ${missingPath}`);
   });
 });

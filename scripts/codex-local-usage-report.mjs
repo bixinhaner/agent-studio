@@ -10,6 +10,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 // src/live-runtime-session.ts
@@ -459,6 +460,40 @@ async function* walkJsonlFiles(root) {
     }
   }
 }
+async function* streamJsonlRecordsFromReadable(input) {
+  const lines = readline.createInterface({
+    input,
+    crlfDelay: Infinity,
+    terminal: false
+  });
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let root;
+      try {
+        root = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const record = asRecord2(root);
+      if (record) yield record;
+    }
+  } finally {
+    lines.close();
+  }
+}
+async function* streamJsonlRecords(filePath) {
+  const input = fsSync.createReadStream(filePath, { encoding: "utf8" });
+  try {
+    yield* streamJsonlRecordsFromReadable(input);
+  } catch (error) {
+    throw new Error(
+      `Failed to stream session file ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  } finally {
+    input.destroy();
+  }
+}
 function codexSessionRoots(root) {
   const namedRoots = ["sessions", "archived_sessions"].map((directory) => path.join(root, directory)).filter((directory) => fsSync.existsSync(directory) && fsSync.statSync(directory).isDirectory());
   return namedRoots.length > 0 ? namedRoots : [root];
@@ -630,23 +665,13 @@ function usageForLocalModelCall(usage2, state, key) {
 }
 async function parseSessionFile(filePath, options, state) {
   const fallbackSessionId = sessionIdFromFile(filePath);
-  const content = await fs.readFile(filePath, "utf8").catch(() => "");
   const requests = [];
   let sessionId = fallbackSessionId;
   let cwd = "";
   let model = "";
   let startedAt = "";
   let lastEventAt = "";
-  for (const line of content.split(/\n/)) {
-    if (!line.trim()) continue;
-    let root;
-    try {
-      root = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const record = asRecord2(root);
-    if (!record) continue;
+  for await (const record of streamJsonlRecords(filePath)) {
     const timestamp = stringValue(record.timestamp);
     if (timestamp) {
       startedAt ||= timestamp;
@@ -1085,5 +1110,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
 }
 export {
   estimatedCost,
+  streamJsonlRecords,
+  streamJsonlRecordsFromReadable,
   usageForLocalModelCall
 };

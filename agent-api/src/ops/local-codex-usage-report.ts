@@ -2,6 +2,8 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { extractRuntimeUsageFromStreamEvent, type RuntimeUsageSnapshot } from "../live-runtime-session.js";
@@ -353,6 +355,43 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
   }
 }
 
+export async function* streamJsonlRecordsFromReadable(input: Readable): AsyncGenerator<Record<string, unknown>> {
+  const lines = readline.createInterface({
+    input,
+    crlfDelay: Infinity,
+    terminal: false
+  });
+
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let root: unknown;
+      try {
+        root = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const record = asRecord(root);
+      if (record) yield record;
+    }
+  } finally {
+    lines.close();
+  }
+}
+
+export async function* streamJsonlRecords(filePath: string): AsyncGenerator<Record<string, unknown>> {
+  const input = fsSync.createReadStream(filePath, { encoding: "utf8" });
+  try {
+    yield* streamJsonlRecordsFromReadable(input);
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to stream session file ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  } finally {
+    input.destroy();
+  }
+}
+
 function codexSessionRoots(root: string): string[] {
   const namedRoots = ["sessions", "archived_sessions"]
     .map((directory) => path.join(root, directory))
@@ -564,7 +603,6 @@ async function parseSessionFile(filePath: string, options: CliOptions, state: Pa
   requests: RequestRecord[];
 }> {
   const fallbackSessionId = sessionIdFromFile(filePath);
-  const content = await fs.readFile(filePath, "utf8").catch(() => "");
   const requests: RequestRecord[] = [];
   let sessionId = fallbackSessionId;
   let cwd = "";
@@ -572,17 +610,7 @@ async function parseSessionFile(filePath: string, options: CliOptions, state: Pa
   let startedAt = "";
   let lastEventAt = "";
 
-  for (const line of content.split(/\n/)) {
-    if (!line.trim()) continue;
-    let root: unknown;
-    try {
-      root = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const record = asRecord(root);
-    if (!record) continue;
-
+  for await (const record of streamJsonlRecords(filePath)) {
     const timestamp = stringValue(record.timestamp);
     if (timestamp) {
       startedAt ||= timestamp;
