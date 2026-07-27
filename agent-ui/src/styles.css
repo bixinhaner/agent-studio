@@ -7855,6 +7855,21 @@ body.public-share-mode #root {
   text-decoration-color: currentColor;
 }
 
+.public-share-file-citation {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid rgba(138, 180, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(138, 180, 255, 0.08);
+  color: #b8d2ff;
+  font-size: 0.84em;
+  font-weight: 650;
+  line-height: 1.2;
+  vertical-align: 0.08em;
+}
+
 .public-share-markdown code {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);

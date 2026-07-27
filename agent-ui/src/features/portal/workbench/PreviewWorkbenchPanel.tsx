@@ -11,6 +11,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../../markdown/markdown-rendering";
+import { parseCodexFileCitationPreviewAnchor } from "../../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../../markdown/latex-delimiters";
 import { usePortalI18n } from "../i18n";
 
@@ -25,6 +26,13 @@ type ThreadFileRecord = {
 type XlsxSheetPreview = {
   name: string;
   rows: string[][];
+};
+
+type XlsxCellRange = {
+  startRow: number;
+  endRow: number;
+  startColumn: number;
+  endColumn: number;
 };
 
 type PptxSlidePreview = {
@@ -207,6 +215,42 @@ function normalizeMarkdownAnchor(value: string): string {
   return safeDecodeURIComponent(value.trim())
     .replace(/^#+/g, "")
     .trim();
+}
+
+function xlsxColumnNumber(value: string): number {
+  let result = 0;
+  for (const character of value.trim().toUpperCase()) {
+    if (character < "A" || character > "Z") return 0;
+    result = result * 26 + (character.charCodeAt(0) - 64);
+  }
+  return result;
+}
+
+export function parseXlsxCellRange(value: string | undefined): XlsxCellRange | null {
+  const normalized = String(value || "").trim().replace(/\$/g, "");
+  const match = normalized.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i);
+  if (!match) return null;
+  const startColumn = xlsxColumnNumber(match[1]);
+  const startRow = Number.parseInt(match[2], 10);
+  const endColumn = xlsxColumnNumber(match[3] || match[1]);
+  const endRow = Number.parseInt(match[4] || match[2], 10);
+  if (!startColumn || !startRow || !endColumn || !endRow) return null;
+  return {
+    startRow: Math.min(startRow, endRow),
+    endRow: Math.max(startRow, endRow),
+    startColumn: Math.min(startColumn, endColumn),
+    endColumn: Math.max(startColumn, endColumn)
+  };
+}
+
+function cellIsInsideRange(row: number, column: number, range: XlsxCellRange | null): boolean {
+  if (!range) return false;
+  return (
+    row >= range.startRow &&
+    row <= range.endRow &&
+    column >= range.startColumn &&
+    column <= range.endColumn
+  );
 }
 
 function slugifyMarkdownHeading(value: string): string {
@@ -744,10 +788,14 @@ async function convertDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
   return asString(result?.value);
 }
 
-async function convertXlsxToSheets(arrayBuffer: ArrayBuffer): Promise<XlsxSheetPreview[]> {
+async function convertXlsxToSheets(arrayBuffer: ArrayBuffer, targetSheetName = ""): Promise<XlsxSheetPreview[]> {
   const xlsxModule = await import("xlsx");
   const workbook = xlsxModule.read(arrayBuffer, { type: "array" });
-  const sheetNames = workbook.SheetNames.slice(0, 6);
+  const normalizedTargetSheet = targetSheetName.trim();
+  const sheetNames = [
+    ...workbook.SheetNames.slice(0, 6),
+    ...(normalizedTargetSheet && workbook.SheetNames.includes(normalizedTargetSheet) ? [normalizedTargetSheet] : [])
+  ].filter((sheetName, index, values) => values.indexOf(sheetName) === index);
   return sheetNames.map((sheetName) => {
     const worksheet = workbook.Sheets[sheetName];
     const rawRows = xlsxModule.utils.sheet_to_json(worksheet, {
@@ -1206,6 +1254,15 @@ export function PreviewWorkbenchPanel(props: {
   const [selectedWorkspaceVersionId, setSelectedWorkspaceVersionId] = useState("");
   const [restoringWorkspaceVersion, setRestoringWorkspaceVersion] = useState(false);
   const previewObjectUrlRef = useRef("");
+  const xlsxPreviewRef = useRef<HTMLDivElement | null>(null);
+  const fileCitationTarget = useMemo(
+    () => parseCodexFileCitationPreviewAnchor(selectedAnchor),
+    [selectedAnchor]
+  );
+  const xlsxCitationRange = useMemo(
+    () => parseXlsxCellRange(fileCitationTarget?.range),
+    [fileCitationTarget?.range]
+  );
   const navigatePreviewTarget = useCallback((target: { filePath: string; anchor: string }) => {
     const normalizedFilePath = normalizeFilePath(target.filePath);
     if (!normalizedFilePath) return;
@@ -1455,7 +1512,7 @@ export function PreviewWorkbenchPanel(props: {
         }
 
         if (kind === "xlsx") {
-          const sheets = await convertXlsxToSheets(await blob.arrayBuffer());
+          const sheets = await convertXlsxToSheets(await blob.arrayBuffer(), fileCitationTarget?.sheet);
           if (!cancelled) {
             setPreview({
               status: "ready",
@@ -1517,6 +1574,7 @@ export function PreviewWorkbenchPanel(props: {
   }, [
     activeFileForKind,
     activeFilePath,
+    fileCitationTarget?.sheet,
     props.externalArtifactMode,
     props.threadId,
     props.workspaceFileId,
@@ -1530,6 +1588,39 @@ export function PreviewWorkbenchPanel(props: {
   const latestWorkspaceVersionId = workspaceVersions[0]?.id || "";
   const selectedWorkspaceVersion =
     workspaceVersions.find((version) => version.id === selectedWorkspaceVersionId) ?? workspaceVersions[0];
+  const fileCitationTargetLabel = fileCitationTarget?.pageNumber
+    ? t("preview.targetPage", { page: fileCitationTarget.pageNumber })
+    : fileCitationTarget?.sheet
+      ? t("preview.targetSheetRange", {
+          sheet: fileCitationTarget.sheet,
+          range: fileCitationTarget.range || t("preview.entireSheet")
+        })
+      : "";
+
+  useEffect(() => {
+    if (activePreview?.kind !== "xlsx" || !fileCitationTarget?.sheet || !xlsxPreviewRef.current) return;
+    const root = xlsxPreviewRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      const targetCell = root.querySelector<HTMLElement>('[data-citation-target-start="true"]');
+      const targetSheet = Array.from(root.querySelectorAll<HTMLElement>("[data-sheet-name]")).find(
+        (element) => element.dataset.sheetName === fileCitationTarget.sheet
+      );
+      const target = targetCell || targetSheet;
+      if (!target) return;
+      alignPreviewTarget(target, targetCell ? "center" : "start", "smooth");
+      const tableScroller = targetCell?.closest<HTMLElement>(".preview-table-wrap");
+      if (targetCell && tableScroller) {
+        const scrollerRect = tableScroller.getBoundingClientRect();
+        const targetRect = targetCell.getBoundingClientRect();
+        const targetLeft = tableScroller.scrollLeft + targetRect.left - scrollerRect.left;
+        tableScroller.scrollTo({
+          left: Math.max(0, targetLeft - Math.max(0, (tableScroller.clientWidth - targetRect.width) / 2)),
+          behavior: "smooth"
+        });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activePreview, anchorJumpToken, fileCitationTarget?.range, fileCitationTarget?.sheet]);
 
   const restoreWorkspaceVersion = async (requestedVersionId?: string) => {
     const fileId = String(props.workspaceFileId || "").trim();
@@ -1572,14 +1663,16 @@ export function PreviewWorkbenchPanel(props: {
                     {t("workspace.versionLabel", { version: selectedWorkspaceVersion.version_no })}
                   </span>
                 ) : null}
-                {selectedAnchor ? (
+                {fileCitationTargetLabel && activePreview?.kind !== "xlsx" ? (
+                  <span className="preview-viewer-anchor is-static">{fileCitationTargetLabel}</span>
+                ) : selectedAnchor ? (
                   <button
                     type="button"
                     className="preview-viewer-anchor"
                     onClick={() => setAnchorJumpToken((value) => value + 1)}
                     title={t("preview.jumpTarget")}
                   >
-                    {t("preview.targetSection", { section: selectedAnchor })}
+                    {fileCitationTargetLabel || t("preview.targetSection", { section: selectedAnchor })}
                   </button>
                 ) : null}
               </div>
@@ -1648,18 +1741,43 @@ export function PreviewWorkbenchPanel(props: {
               ) : null}
 
               {activePreview?.kind === "xlsx" ? (
-                <div className="preview-sheet-list">
+                <div ref={xlsxPreviewRef} className="preview-sheet-list">
                   {activePreview.sheets.map((sheet) => (
-                    <section key={sheet.name} className="preview-sheet-card">
+                    <section
+                      key={sheet.name}
+                      className={
+                        sheet.name === fileCitationTarget?.sheet
+                          ? "preview-sheet-card is-citation-target"
+                          : "preview-sheet-card"
+                      }
+                      data-sheet-name={sheet.name}
+                    >
                       <h5>{sheet.name}</h5>
                       <div className="preview-table-wrap">
                         <table>
                           <tbody>
                             {sheet.rows.map((row, rowIndex) => (
                               <tr key={`${sheet.name}-row-${rowIndex}`}>
-                                {row.map((cell, cellIndex) => (
-                                  <td key={`${sheet.name}-${rowIndex}-${cellIndex}`}>{cell}</td>
-                                ))}
+                                {row.map((cell, cellIndex) => {
+                                  const rowNumber = rowIndex + 1;
+                                  const columnNumber = cellIndex + 1;
+                                  const isTargetCell =
+                                    sheet.name === fileCitationTarget?.sheet &&
+                                    cellIsInsideRange(rowNumber, columnNumber, xlsxCitationRange);
+                                  const isTargetStart =
+                                    isTargetCell &&
+                                    rowNumber === xlsxCitationRange?.startRow &&
+                                    columnNumber === xlsxCitationRange?.startColumn;
+                                  return (
+                                    <td
+                                      key={`${sheet.name}-${rowIndex}-${cellIndex}`}
+                                      className={isTargetCell ? "is-citation-target" : undefined}
+                                      data-citation-target-start={isTargetStart ? "true" : undefined}
+                                    >
+                                      {cell}
+                                    </td>
+                                  );
+                                })}
                               </tr>
                             ))}
                           </tbody>

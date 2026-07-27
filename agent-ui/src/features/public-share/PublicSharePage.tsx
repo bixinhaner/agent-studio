@@ -12,6 +12,7 @@ import {
   MarkdownTable
 } from "../markdown/markdown-rendering";
 import { stripAssistantControlDirectives } from "../markdown/control-directives";
+import { parseCodexFileCitationHref, projectCodexFileCitations } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { fetchPublicThreadShare, PublicShareAccessError } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
@@ -66,11 +67,12 @@ function publicShareImageUrl(token: string, imagePath: string): string {
 }
 
 function preprocessPublicShareMarkdown(text: string, token: string): string {
+  const fileCitations = projectCodexFileCitations(text, "en");
   const resolvedText = token.trim()
-    ? text.replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+    ? fileCitations.markdown.replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
         return `${prefix}<${publicShareImageUrl(token, destination)}>${suffix}`;
       })
-    : text;
+    : fileCitations.markdown;
   return normalizeLatexDelimiters(stripAssistantControlDirectives(resolvedText));
 }
 
@@ -81,6 +83,17 @@ function PublicShareMarkdownLink(props: {
   [key: string]: unknown;
 }) {
   const { href, className, children, ...rest } = props;
+  const fileCitation = typeof href === "string" ? parseCodexFileCitationHref(href) : null;
+  if (fileCitation) {
+    return (
+      <span
+        className={["public-share-file-citation", className].filter(Boolean).join(" ")}
+        aria-label={`Source ${fileCitation.id}: ${fileCitation.displayName}`}
+      >
+        {children}
+      </span>
+    );
+  }
   if (!isHttpUrl(href)) {
     return <span className={className}>{children}</span>;
   }

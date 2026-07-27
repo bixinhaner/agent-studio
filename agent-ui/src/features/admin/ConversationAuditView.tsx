@@ -33,6 +33,7 @@ import {
   MarkdownTable
 } from "../markdown/markdown-rendering";
 import { stripAssistantControlDirectives } from "../markdown/control-directives";
+import { parseCodexFileCitationHref, projectCodexFileCitations } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import {
   fetchAdminApiAuditDetail,
@@ -644,8 +645,9 @@ function adminThreadFileContentUrl(
 }
 
 function preprocessConversationAuditMarkdown(text: string): string {
+  const fileCitations = projectCodexFileCitations(text, "zh");
   return normalizeLatexDelimiters(
-    stripAssistantControlDirectives(text)
+    stripAssistantControlDirectives(fileCitations.markdown)
       .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
         return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
       })
@@ -828,6 +830,23 @@ function ConversationAuditMarkdownLink(props: {
   [key: string]: unknown;
 }) {
   const { href, className, children, threadId, workspace, ...rest } = props;
+  const fileCitation = typeof href === "string" ? parseCodexFileCitationHref(href) : null;
+  if (fileCitation) {
+    const contentUrl = adminThreadFileContentUrl(threadId || "", { filePath: fileCitation.previewPath });
+    if (!contentUrl) return <span className={className}>{children}</span>;
+    return (
+      <a
+        className={["admin-conversation-file-citation", className].filter(Boolean).join(" ")}
+        href={contentUrl}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`引用 ${fileCitation.id}：${fileCitation.displayName}`}
+        {...rest}
+      >
+        {children}
+      </a>
+    );
+  }
   const fileTarget = typeof href === "string" ? resolveConversationAuditFileTarget(href, { threadId, workspace }) : null;
   if (fileTarget) {
     const displayName = flattenNodeText(children).trim() || fileNameFromPath(fileTarget.filePath);

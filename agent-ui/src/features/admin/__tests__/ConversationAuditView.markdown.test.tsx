@@ -69,4 +69,26 @@ describe("ConversationAuditMarkdown", () => {
       "/api/admin/conversations/thread-123/files/content?relative_path=chart.png"
     );
   });
+
+  it("renders Codex file citations as compact reusable links without exposing raw directives", () => {
+    const citation =
+      ':codex-file-citation{path="/tmp/agent-studio/thread-thread-123/.agent-studio/uploads/thread-123/' +
+      '1785117779460-d78fcf64a32c-招标文件[定稿](1).docx" artifact_kind="document" page_number="3"}';
+    const { container } = render(
+      <ConversationAuditMarkdown
+        text={`结论来自招标文件。${citation}`}
+        threadId="thread-123"
+        workspace="/tmp/agent-studio/thread-thread-123"
+      />
+    );
+
+    expect(container.textContent).not.toContain(":codex-file-citation");
+    expect(container.textContent).toContain("上传文件引用 · 1 个文件 / 1 个位置");
+    expect(container.textContent).toContain("招标文件[定稿](1).docx");
+    const citationLinks = screen.getAllByRole("link", { name: "引用 1：招标文件[定稿](1).docx" });
+    expect(citationLinks).toHaveLength(2);
+    expect(citationLinks[0]?.getAttribute("href")).toBe(
+      "/api/admin/conversations/thread-123/files/content?path=.agent-studio%2Fuploads%2Fthread-123%2F1785117779460-d78fcf64a32c-%E6%8B%9B%E6%A0%87%E6%96%87%E4%BB%B6%5B%E5%AE%9A%E7%A8%BF%5D%281%29.docx"
+    );
+  });
 });

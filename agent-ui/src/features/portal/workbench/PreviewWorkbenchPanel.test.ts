@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { alignPreviewTarget, prepareInteractiveHtmlPreview } from "./PreviewWorkbenchPanel";
+import { alignPreviewTarget, parseXlsxCellRange, prepareInteractiveHtmlPreview } from "./PreviewWorkbenchPanel";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -78,5 +78,26 @@ describe("prepareInteractiveHtmlPreview", () => {
 
     expect(html).toMatch(/^<meta http-equiv="Content-Security-Policy"/);
     expect(html).toContain("<section>Chart</section>");
+  });
+});
+
+describe("parseXlsxCellRange", () => {
+  it("normalizes a multi-cell A1 range for citation highlighting", () => {
+    expect(parseXlsxCellRange("T29:A2")).toEqual({
+      startRow: 2,
+      endRow: 29,
+      startColumn: 1,
+      endColumn: 20
+    });
+  });
+
+  it("accepts absolute single-cell references and rejects invalid ranges", () => {
+    expect(parseXlsxCellRange("$C$7")).toEqual({
+      startRow: 7,
+      endRow: 7,
+      startColumn: 3,
+      endColumn: 3
+    });
+    expect(parseXlsxCellRange("sheet1!A1")).toBeNull();
   });
 });

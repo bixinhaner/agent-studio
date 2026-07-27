@@ -127,6 +127,11 @@ import {
   MarkdownTable
 } from "../markdown/markdown-rendering";
 import { expandAssistantControlDirectives } from "../markdown/control-directives";
+import {
+  codexFileCitationPreviewPath,
+  parseCodexFileCitationHref,
+  projectCodexFileCitations
+} from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalBillingPanel } from "./PortalBillingPanel";
@@ -636,8 +641,9 @@ function normalizeMarkdownAssetTarget(value: string): string {
 }
 
 function preprocessAssistantMarkdown(text: string): string {
+  const fileCitations = projectCodexFileCitations(text, "en");
   return normalizeLatexDelimiters(
-    expandAssistantControlDirectives(text).replace(
+    expandAssistantControlDirectives(fileCitations.markdown).replace(
       RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN,
       (_match, prefix, destination, suffix) => {
         return `${prefix}<${destination}>${suffix}`;
@@ -1021,6 +1027,26 @@ function AssistantMarkdownLink(props: {
   const { href, className, children, ...rest } = props;
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
+  const fileCitation = typeof href === "string" ? parseCodexFileCitationHref(href) : null;
+  if (fileCitation) {
+    const previewPath = codexFileCitationPreviewPath(fileCitation);
+    return (
+      <a
+        className={["assistant-markdown-link", "assistant-markdown-file-citation", className].filter(Boolean).join(" ")}
+        href={href}
+        aria-label={`Source ${fileCitation.id}: ${fileCitation.displayName}`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          requestPreview(previewPath);
+        }}
+        {...rest}
+      >
+        <FileIcon size={13} aria-hidden="true" />
+        <span>{children}</span>
+      </a>
+    );
+  }
   const inlineVisualizationPath = resolveInlineVisualizationPath(href);
   if (inlineVisualizationPath) {
     return <InlineVisualization filePath={inlineVisualizationPath} label={children} />;
