@@ -189,6 +189,119 @@ describe("buildOperationsInsights", () => {
     });
   });
 
+  it("keeps security review usage out of business activity and the session ledger", () => {
+    const usageEvents = [
+      makeUsageEvent({
+        id: "evt-chat",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "gpt-5.6",
+        featureType: "chat",
+        inputTokens: 1000,
+        cachedInputTokens: 500,
+        outputTokens: 200,
+        estimatedCost: "1.200000",
+        internalCost: "0.120000",
+        metadata: { source: "chat_stream" },
+        createdAt: "2026-04-15T01:00:00.000Z"
+      }),
+      makeUsageEvent({
+        id: "evt-review-failed-retry",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        model: "gpt-5.6",
+        featureType: "security_review",
+        resultStatus: "failed",
+        metadata: { source: "conversation_security_review", reviewId: "review-a" },
+        createdAt: "2026-04-15T01:01:00.000Z"
+      }),
+      makeUsageEvent({
+        id: "evt-review-success",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        model: "gpt-5.6",
+        featureType: "security_review",
+        inputTokens: 300,
+        cachedInputTokens: 100,
+        outputTokens: 40,
+        estimatedCost: "0.300000",
+        internalCost: "0.030000",
+        metadata: { source: "conversation_security_review", reviewId: "review-a" },
+        createdAt: "2026-04-15T01:02:00.000Z"
+      }),
+      makeUsageEvent({
+        id: "evt-review-failed-terminal",
+        organizationId: "org-a",
+        userId: "user-b",
+        threadId: "thread-b",
+        model: "gpt-5.6",
+        featureType: "security_review",
+        resultStatus: "failed",
+        metadata: { source: "conversation_security_review", reviewId: "review-b" },
+        createdAt: "2026-04-15T01:03:00.000Z"
+      })
+    ];
+
+    const response = buildOperationsInsights({
+      usageEvents,
+      sessionsById: new Map(),
+      organizationsById: new Map([
+        ["org-a", { id: "org-a", slug: "alpha", name: "Alpha Corp", type: "internal", status: "active", createdAt: "", updatedAt: "" }]
+      ]),
+      usersById: new Map([
+        ["user-a", { id: "user-a", displayName: "Alice", email: "alice@example.com", createdAt: "", updatedAt: "" }],
+        ["user-b", { id: "user-b", displayName: "Bob", email: "bob@example.com", createdAt: "", updatedAt: "" }]
+      ]),
+      departmentsById: new Map(),
+      filters: {
+        days: 30,
+        timeZone: "Asia/Shanghai",
+        sessionPage: 1,
+        sessionPageSize: 20
+      },
+      now: new Date("2026-04-16T00:00:00.000Z")
+    });
+
+    expect(response.summary).toMatchObject({
+      totalOrganizations: 1,
+      totalUsers: 1,
+      totalSessions: 1,
+      totalRequests: 1,
+      totalTokens: 1200,
+      estimatedCost: "1.200000",
+      internalCost: "0.120000"
+    });
+    expect(response.trends).toEqual([
+      expect.objectContaining({
+        sessionCount: 1,
+        requestCount: 1,
+        totalTokens: 1200
+      })
+    ]);
+    expect(response.breakdowns.entries.map((item) => item.key)).not.toContain("security_review");
+    expect(response.sessions).toMatchObject({
+      totalItems: 1,
+      items: [expect.objectContaining({ sessionId: "session-a", requestCount: 1 })]
+    });
+    expect(response.securityReview).toEqual({
+      reviewJobCount: 2,
+      successfulReviewCount: 1,
+      failedAttemptCount: 2,
+      affectedThreadCount: 2,
+      affectedUserCount: 2,
+      inputTokens: 300,
+      cachedInputTokens: 100,
+      outputTokens: 40,
+      totalTokens: 340,
+      estimatedCost: "0.300000",
+      internalCost: "0.030000"
+    });
+  });
+
   it("labels Zendesk usage as a first-class operations analytics source", () => {
     const usageEvents = [
       makeUsageEvent({

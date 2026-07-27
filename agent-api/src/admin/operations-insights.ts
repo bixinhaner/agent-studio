@@ -57,6 +57,20 @@ export type OperationsInsightsSummary = {
   cacheShare: number;
 };
 
+export type OperationsInsightsSecurityReviewSummary = {
+  reviewJobCount: number;
+  successfulReviewCount: number;
+  failedAttemptCount: number;
+  affectedThreadCount: number;
+  affectedUserCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+};
+
 export type OperationsInsightsTrendPoint = {
   day: string;
   organizationCount: number;
@@ -161,6 +175,7 @@ export type OperationsInsightsResponse = {
     entries: Array<{ value: string; label: string }>;
   };
   summary: OperationsInsightsSummary;
+  securityReview: OperationsInsightsSecurityReviewSummary;
   trends: OperationsInsightsTrendPoint[];
   breakdowns: {
     paths: OperationsInsightsBreakdownRow[];
@@ -195,6 +210,8 @@ type LabeledEntity = {
 
 type NormalizedEvent = {
   id: string;
+  featureType: string;
+  reviewId?: string;
   createdAt: string;
   createdAtMs: number;
   day: string;
@@ -573,6 +590,8 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
 
     const item: NormalizedEvent = {
       id: record.id,
+      featureType: record.featureType,
+      reviewId: trimOrUndefined(typeof metadata?.reviewId === "string" ? metadata.reviewId : undefined),
       createdAt,
       createdAtMs,
       day: toDateKeyInTimeZone(createdAt, input.filters.timeZone),
@@ -619,6 +638,47 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
   return normalized.sort((left, right) => right.createdAtMs - left.createdAtMs);
 }
 
+function buildSecurityReviewSummary(records: NormalizedEvent[]): OperationsInsightsSecurityReviewSummary {
+  const reviewIds = new Set<string>();
+  const successfulReviewIds = new Set<string>();
+  const affectedThreadIds = new Set<string>();
+  const affectedUserIds = new Set<string>();
+  let failedAttemptCount = 0;
+  let inputTokens = 0;
+  let cachedInputTokens = 0;
+  let outputTokens = 0;
+  let estimatedCost = 0;
+  let internalCost = 0;
+
+  for (const record of records) {
+    const reviewId = record.reviewId ?? `event:${record.id}`;
+    reviewIds.add(reviewId);
+    if (record.resultStatus === "success") successfulReviewIds.add(reviewId);
+    else failedAttemptCount += 1;
+    if (record.threadId) affectedThreadIds.add(record.threadId);
+    if (record.userId) affectedUserIds.add(record.userId);
+    inputTokens += record.inputTokens;
+    cachedInputTokens += record.cachedInputTokens;
+    outputTokens += record.outputTokens;
+    estimatedCost += record.estimatedCost;
+    internalCost += record.internalCost;
+  }
+
+  return {
+    reviewJobCount: reviewIds.size,
+    successfulReviewCount: successfulReviewIds.size,
+    failedAttemptCount,
+    affectedThreadCount: affectedThreadIds.size,
+    affectedUserCount: affectedUserIds.size,
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    totalTokens: usageTotalTokens(inputTokens, outputTokens),
+    estimatedCost: formatDecimal(estimatedCost),
+    internalCost: formatDecimal(internalCost)
+  };
+}
+
 function ensureAggregateState(target: Map<string, AggregateState>, key: string): AggregateState {
   const existing = target.get(key);
   if (existing) return existing;
@@ -652,7 +712,10 @@ function applyToAggregate(target: AggregateState, record: NormalizedEvent): void
 }
 
 export function buildOperationsInsights(input: BuildOperationsInsightsInput): OperationsInsightsResponse {
-  const filtered = normalizeEvents(input);
+  const normalized = normalizeEvents(input);
+  const securityReviewEvents = normalized.filter((record) => record.featureType === "security_review");
+  const filtered = normalized.filter((record) => record.featureType !== "security_review");
+  const securityReview = buildSecurityReviewSummary(securityReviewEvents);
   const now = input.now ?? new Date();
   const summaryRequestCount = filtered.length;
   const sessionBuckets = new Map<string, SessionAggregateState>();
@@ -1062,6 +1125,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       avgInternalCostPerRequest: formatDecimal(summaryRequestCount ? internalCost / summaryRequestCount : 0),
       cacheShare: formatRatio(usageCacheShare(inputTokens, cachedInputTokens))
     },
+    securityReview,
     trends,
     breakdowns: {
       paths: pathRows,

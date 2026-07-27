@@ -1,5 +1,5 @@
 import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs } from "antd";
-import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { formatUsdAmount } from "../../lib/formatters";
@@ -145,6 +145,40 @@ function MetricItem(props: { label: string; value: string; meta: string }) {
       <strong className="ops-analytics-metric-value" title={props.value}>{props.value}</strong>
       <span className="ops-analytics-metric-meta">{props.meta}</span>
     </article>
+  );
+}
+
+function SecurityReviewCostPanel(props: { data: OperationsInsightsResponse["securityReview"] }) {
+  const metrics = [
+    { label: "审核任务", value: formatCount(props.data.reviewJobCount), meta: `覆盖 ${formatCount(props.data.affectedThreadCount)} 个 Thread` },
+    { label: "成功审核", value: formatCount(props.data.successfulReviewCount), meta: `涉及 ${formatCount(props.data.affectedUserCount)} 个用户` },
+    { label: "失败尝试", value: formatCount(props.data.failedAttemptCount), meta: "会自动重试，不等于最终失败" },
+    { label: "安全 Tokens", value: formatCount(props.data.totalTokens), meta: `缓存输入 ${formatCount(props.data.cachedInputTokens)}` },
+    { label: "预估价值", value: formatUsdAmount(props.data.estimatedCost), meta: "按审核模型单价折算" },
+    { label: "内部价值", value: formatUsdAmount(props.data.internalCost), meta: "计入平台成本，不计入业务价值" }
+  ];
+
+  return (
+    <section className="ops-analytics-security-cost" aria-labelledby="ops-security-cost-title">
+      <header className="ops-analytics-security-cost-head">
+        <span className="ops-analytics-security-cost-icon" aria-hidden="true">
+          <ShieldCheck size={17} />
+        </span>
+        <div>
+          <h3 id="ops-security-cost-title">安全审核开销</h3>
+          <p>独立统计，不计入业务会话、问题次数、趋势、分布和会话台账。</p>
+        </div>
+      </header>
+      <div className="ops-analytics-security-cost-grid">
+        {metrics.map((metric) => (
+          <article key={metric.label}>
+            <span>{metric.label}</span>
+            <strong title={metric.value}>{metric.value}</strong>
+            <small>{metric.meta}</small>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -754,24 +788,30 @@ export function OperationsAnalyticsView() {
         </section>
 
         {data ? (
-          <section className="ops-analytics-kpi-strip" aria-label="运营关键指标">
-            <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有调用的组织" />
-            <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有调用的用户" />
-            <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="至少提交过一个问题" />
-            <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`每会话 ${data.summary.avgRequestsPerSession} 次`} />
-            <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
-            <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="按模型单价折算" />
-            <MetricItem
-              label="内部价值"
-              value={formatUsdAmount(data.summary.internalCost)}
-              meta={`平均 ${formatUsdAmount(data.summary.avgInternalCostPerRequest)} /问题`}
-            />
-            <MetricItem
-              label="缓存占比"
-              value={formatPercent(data.summary.cacheShare)}
-              meta={`缓存写入 ${formatCount(data.summary.cacheWriteTokens)} tokens`}
-            />
-          </section>
+          <div className="ops-analytics-business-summary">
+            <div className="ops-analytics-business-summary-head">
+              <strong>业务使用</strong>
+              <span>仅统计用户与渠道请求，已排除后台安全审核</span>
+            </div>
+            <section className="ops-analytics-kpi-strip" aria-label="业务运营关键指标">
+              <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有业务调用的组织" />
+              <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有业务调用的用户" />
+              <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="业务会话，不含安全审核" />
+              <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`业务请求 · 每会话 ${data.summary.avgRequestsPerSession} 次`} />
+              <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`业务使用 · 平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
+              <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="业务使用按模型单价折算" />
+              <MetricItem
+                label="内部价值"
+                value={formatUsdAmount(data.summary.internalCost)}
+                meta={`业务使用 · 平均 ${formatUsdAmount(data.summary.avgInternalCostPerRequest)} /问题`}
+              />
+              <MetricItem
+                label="缓存占比"
+                value={formatPercent(data.summary.cacheShare)}
+                meta={`业务缓存写入 ${formatCount(data.summary.cacheWriteTokens)} tokens`}
+              />
+            </section>
+          </div>
         ) : null}
       </div>
 
@@ -785,6 +825,8 @@ export function OperationsAnalyticsView() {
 
       {data ? (
         <>
+          <SecurityReviewCostPanel data={data.securityReview} />
+
           <section className="ops-analytics-context-strip">
             <div className="ops-analytics-context-block">
               <span className="ops-analytics-context-label">统计窗口</span>
@@ -807,7 +849,7 @@ export function OperationsAnalyticsView() {
                 key: "overview",
                 label: "趋势总览",
                 children: (
-                  <TableShell title="趋势" subtitle="按本地时区天粒度回放会话、问题次数、tokens 和价值变化。">
+                  <TableShell title="业务趋势" subtitle="按本地时区回放业务会话、问题次数、tokens 和价值；后台安全审核单独统计。">
                     <TrendTable rows={data.trends} />
                   </TableShell>
                 )
@@ -862,7 +904,7 @@ export function OperationsAnalyticsView() {
                 children: (
                   <TableShell
                     title="会话台账"
-                    subtitle="逐会话查看 model、路径、tokens 和价值，点击会话 ID 可打开对应对话记录。"
+                    subtitle="仅列出真实业务会话；security_review 等后台任务不进入台账。点击会话 ID 可打开对应对话记录。"
                     action={
                       <div className="ops-analytics-session-meta">
                         <span>共 {formatCount(data.sessions.totalItems)} 条</span>

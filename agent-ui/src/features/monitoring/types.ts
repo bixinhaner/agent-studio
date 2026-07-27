@@ -33,6 +33,20 @@ export type OperationsInsightsSummary = {
   cacheShare: number;
 };
 
+export type OperationsInsightsSecurityReviewSummary = {
+  reviewJobCount: number;
+  successfulReviewCount: number;
+  failedAttemptCount: number;
+  affectedThreadCount: number;
+  affectedUserCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+};
+
 export type OperationsInsightsTrendPoint = {
   day: string;
   organizationCount: number;
@@ -137,6 +151,7 @@ export type OperationsInsightsResponse = {
     entries: Array<{ value: string; label: string }>;
   };
   summary: OperationsInsightsSummary;
+  securityReview: OperationsInsightsSecurityReviewSummary;
   trends: OperationsInsightsTrendPoint[];
   breakdowns: {
     paths: OperationsInsightsBreakdownRow[];
