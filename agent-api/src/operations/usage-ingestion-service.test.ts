@@ -719,7 +719,12 @@ describe("UsageIngestionService", () => {
   });
 
   it("deduplicates cumulative snapshots across Agent Studio sessions for the same Codex thread", async () => {
-    let previous: Awaited<ReturnType<UsageIngestionService["record"]>> | undefined;
+    let previousCursor: {
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+    } | undefined;
+    let createdCount = 0;
     const service = new UsageIngestionService({
       costProfiles: {
         async getActiveByModel() {
@@ -734,9 +739,22 @@ describe("UsageIngestionService", () => {
           throw new Error(`unexpected non-transactional create for ${input.sessionId}`);
         },
         async createCodexCumulative(input) {
-          const eventInput = input.buildInput(previous);
-          previous = {
-            id: previous ? "usage-2" : "usage-1",
+          const eventInput = input.buildInput(previousCursor);
+          const snapshot = (eventInput.metadata as {
+            _codexRuntimeUsage: {
+              inputTokens: number;
+              cachedInputTokens: number;
+              outputTokens: number;
+            };
+          })._codexRuntimeUsage;
+          previousCursor = {
+            inputTokens: Math.max(previousCursor?.inputTokens ?? 0, snapshot.inputTokens),
+            cachedInputTokens: Math.max(previousCursor?.cachedInputTokens ?? 0, snapshot.cachedInputTokens),
+            outputTokens: Math.max(previousCursor?.outputTokens ?? 0, snapshot.outputTokens)
+          };
+          createdCount += 1;
+          return {
+            id: `usage-${createdCount}`,
             organizationId: eventInput.organizationId,
             userId: eventInput.userId,
             departmentIdSnapshot: eventInput.departmentIdSnapshot,
@@ -752,9 +770,8 @@ describe("UsageIngestionService", () => {
             internalCost: eventInput.internalCost ?? "0.000000",
             resultStatus: eventInput.resultStatus,
             metadata: eventInput.metadata,
-            createdAt: previous ? "2026-07-27T02:00:00.000Z" : "2026-07-27T01:00:00.000Z"
+            createdAt: `2026-07-27T0${createdCount}:00:00.000Z`
           };
-          return previous;
         }
       }
     });
@@ -783,6 +800,21 @@ describe("UsageIngestionService", () => {
       inputTokens: 1200,
       cachedInputTokens: 900,
       outputTokens: 60
+    });
+
+    const stale = await service.recordCodexRuntimeUsage({
+      sessionId: "agent-session-old",
+      model: "gpt-5.4",
+      featureType: "chat",
+      codexThreadId: "codex-thread-shared",
+      inputTokens: 10_500,
+      cachedInputTokens: 8_500,
+      outputTokens: 530
+    });
+    expect(stale).toMatchObject({
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0
     });
   });
 });

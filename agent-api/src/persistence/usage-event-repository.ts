@@ -115,7 +115,14 @@ type UsageEventTransaction = {
 export type CreateCodexCumulativeUsageInput = {
   codexThreadId: string;
   featureType: string;
-  buildInput: (previous: UsageEventRecord | undefined) => CreateUsageEventInput;
+  buildInput: (previous: CodexCumulativeUsageCursor | undefined) => CreateUsageEventInput;
+};
+
+export type CodexCumulativeUsageCursor = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens?: number;
+  outputTokens: number;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -201,37 +208,44 @@ export class UsageEventRepository {
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         lockKey
       );
-      const rows = await transaction.$queryRawUnsafe<UsageEventRow[]>(
+      const rows = await transaction.$queryRawUnsafe<Array<{
+        inputTokens: bigint | null;
+        cachedInputTokens: bigint | null;
+        cacheWriteTokens: bigint | null;
+        outputTokens: bigint | null;
+      }>>(
         `SELECT
-          id,
-          organization_id AS "organizationId",
-          user_id AS "userId",
-          department_id_snapshot AS "departmentIdSnapshot",
-          thread_id AS "threadId",
-          session_id AS "sessionId",
-          model,
-          feature_type AS "featureType",
-          input_tokens AS "inputTokens",
-          cached_input_tokens AS "cachedInputTokens",
-          cache_write_tokens AS "cacheWriteTokens",
-          output_tokens AS "outputTokens",
-          estimated_cost AS "estimatedCost",
-          internal_cost AS "internalCost",
-          result_status AS "resultStatus",
-          metadata,
-          created_at AS "createdAt"
+          MAX((CASE WHEN metadata -> '_codexRuntimeUsage' ->> 'kind' = 'turn_delta'
+            THEN metadata -> '_codexRuntimeUsage' -> 'cumulative' ->> 'inputTokens'
+            ELSE metadata -> '_codexRuntimeUsage' ->> 'inputTokens' END)::bigint) AS "inputTokens",
+          MAX((CASE WHEN metadata -> '_codexRuntimeUsage' ->> 'kind' = 'turn_delta'
+            THEN metadata -> '_codexRuntimeUsage' -> 'cumulative' ->> 'cachedInputTokens'
+            ELSE metadata -> '_codexRuntimeUsage' ->> 'cachedInputTokens' END)::bigint) AS "cachedInputTokens",
+          MAX((CASE WHEN metadata -> '_codexRuntimeUsage' ->> 'kind' = 'turn_delta'
+            THEN metadata -> '_codexRuntimeUsage' -> 'cumulative' ->> 'cacheWriteTokens'
+            ELSE metadata -> '_codexRuntimeUsage' ->> 'cacheWriteTokens' END)::bigint) AS "cacheWriteTokens",
+          MAX((CASE WHEN metadata -> '_codexRuntimeUsage' ->> 'kind' = 'turn_delta'
+            THEN metadata -> '_codexRuntimeUsage' -> 'cumulative' ->> 'outputTokens'
+            ELSE metadata -> '_codexRuntimeUsage' ->> 'outputTokens' END)::bigint) AS "outputTokens"
         FROM usage_events
         WHERE feature_type = $1
           AND COALESCE(
             metadata -> '_codexRuntimeUsage' ->> 'codexThreadId',
             metadata ->> 'codexThreadId'
           ) = $2
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1`,
+        `,
         featureType,
         codexThreadId
       );
-      const previous = rows[0] ? mapUsageEvent(rows[0]) : undefined;
+      const row = rows[0];
+      const previous = row?.inputTokens !== null && row?.cachedInputTokens !== null && row?.outputTokens !== null
+        ? {
+            inputTokens: Number(row.inputTokens),
+            cachedInputTokens: Number(row.cachedInputTokens),
+            ...(row.cacheWriteTokens !== null ? { cacheWriteTokens: Number(row.cacheWriteTokens) } : {}),
+            outputTokens: Number(row.outputTokens)
+          }
+        : undefined;
       return this.createWithTable(transaction.usageEvent, input.buildInput(previous));
     });
   }

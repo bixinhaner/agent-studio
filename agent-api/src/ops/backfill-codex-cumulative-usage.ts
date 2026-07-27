@@ -114,7 +114,7 @@ function historicalProfile(metadata: unknown): CostProfileRecord | null {
 }
 
 function delta(current: number, previous: number | undefined): number {
-  return previous === undefined || current < previous ? current : current - previous;
+  return previous === undefined ? current : Math.max(0, current - previous);
 }
 
 function sameUsage(event: EventRow, usage: Required<TokenUsage>): boolean {
@@ -200,20 +200,26 @@ async function main(): Promise<void> {
                 ...usage,
                 cacheWriteTelemetryAvailable: snapshot.cacheWriteTokens !== undefined
               });
+              const rootMetadata = asRecord(event.metadata) ?? {};
+              const previousCorrection = asRecord(rootMetadata._usageCorrection);
+              const originalCorrection = previousCorrection?.reason ===
+                "cross_session_codex_cumulative_snapshot_backfill"
+                ? previousCorrection
+                : undefined;
               const metadata = {
-                ...(asRecord(event.metadata) ?? {}),
+                ...rootMetadata,
                 _usageCorrection: {
                   version: 1,
                   reason: "cross_session_codex_cumulative_snapshot_backfill",
                   correctedAt,
-                  oldUsage: {
-                    inputTokens: event.inputTokens,
-                    cachedInputTokens: event.cachedInputTokens,
-                    cacheWriteTokens: event.cacheWriteTokens,
-                    outputTokens: event.outputTokens
-                  },
-                  oldEstimatedCost: decimal(event.estimatedCost),
-                  oldInternalCost: decimal(event.internalCost)
+                  oldUsage: originalCorrection?.oldUsage ?? {
+                      inputTokens: event.inputTokens,
+                      cachedInputTokens: event.cachedInputTokens,
+                      cacheWriteTokens: event.cacheWriteTokens,
+                      outputTokens: event.outputTokens
+                    },
+                  oldEstimatedCost: originalCorrection?.oldEstimatedCost ?? decimal(event.estimatedCost),
+                  oldInternalCost: originalCorrection?.oldInternalCost ?? decimal(event.internalCost)
                 }
               };
               corrections.push({
@@ -227,7 +233,14 @@ async function main(): Promise<void> {
           }
         }
       }
-      cursors.set(key, snapshot);
+      cursors.set(key, {
+        inputTokens: Math.max(previous?.inputTokens ?? 0, snapshot.inputTokens),
+        cachedInputTokens: Math.max(previous?.cachedInputTokens ?? 0, snapshot.cachedInputTokens),
+        ...(snapshot.cacheWriteTokens !== undefined || previous?.cacheWriteTokens !== undefined
+          ? { cacheWriteTokens: Math.max(previous?.cacheWriteTokens ?? 0, snapshot.cacheWriteTokens ?? 0) }
+          : {}),
+        outputTokens: Math.max(previous?.outputTokens ?? 0, snapshot.outputTokens)
+      });
     }
 
     const summary = {

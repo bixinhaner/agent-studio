@@ -3,6 +3,7 @@ import type {
   CostProfileRepository
 } from "../persistence/cost-profile-repository.js";
 import type {
+  CodexCumulativeUsageCursor,
   CreateUsageEventInput,
   UsageEventRecord,
   UsageEventRepository
@@ -221,6 +222,10 @@ function deltaFromCumulative(current: number, previous: number | undefined): num
   if (previous === undefined) return current;
   if (current >= previous) return current - previous;
   return current;
+}
+
+function deltaFromHighWater(current: number, previous: number | undefined): number {
+  return previous === undefined ? current : Math.max(0, current - previous);
 }
 
 function parseDecimal(value: string | undefined, fallback = 0): number {
@@ -486,26 +491,19 @@ export class UsageIngestionService {
       });
     }
 
-    const buildDeltaInput = (previousEvent: UsageEventRecord | undefined): RecordUsageInput => {
-      const previousSnapshot = snapshotFromMetadata(previousEvent?.metadata) ?? (
-        previousEvent
-          ? codexRuntimeUsageMetadata({
-              inputTokens: previousEvent.inputTokens,
-              cachedInputTokens: previousEvent.cachedInputTokens,
-              cacheWriteTokens: previousEvent.cacheWriteTokens,
-              outputTokens: previousEvent.outputTokens
-            })
-          : undefined
-      );
+    const buildDeltaInput = (
+      previousSnapshot: CodexCumulativeUsageCursor | undefined,
+      delta: typeof deltaFromCumulative
+    ): RecordUsageInput => {
       return {
         ...input,
-        inputTokens: deltaFromCumulative(currentSnapshot.inputTokens, previousSnapshot?.inputTokens),
-        cachedInputTokens: deltaFromCumulative(currentSnapshot.cachedInputTokens, previousSnapshot?.cachedInputTokens),
+        inputTokens: delta(currentSnapshot.inputTokens, previousSnapshot?.inputTokens),
+        cachedInputTokens: delta(currentSnapshot.cachedInputTokens, previousSnapshot?.cachedInputTokens),
         cacheWriteTokens:
           currentSnapshot.cacheWriteTokens === undefined
             ? undefined
-            : deltaFromCumulative(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
-        outputTokens: deltaFromCumulative(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
+            : delta(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
+        outputTokens: delta(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
         codexRuntimeModelInvocations: input.codexRuntimeModelInvocations ?? [],
         metadata: metadataWithCodexRuntimeSnapshot({
           metadata: {
@@ -526,7 +524,7 @@ export class UsageIngestionService {
         codexThreadId,
         featureType: input.featureType,
         buildInput: (previous) => {
-          const deltaInput = buildDeltaInput(previous);
+          const deltaInput = buildDeltaInput(previous, deltaFromHighWater);
           const usage = sanitizeUsage(deltaInput);
           const costs = calculateEstimatedCost({
             profile,
@@ -565,6 +563,16 @@ export class UsageIngestionService {
       ? previousEvents.find((event) => codexThreadIdFromMetadata(event.metadata) === codexThreadId) ??
         (previousEvents.some((event) => codexThreadIdFromMetadata(event.metadata)) ? undefined : previousEvents[0])
       : previousEvents[0];
-    return this.record(buildDeltaInput(previousEvent));
+    const previousSnapshot = snapshotFromMetadata(previousEvent?.metadata) ?? (
+      previousEvent
+        ? {
+            inputTokens: previousEvent.inputTokens,
+            cachedInputTokens: previousEvent.cachedInputTokens,
+            cacheWriteTokens: previousEvent.cacheWriteTokens,
+            outputTokens: previousEvent.outputTokens
+          }
+        : undefined
+    );
+    return this.record(buildDeltaInput(previousSnapshot, deltaFromCumulative));
   }
 }
