@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Spin } from "antd";
-import { FileSearch } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileSearch, Search, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
@@ -28,6 +28,41 @@ type XlsxSheetPreview = {
   rows: string[][];
 };
 
+type TextPreviewPayload = {
+  kind: "text";
+  encoding: string;
+  offset: number;
+  limit: number;
+  lines: Array<{ number: number; text: string }>;
+  totalLines: number | null;
+  totalLinesKnown: boolean;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  query?: string;
+  matchesTruncated?: boolean;
+  sizeBytes: number;
+  partial: boolean;
+};
+
+type TablePreviewPayload = {
+  kind: "table";
+  format: string;
+  sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+  selectedSheet: string;
+  rowOffset: number;
+  rowLimit: number;
+  columnOffset: number;
+  columnLimit: number;
+  rows: string[][];
+  totalRows: number;
+  totalColumns: number;
+  hasPreviousRows: boolean;
+  hasNextRows: boolean;
+  hasPreviousColumns: boolean;
+  hasNextColumns: boolean;
+  partial: boolean;
+};
+
 type XlsxCellRange = {
   startRow: number;
   endRow: number;
@@ -50,6 +85,8 @@ type PreviewContent =
   | ({ kind: "pdf" } & PreviewContentBase)
   | ({ kind: "html"; html: string } & PreviewContentBase)
   | ({ kind: "text"; text: string } & PreviewContentBase)
+  | ({ kind: "paged-text"; data: TextPreviewPayload } & PreviewContentBase)
+  | ({ kind: "paged-table"; data: TablePreviewPayload } & PreviewContentBase)
   | ({ kind: "markdown"; text: string; filePath: string } & PreviewContentBase)
   | ({ kind: "docx"; html: string } & PreviewContentBase)
   | ({ kind: "xlsx"; sheets: XlsxSheetPreview[] } & PreviewContentBase)
@@ -113,6 +150,7 @@ const TEXT_LIKE_EXTENSIONS = new Set([
   "markdown",
   "json",
   "jsonl",
+  "ndjson",
   "yaml",
   "yml",
   "xml",
@@ -133,14 +171,30 @@ const TEXT_LIKE_EXTENSIONS = new Set([
   "go",
   "rs",
   "sh",
+  "bash",
+  "zsh",
+  "ps1",
   "log",
+  "syslog",
+  "dbglog",
+  "messages",
+  "conf",
+  "config",
+  "properties",
+  "ini",
+  "env",
+  "out",
+  "err",
+  "toml",
   "sql"
 ]);
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
-const WORD_EXTENSIONS = new Set(["doc", "docx"]);
-const POWERPOINT_EXTENSIONS = new Set(["ppt", "pptx"]);
-const EXCEL_EXTENSIONS = new Set(["xls", "xlsx"]);
+const WORD_EXTENSIONS = new Set(["doc", "docx", "odt", "rtf"]);
+const POWERPOINT_EXTENSIONS = new Set(["ppt", "pptx", "odp", "odg"]);
+const EXCEL_EXTENSIONS = new Set(["xls", "xlsx", "ods"]);
+const PAGINATED_OFFICE_EXTENSIONS = new Set([...WORD_EXTENSIONS, ...POWERPOINT_EXTENSIONS, "vsd", "vsdx"]);
+const DRAWIO_EXTENSIONS = new Set(["drawio", "dio"]);
 
 const UPLOADED_FILE_TAG_PATTERN = /<uploaded_file\s+([^>]+)>/gi;
 const UPLOADED_FILE_ATTR_PATTERN = /([a-zA-Z_][\w-]*)=("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s>]+)/g;
@@ -168,6 +222,17 @@ function fileExtension(name: string): string {
   const index = normalized.lastIndexOf(".");
   if (index < 0 || index === normalized.length - 1) return "";
   return normalized.slice(index + 1);
+}
+
+function xlsxColumnLabel(columnIndex: number): string {
+  let value = columnIndex + 1;
+  let label = "";
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + value % 26) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
 }
 
 function normalizeFilePath(rawPath: string): string {
@@ -534,6 +599,22 @@ function resolvePreviewKind(file: ThreadFileRecord, responseMimeType: string): P
   return "unsupported";
 }
 
+export function supportsPaginatedOfficePreview(fileName: string, mimeType = ""): boolean {
+  const extension = fileExtension(fileName);
+  if (PAGINATED_OFFICE_EXTENSIONS.has(extension)) return true;
+  const normalizedMime = mimeType.trim().toLowerCase();
+  return (
+    normalizedMime.includes("wordprocessingml") ||
+    normalizedMime.includes("msword") ||
+    normalizedMime.includes("presentationml") ||
+    normalizedMime.includes("powerpoint") ||
+    normalizedMime.includes("opendocument.text") ||
+    normalizedMime.includes("opendocument.presentation") ||
+    normalizedMime.includes("opendocument.graphics") ||
+    normalizedMime.includes("rtf")
+  );
+}
+
 function isKnowledgeSetFilePath(filePath: string): boolean {
   const normalized = normalizeFilePath(filePath);
   return normalized.includes("/data/knowledge-sets/");
@@ -603,8 +684,25 @@ function resolveMarkdownLinkedFilePath(baseFilePath: string, rawTarget: string):
   return { filePath: relativePath, anchor };
 }
 
-async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<Response> {
+type PreviewFetchOptions = {
+  mode?: "pdf" | "auto" | "text" | "table" | "diagram";
+  params?: Record<string, string | number | undefined>;
+};
+
+function appendPreviewOptions(query: URLSearchParams, options?: PreviewFetchOptions): void {
+  if (options?.mode) query.set("preview", options.mode);
+  for (const [key, value] of Object.entries(options?.params || {})) {
+    if (value !== undefined && String(value).trim()) query.set(key, String(value));
+  }
+}
+
+async function fetchThreadFileBlob(
+  threadId: string,
+  filePath: string,
+  options?: PreviewFetchOptions
+): Promise<Response> {
   const query = new URLSearchParams({ path: filePath });
+  appendPreviewOptions(query, options);
   const response = await fetch(
     `${apiBase()}/api/threads/${encodeURIComponent(threadId)}/files/content?${query.toString()}`,
     {
@@ -634,9 +732,14 @@ async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<
   return response;
 }
 
-async function fetchWorkspaceFileBlob(fileId: string, versionId?: string): Promise<Response> {
+async function fetchWorkspaceFileBlob(
+  fileId: string,
+  versionId?: string,
+  options?: PreviewFetchOptions
+): Promise<Response> {
   const query = new URLSearchParams();
   if (versionId) query.set("version_id", versionId);
+  appendPreviewOptions(query, options);
   const response = await fetch(
     `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(fileId)}/content${query.toString() ? `?${query.toString()}` : ""}`,
     {
@@ -714,8 +817,14 @@ async function resolveThreadArtifact(threadId: string, filePath: string): Promis
   };
 }
 
-async function fetchThreadArtifactFileBlob(threadId: string, filePath: string, disposition: "inline" | "attachment" = "inline"): Promise<Response> {
+async function fetchThreadArtifactFileBlob(
+  threadId: string,
+  filePath: string,
+  disposition: "inline" | "attachment" = "inline",
+  options?: PreviewFetchOptions
+): Promise<Response> {
   const query = new URLSearchParams({ path: filePath, disposition });
+  appendPreviewOptions(query, options);
   const response = await fetch(
     `${apiBase()}/api/threads/${encodeURIComponent(threadId)}/artifacts/content?${query.toString()}`,
     {
@@ -745,8 +854,9 @@ async function fetchThreadArtifactFileBlob(threadId: string, filePath: string, d
   return response;
 }
 
-async function fetchPortalResourceFileBlob(filePath: string): Promise<Response> {
+async function fetchPortalResourceFileBlob(filePath: string, options?: PreviewFetchOptions): Promise<Response> {
   const query = new URLSearchParams({ path: filePath });
+  appendPreviewOptions(query, options);
   const response = await fetch(`${apiBase()}/api/portal/resources/files/content?${query.toString()}`, {
     method: "GET",
     credentials: "include",
@@ -771,6 +881,18 @@ async function fetchPortalResourceFileBlob(filePath: string): Promise<Response> 
     throw new Error(detail);
   }
   return response;
+}
+
+async function fetchPaginatedOfficePreview(
+  usePaginatedPreview: boolean,
+  fetchFile: (options?: PreviewFetchOptions) => Promise<Response>
+): Promise<Response> {
+  if (!usePaginatedPreview) return fetchFile();
+  try {
+    return await fetchFile({ mode: "pdf" });
+  } catch {
+    return fetchFile();
+  }
 }
 
 async function convertDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
@@ -897,7 +1019,7 @@ function createPreviewMarkdownHeading(tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h
 
 function parseLineAnchor(value: string): number | null {
   const normalized = normalizeMarkdownAnchor(value);
-  const match = normalized.match(/^l(\d+)$/i);
+  const match = normalized.match(/^l(\d+)(?:-l?\d+)?$/i);
   if (!match) return null;
   const line = Number(match[1]);
   if (!Number.isFinite(line) || line <= 0) return null;
@@ -1250,11 +1372,19 @@ export function PreviewWorkbenchPanel(props: {
   const [selectedAnchor, setSelectedAnchor] = useState("");
   const [anchorJumpToken, setAnchorJumpToken] = useState(0);
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
+  const [textOffset, setTextOffset] = useState(0);
+  const [textSearchDraft, setTextSearchDraft] = useState("");
+  const [textSearch, setTextSearch] = useState("");
+  const [tableSheet, setTableSheet] = useState("");
+  const [tableRowOffset, setTableRowOffset] = useState(0);
+  const [tableColumnOffset, setTableColumnOffset] = useState(0);
   const [workspaceVersions, setWorkspaceVersions] = useState<WorkspaceFileVersionApiRecord[]>([]);
   const [selectedWorkspaceVersionId, setSelectedWorkspaceVersionId] = useState("");
   const [restoringWorkspaceVersion, setRestoringWorkspaceVersion] = useState(false);
   const previewObjectUrlRef = useRef("");
   const xlsxPreviewRef = useRef<HTMLDivElement | null>(null);
+  const pagedTextPreviewRef = useRef<HTMLPreElement | null>(null);
+  const pagedTextTargetRef = useRef<HTMLSpanElement | null>(null);
   const fileCitationTarget = useMemo(
     () => parseCodexFileCitationPreviewAnchor(selectedAnchor),
     [selectedAnchor]
@@ -1263,11 +1393,25 @@ export function PreviewWorkbenchPanel(props: {
     () => parseXlsxCellRange(fileCitationTarget?.range),
     [fileCitationTarget?.range]
   );
+  const selectedTextTargetLine = useMemo(
+    () => parseLineAnchor(normalizeMarkdownAnchor(selectedAnchor)),
+    [selectedAnchor]
+  );
+  const selectedTextTargetOffset = selectedTextTargetLine
+    ? Math.floor((selectedTextTargetLine - 1) / 200) * 200
+    : 0;
   const navigatePreviewTarget = useCallback((target: { filePath: string; anchor: string }) => {
     const normalizedFilePath = normalizeFilePath(target.filePath);
     if (!normalizedFilePath) return;
     setSelectedFilePath(normalizedFilePath);
     setSelectedAnchor(normalizeMarkdownAnchor(target.anchor || ""));
+    const targetLine = parseLineAnchor(normalizeMarkdownAnchor(target.anchor || ""));
+    setTextOffset(targetLine ? Math.floor((targetLine - 1) / 200) * 200 : 0);
+    setTextSearchDraft("");
+    setTextSearch("");
+    setTableSheet("");
+    setTableRowOffset(0);
+    setTableColumnOffset(0);
     setAnchorJumpToken((value) => value + 1);
   }, []);
 
@@ -1294,12 +1438,27 @@ export function PreviewWorkbenchPanel(props: {
   useEffect(() => {
     setSelectedFilePath("");
     setSelectedAnchor("");
+    setTextOffset(0);
+    setTextSearchDraft("");
+    setTextSearch("");
+    setTableSheet("");
+    setTableRowOffset(0);
+    setTableColumnOffset(0);
   }, [props.threadId]);
 
   useEffect(() => {
     if (!requestedFilePath) return;
     setSelectedFilePath(requestedFilePath);
     setSelectedAnchor(requestedAnchor);
+    const targetLine = parseLineAnchor(normalizeMarkdownAnchor(requestedAnchor));
+    setTextOffset(targetLine ? Math.floor((targetLine - 1) / 200) * 200 : 0);
+    setTextSearchDraft("");
+    setTextSearch("");
+    setTableSheet("");
+    const citation = parseCodexFileCitationPreviewAnchor(requestedAnchor);
+    const range = parseXlsxCellRange(citation?.range);
+    setTableRowOffset(range ? Math.floor((range.startRow - 1) / 100) * 100 : 0);
+    setTableColumnOffset(range ? Math.floor((range.startColumn - 1) / 40) * 40 : 0);
     setAnchorJumpToken((value) => value + 1);
   }, [props.requestNonce, requestedAnchor, requestedFilePath]);
 
@@ -1390,13 +1549,47 @@ export function PreviewWorkbenchPanel(props: {
         let response: Response;
         let fileForKind = activeFileForKind;
         let downloadUrl = "";
+        const extension = fileExtension(fileForKind.displayName || fileForKind.filePath);
+        const structuredOptions: PreviewFetchOptions | undefined =
+          EXCEL_EXTENSIONS.has(extension) || extension === "csv" || extension === "tsv"
+            ? {
+                mode: "table",
+                params: {
+                  sheet: tableSheet || fileCitationTarget?.sheet,
+                  row_offset: tableRowOffset,
+                  row_limit: 100,
+                  column_offset: tableColumnOffset,
+                  column_limit: 40
+                }
+              }
+            : DRAWIO_EXTENSIONS.has(extension)
+              ? { mode: "diagram" }
+              : TEXT_LIKE_EXTENSIONS.has(extension) && !["md", "markdown", "html", "htm"].includes(extension)
+                ? {
+                    mode: "text",
+                    params: { offset: textOffset, limit: 200, search: textSearch || undefined }
+                  }
+                : !extension
+                  ? { mode: "auto" }
+                  : undefined;
         if (workspaceFileId) {
-          response = await fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined);
+          response = structuredOptions
+            ? await fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, structuredOptions)
+            : await fetchPaginatedOfficePreview(
+                supportsPaginatedOfficePreview(fileForKind.filePath, fileForKind.mimeType),
+                (options) =>
+                  fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, options)
+              );
           const query = new URLSearchParams({ disposition: "attachment" });
           if (selectedWorkspaceVersionId) query.set("version_id", selectedWorkspaceVersionId);
           downloadUrl = `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(workspaceFileId)}/content?${query.toString()}`;
         } else if (isKnowledgeSetFile) {
-          response = await fetchPortalResourceFileBlob(filePath);
+          response = structuredOptions
+            ? await fetchPortalResourceFileBlob(filePath, structuredOptions)
+            : await fetchPaginatedOfficePreview(
+                supportsPaginatedOfficePreview(fileForKind.filePath, fileForKind.mimeType),
+                (options) => fetchPortalResourceFileBlob(filePath, options)
+              );
         } else if (props.externalArtifactMode) {
           const resolved = await resolveThreadArtifact(props.threadId, filePath);
           if (resolved.artifact.preview_status !== "ready") {
@@ -1415,9 +1608,36 @@ export function PreviewWorkbenchPanel(props: {
                 disposition: "attachment"
               }) || "";
           }
-          response = await fetchThreadArtifactFileBlob(props.threadId, filePath);
+          response = structuredOptions
+            ? await fetchThreadArtifactFileBlob(props.threadId, filePath, "inline", structuredOptions)
+            : await fetchPaginatedOfficePreview(
+                supportsPaginatedOfficePreview(fileForKind.filePath, fileForKind.mimeType),
+                (options) => fetchThreadArtifactFileBlob(props.threadId, filePath, "inline", options)
+              );
         } else {
-          response = await fetchThreadFileBlob(props.threadId, filePath);
+          response = structuredOptions
+            ? await fetchThreadFileBlob(props.threadId, filePath, structuredOptions)
+            : await fetchPaginatedOfficePreview(
+                supportsPaginatedOfficePreview(fileForKind.filePath, fileForKind.mimeType),
+                (options) => fetchThreadFileBlob(props.threadId, filePath, options)
+              );
+        }
+        const responseContentType = response.headers.get("content-type") || "";
+        if (responseContentType.includes("application/json")) {
+          const payload = await response.json() as TextPreviewPayload | TablePreviewPayload;
+          if (!cancelled && payload.kind === "text") {
+            setPreview({
+              status: "ready",
+              content: { kind: "paged-text", data: payload, objectUrl: "", ...(downloadUrl ? { downloadUrl } : {}) }
+            });
+          } else if (!cancelled && payload.kind === "table") {
+            setTableSheet(payload.selectedSheet);
+            setPreview({
+              status: "ready",
+              content: { kind: "paged-table", data: payload, objectUrl: "", ...(downloadUrl ? { downloadUrl } : {}) }
+            });
+          }
+          return;
         }
         const blob = await response.blob();
         createdObjectUrl = URL.createObjectURL(blob);
@@ -1579,6 +1799,11 @@ export function PreviewWorkbenchPanel(props: {
     props.threadId,
     props.workspaceFileId,
     selectedWorkspaceVersionId,
+    tableColumnOffset,
+    tableRowOffset,
+    tableSheet,
+    textOffset,
+    textSearch,
     t
   ]);
 
@@ -1596,6 +1821,28 @@ export function PreviewWorkbenchPanel(props: {
           range: fileCitationTarget.range || t("preview.entireSheet")
         })
       : "";
+
+  useEffect(() => {
+    if (
+      activePreview?.kind !== "paged-text" ||
+      !selectedTextTargetLine ||
+      !pagedTextTargetRef.current ||
+      !pagedTextPreviewRef.current
+    ) {
+      return;
+    }
+    const target = pagedTextTargetRef.current;
+    target.classList.remove("preview-text-line-hit");
+    void target.offsetWidth;
+    target.classList.add("preview-text-line-hit");
+    return keepPreviewTargetAligned({
+      root: pagedTextPreviewRef.current,
+      target,
+      block: "center",
+      behavior: "auto",
+      stabilize: true
+    });
+  }, [activePreview, anchorJumpToken, selectedTextTargetLine]);
 
   useEffect(() => {
     if (activePreview?.kind !== "xlsx" || !fileCitationTarget?.sheet || !xlsxPreviewRef.current) return;
@@ -1700,7 +1947,15 @@ export function PreviewWorkbenchPanel(props: {
               ) : null}
 
               {activePreview?.kind === "pdf" ? (
-                <iframe className="preview-iframe" src={activePreview.objectUrl} title={activeFile.displayName} />
+                <iframe
+                  className="preview-iframe"
+                  src={
+                    fileCitationTarget?.pageNumber
+                      ? `${activePreview.objectUrl}#page=${fileCitationTarget.pageNumber}`
+                      : activePreview.objectUrl
+                  }
+                  title={activeFile.displayName}
+                />
               ) : null}
 
               {activePreview?.kind === "html" || activePreview?.kind === "docx" ? (
@@ -1726,6 +1981,94 @@ export function PreviewWorkbenchPanel(props: {
                   anchor={selectedAnchor}
                   jumpToken={anchorJumpToken}
                 />
+              ) : null}
+
+              {activePreview?.kind === "paged-text" ? (
+                <div className="preview-paged-text">
+                  <div className="preview-data-toolbar">
+                    <form
+                      className="preview-search"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        setTextOffset(0);
+                        setTextSearch(textSearchDraft.trim());
+                      }}
+                    >
+                      <Search size={15} aria-hidden="true" />
+                      <input
+                        value={textSearchDraft}
+                        onChange={(event) => setTextSearchDraft(event.target.value)}
+                        placeholder={locale === "zh-CN" ? "搜索文件" : "Search file"}
+                        aria-label={locale === "zh-CN" ? "搜索文件" : "Search file"}
+                      />
+                      {textSearchDraft ? (
+                        <button
+                          type="button"
+                          className="preview-icon-button"
+                          title={locale === "zh-CN" ? "清除搜索" : "Clear search"}
+                          onClick={() => {
+                            setTextSearchDraft("");
+                            setTextSearch("");
+                            setTextOffset(selectedTextTargetOffset);
+                          }}
+                        >
+                          <X size={14} aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </form>
+                    <span className="preview-data-status">
+                      {activePreview.data.query
+                        ? locale === "zh-CN"
+                          ? `${activePreview.data.lines.length}${activePreview.data.matchesTruncated ? "+" : ""} 个匹配项`
+                          : `${activePreview.data.lines.length}${activePreview.data.matchesTruncated ? "+" : ""} matches`
+                        : locale === "zh-CN"
+                          ? `第 ${activePreview.data.lines[0]?.number || 0}-${activePreview.data.lines.at(-1)?.number || 0} 行${activePreview.data.totalLinesKnown ? `，共 ${activePreview.data.totalLines} 行` : ""}`
+                          : `Lines ${activePreview.data.lines[0]?.number || 0}-${activePreview.data.lines.at(-1)?.number || 0}${activePreview.data.totalLinesKnown ? ` of ${activePreview.data.totalLines}` : ""}`}
+                    </span>
+                    {!activePreview.data.query ? (
+                      <div className="preview-pagination">
+                        <button
+                          type="button"
+                          className="preview-icon-button"
+                          disabled={!activePreview.data.hasPrevious}
+                          title={locale === "zh-CN" ? "上一页" : "Previous page"}
+                          onClick={() => setTextOffset(Math.max(0, activePreview.data.offset - activePreview.data.limit))}
+                        >
+                          <ChevronLeft size={16} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="preview-icon-button"
+                          disabled={!activePreview.data.hasNext}
+                          title={locale === "zh-CN" ? "下一页" : "Next page"}
+                          onClick={() => setTextOffset(activePreview.data.offset + activePreview.data.limit)}
+                        >
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <pre ref={pagedTextPreviewRef} className="preview-text preview-text-with-lines">
+                    {activePreview.data.lines.length ? activePreview.data.lines.map((line) => (
+                      <span
+                        key={line.number}
+                        ref={line.number === selectedTextTargetLine ? pagedTextTargetRef : undefined}
+                        className={
+                          line.number === selectedTextTargetLine
+                            ? "preview-text-line is-target preview-text-line-hit"
+                            : "preview-text-line"
+                        }
+                      >
+                        <span className="preview-text-line-number">{line.number}</span>
+                        <span>{line.text || " "}</span>
+                      </span>
+                    )) : (
+                      <span className="preview-empty-result">
+                        {locale === "zh-CN" ? "没有找到匹配内容" : "No matches found"}
+                      </span>
+                    )}
+                  </pre>
+                </div>
               ) : null}
 
               {activePreview?.kind === "markdown" ? (
@@ -1785,6 +2128,108 @@ export function PreviewWorkbenchPanel(props: {
                       </div>
                     </section>
                   ))}
+                </div>
+              ) : null}
+
+              {activePreview?.kind === "paged-table" ? (
+                <div className="preview-paged-table">
+                  <div className="preview-data-toolbar">
+                    <label className="preview-sheet-select">
+                      <span>{locale === "zh-CN" ? "工作表" : "Sheet"}</span>
+                      <select
+                        value={activePreview.data.selectedSheet}
+                        onChange={(event) => {
+                          setTableSheet(event.target.value);
+                          setTableRowOffset(0);
+                          setTableColumnOffset(0);
+                        }}
+                      >
+                        {activePreview.data.sheets.map((sheet) => (
+                          <option key={sheet.name} value={sheet.name}>
+                            {sheet.name} ({sheet.rowCount.toLocaleString()} × {sheet.columnCount.toLocaleString()})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="preview-data-status">
+                      {locale === "zh-CN"
+                        ? `当前仅加载第 ${activePreview.data.rowOffset + 1}-${Math.min(activePreview.data.totalRows, activePreview.data.rowOffset + activePreview.data.rows.length)} 行、第 ${activePreview.data.columnOffset + 1}-${Math.min(activePreview.data.totalColumns, activePreview.data.columnOffset + activePreview.data.columnLimit)} 列；共 ${activePreview.data.totalRows} 行、${activePreview.data.totalColumns} 列`
+                        : `Partial view: rows ${activePreview.data.rowOffset + 1}-${Math.min(activePreview.data.totalRows, activePreview.data.rowOffset + activePreview.data.rows.length)} and columns ${activePreview.data.columnOffset + 1}-${Math.min(activePreview.data.totalColumns, activePreview.data.columnOffset + activePreview.data.columnLimit)} of ${activePreview.data.totalRows} rows and ${activePreview.data.totalColumns} columns`}
+                    </span>
+                    <div className="preview-pagination preview-table-pagination">
+                      <button
+                        type="button"
+                        className="preview-icon-button"
+                        disabled={!activePreview.data.hasPreviousColumns}
+                        title={locale === "zh-CN" ? "前一组列" : "Previous columns"}
+                        onClick={() => setTableColumnOffset(Math.max(0, activePreview.data.columnOffset - activePreview.data.columnLimit))}
+                      >
+                        <ChevronLeft size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="preview-icon-button"
+                        disabled={!activePreview.data.hasNextColumns}
+                        title={locale === "zh-CN" ? "后一组列" : "Next columns"}
+                        onClick={() => setTableColumnOffset(activePreview.data.columnOffset + activePreview.data.columnLimit)}
+                      >
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </button>
+                      <span className="preview-pagination-divider" />
+                      <button
+                        type="button"
+                        className="preview-icon-button"
+                        disabled={!activePreview.data.hasPreviousRows}
+                        title={locale === "zh-CN" ? "上一页" : "Previous rows"}
+                        onClick={() => setTableRowOffset(Math.max(0, activePreview.data.rowOffset - activePreview.data.rowLimit))}
+                      >
+                        <ChevronLeft size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="preview-icon-button"
+                        disabled={!activePreview.data.hasNextRows}
+                        title={locale === "zh-CN" ? "下一页" : "Next rows"}
+                        onClick={() => setTableRowOffset(activePreview.data.rowOffset + activePreview.data.rowLimit)}
+                      >
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="preview-table-wrap preview-table-window">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th className="preview-table-corner" />
+                          {Array.from(
+                            { length: Math.min(activePreview.data.columnLimit, Math.max(0, activePreview.data.totalColumns - activePreview.data.columnOffset)) },
+                            (_, index) => (
+                              <th key={index}>{xlsxColumnLabel(activePreview.data.columnOffset + index)}</th>
+                            )
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activePreview.data.rows.map((row, rowIndex) => (
+                          <tr key={activePreview.data.rowOffset + rowIndex}>
+                            <th>{activePreview.data.rowOffset + rowIndex + 1}</th>
+                            {row.map((cell, cellIndex) => {
+                              const rowNumber = activePreview.data.rowOffset + rowIndex + 1;
+                              const columnNumber = activePreview.data.columnOffset + cellIndex + 1;
+                              const isTargetCell =
+                                activePreview.data.selectedSheet === fileCitationTarget?.sheet &&
+                                cellIsInsideRange(rowNumber, columnNumber, xlsxCitationRange);
+                              return (
+                                <td key={cellIndex} className={isTargetCell ? "is-citation-target" : undefined}>
+                                  {cell}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : null}
 

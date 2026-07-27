@@ -80,6 +80,12 @@ import {
 import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { EnterpriseContextService, type EnterpriseContextChannel } from "./enterprise-context-service.js";
+import { sendOfficePdfPreview } from "./files/office-preview-service.js";
+import {
+  detectedContentType,
+  sendStructuredPreview,
+  type StructuredPreviewMode
+} from "./files/structured-preview-service.js";
 import {
   buildSharedPythonRuntimeEnv,
   ensureRuntimeWorkspaceTmp,
@@ -2424,7 +2430,16 @@ const browseDirectoriesSchema = z.object({
 const threadFileContentQuerySchema = z
   .object({
     relative_path: z.string().optional(),
-    path: z.string().optional()
+    path: z.string().optional(),
+    preview: z.enum(["pdf", "auto", "text", "table", "diagram"]).optional(),
+    offset: z.string().optional(),
+    limit: z.string().optional(),
+    search: z.string().optional(),
+    sheet: z.string().optional(),
+    row_offset: z.string().optional(),
+    row_limit: z.string().optional(),
+    column_offset: z.string().optional(),
+    column_limit: z.string().optional()
   })
   .refine((value) => Boolean(trimOrUndefined(value.relative_path) || trimOrUndefined(value.path)), {
     message: "Either relative_path or path is required"
@@ -2443,7 +2458,16 @@ const artifactContentQuerySchema = z.object({
 });
 
 const artifactPathContentQuerySchema = artifactResolveQuerySchema.extend({
-  disposition: z.enum(["inline", "attachment"]).optional()
+  disposition: z.enum(["inline", "attachment"]).optional(),
+  preview: z.enum(["pdf", "auto", "text", "table", "diagram"]).optional(),
+  offset: z.string().optional(),
+  limit: z.string().optional(),
+  search: z.string().optional(),
+  sheet: z.string().optional(),
+  row_offset: z.string().optional(),
+  row_limit: z.string().optional(),
+  column_offset: z.string().optional(),
+  column_limit: z.string().optional()
 });
 
 const inlineVisualizationContentQuerySchema = z.object({
@@ -9868,6 +9892,8 @@ async function sendThreadArtifactContent(input: {
   artifactId?: string;
   filePath?: string;
   disposition?: "inline" | "attachment";
+  preview?: "pdf" | StructuredPreviewMode;
+  previewQuery?: Record<string, unknown>;
   enforcePortalSecurityDomain?: boolean;
   authorizedThread?: ThreadRecord;
   res: Response;
@@ -9985,18 +10011,41 @@ async function sendThreadArtifactContent(input: {
         workspace_file_version_id: stableFile.version.id,
         checksum: stableFile.version.checksum
       });
+      if (
+        actionType === "preview" &&
+        await sendOfficePdfPreview(input.res, {
+          requested: input.preview === "pdf",
+          fileName,
+          content: stableFile.content,
+          fingerprint: stableFile.version.checksum
+        })
+      ) {
+        return;
+      }
+      if (
+        actionType === "preview" &&
+        await sendStructuredPreview(input.res, {
+          requested: input.preview === "pdf" ? undefined : input.preview,
+          fileName,
+          content: stableFile.content,
+          mimeType: stableFile.version.mimeType || stableFile.file.mimeType || artifact.mimeType || "",
+          query: input.previewQuery
+        })
+      ) {
+        return;
+      }
       input.res.setHeader("Cache-Control", "private, no-store");
       input.res.setHeader("X-Content-Type-Options", "nosniff");
       input.res.setHeader(
         "Content-Disposition",
         `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
       );
+      const registeredMimeType =
+        stableFile.version.mimeType || stableFile.file.mimeType || artifact.mimeType || "";
       input.res.type(
-        stableFile.version.mimeType ||
-        stableFile.file.mimeType ||
-        artifact.mimeType ||
-        path.extname(fileName) ||
-        "application/octet-stream"
+        registeredMimeType && registeredMimeType !== "application/octet-stream"
+          ? registeredMimeType
+          : path.extname(fileName) || await detectedContentType({ fileName, content: stableFile.content })
       );
       input.res.status(200).send(stableFile.content);
       return;
@@ -10097,6 +10146,29 @@ async function sendThreadArtifactContent(input: {
     latest_version_revalidated: registrationNeedsRefresh,
     checksum: currentChecksum
   });
+  if (
+    actionType === "preview" &&
+    await sendOfficePdfPreview(input.res, {
+      requested: input.preview === "pdf",
+      fileName,
+      content: inspection.fileBuffer,
+      fingerprint: currentChecksum
+    })
+  ) {
+    return;
+  }
+  if (
+    actionType === "preview" &&
+    await sendStructuredPreview(input.res, {
+      requested: input.preview === "pdf" ? undefined : input.preview,
+      fileName,
+      content: inspection.fileBuffer,
+      mimeType: artifact.mimeType || "",
+      query: input.previewQuery
+    })
+  ) {
+    return;
+  }
   input.res.setHeader("Cache-Control", "private, no-store");
   input.res.setHeader("X-Content-Type-Options", "nosniff");
   if (inspection.modifiedAt) input.res.setHeader("X-Artifact-Updated-At", inspection.modifiedAt.toISOString());
@@ -10104,7 +10176,11 @@ async function sendThreadArtifactContent(input: {
     "Content-Disposition",
     `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
   );
-  input.res.type(artifact.mimeType || path.extname(fileName) || "application/octet-stream");
+  input.res.type(
+    artifact.mimeType && artifact.mimeType !== "application/octet-stream"
+      ? artifact.mimeType
+      : path.extname(fileName) || await detectedContentType({ fileName, content: inspection.fileBuffer })
+  );
   input.res.status(200).send(inspection.fileBuffer);
 }
 
@@ -10837,7 +10913,16 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
 
     const query = threadFileContentQuerySchema.parse({
       relative_path: typeof req.query.relative_path === "string" ? req.query.relative_path : undefined,
-      path: typeof req.query.path === "string" ? req.query.path : undefined
+      path: typeof req.query.path === "string" ? req.query.path : undefined,
+      preview: typeof req.query.preview === "string" ? req.query.preview : undefined,
+      offset: typeof req.query.offset === "string" ? req.query.offset : undefined,
+      limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
+      search: typeof req.query.search === "string" ? req.query.search : undefined,
+      sheet: typeof req.query.sheet === "string" ? req.query.sheet : undefined,
+      row_offset: typeof req.query.row_offset === "string" ? req.query.row_offset : undefined,
+      row_limit: typeof req.query.row_limit === "string" ? req.query.row_limit : undefined,
+      column_offset: typeof req.query.column_offset === "string" ? req.query.column_offset : undefined,
+      column_limit: typeof req.query.column_limit === "string" ? req.query.column_limit : undefined
     });
 
     const thread = await getPortalOwnedThread(threadId, currentUser);
@@ -10871,13 +10956,32 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
     }
 
     const fileName = path.basename(absolutePath);
+    if (
+      await sendOfficePdfPreview(res, {
+        requested: query.preview === "pdf",
+        fileName,
+        sourcePath: absolutePath
+      })
+    ) {
+      return;
+    }
+    if (
+      await sendStructuredPreview(res, {
+        requested: query.preview === "pdf" ? undefined : query.preview,
+        fileName,
+        sourcePath: absolutePath,
+        query
+      })
+    ) {
+      return;
+    }
     const ext = path.extname(fileName);
     const fileBuffer = await fs.readFile(absolutePath);
 
     res.setHeader("Cache-Control", "private, max-age=60");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    res.type(ext || "application/octet-stream");
+    res.type(ext || await detectedContentType({ fileName, sourcePath: absolutePath }));
     res.status(200).send(fileBuffer);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read file";
@@ -10958,13 +11062,24 @@ app.get("/api/threads/:threadId/artifacts/content", async (req: Request, res: Re
     const threadId = String(req.params.threadId || "").trim();
     const query = artifactPathContentQuerySchema.parse({
       path: typeof req.query.path === "string" ? req.query.path : "",
-      disposition: typeof req.query.disposition === "string" ? req.query.disposition : undefined
+      disposition: typeof req.query.disposition === "string" ? req.query.disposition : undefined,
+      preview: typeof req.query.preview === "string" ? req.query.preview : undefined,
+      offset: typeof req.query.offset === "string" ? req.query.offset : undefined,
+      limit: typeof req.query.limit === "string" ? req.query.limit : undefined,
+      search: typeof req.query.search === "string" ? req.query.search : undefined,
+      sheet: typeof req.query.sheet === "string" ? req.query.sheet : undefined,
+      row_offset: typeof req.query.row_offset === "string" ? req.query.row_offset : undefined,
+      row_limit: typeof req.query.row_limit === "string" ? req.query.row_limit : undefined,
+      column_offset: typeof req.query.column_offset === "string" ? req.query.column_offset : undefined,
+      column_limit: typeof req.query.column_limit === "string" ? req.query.column_limit : undefined
     });
     await sendThreadArtifactContent({
       currentUser,
       threadId,
       filePath: query.path,
       disposition: query.disposition,
+      preview: query.preview,
+      previewQuery: query,
       enforcePortalSecurityDomain: true,
       res
     });

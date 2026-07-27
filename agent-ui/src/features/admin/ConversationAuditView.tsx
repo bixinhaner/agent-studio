@@ -586,25 +586,44 @@ const CONVERSATION_AUDIT_FILE_EXTENSIONS = new Set([
   "avif",
   "bmp",
   "csv",
+  "conf",
+  "config",
+  "dbglog",
+  "dio",
   "doc",
   "docx",
+  "drawio",
   "gif",
   "htm",
   "html",
   "jpeg",
   "jpg",
   "json",
+  "jsonl",
   "md",
   "markdown",
+  "messages",
+  "ndjson",
+  "odg",
+  "odp",
+  "odt",
   "pdf",
   "png",
   "ppt",
   "pptx",
+  "properties",
+  "ps1",
+  "rtf",
   "svg",
   "txt",
+  "syslog",
+  "log",
+  "vsd",
+  "vsdx",
   "webp",
   "xls",
   "xlsx",
+  "ods",
   "xml",
   "yaml",
   "yml"
@@ -673,6 +692,35 @@ function fileExtensionFromTarget(value: string): string {
 
 function hasKnownFileExtension(value: string): boolean {
   return CONVERSATION_AUDIT_FILE_EXTENSIONS.has(fileExtensionFromTarget(value));
+}
+
+const CONVERSATION_AUDIT_PAGINATED_OFFICE_EXTENSIONS = new Set([
+  "doc",
+  "docx",
+  "odg",
+  "odp",
+  "odt",
+  "ppt",
+  "pptx",
+  "rtf",
+  "vsd",
+  "vsdx"
+]);
+
+function adminPaginatedPreviewUrl(contentUrl: string, filePath: string, pageNumber?: number): string {
+  const extension = fileExtensionFromTarget(filePath);
+  if (extension === "drawio" || extension === "dio") {
+    const parsed = new URL(contentUrl, "https://agent-studio.invalid");
+    parsed.searchParams.set("preview", "diagram");
+    return `${parsed.pathname}${parsed.search}`;
+  }
+  if (!CONVERSATION_AUDIT_PAGINATED_OFFICE_EXTENSIONS.has(extension)) {
+    return contentUrl;
+  }
+  const parsed = new URL(contentUrl, "https://agent-studio.invalid");
+  parsed.searchParams.set("preview", "pdf");
+  if (pageNumber && pageNumber > 0) parsed.hash = `page=${pageNumber}`;
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 function isLikelyBareExternalUrl(value: string): boolean {
@@ -834,10 +882,11 @@ function ConversationAuditMarkdownLink(props: {
   if (fileCitation) {
     const contentUrl = adminThreadFileContentUrl(threadId || "", { filePath: fileCitation.previewPath });
     if (!contentUrl) return <span className={className}>{children}</span>;
+    const previewUrl = adminPaginatedPreviewUrl(contentUrl, fileCitation.previewPath, fileCitation.pageNumber);
     return (
       <a
         className={["admin-conversation-file-citation", className].filter(Boolean).join(" ")}
-        href={contentUrl}
+        href={previewUrl}
         target="_blank"
         rel="noreferrer"
         aria-label={`引用 ${fileCitation.id}：${fileCitation.displayName}`}
@@ -850,6 +899,7 @@ function ConversationAuditMarkdownLink(props: {
   const fileTarget = typeof href === "string" ? resolveConversationAuditFileTarget(href, { threadId, workspace }) : null;
   if (fileTarget) {
     const displayName = flattenNodeText(children).trim() || fileNameFromPath(fileTarget.filePath);
+    const previewUrl = adminPaginatedPreviewUrl(fileTarget.contentUrl, fileTarget.filePath);
     return (
       <span className="admin-conversation-file-card" role="group" aria-label={`File ${displayName}`}>
         <span className="admin-conversation-file-meta">
@@ -859,7 +909,7 @@ function ConversationAuditMarkdownLink(props: {
         </span>
         <a
           className="admin-conversation-file-btn"
-          href={fileTarget.contentUrl}
+          href={previewUrl}
           target="_blank"
           rel="noreferrer"
         >
@@ -1030,6 +1080,12 @@ function TranscriptAttachmentList(props: {
             relativePath: attachment.relativePath,
             filePath: attachment.path
           });
+        const previewUrl = contentUrl
+          ? adminPaginatedPreviewUrl(
+              contentUrl,
+              attachment.relativePath || attachment.path || attachment.name
+            )
+          : null;
         if (attachment.kind === "image" && contentUrl) {
           return (
             <div key={attachment.id} className="admin-conversation-image-attachment">
@@ -1053,8 +1109,8 @@ function TranscriptAttachmentList(props: {
               </span>
               <span className="admin-conversation-file-path">{attachment.relativePath || attachment.path || "未记录路径"}</span>
             </span>
-            {contentUrl ? (
-              <a className="admin-conversation-file-btn" href={contentUrl} target="_blank" rel="noreferrer">
+            {previewUrl ? (
+              <a className="admin-conversation-file-btn" href={previewUrl} target="_blank" rel="noreferrer">
                 打开
               </a>
             ) : null}

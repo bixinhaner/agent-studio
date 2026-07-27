@@ -196,6 +196,29 @@ describe("createPortalWorkspaceRouter", () => {
     });
   });
 
+  it("serves bounded text preview pages without changing the original download path", async () => {
+    const content = Buffer.from(Array.from({ length: 240 }, (_, index) => `line ${index + 1}`).join("\n"));
+    const { app } = createTestApp({
+      getFile: vi.fn().mockResolvedValue({
+        file: node({ name: "service.log", mimeType: "text/plain", sizeBytes: content.length }),
+        version: version({ mimeType: "text/plain", sizeBytes: content.length }),
+        content
+      })
+    });
+    const response = await request(app)
+      .get("/api/portal/workspace/files/file-1/content?preview=text&offset=200&limit=20")
+      .expect(200);
+    expect(response.body).toMatchObject({
+      kind: "text",
+      offset: 200,
+      limit: 20,
+      hasPrevious: true,
+      hasNext: true
+    });
+    expect(response.body.lines).toHaveLength(20);
+    expect(response.body.lines[0]).toEqual({ number: 201, text: "line 201" });
+  });
+
   it("lists stable files bound to a historical task", async () => {
     const { app, service } = createTestApp();
     const response = await request(app)

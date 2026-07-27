@@ -3,6 +3,8 @@ import path from "node:path";
 import { Router, type Request, type Response } from "express";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
+import { sendOfficePdfPreview } from "../files/office-preview-service.js";
+import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import { PolicyService } from "./policy-service.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
@@ -145,12 +147,34 @@ export function createResourcesPortalRouter(options: {
     }
 
     const fileName = path.basename(normalizedRequestedPath);
+    if (
+      await sendOfficePdfPreview(res, {
+        requested: req.query.preview === "pdf",
+        fileName,
+        sourcePath: normalizedRequestedPath
+      })
+    ) {
+      return;
+    }
+    if (
+      await sendStructuredPreview(res, {
+        requested:
+          typeof req.query.preview === "string" && req.query.preview !== "pdf"
+            ? req.query.preview as "auto" | "text" | "table" | "diagram"
+            : undefined,
+        fileName,
+        sourcePath: normalizedRequestedPath,
+        query: req.query
+      })
+    ) {
+      return;
+    }
     const ext = path.extname(fileName);
     const fileBuffer = await fs.readFile(normalizedRequestedPath);
     res.setHeader("Cache-Control", "private, max-age=60");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    res.type(ext || "application/octet-stream");
+    res.type(ext || await detectedContentType({ fileName, sourcePath: normalizedRequestedPath }));
     res.status(200).send(fileBuffer);
   });
 

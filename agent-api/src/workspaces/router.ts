@@ -2,6 +2,8 @@ import express, { Router, type Request, type Response } from "express";
 import path from "node:path";
 import { z } from "zod";
 
+import { sendOfficePdfPreview } from "../files/office-preview-service.js";
+import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import {
   PortalWorkspaceService,
   type WorkspaceActor,
@@ -261,6 +263,32 @@ export function createPortalWorkspaceRouter(input: {
         fileId: String(req.params.fileId || "").trim(),
         versionId: versionId || undefined
       });
+      if (
+        disposition === "inline" &&
+        await sendOfficePdfPreview(res, {
+          requested: req.query.preview === "pdf",
+          fileName: resolved.file.name,
+          content: resolved.content,
+          fingerprint: resolved.version.checksum
+        })
+      ) {
+        return;
+      }
+      if (
+        disposition === "inline" &&
+        await sendStructuredPreview(res, {
+          requested:
+            typeof req.query.preview === "string" && req.query.preview !== "pdf"
+              ? req.query.preview as "auto" | "text" | "table" | "diagram"
+              : undefined,
+          fileName: resolved.file.name,
+          content: resolved.content,
+          mimeType: resolved.version.mimeType || resolved.file.mimeType || "",
+          query: req.query
+        })
+      ) {
+        return;
+      }
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Length", String(resolved.content.length));
@@ -268,7 +296,13 @@ export function createPortalWorkspaceRouter(input: {
         "Content-Disposition",
         `${disposition}; filename*=UTF-8''${encodeURIComponent(resolved.file.name)}`
       );
-      res.type(resolved.version.mimeType || resolved.file.mimeType || path.extname(resolved.file.name) || "application/octet-stream");
+      const registeredMimeType = resolved.version.mimeType || resolved.file.mimeType || "";
+      res.type(
+        registeredMimeType && registeredMimeType !== "application/octet-stream"
+          ? registeredMimeType
+          : path.extname(resolved.file.name) ||
+            await detectedContentType({ fileName: resolved.file.name, content: resolved.content })
+      );
       res.status(200).send(resolved.content);
     } catch (error) {
       sendWorkspaceError(res, error, "Failed to read workspace file");

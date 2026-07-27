@@ -4,6 +4,8 @@ import path from "node:path";
 import { Router, type Request, type Response } from "express";
 
 import { getDbClient } from "../db/client.js";
+import { sendOfficePdfPreview } from "../files/office-preview-service.js";
+import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import {
   ThreadRepository,
   type StoredMessageItem,
@@ -2161,13 +2163,35 @@ export function createConversationAuditRouter(options: {
       }
 
       const fileName = path.basename(absolutePath);
+      if (
+        await sendOfficePdfPreview(res, {
+          requested: req.query.preview === "pdf",
+          fileName,
+          sourcePath: absolutePath
+        })
+      ) {
+        return;
+      }
+      if (
+        await sendStructuredPreview(res, {
+          requested:
+            typeof req.query.preview === "string" && req.query.preview !== "pdf"
+              ? req.query.preview as "auto" | "text" | "table" | "diagram"
+              : undefined,
+          fileName,
+          sourcePath: absolutePath,
+          query: req.query
+        })
+      ) {
+        return;
+      }
       const ext = path.extname(fileName);
       const fileBuffer = await fs.readFile(absolutePath);
 
       res.setHeader("Cache-Control", "private, max-age=60");
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-      res.type(ext || "application/octet-stream");
+      res.type(ext || await detectedContentType({ fileName, sourcePath: absolutePath }));
       res.status(200).send(fileBuffer);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "读取会话附件失败";

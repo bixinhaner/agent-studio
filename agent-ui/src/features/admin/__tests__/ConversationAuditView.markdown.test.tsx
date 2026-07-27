@@ -88,7 +88,7 @@ describe("ConversationAuditMarkdown", () => {
     const citationLinks = screen.getAllByRole("link", { name: "引用 1：招标文件[定稿](1).docx" });
     expect(citationLinks).toHaveLength(2);
     expect(citationLinks[0]?.getAttribute("href")).toBe(
-      "/api/admin/conversations/thread-123/files/content?path=.agent-studio%2Fuploads%2Fthread-123%2F1785117779460-d78fcf64a32c-%E6%8B%9B%E6%A0%87%E6%96%87%E4%BB%B6%5B%E5%AE%9A%E7%A8%BF%5D%281%29.docx"
+      "/api/admin/conversations/thread-123/files/content?path=.agent-studio%2Fuploads%2Fthread-123%2F1785117779460-d78fcf64a32c-%E6%8B%9B%E6%A0%87%E6%96%87%E4%BB%B6%5B%E5%AE%9A%E7%A8%BF%5D%281%29.docx&preview=pdf#page=3"
     );
   });
 });
