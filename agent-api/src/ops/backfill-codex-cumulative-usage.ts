@@ -16,13 +16,14 @@ type TokenUsage = {
 
 type RuntimeSnapshot = TokenUsage & {
   kind: "cumulative_snapshot" | "turn_delta";
-  codexThreadId: string;
+  codexThreadId?: string;
 };
 
 type EventRow = {
   id: string;
   organizationId: string | null;
   featureType: string;
+  sessionId: string | null;
   model: string;
   inputTokens: number;
   cachedInputTokens: number;
@@ -69,12 +70,12 @@ function runtimeSnapshot(metadata: unknown): RuntimeSnapshot | undefined {
   const cacheWriteTokens = token(source?.cacheWriteTokens);
   const outputTokens = token(source?.outputTokens);
   const codexThreadId = String(snapshot.codexThreadId ?? root?.codexThreadId ?? "").trim();
-  if (!codexThreadId || inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) {
+  if (inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) {
     return undefined;
   }
   return {
     kind: snapshot.kind === "turn_delta" ? "turn_delta" : "cumulative_snapshot",
-    codexThreadId,
+    ...(codexThreadId ? { codexThreadId } : {}),
     inputTokens,
     cachedInputTokens,
     ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
@@ -164,6 +165,7 @@ async function main(): Promise<void> {
         left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id)
       ) as EventRow[];
     const cursors = new Map<string, TokenUsage>();
+    const legacySessionCursors = new Map<string, TokenUsage>();
     const corrections: Correction[] = [];
     const blocked: Array<{ eventId: string; reason: string }> = [];
     let skippedInvalidSnapshots = 0;
@@ -175,8 +177,19 @@ async function main(): Promise<void> {
         skippedInvalidSnapshots += 1;
         continue;
       }
+      if (!snapshot.codexThreadId) {
+        skippedInvalidSnapshots += 1;
+        if (event.sessionId) {
+          legacySessionCursors.set(`${event.featureType}\u0000${event.sessionId}`, snapshot);
+        }
+        continue;
+      }
       const key = `${event.featureType}\u0000${snapshot.codexThreadId}`;
-      const previous = cursors.get(key);
+      const previous = cursors.get(key) ?? (
+        event.sessionId
+          ? legacySessionCursors.get(`${event.featureType}\u0000${event.sessionId}`)
+          : undefined
+      );
       if (snapshot.kind === "cumulative_snapshot") {
         const usage = {
           inputTokens: delta(snapshot.inputTokens, previous?.inputTokens),
