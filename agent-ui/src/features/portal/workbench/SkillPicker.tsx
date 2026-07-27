@@ -317,20 +317,36 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     panelRef.current?.scrollTo({ top: 0 });
   }, [focusedSkillId, isMobile, mobileStep]);
 
-  const updateSelection = async (skill: SkillOption) => {
-    const isSelected = enabledSkillIds.includes(skill.id);
-    const nextIds = isSelected
-      ? enabledSkillIds.filter((id) => id !== skill.id)
-      : [...enabledSkillIds.filter((id) => skillById.get(id)?.name !== skill.name), skill.id];
+  const saveSelection = async (nextIds: string[]): Promise<boolean> => {
     setSaving(true);
     setErrorText("");
     try {
       await onEnabledSkillIdsChange(Array.from(new Set(nextIds)));
+      return true;
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : copy.saveError);
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const enableSkill = async (skill: SkillOption): Promise<boolean> => {
+    if (isAutomaticSkill(skill) || enabledSkillIds.includes(skill.id)) return true;
+    return saveSelection([
+      ...enabledSkillIds.filter((id) => skillById.get(id)?.name !== skill.name),
+      skill.id
+    ]);
+  };
+
+  const toggleSelection = async (skill: SkillOption) => {
+    const isSelected = enabledSkillIds.includes(skill.id);
+    const saved = await saveSelection(
+      isSelected
+        ? enabledSkillIds.filter((id) => id !== skill.id)
+        : [...enabledSkillIds.filter((id) => skillById.get(id)?.name !== skill.name), skill.id]
+    );
+    if (saved && !isSelected) setOpen(false);
   };
 
   const openPicker = (nextOpen: boolean) => {
@@ -356,9 +372,11 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     focusSkill(createSkill);
   };
 
-  const fillExample = (skill: SkillOption, selectedPrompt?: string) => {
+  const fillExample = async (skill: SkillOption, selectedPrompt?: string) => {
     const prompt = selectedPrompt ?? skill.presentation.examplePrompts[0];
     if (!prompt) return;
+    const enabled = await enableSkill(skill);
+    if (!enabled) return;
     onFillPrompt(prompt);
     setOpen(false);
   };
@@ -453,8 +471,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
           errorText={errorText}
           mobile={isMobile}
           onBack={() => setMobileStep("list")}
-          onFill={(prompt) => fillExample(focusedSkill, prompt)}
-          onToggle={isAutomaticSkill(focusedSkill) ? undefined : () => void updateSelection(focusedSkill)}
+          onFill={(prompt) => void fillExample(focusedSkill, prompt)}
+          onToggle={isAutomaticSkill(focusedSkill) ? undefined : () => void toggleSelection(focusedSkill)}
         />
       ) : null}
       <button type="button" className="portal-skill-close" aria-label={copy.close} onClick={() => setOpen(false)}>

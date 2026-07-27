@@ -89,6 +89,52 @@ describe("PortalSkillPicker", () => {
     fireEvent.click(await screen.findByRole("button", { name: /启用 Skill|Enable Skill/ }));
 
     await waitFor(() => expect(setSkills).toHaveBeenCalledWith(["power-outage-report"]));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeNull());
+    expect(fillPrompt).not.toHaveBeenCalled();
+  });
+
+  it("enables the Skill before filling its example into the composer", async () => {
+    const setSkills = vi.fn().mockResolvedValue(undefined);
+    const fillPrompt = vi.fn();
+    render(
+      <PortalSkillPicker
+        availableSkills={[outageSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={setSkills}
+        onFillPrompt={fillPrompt}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /填入示例|Use example/ }));
+
+    await waitFor(() => expect(setSkills).toHaveBeenCalledWith(["power-outage-report"]));
+    expect(setSkills.mock.invocationCallOrder[0]).toBeLessThan(fillPrompt.mock.invocationCallOrder[0]);
+    expect(fillPrompt).toHaveBeenCalledWith("生成上周华东地区的停电报表。");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeNull());
+  });
+
+  it("keeps the picker open and does not fill the prompt when enabling fails", async () => {
+    const setSkills = vi.fn().mockRejectedValue(new Error("保存失败"));
+    const fillPrompt = vi.fn();
+    render(
+      <PortalSkillPicker
+        availableSkills={[outageSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={setSkills}
+        onFillPrompt={fillPrompt}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /填入示例|Use example/ }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("保存失败");
+    expect(screen.getByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeTruthy();
     expect(fillPrompt).not.toHaveBeenCalled();
   });
 
@@ -125,8 +171,9 @@ describe("PortalSkillPicker", () => {
     expect(screen.queryByRole("button", { name: /启用 Skill|Enable Skill/ })).toBeNull();
     expect(screen.getAllByText(/自动启用|available automatically/i).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /填入示例|Use example/ }));
-    expect(fillPrompt).toHaveBeenCalledWith("把这份提纲整理成正式 Word 文档。");
+    await waitFor(() => expect(fillPrompt).toHaveBeenCalledWith("把这份提纲整理成正式 Word 文档。"));
     expect(setSkills).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeNull());
   });
 
   it("reveals the localized purpose and summary when the composer chip is hovered", async () => {
