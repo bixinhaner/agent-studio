@@ -22,6 +22,102 @@ afterEach(async () => {
   if (runtimeRoot) await fs.rm(runtimeRoot, { recursive: true, force: true });
 });
 
+describe("PortalWorkspaceService history compatibility", () => {
+  it("keeps migrated history files collapsed by default and reveals them on demand", async () => {
+    const now = new Date("2026-07-27T00:00:00.000Z");
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "workspace-1",
+          status: "active"
+        })
+      },
+      workspaceNode: {
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({ id: "history-1" })
+          .mockResolvedValueOnce({ systemKey: "history_unfiled" })
+          .mockResolvedValueOnce({ id: "history-1" })
+          .mockResolvedValueOnce({ systemKey: "history_unfiled" }),
+        findMany: vi.fn().mockResolvedValue([{
+          id: "file-1",
+          workspaceId: "workspace-1",
+          parentId: "history-1",
+          kind: "file",
+          name: "report.pdf",
+          systemKey: null,
+          mimeType: "application/pdf",
+          sizeBytes: 100n,
+          checksum: "abc",
+          state: "active",
+          createdByType: "migration",
+          sourceThreadId: "thread-1",
+          createdAt: now,
+          updatedAt: now
+        }])
+      }
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    await service.listNodes({ actor, parentId: "history-1" });
+    expect(db.workspaceNode.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          NOT: {
+            createdByType: "migration",
+            sourceThreadId: { not: null }
+          }
+        })
+      })
+    );
+
+    const files = await service.listNodes({
+      actor,
+      parentId: "history-1",
+      includeMigrated: true
+    });
+    expect(db.workspaceNode.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ NOT: expect.anything() })
+      })
+    );
+    expect(files[0]?.name).toBe("report.pdf");
+  });
+
+  it("counts distinct files and tasks with files for the whole history folder", async () => {
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "workspace-1",
+          status: "active"
+        })
+      },
+      workspaceNode: {
+        findFirst: vi.fn().mockResolvedValue({ id: "history-1" })
+      },
+      thread: {
+        count: vi.fn().mockResolvedValue(243)
+      },
+      threadFileBinding: {
+        findMany: vi.fn().mockResolvedValue([
+          { threadId: "thread-1", fileId: "file-1" },
+          { threadId: "thread-1", fileId: "file-1" },
+          { threadId: "thread-2", fileId: "file-2" }
+        ])
+      }
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    await expect(service.getFolderTaskSummary({
+      actor,
+      folderId: "history-1"
+    })).resolves.toEqual({
+      taskCount: 243,
+      tasksWithFiles: 2,
+      fileCount: 2
+    });
+  });
+});
+
 describe("PortalWorkspaceService.materializeTaskWorkspace", () => {
   it("materializes the selected folder hierarchy and reports a safe byte truncation", async () => {
     const now = new Date("2026-07-27T00:00:00.000Z");

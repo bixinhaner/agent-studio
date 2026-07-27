@@ -126,8 +126,8 @@ body.portal-workbench-mode {
 .workspace-rail-head {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px 16px 14px;
+  gap: 14px;
+  padding: 22px 16px 14px;
   border-bottom: 1px solid var(--workbench-border);
 }
 
@@ -138,51 +138,12 @@ body.portal-workbench-mode {
   gap: 12px;
 }
 
-.workspace-rail-eyebrow {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--workbench-muted-text);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .workspace-rail h2 {
   margin: 0;
   color: #18181b;
   font-size: 17px;
   font-weight: 650;
   line-height: 1.35;
-}
-
-.workspace-icon-button.ant-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  color: #52525b;
-}
-
-.workspace-rail .session-rail-new-btn {
-  width: 100%;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--workbench-accent);
-  border-radius: 8px;
-  background: var(--workbench-accent);
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: none;
-}
-
-.workspace-rail .session-rail-new-btn:hover {
-  border-color: var(--workbench-accent-strong);
-  background: var(--workbench-accent-strong);
 }
 
 .workspace-search.ant-input-affix-wrapper {
@@ -197,8 +158,7 @@ body.portal-workbench-mode {
   box-shadow: 0 0 0 3px rgba(255, 70, 20, 0.12);
 }
 
-.workspace-folder-nav,
-.workspace-task-section {
+.workspace-folder-nav {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -206,20 +166,13 @@ body.portal-workbench-mode {
 }
 
 .workspace-folder-nav {
-  flex: 0 0 auto;
-  max-height: 46%;
-  overflow-y: auto;
-}
-
-.workspace-task-section {
-  min-height: 0;
   flex: 1 1 auto;
-  border-top: 1px solid var(--workbench-border);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .workspace-task-list {
   min-height: 0;
-  overflow-y: auto;
 }
 
 .workspace-nav-section-label {
@@ -233,6 +186,47 @@ body.portal-workbench-mode {
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.workspace-nav-section-label button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: #52525b;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.workspace-nav-section-label button:hover {
+  color: var(--workbench-accent);
+}
+
+.workspace-folder-entry {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-folder-entry[data-system-folder="history_unfiled"] {
+  margin-top: 4px;
+}
+
+.workspace-folder-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.workspace-folder-entry.is-active .workspace-folder-row {
+  border-color: rgba(255, 70, 20, 0.16);
+  background: var(--workbench-sidebar-active-bg);
 }
 
 .workspace-nav-item {
@@ -265,14 +259,35 @@ body.portal-workbench-mode {
 }
 
 .workspace-nav-item.is-active {
-  border-color: rgba(255, 70, 20, 0.16);
-  background: var(--workbench-sidebar-active-bg);
+  border-color: transparent;
+  background: transparent;
   color: var(--workbench-sidebar-active-text);
   font-weight: 600;
 }
 
-.workspace-nav-item[data-system-folder="history_unfiled"] {
-  margin-top: 4px;
+.workspace-folder-entry.is-active .workspace-nav-item:hover {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.workspace-folder-inline-new {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid rgba(255, 70, 20, 0.13);
+  background: transparent;
+  color: var(--workbench-accent);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-folder-inline-new:hover {
+  background: rgba(255, 255, 255, 0.64);
 }
 
 .workspace-nav-chevron {
@@ -307,13 +322,58 @@ body.portal-workbench-mode {
 }
 
 .workspace-task-list .agent-thread-list-item {
-  min-height: 38px;
-  margin-bottom: 2px;
-  border-radius: 7px;
+  min-height: 34px;
+  margin: 0;
+  border-radius: 6px;
 }
 
 .workspace-task-list .aui-thread-list-item-title {
-  font-size: 12.5px;
+  font-size: 12px;
+  font-weight: 450;
+}
+
+.workspace-task-list .aui-thread-list-item-trigger {
+  min-height: 34px;
+  padding-inline: 8px 4px;
+}
+
+.workspace-task-list .agent-thread-item-actions,
+.workspace-task-list .thread-running-indicator-slot {
+  display: none;
+}
+
+.workspace-folder-task-preview {
+  margin: 4px 0 8px 19px;
+  padding: 6px 0 3px 10px;
+  border-left: 1px solid #e4e4e7;
+}
+
+.workspace-folder-task-preview-label {
+  padding: 1px 8px 4px;
+  color: #8a8a91;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.workspace-view-all-tasks {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: #71717a;
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-view-all-tasks:hover {
+  color: var(--workbench-accent);
 }
 
 .workspace-rail-footer {
@@ -326,28 +386,9 @@ body.portal-workbench-mode {
   background: #fff;
 }
 
-.workspace-storage {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px 8px;
-  color: #71717a;
-  font-size: 11px;
-}
-
-.workspace-storage-track {
-  grid-column: 1 / -1;
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #eeeef0;
-}
-
-.workspace-storage-track > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--workbench-accent);
+.workspace-rail-footer .workspace-nav-item.is-active {
+  border-color: rgba(255, 70, 20, 0.16);
+  background: var(--workbench-sidebar-active-bg);
 }
 
 .workspace-folder-home {
@@ -444,6 +485,54 @@ body.portal-workbench-mode {
 
 .workspace-folder-actions .ant-btn-primary {
   background: var(--workbench-accent);
+}
+
+.workspace-history-files-summary {
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 22px;
+  padding: 11px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  background: #fafafa;
+}
+
+.workspace-history-files-summary > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: #71717a;
+}
+
+.workspace-history-files-summary > div > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-history-files-summary strong {
+  color: #303036;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.workspace-history-files-summary small {
+  overflow: hidden;
+  color: #71717a;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-history-files-summary .ant-btn {
+  flex: 0 0 auto;
+  color: var(--workbench-accent);
+  font-weight: 600;
 }
 
 .workspace-agent-status {
@@ -708,7 +797,7 @@ body.portal-workbench-mode {
   flex: 1 1 auto;
   min-height: 58px;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 10px 48px 10px 14px;
@@ -725,6 +814,37 @@ body.portal-workbench-mode {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.workspace-task-main > .workspace-task-file-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.workspace-task-main > .workspace-task-file-count[data-empty="true"] {
+  background: #f4f4f5;
+  color: #71717a;
+}
+
+.workspace-task-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.workspace-task-pagination .ant-pagination-item-active {
+  border-color: var(--workbench-accent);
+}
+
+.workspace-task-pagination .ant-pagination-item-active a {
+  color: var(--workbench-accent);
 }
 
 .workspace-task-shell {
@@ -1048,56 +1168,54 @@ body.portal-workbench-mode {
   }
 
   .workbench-mobile-session-drawer .workspace-folder-nav {
-    max-height: 52%;
+    max-height: none;
     padding: 12px 16px 4px;
     overflow-y: auto;
   }
 
-  .workbench-mobile-session-drawer .workspace-task-section {
-    flex: 0 0 auto;
-    min-height: 120px;
-    max-height: 26%;
-    padding: 12px 16px;
-  }
-
   .workbench-mobile-session-drawer .workspace-nav-item {
-    min-height: 54px;
-    margin-bottom: 7px;
+    min-height: 48px;
+    margin-bottom: 5px;
     border-color: #e5e7eb;
     border-radius: 8px;
     font-size: 14px;
   }
 
+  .workbench-mobile-session-drawer .workspace-folder-entry.is-active .workspace-nav-item {
+    margin-bottom: 0;
+    border-color: transparent;
+  }
+
+  .workbench-mobile-session-drawer .workspace-folder-inline-new {
+    padding-inline: 12px;
+    font-size: 12px;
+  }
+
   .workbench-mobile-session-drawer .workspace-nav-item.is-active {
-    border-color: rgba(255, 70, 20, 0.28);
+    border-color: transparent;
   }
 
   .workbench-mobile-session-drawer .workspace-task-list .agent-thread-list-item {
-    min-height: 54px;
-    margin-bottom: 7px;
-    padding: 0 8px;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    background: #fff;
+    min-height: 38px;
+    margin-bottom: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
   }
 
   .workbench-mobile-session-drawer .workspace-task-list .aui-thread-list-item-trigger {
-    min-height: 52px;
+    min-height: 38px;
   }
 
   .workbench-mobile-session-drawer .workspace-task-list .aui-thread-list-item-title {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .workbench-mobile-session-drawer .workspace-rail-footer {
     margin-top: auto;
     gap: 4px;
     padding: 8px 16px 12px;
-  }
-
-  .workbench-mobile-session-drawer .workspace-storage,
-  .workbench-mobile-session-drawer .workspace-rail-footer .user-identity-card {
-    display: none;
   }
 
   .workspace-folder-home {
@@ -1123,6 +1241,23 @@ body.portal-workbench-mode {
   .workspace-folder-actions .ant-btn {
     min-height: 44px;
     padding-inline: 10px;
+  }
+
+  .workspace-history-files-summary {
+    align-items: flex-start;
+  }
+
+  .workspace-history-files-summary small {
+    white-space: normal;
+  }
+
+  .workspace-task-main {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .workspace-task-main > .workspace-task-file-count {
+    grid-column: 2;
+    width: fit-content;
   }
 
   .workspace-section-heading {

@@ -55,6 +55,7 @@ function taskOut(task: WorkspaceTaskSummary) {
     title: task.title,
     status: task.status,
     folder_id: task.folderId ?? null,
+    file_count: task.fileCount,
     created_at: task.createdAt,
     updated_at: task.updatedAt
   };
@@ -139,7 +140,8 @@ export function createPortalWorkspaceRouter(input: {
         actor,
         parentId: parentId || undefined,
         state,
-        allParents: state === "trashed" && queryBoolean(req.query.all)
+        allParents: state === "trashed" && queryBoolean(req.query.all),
+        includeMigrated: queryBoolean(req.query.include_migrated)
       });
       res.json({ nodes: nodes.map(nodeOut) });
     } catch (error) {
@@ -309,13 +311,29 @@ export function createPortalWorkspaceRouter(input: {
   router.get("/folders/:folderId/tasks", async (req, res) => {
     try {
       const actor = await input.resolveActor(req);
-      const tasks = await input.service.listFolderTasks({
-        actor,
-        folderId: String(req.params.folderId || "").trim(),
-        includeArchived: queryBoolean(req.query.include_archived),
-        take: Number(req.query.take) || undefined
+      const folderId = String(req.params.folderId || "").trim();
+      const includeArchived = queryBoolean(req.query.include_archived);
+      const [tasks, summary] = await Promise.all([
+        input.service.listFolderTasks({
+          actor,
+          folderId,
+          includeArchived,
+          take: Number(req.query.take) || undefined
+        }),
+        input.service.getFolderTaskSummary({
+          actor,
+          folderId,
+          includeArchived
+        })
+      ]);
+      res.json({
+        tasks: tasks.map(taskOut),
+        summary: {
+          task_count: summary.taskCount,
+          tasks_with_files: summary.tasksWithFiles,
+          file_count: summary.fileCount
+        }
       });
-      res.json({ tasks: tasks.map(taskOut) });
     } catch (error) {
       sendWorkspaceError(res, error, "Failed to load folder tasks");
     }

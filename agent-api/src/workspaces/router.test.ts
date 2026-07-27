@@ -63,6 +63,11 @@ function createTestApp(serviceOverrides: Record<string, unknown> = {}) {
     listVersions: vi.fn().mockResolvedValue([version()]),
     restoreVersion: vi.fn().mockResolvedValue({ file: node(), version: version({ id: "version-2", versionNo: 2 }) }),
     listFolderTasks: vi.fn().mockResolvedValue([]),
+    getFolderTaskSummary: vi.fn().mockResolvedValue({
+      taskCount: 0,
+      tasksWithFiles: 0,
+      fileCount: 0
+    }),
     listThreadFiles: vi.fn().mockResolvedValue([node()]),
     moveThread: vi.fn(),
     recent: vi.fn().mockResolvedValue({ nodes: [], tasks: [] }),
@@ -114,7 +119,22 @@ describe("createPortalWorkspaceRouter", () => {
       actor,
       parentId: undefined,
       state: "trashed",
-      allParents: true
+      allParents: true,
+      includeMigrated: false
+    });
+  });
+
+  it("reveals migrated historical files only when the caller explicitly asks for them", async () => {
+    const { app, service } = createTestApp();
+    await request(app)
+      .get("/api/portal/workspace/nodes?parent_id=history-1&include_migrated=1")
+      .expect(200);
+    expect(service.listNodes).toHaveBeenCalledWith({
+      actor,
+      parentId: "history-1",
+      state: "active",
+      allParents: false,
+      includeMigrated: true
     });
   });
 
@@ -183,6 +203,41 @@ describe("createPortalWorkspaceRouter", () => {
       .expect(200);
     expect(response.body.files).toHaveLength(1);
     expect(service.listThreadFiles).toHaveBeenCalledWith({ actor, threadId: "thread-1" });
+  });
+
+  it("returns folder task and historical-file totals with each task file count", async () => {
+    const task = {
+      id: "thread-1",
+      title: "Historical report",
+      status: "regular",
+      folderId: "history-1",
+      fileCount: 3,
+      createdAt: "2026-07-27T00:00:00.000Z",
+      updatedAt: "2026-07-27T00:00:00.000Z"
+    };
+    const { app, service } = createTestApp({
+      listFolderTasks: vi.fn().mockResolvedValue([task]),
+      getFolderTaskSummary: vi.fn().mockResolvedValue({
+        taskCount: 243,
+        tasksWithFiles: 45,
+        fileCount: 142
+      })
+    });
+    const response = await request(app)
+      .get("/api/portal/workspace/folders/history-1/tasks?take=500")
+      .expect(200);
+    expect(response.body.tasks[0].file_count).toBe(3);
+    expect(response.body.summary).toEqual({
+      task_count: 243,
+      tasks_with_files: 45,
+      file_count: 142
+    });
+    expect(service.listFolderTasks).toHaveBeenCalledWith({
+      actor,
+      folderId: "history-1",
+      includeArchived: false,
+      take: 500
+    });
   });
 
   it("lists the agent-output smart view without creating a duplicate folder", async () => {

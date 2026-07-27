@@ -44,8 +44,15 @@ export type WorkspaceTaskSummary = {
   title: string;
   status: "regular" | "archived";
   folderId?: string;
+  fileCount: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorkspaceFolderTaskSummary = {
+  taskCount: number;
+  tasksWithFiles: number;
+  fileCount: number;
 };
 
 export type WorkspaceFileVersionSummary = {
@@ -152,6 +159,7 @@ function mapTask(row: {
   title: string | null;
   status: string;
   workspaceFolderId: string | null;
+  workspaceFileBindings?: Array<{ fileId: string }>;
   createdAt: Date | string;
   updatedAt: Date | string;
 }): WorkspaceTaskSummary {
@@ -160,6 +168,7 @@ function mapTask(row: {
     title: row.title?.trim() || "新任务",
     status: row.status === "archived" ? "archived" : "regular",
     folderId: row.workspaceFolderId ?? undefined,
+    fileCount: new Set((row.workspaceFileBindings || []).map((binding) => binding.fileId)).size,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt)
   };
@@ -218,8 +227,8 @@ export class PortalWorkspaceService {
         }
       },
       update: {
-        name: "未整理的历史任务",
-        normalizedName: "未整理的历史任务",
+        name: "History",
+        normalizedName: "history",
         state: "active"
       },
       create: {
@@ -227,8 +236,8 @@ export class PortalWorkspaceService {
         workspaceId: workspace.id,
         parentId: null,
         kind: "folder",
-        name: "未整理的历史任务",
-        normalizedName: "未整理的历史任务",
+        name: "History",
+        normalizedName: "history",
         systemKey: HISTORY_SYSTEM_KEY,
         createdByType: "migration"
       }
@@ -273,6 +282,7 @@ export class PortalWorkspaceService {
     parentId?: string;
     state?: WorkspaceNodeState;
     allParents?: boolean;
+    includeMigrated?: boolean;
   }): Promise<WorkspaceNodeSummary[]> {
     const workspace = await this.getWorkspaceRecord(input.actor);
     if (!input.allParents) await this.assertFolder(workspace.id, input.parentId);
@@ -287,7 +297,7 @@ export class PortalWorkspaceService {
         workspaceId: workspace.id,
         ...(input.allParents ? {} : { parentId: input.parentId ?? null }),
         state: input.state ?? "active",
-        ...(parent?.systemKey === HISTORY_SYSTEM_KEY
+        ...(parent?.systemKey === HISTORY_SYSTEM_KEY && !input.includeMigrated
           ? {
               NOT: {
                 createdByType: "migration",
@@ -365,13 +375,55 @@ export class PortalWorkspaceService {
         title: true,
         status: true,
         workspaceFolderId: true,
+        workspaceFileBindings: {
+          select: { fileId: true }
+        },
         createdAt: true,
         updatedAt: true
       },
       orderBy: { updatedAt: "desc" },
-      take: Math.min(Math.max(input.take ?? 100, 1), 200)
+      take: Math.min(Math.max(input.take ?? 100, 1), 500)
     });
     return rows.map(mapTask);
+  }
+
+  async getFolderTaskSummary(input: {
+    actor: WorkspaceActor;
+    folderId: string;
+    includeArchived?: boolean;
+  }): Promise<WorkspaceFolderTaskSummary> {
+    const workspace = await this.getWorkspaceRecord(input.actor);
+    await this.assertFolder(workspace.id, input.folderId);
+    const threadWhere = {
+      organizationId: input.actor.organizationId,
+      securityDomainId: input.actor.securityDomainId ?? null,
+      userId: input.actor.userId,
+      userWorkspaceId: workspace.id,
+      workspaceFolderId: input.folderId,
+      ...(input.includeArchived ? {} : { status: "active" as const })
+    };
+    const [taskCount, bindings] = await Promise.all([
+      this.db.thread.count({ where: threadWhere }),
+      this.db.threadFileBinding.findMany({
+        where: {
+          thread: threadWhere,
+          file: {
+            workspaceId: workspace.id,
+            kind: "file",
+            state: "active"
+          }
+        },
+        select: {
+          threadId: true,
+          fileId: true
+        }
+      })
+    ]);
+    return {
+      taskCount,
+      tasksWithFiles: new Set(bindings.map((binding) => binding.threadId)).size,
+      fileCount: new Set(bindings.map((binding) => binding.fileId)).size
+    };
   }
 
   async listThreadFiles(input: {

@@ -30,8 +30,20 @@ export type PortalWorkspaceTask = {
   title: string;
   status: "regular" | "archived";
   folder_id: string | null;
+  file_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type PortalWorkspaceFolderTaskSummary = {
+  task_count: number;
+  tasks_with_files: number;
+  file_count: number;
+};
+
+export type PortalWorkspaceFolderTasksResult = {
+  tasks: PortalWorkspaceTask[];
+  summary: PortalWorkspaceFolderTaskSummary;
 };
 
 export async function fetchPortalWorkspace(): Promise<{
@@ -41,9 +53,13 @@ export async function fetchPortalWorkspace(): Promise<{
   return api("/api/portal/workspace");
 }
 
-export async function fetchPortalWorkspaceNodes(parentId?: string): Promise<PortalWorkspaceNode[]> {
+export async function fetchPortalWorkspaceNodes(
+  parentId?: string,
+  options?: { includeMigrated?: boolean }
+): Promise<PortalWorkspaceNode[]> {
   const query = new URLSearchParams();
   if (parentId) query.set("parent_id", parentId);
+  if (options?.includeMigrated) query.set("include_migrated", "1");
   const out = await api<{ nodes: PortalWorkspaceNode[] }>(
     `/api/portal/workspace/nodes${query.toString() ? `?${query.toString()}` : ""}`
   );
@@ -57,11 +73,22 @@ export async function fetchPortalWorkspaceNode(nodeId: string): Promise<PortalWo
   return out.node;
 }
 
-export async function fetchPortalFolderTasks(folderId: string): Promise<PortalWorkspaceTask[]> {
-  const out = await api<{ tasks: PortalWorkspaceTask[] }>(
-    `/api/portal/workspace/folders/${encodeURIComponent(folderId)}/tasks?take=200`
+export async function fetchPortalFolderTasks(folderId: string): Promise<PortalWorkspaceFolderTasksResult> {
+  const out = await api<{
+    tasks: PortalWorkspaceTask[];
+    summary?: PortalWorkspaceFolderTaskSummary;
+  }>(
+    `/api/portal/workspace/folders/${encodeURIComponent(folderId)}/tasks?take=500`
   );
-  return Array.isArray(out.tasks) ? out.tasks : [];
+  const tasks = Array.isArray(out.tasks) ? out.tasks : [];
+  return {
+    tasks,
+    summary: out.summary || {
+      task_count: tasks.length,
+      tasks_with_files: tasks.filter((task) => task.file_count > 0).length,
+      file_count: tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+    }
+  };
 }
 
 export async function fetchPortalRecentWorkspace(): Promise<{

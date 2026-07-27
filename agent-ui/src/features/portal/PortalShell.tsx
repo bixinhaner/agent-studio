@@ -2422,19 +2422,6 @@ const MobileAwareComposer: FC = () => {
   );
 };
 
-const SessionRailNewThreadButton: FC<{ label?: string; onClick?: () => void }> = ({ label, onClick }) => {
-  const { t } = usePortalI18n();
-  const resolvedLabel = label ?? t("sessions.new");
-  return (
-    <ThreadListPrimitive.New asChild>
-      <button type="button" className="session-rail-new-btn" aria-label={resolvedLabel} onClick={onClick}>
-        <PlusIcon size={16} />
-        <span>{resolvedLabel}</span>
-      </button>
-    </ThreadListPrimitive.New>
-  );
-};
-
 function buildCodexRunConfig(
   cfg: AppliedConfig,
   mode: string,
@@ -6460,6 +6447,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (cancelled) return;
         setPortalWorkspace(out.workspace);
         setWorkspaceRootNodes(Array.isArray(out.nodes) ? out.nodes : []);
+        if (
+          typeof window !== "undefined" &&
+          !new URLSearchParams(window.location.search).has(PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM) &&
+          !readPortalThreadIdFromLocation(window.location.search)
+        ) {
+          setSelectedWorkspaceFolderId(out.workspace.history_folder_id);
+          writePortalWorkspaceLocation({ folderId: out.workspace.history_folder_id }, "replace");
+        }
       })
       .catch((error) => {
         if (!cancelled) setWorkspaceErrorText(error instanceof Error ? error.message : t("workspace.loadFailed"));
@@ -7294,9 +7289,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         ? t("workspace.agentOutputs")
       : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
         ? t("workspace.trash")
-      : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
-  const visibleWorkspaceThreadIds = useMemo(() => {
-    const candidates = workspaceThreads
+      : selectedWorkspaceFolder?.system_key === "history_unfiled"
+        ? t("workspace.historyTasks")
+        : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
+  const selectedWorkspaceThreads = useMemo(() => {
+    return workspaceThreads
       .filter((thread) => thread.status === "regular")
       .filter((thread) =>
         selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
@@ -7307,16 +7304,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             ? false
           : thread.folder_id === selectedWorkspaceFolderId
       )
-      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime())
-      .slice(
-        0,
-        selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW ||
-          selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
-          ? 50
-          : 200
-      );
-    return new Set(candidates.map((thread) => thread.id));
+      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
   }, [selectedWorkspaceFolderId, workspaceThreads]);
+  const visibleWorkspaceThreadIds = useMemo(
+    () => new Set(selectedWorkspaceThreads.slice(0, 200).map((thread) => thread.id)),
+    [selectedWorkspaceThreads]
+  );
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
@@ -8988,7 +8981,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           setSelectedWorkspaceFile(null);
           return;
         }
-        void fetchPortalWorkspaceNodes(location.folderId)
+        void fetchPortalWorkspaceNodes(location.folderId, { includeMigrated: true })
           .then((nodes) => {
             const file = nodes.find((node) => node.id === location.fileId && node.kind === "file");
             setSelectedWorkspaceFile(file || null);
@@ -9306,12 +9299,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
               <StableThreadListItems
                 visibleRemoteIds={visibleWorkspaceThreadIds}
-                maxItems={
-                  selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW ||
-                  selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
-                    ? 50
-                    : 5
-                }
+                maxItems={3}
                 onSelectThread={(threadId) => {
                   setWorkspaceMainView("task");
                   setSelectedWorkspaceFile(null);
@@ -9335,16 +9323,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       loading={workspaceLoading}
       errorText={workspaceErrorText}
       taskList={workspaceTaskList}
+      taskCount={selectedWorkspaceThreads.length}
       footer={workspaceRailFooter}
-      newThreadSlot={
-        <SessionRailNewThreadButton
-          label={t("workspace.newTask")}
-          onClick={() => {
-            setWorkspaceMainView("task");
-            setSelectedWorkspaceFile(null);
-          }}
-        />
-      }
       onSearchChange={(value) => {
         setSessionSearchValue(value);
         writePortalWorkspaceLocation({
@@ -9361,6 +9341,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       }}
       onSelectFolder={selectWorkspaceFolder}
       onCreateFolder={() => void createRootWorkspaceFolder()}
+      onNewTask={() => void startWorkspaceTask()}
+      onViewAllTasks={() => {
+        setWorkspaceMainView("folder");
+        setSelectedWorkspaceFile(null);
+        setRequestedPreviewPath("");
+        writePortalWorkspaceLocation({ folderId: selectedWorkspaceFolderId }, "push");
+        if (isMobile) {
+          setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
+        }
+      }}
     />
   );
 
@@ -9370,6 +9360,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         key={`${selectedWorkspaceFolderId}-${workspaceRefreshToken}`}
         folderId={selectedWorkspaceFolderId}
         folderName={selectedWorkspaceFolderName}
+        folderSystemKey={selectedWorkspaceFolder?.system_key}
         folderPath={selectedWorkspaceFolderPath}
         activeThreadId={activeRemoteThreadId || undefined}
         searchQuery={sessionSearchValue}

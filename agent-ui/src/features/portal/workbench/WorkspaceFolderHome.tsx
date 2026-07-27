@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { Button, Dropdown, Empty, Spin } from "antd";
+import { Button, Dropdown, Empty, Pagination, Spin } from "antd";
 import {
   CheckCircle2,
   ChevronRight,
@@ -29,6 +29,7 @@ import {
   searchPortalWorkspace,
   uploadPortalWorkspaceFile,
   type PortalWorkspaceNode,
+  type PortalWorkspaceFolderTaskSummary,
   type PortalWorkspaceTask
 } from "../workspace";
 import {
@@ -69,6 +70,7 @@ function formatLocalDate(value: string, locale: string): string {
 export function WorkspaceFolderHome(props: {
   folderId: string;
   folderName: string;
+  folderSystemKey?: string | null;
   folderPath?: PortalWorkspaceNode[];
   activeThreadId?: string;
   searchQuery?: string;
@@ -82,16 +84,24 @@ export function WorkspaceFolderHome(props: {
   const { locale, t } = usePortalI18n();
   const [nodes, setNodes] = useState<PortalWorkspaceNode[]>([]);
   const [tasks, setTasks] = useState<PortalWorkspaceTask[]>([]);
+  const [folderTaskSummary, setFolderTaskSummary] = useState<PortalWorkspaceFolderTaskSummary>({
+    task_count: 0,
+    tasks_with_files: 0,
+    file_count: 0
+  });
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [showHistoryFiles, setShowHistoryFiles] = useState(false);
+  const [taskPage, setTaskPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recentView = props.folderId === RECENT_WORKSPACE_VIEW;
   const agentOutputsView = props.folderId === AGENT_OUTPUTS_WORKSPACE_VIEW;
   const trashView = props.folderId === TRASH_WORKSPACE_VIEW;
   const searchQuery = String(props.searchQuery || "").trim();
   const searchView = Boolean(searchQuery);
+  const historyView = props.folderSystemKey === "history_unfiled";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,34 +111,56 @@ export function WorkspaceFolderHome(props: {
         const result = await searchPortalWorkspace(searchQuery);
         setNodes(result.nodes);
         setTasks(result.tasks);
+        setFolderTaskSummary({
+          task_count: result.tasks.length,
+          tasks_with_files: result.tasks.filter((task) => task.file_count > 0).length,
+          file_count: result.tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+        });
       } else if (trashView) {
         const result = await fetchPortalWorkspaceTrash();
         setNodes(result.nodes);
         setTasks(result.tasks);
+        setFolderTaskSummary({
+          task_count: result.tasks.length,
+          tasks_with_files: result.tasks.filter((task) => task.file_count > 0).length,
+          file_count: result.tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+        });
       } else if (agentOutputsView) {
         const result = await fetchPortalAgentOutputs();
         setNodes(result.nodes);
         setTasks(result.tasks);
+        setFolderTaskSummary({
+          task_count: result.tasks.length,
+          tasks_with_files: result.tasks.filter((task) => task.file_count > 0).length,
+          file_count: result.tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+        });
       } else if (recentView) {
         const recent = await fetchPortalRecentWorkspace();
         setNodes(recent.nodes);
         setTasks(recent.tasks);
+        setFolderTaskSummary({
+          task_count: recent.tasks.length,
+          tasks_with_files: recent.tasks.filter((task) => task.file_count > 0).length,
+          file_count: recent.tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+        });
       } else {
-        const [nextNodes, nextTasks] = await Promise.all([
-          fetchPortalWorkspaceNodes(props.folderId),
+        const [nextNodes, taskResult] = await Promise.all([
+          fetchPortalWorkspaceNodes(props.folderId, { includeMigrated: historyView && showHistoryFiles }),
           fetchPortalFolderTasks(props.folderId)
         ]);
         setNodes(nextNodes);
-        setTasks(nextTasks);
+        setTasks(taskResult.tasks);
+        setFolderTaskSummary(taskResult.summary);
       }
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : t("workspace.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [agentOutputsView, props.folderId, recentView, searchQuery, searchView, t, trashView]);
+  }, [agentOutputsView, historyView, props.folderId, recentView, searchQuery, searchView, showHistoryFiles, t, trashView]);
 
   useEffect(() => {
+    setTaskPage(1);
     void load();
   }, [load]);
 
@@ -262,7 +294,11 @@ export function WorkspaceFolderHome(props: {
   };
 
   const visibleNodes = useMemo(() => nodes.slice(0, 200), [nodes]);
-  const visibleTasks = useMemo(() => tasks.slice(0, 100), [tasks]);
+  const taskPageSize = 20;
+  const visibleTasks = useMemo(
+    () => tasks.slice((taskPage - 1) * taskPageSize, taskPage * taskPageSize),
+    [taskPage, tasks]
+  );
   const latestUpdatedAt = useMemo(
     () =>
       [...nodes.map((node) => node.updated_at), ...tasks.map((task) => task.updated_at)]
@@ -314,23 +350,25 @@ export function WorkspaceFolderHome(props: {
                     aria-current={index === props.folderPath!.length - 1 ? "page" : undefined}
                     onClick={() => props.onOpenFolder(folder)}
                   >
-                    {folder.name}
+                    {folder.system_key === "history_unfiled" ? t("workspace.historyTasks") : folder.name}
                   </button>
                 </span>
               ))}
             </nav>
           ) : null}
-          <p className="workspace-folder-kicker">
-            {searchView
-              ? t("workspace.searchResults")
-              : recentView
-                ? t("workspace.recent")
-                : agentOutputsView
-                  ? t("workspace.agentOutputs")
-                  : trashView
-                    ? t("workspace.trash")
-                    : t("workspace.folder")}
-          </p>
+          {!historyView ? (
+            <p className="workspace-folder-kicker">
+              {searchView
+                ? t("workspace.searchResults")
+                : recentView
+                  ? t("workspace.recent")
+                  : agentOutputsView
+                    ? t("workspace.agentOutputs")
+                    : trashView
+                      ? t("workspace.trash")
+                      : t("workspace.folder")}
+            </p>
+          ) : null}
           <h1>{searchView ? t("workspace.searchFor", { query: searchQuery }) : props.folderName}</h1>
           <p>
             {searchView
@@ -341,6 +379,12 @@ export function WorkspaceFolderHome(props: {
                   ? t("workspace.agentOutputsHelp")
                   : trashView
                     ? t("workspace.trashHelp")
+                    : historyView && !loading
+                      ? t("workspace.historyTaskSummary", {
+                          tasks: folderTaskSummary.task_count,
+                          tasksWithFiles: folderTaskSummary.tasks_with_files,
+                          files: folderTaskSummary.file_count
+                        })
                     : loading
                       ? t("workspace.folderHelp")
                       : t("workspace.folderMeta", {
@@ -388,6 +432,27 @@ export function WorkspaceFolderHome(props: {
         <div className="workspace-folder-loading"><Spin /><span>{t("common.loadingWorkspace")}</span></div>
       ) : (
         <>
+          {historyView ? (
+            <section className="workspace-history-files-summary" aria-label={t("workspace.historyFiles")}>
+              <div>
+                <FileArchive size={20} />
+                <span>
+                  <strong>{t("workspace.historyFiles")}</strong>
+                  <small>
+                    {t("workspace.historyFilesRecovered", {
+                      tasks: folderTaskSummary.tasks_with_files,
+                      files: folderTaskSummary.file_count
+                    })}
+                  </small>
+                </span>
+              </div>
+              {folderTaskSummary.file_count > 0 ? (
+                <Button type="text" onClick={() => setShowHistoryFiles((value) => !value)}>
+                  {showHistoryFiles ? t("workspace.hideHistoryFiles") : t("workspace.viewAllFiles")}
+                </Button>
+              ) : null}
+            </section>
+          ) : null}
           {!recentView && !agentOutputsView && !trashView && !searchView && latestAgentOutput ? (
             <button
               type="button"
@@ -399,7 +464,7 @@ export function WorkspaceFolderHome(props: {
               <strong>{t("workspace.preview")}</strong>
             </button>
           ) : null}
-          <section className="workspace-home-section">
+          {!historyView || showHistoryFiles ? <section className="workspace-home-section">
             <div className="workspace-section-heading">
               <div>
                 <h2>{t("workspace.filesAndFolders")}</h2>
@@ -526,7 +591,7 @@ export function WorkspaceFolderHome(props: {
             {nodes.length > visibleNodes.length ? (
               <p className="workspace-result-limit">{t("workspace.showingFirst", { count: visibleNodes.length })}</p>
             ) : null}
-          </section>
+          </section> : null}
 
           <section className="workspace-home-section workspace-task-cards-section">
             <div className="workspace-section-heading">
@@ -553,6 +618,11 @@ export function WorkspaceFolderHome(props: {
                       <span>
                         <strong>{task.title}</strong>
                         <small>{formatLocalDate(task.updated_at, locale)}</small>
+                      </span>
+                      <span className="workspace-task-file-count" data-empty={task.file_count > 0 ? undefined : "true"}>
+                        {task.file_count > 0
+                          ? t("workspace.filesCount", { count: task.file_count })
+                          : t("workspace.pureConversation")}
                       </span>
                     </button>
                     <Dropdown
@@ -596,6 +666,17 @@ export function WorkspaceFolderHome(props: {
                 ) : null}
               </div>
             )}
+            {tasks.length > taskPageSize ? (
+              <Pagination
+                className="workspace-task-pagination"
+                current={taskPage}
+                pageSize={taskPageSize}
+                total={tasks.length}
+                showSizeChanger={false}
+                hideOnSinglePage
+                onChange={setTaskPage}
+              />
+            ) : null}
           </section>
         </>
       )}
