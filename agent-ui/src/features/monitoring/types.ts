@@ -36,6 +36,8 @@ export type OperationsInsightsSummary = {
 export type OperationsInsightsSecurityReviewSummary = {
   reviewJobCount: number;
   successfulReviewCount: number;
+  recoveredReviewCount: number;
+  unsuccessfulReviewCount: number;
   failedAttemptCount: number;
   affectedThreadCount: number;
   affectedUserCount: number;

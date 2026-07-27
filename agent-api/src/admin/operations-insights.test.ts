@@ -290,6 +290,8 @@ describe("buildOperationsInsights", () => {
     expect(response.securityReview).toEqual({
       reviewJobCount: 2,
       successfulReviewCount: 1,
+      recoveredReviewCount: 1,
+      unsuccessfulReviewCount: 1,
       failedAttemptCount: 2,
       affectedThreadCount: 2,
       affectedUserCount: 2,

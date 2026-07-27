@@ -60,6 +60,8 @@ export type OperationsInsightsSummary = {
 export type OperationsInsightsSecurityReviewSummary = {
   reviewJobCount: number;
   successfulReviewCount: number;
+  recoveredReviewCount: number;
+  unsuccessfulReviewCount: number;
   failedAttemptCount: number;
   affectedThreadCount: number;
   affectedUserCount: number;
@@ -641,6 +643,7 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
 function buildSecurityReviewSummary(records: NormalizedEvent[]): OperationsInsightsSecurityReviewSummary {
   const reviewIds = new Set<string>();
   const successfulReviewIds = new Set<string>();
+  const failedReviewIds = new Set<string>();
   const affectedThreadIds = new Set<string>();
   const affectedUserIds = new Set<string>();
   let failedAttemptCount = 0;
@@ -654,7 +657,10 @@ function buildSecurityReviewSummary(records: NormalizedEvent[]): OperationsInsig
     const reviewId = record.reviewId ?? `event:${record.id}`;
     reviewIds.add(reviewId);
     if (record.resultStatus === "success") successfulReviewIds.add(reviewId);
-    else failedAttemptCount += 1;
+    else {
+      failedReviewIds.add(reviewId);
+      failedAttemptCount += 1;
+    }
     if (record.threadId) affectedThreadIds.add(record.threadId);
     if (record.userId) affectedUserIds.add(record.userId);
     inputTokens += record.inputTokens;
@@ -667,6 +673,8 @@ function buildSecurityReviewSummary(records: NormalizedEvent[]): OperationsInsig
   return {
     reviewJobCount: reviewIds.size,
     successfulReviewCount: successfulReviewIds.size,
+    recoveredReviewCount: [...failedReviewIds].filter((reviewId) => successfulReviewIds.has(reviewId)).length,
+    unsuccessfulReviewCount: [...reviewIds].filter((reviewId) => !successfulReviewIds.has(reviewId)).length,
     failedAttemptCount,
     affectedThreadCount: affectedThreadIds.size,
     affectedUserCount: affectedUserIds.size,

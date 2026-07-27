@@ -20,7 +20,7 @@ const DAY_OPTIONS = [
   { label: "90天", value: 90 }
 ];
 
-type OperationsAnalyticsTab = "overview" | "breakdowns" | "organizations" | "users" | "sessions";
+type OperationsAnalyticsTab = "overview" | "breakdowns" | "organizations" | "users" | "sessions" | "security";
 type SortDirection = "asc" | "desc";
 type SortValue = string | number | null | undefined;
 type SortState<Key extends string> = {
@@ -151,8 +151,10 @@ function MetricItem(props: { label: string; value: string; meta: string }) {
 function SecurityReviewCostPanel(props: { data: OperationsInsightsResponse["securityReview"] }) {
   const metrics = [
     { label: "审核任务", value: formatCount(props.data.reviewJobCount), meta: `覆盖 ${formatCount(props.data.affectedThreadCount)} 个 Thread` },
-    { label: "成功审核", value: formatCount(props.data.successfulReviewCount), meta: `涉及 ${formatCount(props.data.affectedUserCount)} 个用户` },
-    { label: "失败尝试", value: formatCount(props.data.failedAttemptCount), meta: "会自动重试，不等于最终失败" },
+    { label: "已成功任务", value: formatCount(props.data.successfulReviewCount), meta: `涉及 ${formatCount(props.data.affectedUserCount)} 个用户` },
+    { label: "重试后成功", value: formatCount(props.data.recoveredReviewCount), meta: "曾失败，但后续尝试成功" },
+    { label: "窗口内未成功", value: formatCount(props.data.unsuccessfulReviewCount), meta: "当前统计窗口未记录成功结果" },
+    { label: "失败尝试", value: formatCount(props.data.failedAttemptCount), meta: "尝试次数，可与成功任务重叠" },
     { label: "安全 Tokens", value: formatCount(props.data.totalTokens), meta: `缓存输入 ${formatCount(props.data.cachedInputTokens)}` },
     { label: "预估价值", value: formatUsdAmount(props.data.estimatedCost), meta: "按审核模型单价折算" },
     { label: "内部价值", value: formatUsdAmount(props.data.internalCost), meta: "计入平台成本，不计入业务价值" }
@@ -166,7 +168,7 @@ function SecurityReviewCostPanel(props: { data: OperationsInsightsResponse["secu
         </span>
         <div>
           <h3 id="ops-security-cost-title">安全审核开销</h3>
-          <p>独立统计，不计入业务会话、问题次数、趋势、分布和会话台账。</p>
+          <p>任务结果按 review 去重；失败尝试按每次调用计数，同一任务可以先失败、重试后成功。</p>
         </div>
       </header>
       <div className="ops-analytics-security-cost-grid">
@@ -825,8 +827,6 @@ export function OperationsAnalyticsView() {
 
       {data ? (
         <>
-          <SecurityReviewCostPanel data={data.securityReview} />
-
           <section className="ops-analytics-context-strip">
             <div className="ops-analytics-context-block">
               <span className="ops-analytics-context-label">统计窗口</span>
@@ -931,6 +931,11 @@ export function OperationsAnalyticsView() {
                     ) : null}
                   </TableShell>
                 )
+              },
+              {
+                key: "security",
+                label: "安全审核",
+                children: <SecurityReviewCostPanel data={data.securityReview} />
               }
             ]}
           />
