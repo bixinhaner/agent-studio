@@ -1,0 +1,5 @@
+生产问题：2026-07-27 起 Codex 业务 Usage 事件停止写入，Prisma 6.19.2 无法反序列化 SELECT pg_advisory_xact_lock(...) 返回的 void 列。
+
+修复验证：锁查询改为返回 1::int AS locked；生产数据库只读验证查询成功，Usage 相关 21 项测试通过，agent-api 构建通过。
+
+部署状态：仅提交并推送 GitHub，按用户要求暂未部署生产，历史缺失数据尚未回填。
