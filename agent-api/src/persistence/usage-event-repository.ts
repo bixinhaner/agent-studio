@@ -205,7 +205,7 @@ export class UsageEventRepository {
     return this.db.$transaction(async (transaction) => {
       const lockKey = `codex-usage:${featureType}:${codexThreadId}`;
       await transaction.$queryRawUnsafe(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        'SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))',
         lockKey
       );
       const rows = await transaction.$queryRawUnsafe<Array<{
