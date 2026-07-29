@@ -65,11 +65,14 @@ describe("tool runtime env", () => {
       fallbackBin: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "bin", "fallback"),
       nodeBin: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "node", "bin"),
       nodeModules: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "node", "node_modules"),
-      fontConfig: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "fontconfig", "fonts.conf")
+      fontConfig: path.join(workspace, ".agent-studio", "tmp", "home", ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "fontconfig", "fonts.conf"),
+      artifactCli: path.join(workspace, ".agent-studio", "artifact-cli.mjs"),
+      artifactManifest: path.join(workspace, ".agent-studio", "artifacts", "published.jsonl")
     });
     await expect(fs.stat(paths!.home)).resolves.toBeTruthy();
     await expect(fs.stat(paths!.cache)).resolves.toBeTruthy();
     await expect(fs.stat(paths!.config)).resolves.toBeTruthy();
+    await expect(fs.stat(paths!.artifactCli)).resolves.toMatchObject({ mode: expect.any(Number) });
   });
 
   it("injects shared runtime commands, packages, and fonts", async () => {
@@ -90,6 +93,9 @@ describe("tool runtime env", () => {
     );
     expect(env.NODE_PATH).toBe([paths.nodeModules, "/custom/node_modules"].join(path.delimiter));
     expect(env.FONTCONFIG_FILE).toBe(paths.fontConfig);
+    expect(env.AGENT_STUDIO_WORKSPACE).toBe(workspace);
+    expect(env.AGENT_STUDIO_ARTIFACT_CLI).toBe(paths.artifactCli);
+    expect(env.AGENT_STUDIO_ARTIFACT_MANIFEST).toBe(paths.artifactManifest);
     expect(env).not.toHaveProperty("CODEX_HOME");
   });
 

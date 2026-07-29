@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import {
+  artifactPublicationPaths,
+  ensureArtifactPublicationTool
+} from "./artifacts/artifact-publication.js";
+
 export type ToolRuntimeEnvPaths = {
   root: string;
   home: string;
@@ -13,6 +18,8 @@ export type ToolRuntimeEnvPaths = {
   nodeBin: string;
   nodeModules: string;
   fontConfig: string;
+  artifactCli: string;
+  artifactManifest: string;
 };
 
 export const TOOL_RUNTIME_FRESHNESS_HINT = [
@@ -35,6 +42,7 @@ export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | u
     "codex-primary-runtime"
   );
   const dependencies = path.join(codexRuntimeLink, "dependencies");
+  const artifactPaths = artifactPublicationPaths(normalized);
   return {
     root,
     home: path.join(root, "home"),
@@ -46,7 +54,9 @@ export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | u
     fallbackBin: path.join(dependencies, "bin", "fallback"),
     nodeBin: path.join(dependencies, "node", "bin"),
     nodeModules: path.join(dependencies, "node", "node_modules"),
-    fontConfig: path.join(dependencies, "fontconfig", "fonts.conf")
+    fontConfig: path.join(dependencies, "fontconfig", "fonts.conf"),
+    artifactCli: artifactPaths.cli,
+    artifactManifest: artifactPaths.manifest
   };
 }
 
@@ -140,7 +150,8 @@ export async function ensureToolRuntimeEnvDirs(
   await Promise.all([
     fs.mkdir(paths.home, { recursive: true }),
     fs.mkdir(paths.cache, { recursive: true }),
-    fs.mkdir(paths.config, { recursive: true })
+    fs.mkdir(paths.config, { recursive: true }),
+    ensureArtifactPublicationTool(workspaceRoot)
   ]);
   const sharedRuntime = sharedCodexRuntimeRoot?.trim();
   if (sharedRuntime) {
@@ -174,6 +185,9 @@ export function buildToolRuntimeEnv(input: {
       baseEnv.PATH,
       paths.fallbackBin
     ].filter(Boolean).join(path.delimiter),
-    FONTCONFIG_FILE: paths.fontConfig
+    FONTCONFIG_FILE: paths.fontConfig,
+    AGENT_STUDIO_WORKSPACE: path.resolve(input.workspace!),
+    AGENT_STUDIO_ARTIFACT_CLI: paths.artifactCli,
+    AGENT_STUDIO_ARTIFACT_MANIFEST: paths.artifactManifest
   };
 }
