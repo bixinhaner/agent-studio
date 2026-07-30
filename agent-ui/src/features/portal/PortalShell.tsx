@@ -155,6 +155,7 @@ import {
   TRASH_WORKSPACE_VIEW
 } from "./workbench/WorkspaceRail";
 import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
+import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
 import { WorkspaceTaskFilesPanel } from "./workbench/WorkspaceTaskFilesPanel";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import {
@@ -6262,6 +6263,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   );
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceErrorText, setWorkspaceErrorText] = useState("");
+  const [createRootFolderOpen, setCreateRootFolderOpen] = useState(false);
   const [selectedWorkspaceFile, setSelectedWorkspaceFile] = useState<PortalWorkspaceNode | null>(null);
   const [workspaceRefreshToken, setWorkspaceRefreshToken] = useState(0);
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
@@ -7348,20 +7350,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
     }
   }, [isMobile]);
-  const createRootWorkspaceFolder = useCallback(async () => {
-    const name = window.prompt(t("workspace.folderNamePrompt"))?.trim();
-    if (!name) return;
-    try {
-      const folder = await createPortalWorkspaceFolder(name);
-      setWorkspaceRootNodes((current) => [
-        ...current.filter((node) => node.id !== folder.id),
-        folder
-      ]);
-      selectWorkspaceFolder(folder.id, folder.name);
-    } catch (error) {
-      setWorkspaceErrorText(error instanceof Error ? error.message : t("workspace.createFolderFailed"));
-    }
-  }, [selectWorkspaceFolder, t]);
+  const createRootWorkspaceFolder = useCallback(async (name: string) => {
+    const folder = await createPortalWorkspaceFolder(name);
+    setWorkspaceRootNodes((current) => [
+      ...current.filter((node) => node.id !== folder.id),
+      folder
+    ]);
+    selectWorkspaceFolder(folder.id, folder.name);
+  }, [selectWorkspaceFolder]);
   const activeThreadCollaboration =
     threadCollaboration && threadCollaboration.threadId === activeRemoteThreadId ? threadCollaboration : null;
   const sharedThreadReadonly = Boolean(
@@ -9366,7 +9362,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
       }}
       onSelectFolder={selectWorkspaceFolder}
-      onCreateFolder={() => void createRootWorkspaceFolder()}
+      onCreateFolder={() => setCreateRootFolderOpen(true)}
       onNewTask={() => void startWorkspaceTask()}
       onViewAllTasks={() => {
         setWorkspaceMainView("folder");
@@ -9583,6 +9579,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               )}
             </div>
 
+            <CreateWorkspaceFolderModal
+              open={createRootFolderOpen}
+              onCancel={() => setCreateRootFolderOpen(false)}
+              onCreate={createRootWorkspaceFolder}
+            />
             <Modal
               open={productFeedbackOpen}
               title={t("feedback.title")}

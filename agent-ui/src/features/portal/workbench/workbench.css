@@ -582,6 +582,25 @@ body.portal-workbench-mode {
   font-size: 13px;
 }
 
+.workspace-create-folder-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-create-folder-help {
+  margin: 0 0 18px;
+  color: #71717a;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.workspace-create-folder-error {
+  margin: 8px 0 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
 .workspace-folder-loading {
   min-height: 260px;
   display: flex;

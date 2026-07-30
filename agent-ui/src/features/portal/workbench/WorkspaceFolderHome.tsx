@@ -37,6 +37,7 @@ import {
   RECENT_WORKSPACE_VIEW,
   TRASH_WORKSPACE_VIEW
 } from "./WorkspaceRail";
+import { CreateWorkspaceFolderModal } from "./CreateWorkspaceFolderModal";
 
 function fileIconFor(node: PortalWorkspaceNode) {
   if (node.kind === "folder") return <Folder size={21} />;
@@ -95,6 +96,7 @@ export function WorkspaceFolderHome(props: {
   const [dragActive, setDragActive] = useState(false);
   const [showHistoryFiles, setShowHistoryFiles] = useState(false);
   const [taskPage, setTaskPage] = useState(1);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recentView = props.folderId === RECENT_WORKSPACE_VIEW;
   const agentOutputsView = props.folderId === AGENT_OUTPUTS_WORKSPACE_VIEW;
@@ -186,17 +188,11 @@ export function WorkspaceFolderHome(props: {
     }
   };
 
-  const createSubfolder = async () => {
+  const createSubfolder = async (name: string) => {
     if (recentView || agentOutputsView || trashView || searchView) return;
-    const name = window.prompt(t("workspace.folderNamePrompt"))?.trim();
-    if (!name) return;
-    try {
-      await createPortalWorkspaceFolder(name, props.folderId);
-      await load();
-      props.onWorkspaceChanged?.();
-    } catch (error) {
-      setErrorText(error instanceof Error ? error.message : t("workspace.createFolderFailed"));
-    }
+    await createPortalWorkspaceFolder(name, props.folderId);
+    await load();
+    props.onWorkspaceChanged?.();
   };
 
   const renameNode = async (node: PortalWorkspaceNode) => {
@@ -406,7 +402,7 @@ export function WorkspaceFolderHome(props: {
               <Button icon={<Upload size={16} />} loading={uploading} onClick={() => fileInputRef.current?.click()}>
                 {t("workspace.upload")}
               </Button>
-              <Button icon={<FolderPlus size={16} />} onClick={() => void createSubfolder()}>
+              <Button icon={<FolderPlus size={16} />} onClick={() => setCreateFolderOpen(true)}>
                 {t("workspace.newFolder")}
               </Button>
             </>
@@ -687,6 +683,12 @@ export function WorkspaceFolderHome(props: {
           <strong>{t("workspace.dropNow")}</strong>
         </div>
       ) : null}
+      <CreateWorkspaceFolderModal
+        open={createFolderOpen}
+        parentName={props.folderName}
+        onCancel={() => setCreateFolderOpen(false)}
+        onCreate={createSubfolder}
+      />
     </main>
   );
 }
