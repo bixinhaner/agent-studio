@@ -39,7 +39,6 @@ import {
   AssistantMessage,
   BranchPicker,
   Composer,
-  Thread,
   UserMessage,
   ThreadWelcome,
   ThreadList,
@@ -134,6 +133,7 @@ import {
 } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
+import { PortalThread } from "./PortalThread";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n, type PortalLocale } from "./i18n";
@@ -9227,7 +9227,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <AnswerFeedbackConfigContext.Provider value={answerFeedbackConfig}>
           <ExternalPortalUserContext.Provider value={isExternalPortalUser}>
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
-            <Thread
+            <PortalThread
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
               strings={{
                 threadList: {
