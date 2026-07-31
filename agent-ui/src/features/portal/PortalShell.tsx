@@ -152,7 +152,8 @@ import {
   WorkspaceRail,
   AGENT_OUTPUTS_WORKSPACE_VIEW,
   RECENT_WORKSPACE_VIEW,
-  TRASH_WORKSPACE_VIEW
+  TRASH_WORKSPACE_VIEW,
+  WORKSPACE_RAIL_TASK_LIMIT
 } from "./workbench/WorkspaceRail";
 import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
 import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
@@ -7320,6 +7321,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       : selectedWorkspaceFolder?.system_key === "history_unfiled"
         ? t("workspace.historyTasks")
         : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
+  const selectedWorkspaceThreads = useMemo(() => {
+    return workspaceThreads
+      .filter((thread) => thread.status === "regular")
+      .filter((thread) =>
+        selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
+          ? true
+          : selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
+            ? true
+          : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
+            ? false
+            : thread.folder_id === selectedWorkspaceFolderId
+      )
+      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
+  }, [selectedWorkspaceFolderId, workspaceThreads]);
+  const visibleWorkspaceThreadIds = useMemo(
+    () => new Set(selectedWorkspaceThreads.slice(0, WORKSPACE_RAIL_TASK_LIMIT).map((thread) => thread.id)),
+    [selectedWorkspaceThreads]
+  );
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
@@ -9295,6 +9314,29 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     <p className="session-rail-user-fallback">{currentUserName}</p>
   );
 
+  const workspaceTaskList = (
+    <SessionSearchContext.Provider value={sessionSearchValue}>
+      <SessionGroupLabelContext.Provider value={{ groupHeaderByRemoteId: {} }}>
+        <RunningThreadIdsContext.Provider value={runningThreadIds}>
+          <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
+            <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+              <StableThreadListItems
+                visibleRemoteIds={visibleWorkspaceThreadIds}
+                maxItems={WORKSPACE_RAIL_TASK_LIMIT}
+                onSelectThread={(threadId) => {
+                  setWorkspaceMainView("task");
+                  setSelectedWorkspaceFile(null);
+                  const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
+                  if (thread?.folder_id) setSelectedWorkspaceFolderId(thread.folder_id);
+                }}
+              />
+            </ActiveThreadIdContext.Provider>
+          </ThreadCompletionNoticeContext.Provider>
+        </RunningThreadIdsContext.Provider>
+      </SessionGroupLabelContext.Provider>
+    </SessionSearchContext.Provider>
+  );
+
   const workspaceRail = (
     <WorkspaceRail
       workspace={portalWorkspace}
@@ -9304,6 +9346,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       searchValue={sessionSearchValue}
       loading={workspaceLoading}
       errorText={workspaceErrorText}
+      taskList={workspaceTaskList}
+      taskCount={selectedWorkspaceThreads.length}
       footer={workspaceRailFooter}
       refreshKey={workspaceRefreshToken}
       onSearchChange={(value) => {
@@ -9322,6 +9366,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       }}
       onSelectFolder={selectWorkspaceFolder}
       onCreateFolder={() => setCreateRootFolderOpen(true)}
+      onNewTask={() => void startWorkspaceTask()}
+      onViewAllTasks={() => {
+        setWorkspaceMainView("folder");
+        setSelectedWorkspaceFile(null);
+        setRequestedPreviewPath("");
+        writePortalWorkspaceLocation({ folderId: selectedWorkspaceFolderId }, "push");
+        if (isMobile) {
+          setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
+        }
+      }}
     />
   );
 

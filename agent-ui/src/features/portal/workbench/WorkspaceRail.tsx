@@ -27,6 +27,7 @@ import {
 export const RECENT_WORKSPACE_VIEW = "__recent__";
 export const AGENT_OUTPUTS_WORKSPACE_VIEW = "__agent_outputs__";
 export const TRASH_WORKSPACE_VIEW = "__trash__";
+export const WORKSPACE_RAIL_TASK_LIMIT = 5;
 
 export function WorkspaceRail(props: {
   workspace: PortalWorkspaceSummary | null;
@@ -36,11 +37,15 @@ export function WorkspaceRail(props: {
   searchValue: string;
   loading?: boolean;
   errorText?: string;
+  taskList?: ReactNode;
+  taskCount?: number;
   footer?: ReactNode;
   refreshKey?: number;
   onSearchChange(value: string): void;
   onSelectFolder(folderId: string): void;
   onCreateFolder(): void;
+  onNewTask(): void;
+  onViewAllTasks(): void;
 }) {
   const { t } = usePortalI18n();
   const folders = props.rootNodes.filter((node) => node.kind === "folder");
@@ -143,7 +148,31 @@ export function WorkspaceRail(props: {
             <FolderIcon size={17} />
             <span title={folderName}>{folderName}</span>
           </button>
+          {selected ? (
+            <button
+              type="button"
+              className="workspace-folder-inline-new"
+              aria-label={t("workspace.newTask")}
+              title={t("workspace.newTask")}
+              onClick={props.onNewTask}
+            >
+              <Plus size={14} />
+              <span>{t("workspace.newTask")}</span>
+            </button>
+          ) : null}
         </div>
+        {selected ? (
+          <div className="workspace-folder-task-preview">
+            <div className="workspace-folder-task-preview-label">{t("workspace.recentTasks")}</div>
+            <div className="workspace-task-list">{props.taskList}</div>
+            {(props.taskCount || 0) > WORKSPACE_RAIL_TASK_LIMIT ? (
+              <button type="button" className="workspace-view-all-tasks" onClick={props.onViewAllTasks}>
+                {t("workspace.viewAllTasks", { count: props.taskCount || 0 })}
+                <ChevronRight size={13} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {expanded ? (
           <div className="workspace-folder-tree-children">
             {childFolders.map((child) => renderFolder(child, depth + 1))}
@@ -156,8 +185,12 @@ export function WorkspaceRail(props: {
     childrenByFolderId,
     expandedFolderIds,
     loadingFolderIds,
+    props.onNewTask,
     props.onSelectFolder,
+    props.onViewAllTasks,
     props.selectedFolderId,
+    props.taskCount,
+    props.taskList,
     t,
     toggleFolder
   ]);

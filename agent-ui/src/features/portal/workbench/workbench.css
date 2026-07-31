@@ -437,7 +437,7 @@ body.portal-workbench-mode {
 }
 
 .workspace-folder-task-preview {
-  margin: 4px 0 8px 19px;
+  margin: 4px 0 8px calc(19px + var(--workspace-tree-depth, 0) * 15px);
   padding: 6px 0 3px 10px;
   border-left: 1px solid #e4e4e7;
 }
