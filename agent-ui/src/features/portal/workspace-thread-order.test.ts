@@ -63,4 +63,16 @@ describe("workspace thread ordering", () => {
 
     expect(result.map((item) => item.id)).toContain("selected");
   });
+
+  it("does not move an ordinary selected thread ahead of newer threads", () => {
+    const threads = [
+      thread("selected", "2026-07-31T01:00:00.000Z"),
+      thread("recent", "2026-07-31T09:00:00.000Z")
+    ];
+    const sorted = sortWorkspaceThreads(threads, {}, {});
+    const result = selectVisibleWorkspaceThreads(sorted, {}, {}, 1, { selected: true });
+
+    expect(sorted.map((item) => item.id)).toEqual(["recent", "selected"]);
+    expect(result.map((item) => item.id)).toEqual(["recent", "selected"]);
+  });
 });

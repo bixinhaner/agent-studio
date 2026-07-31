@@ -15,25 +15,23 @@ function identityKeys(thread: WorkspaceThreadOrderItem): string[] {
 export function isWorkspaceThreadPriority(
   thread: WorkspaceThreadOrderItem,
   runningThreadIds: WorkspaceThreadStateMap,
-  unreadThreadIds: WorkspaceThreadStateMap,
-  selectedThreadIds: WorkspaceThreadStateMap = {}
+  unreadThreadIds: WorkspaceThreadStateMap
 ): boolean {
   return identityKeys(thread).some(
-    (key) => runningThreadIds[key] || unreadThreadIds[key] || selectedThreadIds[key]
+    (key) => runningThreadIds[key] || unreadThreadIds[key]
   );
 }
 
 export function sortWorkspaceThreads<T extends WorkspaceThreadOrderItem>(
   threads: readonly T[],
   runningThreadIds: WorkspaceThreadStateMap,
-  unreadThreadIds: WorkspaceThreadStateMap,
-  selectedThreadIds: WorkspaceThreadStateMap = {}
+  unreadThreadIds: WorkspaceThreadStateMap
 ): T[] {
   return threads
     .map((thread, index) => ({
       thread,
       index,
-      priority: isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds, selectedThreadIds),
+      priority: isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds),
       updatedAt: Date.parse(thread.updated_at)
     }))
     .sort((left, right) => {
@@ -54,10 +52,16 @@ export function selectVisibleWorkspaceThreads<T extends WorkspaceThreadOrderItem
   selectedThreadIds: WorkspaceThreadStateMap = {}
 ): T[] {
   const priorityThreads = sortedThreads.filter((thread) =>
-    isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds, selectedThreadIds)
+    isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds)
   );
   const ordinaryThreads = sortedThreads
-    .filter((thread) => !isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds, selectedThreadIds))
+    .filter((thread) => !isWorkspaceThreadPriority(thread, runningThreadIds, unreadThreadIds))
     .slice(0, Math.max(0, ordinaryLimit - priorityThreads.length));
-  return [...priorityThreads, ...ordinaryThreads];
+  const visibleThreads = [...priorityThreads, ...ordinaryThreads];
+  const visibleThreadIds = new Set(visibleThreads.map((thread) => thread.id));
+  const selectedOverflowThreads = sortedThreads.filter((thread) =>
+    !visibleThreadIds.has(thread.id) &&
+    identityKeys(thread).some((key) => selectedThreadIds[key])
+  );
+  return [...visibleThreads, ...selectedOverflowThreads];
 }

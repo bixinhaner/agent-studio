@@ -6390,12 +6390,25 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [props.currentUser, refreshServerRunningThreadIds]);
-  const clearCompletedThreadNotice = useCallback((...threadIds: Array<string | undefined | null>) => {
+  const clearPortalThreadUnreadState = useCallback((...threadIds: Array<string | undefined | null>) => {
     const keys = normalizeThreadIdentityKeys(...threadIds);
     if (keys.length === 0) return;
     setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, keys, false));
     setPersistedCompletionNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, keys, false));
+    setWorkspaceThreads((previous) => {
+      let changed = false;
+      const next = previous.map((thread) => {
+        if (thread.has_unread_completion !== true) return thread;
+        const matches = normalizeThreadIdentityKeys(thread.id, thread.external_id)
+          .some((key) => keys.includes(key));
+        if (!matches) return thread;
+        changed = true;
+        return { ...thread, has_unread_completion: false };
+      });
+      return changed ? next : previous;
+    });
   }, []);
+  const clearCompletedThreadNotice = clearPortalThreadUnreadState;
   const threadCompletionNoticeContext = useMemo<ThreadCompletionNoticeContextValue>(
     () => ({
       completedThreadIds: completionNoticeThreadIds,
@@ -6489,12 +6502,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const markPortalThreadRead = useCallback(async (threadId: string) => {
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) return;
+    clearPortalThreadUnreadState(normalizedThreadId);
     try {
       await api(`/api/threads/${encodeURIComponent(normalizedThreadId)}/read`, { method: "POST" });
     } catch {
       // The next thread-list refresh can restore the persisted unread state.
     }
-  }, []);
+  }, [clearPortalThreadUnreadState]);
 
   const syncActiveThreadIdentity = useCallback((identity: ThreadIdentity) => {
     const normalizedRemoteId = String(identity.remoteId || "").trim();
@@ -7446,8 +7460,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     return sortWorkspaceThreads(
       filteredThreads,
       runningThreadIds,
-      completionNoticeThreadIds,
-      selectedWorkspaceThreadIds
+      completionNoticeThreadIds
     );
   }, [completionNoticeThreadIds, runningThreadIds, selectedWorkspaceFolderId, selectedWorkspaceThreadIds, workspaceThreads]);
   const visibleWorkspaceThreads = useMemo(
