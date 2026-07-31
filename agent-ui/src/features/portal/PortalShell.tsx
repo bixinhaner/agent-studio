@@ -177,6 +177,10 @@ import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-scree
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
+  selectVisibleWorkspaceThreads,
+  sortWorkspaceThreads
+} from "./workspace-thread-order";
+import {
   createPortalWorkspaceFolder,
   fetchPortalWorkspace,
   fetchPortalWorkspaceNode,
@@ -211,12 +215,17 @@ type ThreadOut = {
     managed_skill_id?: string | null;
   }>;
   enabled_skill_names?: string[];
+  has_unread_completion?: boolean;
   created_at: string;
   updated_at: string;
 };
 
 type ThreadListOut = {
   threads: ThreadOut[];
+};
+
+type RunningThreadsOut = {
+  thread_ids: string[];
 };
 
 type ThreadOneOut = {
@@ -3514,12 +3523,12 @@ function updateRunningThreadMapForKeys(
 }
 
 function mergeRunningThreadMaps(
-  first: RunningThreadIdsContextValue,
-  second: RunningThreadIdsContextValue
+  ...maps: RunningThreadIdsContextValue[]
 ): RunningThreadIdsContextValue {
-  if (Object.keys(first).length === 0) return second;
-  if (Object.keys(second).length === 0) return first;
-  return { ...first, ...second };
+  return maps.reduce<RunningThreadIdsContextValue>((merged, current) => {
+    if (Object.keys(current).length === 0) return merged;
+    return { ...merged, ...current };
+  }, {});
 }
 
 function messageTextForSuggestions(message: ThreadMessage): string {
@@ -5262,16 +5271,28 @@ const ThreadListItemByIdProvider: FC<PropsWithChildren<{ threadId: string }>> = 
 
 const StableThreadListItems: FC<{
   visibleRemoteIds?: ReadonlySet<string>;
+  orderedRemoteIds?: readonly string[];
   maxItems?: number;
   onSelectThread?: (threadId: string) => void;
-}> = ({ visibleRemoteIds, maxItems, onSelectThread }) => {
+}> = ({ visibleRemoteIds, orderedRemoteIds, maxItems, onSelectThread }) => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const stableThreadIds = useMemo(() => {
     const itemById = new Map(threadItems.map((item) => [item.id, item]));
+    const itemIdByIdentity = new Map<string, string>();
+    for (const item of threadItems) {
+      for (const identity of [item.externalId, item.remoteId, item.id]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)) {
+        itemIdByIdentity.set(identity, item.id);
+      }
+    }
     const seen = new Set<string>();
     const result: string[] = [];
-    for (const threadId of threadIds) {
+    const candidateThreadIds = orderedRemoteIds?.length
+      ? orderedRemoteIds.map((identity) => itemIdByIdentity.get(String(identity || "").trim())).filter(Boolean)
+      : threadIds;
+    for (const threadId of candidateThreadIds) {
       if (!threadId) continue;
       const item = itemById.get(threadId);
       const identities = [item?.externalId, item?.remoteId, threadId]
@@ -5284,7 +5305,7 @@ const StableThreadListItems: FC<{
       if (maxItems && result.length >= maxItems) break;
     }
     return result;
-  }, [maxItems, threadIds, threadItems, visibleRemoteIds]);
+  }, [maxItems, orderedRemoteIds, threadIds, threadItems, visibleRemoteIds]);
 
   return (
     <>
@@ -6285,7 +6306,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   }, [locale]);
   const [activeRunThreadIds, setActiveRunThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [runtimeRunningThreadIds, setRuntimeRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [serverRunningThreadIds, setServerRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [completedNoticeThreadIds, setCompletedNoticeThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [persistedCompletionNoticeThreadIds, setPersistedCompletionNoticeThreadIds] =
+    useState<RunningThreadIdsContextValue>({});
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
 
   useEffect(() => {
@@ -6310,20 +6334,61 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [productFeedbackError, setProductFeedbackError] = useState("");
   const [productFeedbackSubmitted, setProductFeedbackSubmitted] = useState(false);
   const runningThreadIds = useMemo(
-    () => mergeRunningThreadMaps(activeRunThreadIds, runtimeRunningThreadIds),
-    [activeRunThreadIds, runtimeRunningThreadIds]
+    () => mergeRunningThreadMaps(activeRunThreadIds, runtimeRunningThreadIds, serverRunningThreadIds),
+    [activeRunThreadIds, runtimeRunningThreadIds, serverRunningThreadIds]
   );
+  const completionNoticeThreadIds = useMemo(
+    () => mergeRunningThreadMaps(completedNoticeThreadIds, persistedCompletionNoticeThreadIds),
+    [completedNoticeThreadIds, persistedCompletionNoticeThreadIds]
+  );
+  const refreshServerRunningThreadIds = useCallback(async () => {
+    if (!props.currentUser) {
+      setServerRunningThreadIds({});
+      return;
+    }
+    try {
+      const out = await api<RunningThreadsOut>("/api/threads/running");
+      const next: RunningThreadIdsContextValue = {};
+      for (const threadId of Array.isArray(out.thread_ids) ? out.thread_ids : []) {
+        const normalized = String(threadId || "").trim();
+        if (normalized) next[normalized] = true;
+      }
+      setServerRunningThreadIds((previous) => (areRunningThreadMapsEqual(previous, next) ? previous : next));
+    } catch {
+      // Keep the last successful snapshot during a transient status request failure.
+    }
+  }, [props.currentUser]);
+  useEffect(() => {
+    if (!props.currentUser || typeof window === "undefined") {
+      setServerRunningThreadIds({});
+      return undefined;
+    }
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshServerRunningThreadIds();
+    };
+    refreshIfVisible();
+    const interval = window.setInterval(refreshIfVisible, 3500);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [props.currentUser, refreshServerRunningThreadIds]);
   const clearCompletedThreadNotice = useCallback((...threadIds: Array<string | undefined | null>) => {
     const keys = normalizeThreadIdentityKeys(...threadIds);
     if (keys.length === 0) return;
     setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, keys, false));
+    setPersistedCompletionNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, keys, false));
   }, []);
   const threadCompletionNoticeContext = useMemo<ThreadCompletionNoticeContextValue>(
     () => ({
-      completedThreadIds: completedNoticeThreadIds,
+      completedThreadIds: completionNoticeThreadIds,
       clearCompletedThreadNotice
     }),
-    [clearCompletedThreadNotice, completedNoticeThreadIds]
+    [clearCompletedThreadNotice, completionNoticeThreadIds]
   );
 
   const [statusText, setStatusText] = useState("Ready");
@@ -6392,6 +6457,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const knowledgeSetSelectionInitializedRef = useRef(false);
   const completedRunThreadIdsRef = useRef<Set<string>>(new Set());
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
+  const lastMarkedReadThreadIdRef = useRef("");
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const threadCollaborationLoadingRef = useRef(false);
   const threadCollaborationPendingRef = useRef<{
@@ -6406,6 +6472,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshPortalSubscriptionStatusRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
+
+  const markPortalThreadRead = useCallback(async (threadId: string) => {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) return;
+    try {
+      await api(`/api/threads/${encodeURIComponent(normalizedThreadId)}/read`, { method: "POST" });
+    } catch {
+      // The next thread-list refresh can restore the persisted unread state.
+    }
+  }, []);
 
   const syncActiveThreadIdentity = useCallback((identity: ThreadIdentity) => {
     const normalizedRemoteId = String(identity.remoteId || "").trim();
@@ -6425,10 +6501,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       setContextUsage(null);
       return;
     }
+    if (lastMarkedReadThreadIdRef.current !== normalizedRemoteId) {
+      lastMarkedReadThreadIdRef.current = normalizedRemoteId;
+      void markPortalThreadRead(normalizedRemoteId);
+    }
     setWorkspaceMainView("task");
     setSelectedWorkspaceFile(null);
     setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
-  }, []);
+  }, [markPortalThreadRead]);
 
   appliedConfigRef.current = appliedConfig;
   localeRef.current = locale;
@@ -7053,10 +7133,23 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     () => ({
       async list() {
         const out = await api<ThreadListOut>("/api/threads");
-        setWorkspaceThreads(Array.isArray(out.threads) ? out.threads : []);
+        const threads = Array.isArray(out.threads) ? out.threads : [];
+        setWorkspaceThreads(threads);
+        const nextPersistedCompletionNotices: RunningThreadIdsContextValue = {};
+        for (const thread of threads) {
+          if (thread.has_unread_completion !== true) continue;
+          for (const key of normalizeThreadIdentityKeys(thread.id, thread.external_id)) {
+            nextPersistedCompletionNotices[key] = true;
+          }
+        }
+        setPersistedCompletionNoticeThreadIds((previous) =>
+          areRunningThreadMapsEqual(previous, nextPersistedCompletionNotices)
+            ? previous
+            : nextPersistedCompletionNotices
+        );
         const groupHeaderByRemoteId: Record<string, string> = {};
         let previousGroupLabel = "";
-        for (const thread of out.threads || []) {
+        for (const thread of threads) {
           const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at, localeRef.current);
           if (groupLabel && groupLabel !== previousGroupLabel) {
             rememberThreadGroupHeader(groupHeaderByRemoteId, thread, groupLabel);
@@ -7065,7 +7158,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
         setSessionGroupLabelContext({ groupHeaderByRemoteId });
         return {
-          threads: (out.threads || []).map((thread) => ({
+          threads: threads.map((thread) => ({
             status: thread.status,
             remoteId: thread.id,
             externalId: thread.external_id,
@@ -7321,8 +7414,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       : selectedWorkspaceFolder?.system_key === "history_unfiled"
         ? t("workspace.historyTasks")
         : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
+  const selectedWorkspaceThreadIds = useMemo<RunningThreadIdsContextValue>(
+    () => activeRemoteThreadId ? { [activeRemoteThreadId]: true } : {},
+    [activeRemoteThreadId]
+  );
   const selectedWorkspaceThreads = useMemo(() => {
-    return workspaceThreads
+    const filteredThreads = workspaceThreads
       .filter((thread) => thread.status === "regular")
       .filter((thread) =>
         selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
@@ -7332,13 +7429,49 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
             ? false
             : thread.folder_id === selectedWorkspaceFolderId
-      )
-      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
-  }, [selectedWorkspaceFolderId, workspaceThreads]);
-  const visibleWorkspaceThreadIds = useMemo(
-    () => new Set(selectedWorkspaceThreads.slice(0, WORKSPACE_RAIL_TASK_LIMIT).map((thread) => thread.id)),
-    [selectedWorkspaceThreads]
+      );
+    return sortWorkspaceThreads(
+      filteredThreads,
+      runningThreadIds,
+      completionNoticeThreadIds,
+      selectedWorkspaceThreadIds
+    );
+  }, [completionNoticeThreadIds, runningThreadIds, selectedWorkspaceFolderId, selectedWorkspaceThreadIds, workspaceThreads]);
+  const visibleWorkspaceThreads = useMemo(
+    () => selectVisibleWorkspaceThreads(
+      selectedWorkspaceThreads,
+      runningThreadIds,
+      completionNoticeThreadIds,
+      WORKSPACE_RAIL_TASK_LIMIT,
+      selectedWorkspaceThreadIds
+    ),
+    [completionNoticeThreadIds, runningThreadIds, selectedWorkspaceThreadIds, selectedWorkspaceThreads]
   );
+  const visibleWorkspaceThreadIds = useMemo(
+    () => new Set(visibleWorkspaceThreads.map((thread) => thread.id)),
+    [visibleWorkspaceThreads]
+  );
+  const orderedWorkspaceThreadIds = useMemo(
+    () => selectedWorkspaceThreads
+      .filter((thread) => visibleWorkspaceThreadIds.has(thread.id))
+      .flatMap((thread) => [thread.id, thread.external_id].filter((value): value is string => Boolean(value))),
+    [selectedWorkspaceThreads, visibleWorkspaceThreadIds]
+  );
+  const unreadWorkspaceFolderIds = useMemo(() => {
+    const folderIds = new Set<string>();
+    const historyFolderId = portalWorkspace?.history_folder_id?.trim() || "";
+    for (const thread of workspaceThreads) {
+      if (thread.status !== "regular") continue;
+      const hasUnreadCompletion = thread.has_unread_completion === true ||
+        normalizeThreadIdentityKeys(thread.id, thread.external_id).some(
+          (key) => completionNoticeThreadIds[key]
+        );
+      if (!hasUnreadCompletion) continue;
+      const folderId = thread.folder_id?.trim() || historyFolderId;
+      if (folderId) folderIds.add(folderId);
+    }
+    return folderIds;
+  }, [completionNoticeThreadIds, portalWorkspace?.history_folder_id, workspaceThreads]);
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
@@ -8935,6 +9068,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             activeThreadIdentityRef.current.localId
           );
           const completedInActiveThread = runningThreadKeys.some((key) => activeThreadKeys.includes(key));
+          if (completedInActiveThread) {
+            void markPortalThreadRead(threadId);
+          }
           setActiveRunThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
           setRuntimeRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
           setCompletedNoticeThreadIds((prev) =>
@@ -8946,7 +9082,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
       }
     }),
-    []
+    [markPortalThreadRead]
   );
 
   const runtime = useRemoteThreadListRuntime({
@@ -9322,7 +9458,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
               <StableThreadListItems
                 visibleRemoteIds={visibleWorkspaceThreadIds}
-                maxItems={WORKSPACE_RAIL_TASK_LIMIT}
+                orderedRemoteIds={orderedWorkspaceThreadIds}
                 onSelectThread={(threadId) => {
                   setWorkspaceMainView("task");
                   setSelectedWorkspaceFile(null);
@@ -9344,6 +9480,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       selectedFolderPath={selectedWorkspaceFolderPath}
       selectedFolderId={selectedWorkspaceFolderId}
       searchValue={sessionSearchValue}
+      unreadFolderIds={unreadWorkspaceFolderIds}
       loading={workspaceLoading}
       errorText={workspaceErrorText}
       taskList={workspaceTaskList}

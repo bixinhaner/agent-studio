@@ -82,6 +82,7 @@ describe("WorkspaceRail", () => {
           rootNodes={[folder("root-1", "员工AI培训")]}
           selectedFolderId="root-1"
           searchValue=""
+          unreadFolderIds={new Set(["root-1"])}
           taskList={
             <>
               {Array.from({ length: WORKSPACE_RAIL_TASK_LIMIT }, (_, index) => (
@@ -100,6 +101,7 @@ describe("WorkspaceRail", () => {
     );
 
     expect(screen.getAllByText(/^任务 \d$/)).toHaveLength(5);
+    expect(screen.getByLabelText("未读任务")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "新任务" }));
     expect(onNewTask).toHaveBeenCalledOnce();
 

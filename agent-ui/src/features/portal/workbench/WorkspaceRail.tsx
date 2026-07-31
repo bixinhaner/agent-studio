@@ -35,6 +35,7 @@ export function WorkspaceRail(props: {
   selectedFolderPath?: PortalWorkspaceNode[];
   selectedFolderId: string;
   searchValue: string;
+  unreadFolderIds?: ReadonlySet<string>;
   loading?: boolean;
   errorText?: string;
   taskList?: ReactNode;
@@ -115,6 +116,7 @@ export function WorkspaceRail(props: {
     const folderName = folder.system_key === "history_unfiled"
       ? t("workspace.historyTasks")
       : folder.name;
+    const hasUnreadTasks = props.unreadFolderIds?.has(folder.id) ?? false;
     const canExpand = !folder.system_key;
     const treeStyle = { "--workspace-tree-depth": depth } as CSSProperties;
 
@@ -146,7 +148,14 @@ export function WorkspaceRail(props: {
             onClick={() => props.onSelectFolder(folder.id)}
           >
             <FolderIcon size={17} />
-            <span title={folderName}>{folderName}</span>
+            <span className="workspace-tree-item-label" title={folderName}>{folderName}</span>
+            {hasUnreadTasks ? (
+              <span
+                className="workspace-folder-unread-indicator"
+                aria-label={t("workspace.unreadTasks")}
+                title={t("workspace.unreadTasks")}
+              />
+            ) : null}
           </button>
           {selected ? (
             <button
@@ -191,6 +200,7 @@ export function WorkspaceRail(props: {
     props.selectedFolderId,
     props.taskCount,
     props.taskList,
+    props.unreadFolderIds,
     t,
     toggleFolder
   ]);

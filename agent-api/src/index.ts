@@ -183,6 +183,10 @@ import {
 } from "./persistence/thread-public-share-repository.js";
 import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persistence/thread-share-repository.js";
 import {
+  ThreadReadStateRepository,
+  type ThreadReadStateRepositoryDb
+} from "./persistence/thread-read-state-repository.js";
+import {
   ExternalConversationBindingRepository,
   type ExternalConversationBindingRecord,
   type ExternalConversationBindingRepositoryDb
@@ -451,6 +455,53 @@ async function isThreadActiveForAdmin(threadId: string): Promise<boolean> {
   }
 }
 
+async function activePortalThreadIdsForActor(
+  currentUser: CurrentActor
+): Promise<{ available: boolean; threadIds: Set<string> }> {
+  let statuses: unknown[];
+  if (runsChatService) {
+    statuses = activeThreadStatus();
+  } else {
+    const statusUrl = trimOrUndefined(process.env.AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL);
+    if (!statusUrl) return { available: false, threadIds: new Set() };
+    try {
+      const response = await fetch(statusUrl, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(1000)
+      });
+      if (!response.ok) return { available: false, threadIds: new Set() };
+      const payload = asRecord(await response.json());
+      statuses = Array.isArray(payload?.active_threads)
+        ? payload.active_threads
+        : Array.isArray(payload?.turns)
+          ? payload.turns
+          : [];
+    } catch {
+      return { available: false, threadIds: new Set() };
+    }
+  }
+
+  const threadIds = new Set<string>();
+  for (const item of statuses) {
+    const record = asRecord(item);
+    const threadId = trimOrUndefined(typeof record?.thread_id === "string" ? record.thread_id : undefined);
+    const userId = trimOrUndefined(typeof record?.user_id === "string" ? record.user_id : undefined);
+    const organizationId = trimOrUndefined(
+      typeof record?.organization_id === "string" ? record.organization_id : undefined
+    );
+    const channel = trimOrUndefined(typeof record?.channel === "string" ? record.channel : undefined);
+    if (
+      threadId &&
+      userId === currentUser.id &&
+      organizationId === currentUser.organizationId &&
+      channel === "portal"
+    ) {
+      threadIds.add(threadId);
+    }
+  }
+  return { available: true, threadIds };
+}
+
 let codexMemoryEngine: CodexMemoryEngine;
 const codexExecution = new CodexExecutionService({
   runtimeTurnTracker: {
@@ -475,6 +526,7 @@ const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage);
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
+const threadReadStates = new ThreadReadStateRepository(db as unknown as ThreadReadStateRepositoryDb);
 const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
 const organizationMemberships = new OrganizationMembershipRepository(db as unknown as OrganizationMembershipRepositoryDb);
 const authIdentities = new AuthIdentityRepository(db as unknown as AuthIdentityRepositoryDb);
@@ -2746,7 +2798,39 @@ function sessionOut(session: {
   };
 }
 
-function threadOut(thread: ThreadRecord) {
+function latestAssistantMessageAt(thread: ThreadRecord): string | undefined {
+  let latestTimestamp = 0;
+  let latestIso: string | undefined;
+  for (const item of thread.messages) {
+    if (storedMessageRole(item.message) !== "assistant") continue;
+    const message = asRecord(item.message);
+    const candidate =
+      item.updatedAt ??
+      item.createdAt ??
+      (typeof message?.updated_at === "string" ? message.updated_at : undefined) ??
+      (typeof message?.created_at === "string" ? message.created_at : undefined);
+    if (!candidate) continue;
+    const timestamp = Date.parse(candidate);
+    if (!Number.isFinite(timestamp) || timestamp <= latestTimestamp) continue;
+    latestTimestamp = timestamp;
+    latestIso = new Date(timestamp).toISOString();
+  }
+  return latestIso;
+}
+
+function hasUnreadAssistantCompletion(thread: ThreadRecord, lastReadAt?: string): boolean {
+  if (!lastReadAt) return false;
+  const latestAssistantAt = latestAssistantMessageAt(thread);
+  if (!latestAssistantAt) return false;
+  const readTimestamp = Date.parse(lastReadAt);
+  const assistantTimestamp = Date.parse(latestAssistantAt);
+  return Number.isFinite(readTimestamp) && Number.isFinite(assistantTimestamp) && assistantTimestamp > readTimestamp;
+}
+
+function threadOut(
+  thread: ThreadRecord,
+  options?: { isRunning?: boolean; hasUnreadCompletion?: boolean }
+) {
   return {
     id: thread.id,
     organization_id: thread.organizationId ?? null,
@@ -2764,7 +2848,11 @@ function threadOut(thread: ThreadRecord) {
     })),
     enabled_skill_names: enabledSkillNamesFromRunConfig(thread.codexRunConfig),
     created_at: thread.createdAt,
-    updated_at: thread.updatedAt
+    updated_at: thread.updatedAt,
+    ...(options?.isRunning !== undefined ? { is_running: options.isRunning } : {}),
+    ...(options?.hasUnreadCompletion !== undefined
+      ? { has_unread_completion: options.hasUnreadCompletion }
+      : {})
   };
 }
 
@@ -3920,6 +4008,7 @@ function mergeAbortSignals(signals: AbortSignal[]): { signal: AbortSignal; dispo
 
 type PortalActiveChatRun = {
   userId: string;
+  organizationId: string;
   controller: AbortController;
   createdAt: number;
   traceId?: string;
@@ -3939,6 +4028,63 @@ function gcPortalActiveChatRuns(): void {
       portalActiveChatRuns.delete(sessionId);
     }
   }
+}
+
+type ActiveThreadStatus = {
+  thread_id: string;
+  user_id: string;
+  organization_id: string;
+  channel: string;
+  started_at: string;
+  age_ms: number;
+};
+
+function activeThreadStatus(): ActiveThreadStatus[] {
+  const now = Date.now();
+  const byThreadId = new Map<string, ActiveThreadStatus>();
+  const add = (input: {
+    threadId?: string;
+    userId?: string;
+    organizationId?: string;
+    channel?: string;
+    startedAtMs: number;
+  }) => {
+    const threadId = trimOrUndefined(input.threadId);
+    const userId = trimOrUndefined(input.userId);
+    const organizationId = trimOrUndefined(input.organizationId);
+    if (!threadId || !userId || !organizationId) return;
+    const current = byThreadId.get(threadId);
+    if (current && Date.parse(current.started_at) <= input.startedAtMs) return;
+    byThreadId.set(threadId, {
+      thread_id: threadId,
+      user_id: userId,
+      organization_id: organizationId,
+      channel: trimOrUndefined(input.channel) ?? "unknown",
+      started_at: new Date(input.startedAtMs).toISOString(),
+      age_ms: Math.max(0, now - input.startedAtMs)
+    });
+  };
+
+  for (const turn of activeRuntimeTurns.values()) {
+    add({
+      threadId: turn.threadId,
+      userId: turn.userId,
+      organizationId: turn.organizationId,
+      channel: turn.channel,
+      startedAtMs: turn.startedAtMs
+    });
+  }
+  for (const run of portalActiveChatRuns.values()) {
+    add({
+      threadId: run.threadId,
+      userId: run.userId,
+      organizationId: run.organizationId,
+      channel: "portal",
+      startedAtMs: run.createdAt
+    });
+  }
+
+  return Array.from(byThreadId.values()).sort((left, right) => left.started_at.localeCompare(right.started_at));
 }
 
 function logPortalStreamLifecycle(stage: string, details: Record<string, unknown>): void {
@@ -3962,6 +4108,7 @@ function logPortalStreamLifecycle(stage: string, details: Record<string, unknown
 function registerPortalActiveChatRun(input: {
   sessionId: string;
   userId: string;
+  organizationId: string;
   controller: AbortController;
   threadId?: string;
   traceId?: string;
@@ -3975,6 +4122,7 @@ function registerPortalActiveChatRun(input: {
   }
   portalActiveChatRuns.set(sessionId, {
     userId: input.userId,
+    organizationId: input.organizationId,
     controller: input.controller,
     createdAt: Date.now(),
     traceId: trimOrUndefined(input.traceId),
@@ -10294,7 +10442,8 @@ app.get("/internal/deploy/drain-status", async (req: Request, res: Response) => 
     ok: true,
     now: new Date().toISOString(),
     draining: Boolean(drainReason),
-    ...activeRuntimeTurnStatus()
+    ...activeRuntimeTurnStatus(),
+    active_threads: activeThreadStatus()
   });
 });
 
@@ -11448,9 +11597,28 @@ app.get("/api/threads", async (req: Request, res: Response) => {
   );
   const requestedFolderId = typeof req.query.folder_id === "string" ? req.query.folder_id.trim() : "";
   const filtered = requestedFolderId ? list.filter((thread) => thread.workspaceFolderId === requestedFolderId) : list;
+  const readStates = await threadReadStates.listForUserThreadIds(
+    currentUser.id,
+    filtered.map((thread) => thread.id)
+  );
   res.json({
-    threads: filtered.map((thread) => threadOut(thread))
+    threads: filtered.map((thread) =>
+      threadOut(thread, {
+        hasUnreadCompletion: hasUnreadAssistantCompletion(thread, readStates.get(thread.id)?.lastReadAt)
+      })
+    )
   });
+});
+
+app.get("/api/threads/running", async (req: Request, res: Response) => {
+  const currentUser = currentActorFromRequest(req);
+  const result = await activePortalThreadIdsForActor(currentUser);
+  if (!result.available) {
+    res.status(503).json({ detail: "Running thread status is temporarily unavailable" });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ thread_ids: Array.from(result.threadIds) });
 });
 
 app.post("/api/threads", async (req: Request, res: Response) => {
@@ -11566,6 +11734,23 @@ app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
     return;
   }
   res.json({ thread: threadOut(thread) });
+});
+
+app.post("/api/threads/:threadId/read", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const thread = await getPortalOwnedThread(threadId, currentUser);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    const state = await threadReadStates.markRead(thread.id, currentUser.id);
+    res.json({ ok: true, thread_id: thread.id, last_read_at: state.lastReadAt });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to mark thread as read";
+    res.status(400).json({ detail });
+  }
 });
 
 app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
@@ -12170,6 +12355,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     unregisterPortalRun = registerPortalActiveChatRun({
       sessionId: currentSession.sessionId,
       userId: currentUser.id,
+      organizationId: currentUser.organizationId,
       controller: explicitCancel,
       threadId: portalThreadId,
       traceId: portalStreamTraceId
