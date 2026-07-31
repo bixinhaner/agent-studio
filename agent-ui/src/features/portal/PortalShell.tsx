@@ -7320,24 +7320,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       : selectedWorkspaceFolder?.system_key === "history_unfiled"
         ? t("workspace.historyTasks")
         : selectedWorkspaceFolder?.name || selectedWorkspaceFolderLabel || t("workspace.folder");
-  const selectedWorkspaceThreads = useMemo(() => {
-    return workspaceThreads
-      .filter((thread) => thread.status === "regular")
-      .filter((thread) =>
-        selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
-          ? true
-          : selectedWorkspaceFolderId === AGENT_OUTPUTS_WORKSPACE_VIEW
-            ? true
-          : selectedWorkspaceFolderId === TRASH_WORKSPACE_VIEW
-            ? false
-          : thread.folder_id === selectedWorkspaceFolderId
-      )
-      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
-  }, [selectedWorkspaceFolderId, workspaceThreads]);
-  const visibleWorkspaceThreadIds = useMemo(
-    () => new Set(selectedWorkspaceThreads.slice(0, 200).map((thread) => thread.id)),
-    [selectedWorkspaceThreads]
-  );
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
@@ -9313,40 +9295,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     <p className="session-rail-user-fallback">{currentUserName}</p>
   );
 
-  const workspaceTaskList = (
-    <SessionSearchContext.Provider value={sessionSearchValue}>
-      <SessionGroupLabelContext.Provider value={{ groupHeaderByRemoteId: {} }}>
-        <RunningThreadIdsContext.Provider value={runningThreadIds}>
-          <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
-            <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-              <StableThreadListItems
-                visibleRemoteIds={visibleWorkspaceThreadIds}
-                maxItems={3}
-                onSelectThread={(threadId) => {
-                  setWorkspaceMainView("task");
-                  setSelectedWorkspaceFile(null);
-                  const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
-                  if (thread?.folder_id) setSelectedWorkspaceFolderId(thread.folder_id);
-                }}
-              />
-            </ActiveThreadIdContext.Provider>
-          </ThreadCompletionNoticeContext.Provider>
-        </RunningThreadIdsContext.Provider>
-      </SessionGroupLabelContext.Provider>
-    </SessionSearchContext.Provider>
-  );
-
   const workspaceRail = (
     <WorkspaceRail
       workspace={portalWorkspace}
       rootNodes={workspaceRootNodes}
+      selectedFolderPath={selectedWorkspaceFolderPath}
       selectedFolderId={selectedWorkspaceFolderId}
       searchValue={sessionSearchValue}
       loading={workspaceLoading}
       errorText={workspaceErrorText}
-      taskList={workspaceTaskList}
-      taskCount={selectedWorkspaceThreads.length}
       footer={workspaceRailFooter}
+      refreshKey={workspaceRefreshToken}
       onSearchChange={(value) => {
         setSessionSearchValue(value);
         writePortalWorkspaceLocation({
@@ -9363,16 +9322,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       }}
       onSelectFolder={selectWorkspaceFolder}
       onCreateFolder={() => setCreateRootFolderOpen(true)}
-      onNewTask={() => void startWorkspaceTask()}
-      onViewAllTasks={() => {
-        setWorkspaceMainView("folder");
-        setSelectedWorkspaceFile(null);
-        setRequestedPreviewPath("");
-        writePortalWorkspaceLocation({ folderId: selectedWorkspaceFolderId }, "push");
-        if (isMobile) {
-          setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
-        }
-      }}
     />
   );
 
@@ -9396,8 +9345,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     ) : (
       <div className="workspace-task-shell">
         <div className="workspace-task-breadcrumb" aria-label={t("workspace.taskLocation")}>
-          <Folder size={15} />
-          <span>{selectedWorkspaceFolderName}</span>
+          <button
+            type="button"
+            className="workspace-task-folder-link"
+            onClick={() => selectWorkspaceFolder(selectedWorkspaceFolderId, selectedWorkspaceFolderName)}
+          >
+            <Folder size={15} />
+            <span>{selectedWorkspaceFolderName}</span>
+          </button>
           <ChevronRight size={14} />
           <strong>
             {workspaceThreads.find((thread) => thread.id === activeRemoteThreadId)?.title ||

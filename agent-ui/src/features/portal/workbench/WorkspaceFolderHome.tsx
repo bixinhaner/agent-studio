@@ -96,6 +96,7 @@ export function WorkspaceFolderHome(props: {
   const [dragActive, setDragActive] = useState(false);
   const [showHistoryFiles, setShowHistoryFiles] = useState(false);
   const [taskPage, setTaskPage] = useState(1);
+  const [activeContentTab, setActiveContentTab] = useState<"tasks" | "files">("tasks");
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recentView = props.folderId === RECENT_WORKSPACE_VIEW;
@@ -163,6 +164,10 @@ export function WorkspaceFolderHome(props: {
 
   useEffect(() => {
     setTaskPage(1);
+    setActiveContentTab("tasks");
+  }, [props.folderId, searchQuery]);
+
+  useEffect(() => {
     void load();
   }, [load]);
 
@@ -428,252 +433,295 @@ export function WorkspaceFolderHome(props: {
         <div className="workspace-folder-loading"><Spin /><span>{t("common.loadingWorkspace")}</span></div>
       ) : (
         <>
-          {historyView ? (
-            <section className="workspace-history-files-summary" aria-label={t("workspace.historyFiles")}>
-              <div>
-                <FileArchive size={20} />
-                <span>
-                  <strong>{t("workspace.historyFiles")}</strong>
-                  <small>
-                    {t("workspace.historyFilesRecovered", {
-                      tasks: folderTaskSummary.tasks_with_files,
-                      files: folderTaskSummary.file_count
-                    })}
-                  </small>
-                </span>
-              </div>
-              {folderTaskSummary.file_count > 0 ? (
-                <Button type="text" onClick={() => setShowHistoryFiles((value) => !value)}>
-                  {showHistoryFiles ? t("workspace.hideHistoryFiles") : t("workspace.viewAllFiles")}
-                </Button>
-              ) : null}
-            </section>
-          ) : null}
-          {!recentView && !agentOutputsView && !trashView && !searchView && latestAgentOutput ? (
+          <div className="workspace-content-tabs" role="tablist" aria-label={t("workspace.folder")}>
             <button
               type="button"
-              className="workspace-agent-status"
-              onClick={() => props.onOpenFile(latestAgentOutput)}
+              role="tab"
+              id="workspace-tasks-tab"
+              aria-selected={activeContentTab === "tasks"}
+              aria-controls="workspace-tasks-panel"
+              className={activeContentTab === "tasks" ? "is-active" : undefined}
+              onClick={() => setActiveContentTab("tasks")}
             >
-              <CheckCircle2 size={19} />
-              <span>{t("workspace.agentRecentlyUpdated", { name: latestAgentOutput.name })}</span>
-              <strong>{t("workspace.preview")}</strong>
+              <span>{t("workspace.tasks")}</span>
+              <small>{tasks.length}</small>
             </button>
-          ) : null}
-          {!historyView || showHistoryFiles ? <section className="workspace-home-section">
-            <div className="workspace-section-heading">
-              <div>
-                <h2>{t("workspace.filesAndFolders")}</h2>
-                <span>{t("workspace.itemCount", { count: nodes.length })}</span>
-              </div>
-              {!recentView && !agentOutputsView && !trashView && !searchView ? <span>{t("workspace.dropHint")}</span> : null}
-            </div>
-            {visibleNodes.length > 0 ? (
-              <div className="workspace-file-grid">
-                <div className="workspace-file-table-head" aria-hidden="true">
-                  <span />
-                  <span>{t("workspace.name")}</span>
-                  <span>{t("workspace.modified")}</span>
-                  <span>{t("workspace.source")}</span>
-                  <span />
-                </div>
-                {visibleNodes.map((node) => (
-                  <article
-                    key={node.id}
-                    className="workspace-file-card"
-                    data-kind={node.kind}
-                    tabIndex={0}
-                    onDoubleClick={() =>
-                      trashView
-                        ? void restoreNode(node)
-                        : node.kind === "folder"
-                          ? props.onOpenFolder(node)
-                          : props.onOpenFile(node)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      if (trashView) {
-                        void restoreNode(node);
-                      } else {
-                        node.kind === "folder" ? props.onOpenFolder(node) : props.onOpenFile(node);
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="workspace-file-main"
-                      onClick={() =>
-                        trashView
-                          ? void restoreNode(node)
-                          : node.kind === "folder"
-                            ? props.onOpenFolder(node)
-                            : props.onOpenFile(node)
-                      }
-                    >
-                      <span className="workspace-file-icon">{fileIconFor(node)}</span>
-                      <span className="workspace-file-copy">
-                        <strong title={node.name}>{node.name}</strong>
-                        <small className="workspace-file-mobile-meta">
-                          {node.kind === "folder"
-                            ? t("workspace.folder")
-                            : `${formatFileSize(node.size_bytes)} · ${formatLocalDate(node.updated_at, locale)} · ${sourceLabel(node)}`}
-                        </small>
-                      </span>
-                      <small className="workspace-file-date">
-                        {node.kind === "folder" ? "—" : formatLocalDate(node.updated_at, locale)}
+            <button
+              type="button"
+              role="tab"
+              id="workspace-files-tab"
+              aria-selected={activeContentTab === "files"}
+              aria-controls="workspace-files-panel"
+              className={activeContentTab === "files" ? "is-active" : undefined}
+              onClick={() => setActiveContentTab("files")}
+            >
+              <span>{t("workspace.files")}</span>
+              <small>{nodes.length}</small>
+            </button>
+          </div>
+
+          {activeContentTab === "files" ? (
+            <div
+              id="workspace-files-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-files-tab"
+              className="workspace-tab-panel"
+            >
+              {historyView ? (
+                <section className="workspace-history-files-summary" aria-label={t("workspace.historyFiles")}>
+                  <div>
+                    <FileArchive size={20} />
+                    <span>
+                      <strong>{t("workspace.historyFiles")}</strong>
+                      <small>
+                        {t("workspace.historyFilesRecovered", {
+                          tasks: folderTaskSummary.tasks_with_files,
+                          files: folderTaskSummary.file_count
+                        })}
                       </small>
-                      <span className="workspace-file-source" data-source={node.created_by_type}>
-                        {node.kind === "folder" ? "—" : sourceLabel(node)}
-                      </span>
-                    </button>
-                    {!node.system_key ? (
+                    </span>
+                  </div>
+                  {folderTaskSummary.file_count > 0 ? (
+                    <Button type="text" onClick={() => setShowHistoryFiles((value) => !value)}>
+                      {showHistoryFiles ? t("workspace.hideHistoryFiles") : t("workspace.viewAllFiles")}
+                    </Button>
+                  ) : null}
+                </section>
+              ) : null}
+              {!recentView && !agentOutputsView && !trashView && !searchView && latestAgentOutput ? (
+                <button
+                  type="button"
+                  className="workspace-agent-status"
+                  onClick={() => props.onOpenFile(latestAgentOutput)}
+                >
+                  <CheckCircle2 size={19} />
+                  <span>{t("workspace.agentRecentlyUpdated", { name: latestAgentOutput.name })}</span>
+                  <strong>{t("workspace.preview")}</strong>
+                </button>
+              ) : null}
+              {!historyView || showHistoryFiles ? <section className="workspace-home-section">
+                <div className="workspace-section-heading">
+                  <div>
+                    <h2>{t("workspace.filesAndFolders")}</h2>
+                    <span>{t("workspace.itemCount", { count: nodes.length })}</span>
+                  </div>
+                  {!recentView && !agentOutputsView && !trashView && !searchView ? <span>{t("workspace.dropHint")}</span> : null}
+                </div>
+                {visibleNodes.length > 0 ? (
+                  <div className="workspace-file-grid">
+                    <div className="workspace-file-table-head" aria-hidden="true">
+                      <span />
+                      <span>{t("workspace.name")}</span>
+                      <span>{t("workspace.modified")}</span>
+                      <span>{t("workspace.source")}</span>
+                      <span />
+                    </div>
+                    {visibleNodes.map((node) => (
+                      <article
+                        key={node.id}
+                        className="workspace-file-card"
+                        data-kind={node.kind}
+                        tabIndex={0}
+                        onDoubleClick={() =>
+                          trashView
+                            ? void restoreNode(node)
+                            : node.kind === "folder"
+                              ? props.onOpenFolder(node)
+                              : props.onOpenFile(node)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter") return;
+                          if (trashView) {
+                            void restoreNode(node);
+                          } else {
+                            node.kind === "folder" ? props.onOpenFolder(node) : props.onOpenFile(node);
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="workspace-file-main"
+                          onClick={() =>
+                            trashView
+                              ? void restoreNode(node)
+                              : node.kind === "folder"
+                                ? props.onOpenFolder(node)
+                                : props.onOpenFile(node)
+                          }
+                        >
+                          <span className="workspace-file-icon">{fileIconFor(node)}</span>
+                          <span className="workspace-file-copy">
+                            <strong title={node.name}>{node.name}</strong>
+                            <small className="workspace-file-mobile-meta">
+                              {node.kind === "folder"
+                                ? t("workspace.folder")
+                                : `${formatFileSize(node.size_bytes)} · ${formatLocalDate(node.updated_at, locale)} · ${sourceLabel(node)}`}
+                            </small>
+                          </span>
+                          <small className="workspace-file-date">
+                            {node.kind === "folder" ? "—" : formatLocalDate(node.updated_at, locale)}
+                          </small>
+                          <span className="workspace-file-source" data-source={node.created_by_type}>
+                            {node.kind === "folder" ? "—" : sourceLabel(node)}
+                          </span>
+                        </button>
+                        {!node.system_key ? (
+                          <Dropdown
+                            trigger={["click"]}
+                            menu={{
+                              items: trashView
+                                ? [{ key: "restore", label: t("workspace.restore") }]
+                                : [
+                                    { key: "rename", label: t("workspace.rename") },
+                                    ...(moveTargets.length > 0
+                                      ? [{
+                                          key: "move",
+                                          label: t("workspace.moveTo"),
+                                          children: moveTargets
+                                            .filter((folder) => folder.id !== node.parent_id)
+                                            .map((folder) => ({ key: `move:${folder.id}`, label: folder.name }))
+                                        }]
+                                      : []),
+                                    { key: "trash", label: t("workspace.moveToTrash"), danger: true }
+                                  ],
+                              onClick: ({ key, domEvent }) => {
+                                domEvent.stopPropagation();
+                                if (key === "rename") void renameNode(node);
+                                if (key === "trash") void trashNode(node);
+                                if (key === "restore") void restoreNode(node);
+                                if (key.startsWith("move:")) void moveNode(node, key.slice(5));
+                              }
+                            }}
+                          >
+                            <button type="button" className="workspace-card-menu" aria-label={t("workspace.moreActions")}>
+                              <MoreHorizontal size={16} />
+                            </button>
+                          </Dropdown>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={
+                      searchView
+                        ? t("workspace.searchEmpty")
+                        : recentView
+                        ? t("workspace.recentEmpty")
+                        : agentOutputsView
+                          ? t("workspace.agentOutputsEmpty")
+                        : trashView
+                          ? t("workspace.trashEmpty")
+                          : t("workspace.folderEmpty")
+                    }
+                  >
+                    {!recentView && !agentOutputsView && !trashView && !searchView ? (
+                      <Button type="primary" icon={<Upload size={16} />} onClick={() => fileInputRef.current?.click()}>
+                        {t("workspace.uploadFirstFile")}
+                      </Button>
+                    ) : null}
+                  </Empty>
+                )}
+                {nodes.length > visibleNodes.length ? (
+                  <p className="workspace-result-limit">{t("workspace.showingFirst", { count: visibleNodes.length })}</p>
+                ) : null}
+              </section> : null}
+            </div>
+          ) : null}
+
+          {activeContentTab === "tasks" ? (
+            <section
+              id="workspace-tasks-panel"
+              role="tabpanel"
+              aria-labelledby="workspace-tasks-tab"
+              className="workspace-home-section workspace-task-cards-section workspace-tab-panel"
+            >
+              <div className="workspace-section-heading">
+                <div>
+                  <h2>{t("workspace.tasks")}</h2>
+                  <span>{t("workspace.taskCount", { count: tasks.length })}</span>
+                </div>
+                {!recentView && !agentOutputsView && !searchView ? (
+                  <Button type="text" icon={<Plus size={16} />} onClick={props.onNewTask}>
+                    {t("workspace.newTask")}
+                  </Button>
+                ) : null}
+              </div>
+              {visibleTasks.length > 0 ? (
+                <div className="workspace-task-cards">
+                  {visibleTasks.map((task) => (
+                    <article key={task.id} className="workspace-task-card">
+                      <button
+                        type="button"
+                        className="workspace-task-main"
+                        onClick={() => trashView ? void restoreTask(task) : props.onOpenTask(task)}
+                      >
+                        <MessageSquare size={18} />
+                        <span>
+                          <strong>{task.title}</strong>
+                          <small>{formatLocalDate(task.updated_at, locale)}</small>
+                        </span>
+                        <span className="workspace-task-file-count" data-empty={task.file_count > 0 ? undefined : "true"}>
+                          {task.file_count > 0
+                            ? t("workspace.filesCount", { count: task.file_count })
+                            : t("workspace.pureConversation")}
+                        </span>
+                      </button>
                       <Dropdown
                         trigger={["click"]}
                         menu={{
                           items: trashView
                             ? [{ key: "restore", label: t("workspace.restore") }]
                             : [
-                                { key: "rename", label: t("workspace.rename") },
                                 ...(moveTargets.length > 0
                                   ? [{
                                       key: "move",
                                       label: t("workspace.moveTo"),
                                       children: moveTargets
-                                        .filter((folder) => folder.id !== node.parent_id)
+                                        .filter((folder) => folder.id !== task.folder_id)
                                         .map((folder) => ({ key: `move:${folder.id}`, label: folder.name }))
                                     }]
                                   : []),
-                                { key: "trash", label: t("workspace.moveToTrash"), danger: true }
+                                { key: "archive", label: t("workspace.archiveTask") }
                               ],
                           onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation();
-                            if (key === "rename") void renameNode(node);
-                            if (key === "trash") void trashNode(node);
-                            if (key === "restore") void restoreNode(node);
-                            if (key.startsWith("move:")) void moveNode(node, key.slice(5));
+                            if (key === "archive") void archiveTask(task);
+                            if (key === "restore") void restoreTask(task);
+                            if (key.startsWith("move:")) void moveTask(task, key.slice(5));
                           }
                         }}
                       >
-                        <button type="button" className="workspace-card-menu" aria-label={t("workspace.moreActions")}>
+                        <button type="button" className="workspace-card-menu" aria-label={t("workspace.moreTaskActions")}>
                           <MoreHorizontal size={16} />
                         </button>
                       </Dropdown>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  searchView
-                    ? t("workspace.searchEmpty")
-                    : recentView
-                    ? t("workspace.recentEmpty")
-                    : agentOutputsView
-                      ? t("workspace.agentOutputsEmpty")
-                    : trashView
-                      ? t("workspace.trashEmpty")
-                      : t("workspace.folderEmpty")
-                }
-              >
-                {!recentView && !agentOutputsView && !trashView && !searchView ? (
-                  <Button type="primary" icon={<Upload size={16} />} onClick={() => fileInputRef.current?.click()}>
-                    {t("workspace.uploadFirstFile")}
-                  </Button>
-                ) : null}
-              </Empty>
-            )}
-            {nodes.length > visibleNodes.length ? (
-              <p className="workspace-result-limit">{t("workspace.showingFirst", { count: visibleNodes.length })}</p>
-            ) : null}
-          </section> : null}
-
-          <section className="workspace-home-section workspace-task-cards-section">
-            <div className="workspace-section-heading">
-              <div>
-                <h2>{t("workspace.tasks")}</h2>
-                <span>{t("workspace.taskCount", { count: tasks.length })}</span>
-              </div>
-              {!recentView && !agentOutputsView && !searchView ? (
-                <Button type="text" icon={<Plus size={16} />} onClick={props.onNewTask}>
-                  {t("workspace.newTask")}
-                </Button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="workspace-task-empty">
+                  <MessageSquare size={22} />
+                  <p>{t("workspace.taskEmpty")}</p>
+                  {!recentView && !agentOutputsView && !searchView ? (
+                    <Button onClick={props.onNewTask}>{t("workspace.newTask")}</Button>
+                  ) : null}
+                </div>
+              )}
+              {tasks.length > taskPageSize ? (
+                <Pagination
+                  className="workspace-task-pagination"
+                  current={taskPage}
+                  pageSize={taskPageSize}
+                  total={tasks.length}
+                  showSizeChanger={false}
+                  hideOnSinglePage
+                  onChange={setTaskPage}
+                />
               ) : null}
-            </div>
-            {visibleTasks.length > 0 ? (
-              <div className="workspace-task-cards">
-                {visibleTasks.map((task) => (
-                  <article key={task.id} className="workspace-task-card">
-                    <button
-                      type="button"
-                      className="workspace-task-main"
-                      onClick={() => trashView ? void restoreTask(task) : props.onOpenTask(task)}
-                    >
-                      <MessageSquare size={18} />
-                      <span>
-                        <strong>{task.title}</strong>
-                        <small>{formatLocalDate(task.updated_at, locale)}</small>
-                      </span>
-                      <span className="workspace-task-file-count" data-empty={task.file_count > 0 ? undefined : "true"}>
-                        {task.file_count > 0
-                          ? t("workspace.filesCount", { count: task.file_count })
-                          : t("workspace.pureConversation")}
-                      </span>
-                    </button>
-                    <Dropdown
-                      trigger={["click"]}
-                      menu={{
-                        items: trashView
-                          ? [{ key: "restore", label: t("workspace.restore") }]
-                          : [
-                              ...(moveTargets.length > 0
-                                ? [{
-                                    key: "move",
-                                    label: t("workspace.moveTo"),
-                                    children: moveTargets
-                                      .filter((folder) => folder.id !== task.folder_id)
-                                      .map((folder) => ({ key: `move:${folder.id}`, label: folder.name }))
-                                  }]
-                                : []),
-                              { key: "archive", label: t("workspace.archiveTask") }
-                            ],
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          if (key === "archive") void archiveTask(task);
-                          if (key === "restore") void restoreTask(task);
-                          if (key.startsWith("move:")) void moveTask(task, key.slice(5));
-                        }
-                      }}
-                    >
-                      <button type="button" className="workspace-card-menu" aria-label={t("workspace.moreTaskActions")}>
-                        <MoreHorizontal size={16} />
-                      </button>
-                    </Dropdown>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="workspace-task-empty">
-                <MessageSquare size={22} />
-                <p>{t("workspace.taskEmpty")}</p>
-                {!recentView && !agentOutputsView && !searchView ? (
-                  <Button onClick={props.onNewTask}>{t("workspace.newTask")}</Button>
-                ) : null}
-              </div>
-            )}
-            {tasks.length > taskPageSize ? (
-              <Pagination
-                className="workspace-task-pagination"
-                current={taskPage}
-                pageSize={taskPageSize}
-                total={tasks.length}
-                showSizeChanger={false}
-                hideOnSinglePage
-                onChange={setTaskPage}
-              />
-            ) : null}
-          </section>
+            </section>
+          ) : null}
         </>
       )}
 

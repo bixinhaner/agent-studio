@@ -1,6 +1,14 @@
-import type { ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode
+} from "react";
 import { Input } from "antd";
 import {
+  ChevronDown,
   ChevronRight,
   Folder,
   FolderOpen,
@@ -10,7 +18,11 @@ import {
 } from "lucide-react";
 
 import { usePortalI18n } from "../i18n";
-import type { PortalWorkspaceNode, PortalWorkspaceSummary } from "../workspace";
+import {
+  fetchPortalWorkspaceNodes,
+  type PortalWorkspaceNode,
+  type PortalWorkspaceSummary
+} from "../workspace";
 
 export const RECENT_WORKSPACE_VIEW = "__recent__";
 export const AGENT_OUTPUTS_WORKSPACE_VIEW = "__agent_outputs__";
@@ -19,21 +31,141 @@ export const TRASH_WORKSPACE_VIEW = "__trash__";
 export function WorkspaceRail(props: {
   workspace: PortalWorkspaceSummary | null;
   rootNodes: PortalWorkspaceNode[];
+  selectedFolderPath?: PortalWorkspaceNode[];
   selectedFolderId: string;
   searchValue: string;
   loading?: boolean;
   errorText?: string;
-  taskList?: ReactNode;
-  taskCount?: number;
   footer?: ReactNode;
+  refreshKey?: number;
   onSearchChange(value: string): void;
   onSelectFolder(folderId: string): void;
   onCreateFolder(): void;
-  onNewTask(): void;
-  onViewAllTasks(): void;
 }) {
   const { t } = usePortalI18n();
   const folders = props.rootNodes.filter((node) => node.kind === "folder");
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+  const [childrenByFolderId, setChildrenByFolderId] = useState<Record<string, PortalWorkspaceNode[]>>({});
+  const [loadingFolderIds, setLoadingFolderIds] = useState<Set<string>>(new Set());
+
+  const loadChildren = useCallback(async (folderId: string) => {
+    setLoadingFolderIds((current) => new Set(current).add(folderId));
+    try {
+      const children = await fetchPortalWorkspaceNodes(folderId);
+      setChildrenByFolderId((current) => ({ ...current, [folderId]: children }));
+    } catch {
+      setChildrenByFolderId((current) => ({ ...current, [folderId]: [] }));
+    } finally {
+      setLoadingFolderIds((current) => {
+        const next = new Set(current);
+        next.delete(folderId);
+        return next;
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    setChildrenByFolderId({});
+  }, [props.refreshKey]);
+
+  useEffect(() => {
+    const path = props.selectedFolderPath || [];
+    if (path.length === 0) return;
+    setExpandedFolderIds((current) => {
+      const next = new Set(current);
+      path.forEach((folder) => {
+        if (!folder.system_key) next.add(folder.id);
+      });
+      return next;
+    });
+    path.forEach((folder) => {
+      if (
+        !folder.system_key &&
+        childrenByFolderId[folder.id] === undefined &&
+        !loadingFolderIds.has(folder.id)
+      ) {
+        void loadChildren(folder.id);
+      }
+    });
+  }, [childrenByFolderId, loadChildren, loadingFolderIds, props.selectedFolderPath]);
+
+  const toggleFolder = useCallback((folder: PortalWorkspaceNode) => {
+    const willExpand = !expandedFolderIds.has(folder.id);
+    setExpandedFolderIds((current) => {
+      const next = new Set(current);
+      willExpand ? next.add(folder.id) : next.delete(folder.id);
+      return next;
+    });
+    if (willExpand && childrenByFolderId[folder.id] === undefined) {
+      void loadChildren(folder.id);
+    }
+  }, [childrenByFolderId, expandedFolderIds, loadChildren]);
+
+  const renderFolder = useCallback((folder: PortalWorkspaceNode, depth: number) => {
+    const selected = props.selectedFolderId === folder.id;
+    const expanded = expandedFolderIds.has(folder.id);
+    const loading = loadingFolderIds.has(folder.id);
+    const childFolders = (childrenByFolderId[folder.id] || []).filter((node) => node.kind === "folder");
+    const FolderIcon = selected || expanded ? FolderOpen : Folder;
+    const folderName = folder.system_key === "history_unfiled"
+      ? t("workspace.historyTasks")
+      : folder.name;
+    const canExpand = !folder.system_key;
+    const treeStyle = { "--workspace-tree-depth": depth } as CSSProperties;
+
+    return (
+      <div
+        key={folder.id}
+        className={selected ? "workspace-folder-tree-node is-active" : "workspace-folder-tree-node"}
+        data-system-folder={folder.system_key || undefined}
+        style={treeStyle}
+      >
+        <div className="workspace-folder-tree-row">
+          {canExpand ? (
+            <button
+              type="button"
+              className="workspace-tree-toggle"
+              aria-label={t(expanded ? "workspace.collapseFolder" : "workspace.expandFolder", { name: folderName })}
+              aria-expanded={expanded}
+              onClick={() => toggleFolder(folder)}
+            >
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+          ) : (
+            <span className="workspace-tree-toggle-spacer" aria-hidden="true" />
+          )}
+          <button
+            type="button"
+            className={selected ? "workspace-tree-item is-active" : "workspace-tree-item"}
+            aria-current={selected ? "page" : undefined}
+            onClick={() => props.onSelectFolder(folder.id)}
+          >
+            <FolderIcon size={17} />
+            <span title={folderName}>{folderName}</span>
+          </button>
+        </div>
+        {expanded ? (
+          <div className="workspace-folder-tree-children">
+            {childFolders.map((child) => renderFolder(child, depth + 1))}
+            {loading ? <span className="workspace-tree-loading">{t("common.loading")}</span> : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }, [
+    childrenByFolderId,
+    expandedFolderIds,
+    loadingFolderIds,
+    props.onSelectFolder,
+    props.selectedFolderId,
+    t,
+    toggleFolder
+  ]);
+
+  const folderTree = useMemo(
+    () => folders.map((folder) => renderFolder(folder, 0)),
+    [folders, renderFolder]
+  );
 
   return (
     <aside className="workspace-rail" aria-label={t("workspace.title")}>
@@ -61,56 +193,7 @@ export function WorkspaceRail(props: {
           </button>
         </div>
 
-        {folders.map((folder) => {
-          const selected = props.selectedFolderId === folder.id;
-          const FolderIcon = selected ? FolderOpen : Folder;
-          const folderName = folder.system_key === "history_unfiled"
-            ? t("workspace.historyTasks")
-            : folder.name;
-          return (
-            <div
-              key={folder.id}
-              className={selected ? "workspace-folder-entry is-active" : "workspace-folder-entry"}
-              data-system-folder={folder.system_key || undefined}
-            >
-              <div className="workspace-folder-row">
-                <button
-                  type="button"
-                  className={selected ? "workspace-nav-item is-active" : "workspace-nav-item"}
-                  onClick={() => props.onSelectFolder(folder.id)}
-                >
-                  <FolderIcon size={17} />
-                  <span title={folderName}>{folderName}</span>
-                  {!selected ? <ChevronRight size={14} className="workspace-nav-chevron" /> : null}
-                </button>
-                {selected ? (
-                  <button
-                    type="button"
-                    className="workspace-folder-inline-new"
-                    aria-label={t("workspace.newTask")}
-                    title={t("workspace.newTask")}
-                    onClick={props.onNewTask}
-                  >
-                    <Plus size={14} />
-                    <span>{t("workspace.newTask")}</span>
-                  </button>
-                ) : null}
-              </div>
-              {selected ? (
-                <div className="workspace-folder-task-preview">
-                  <div className="workspace-folder-task-preview-label">{t("workspace.recentTasks")}</div>
-                  <div className="workspace-task-list">{props.taskList}</div>
-                  {(props.taskCount || 0) > 0 ? (
-                    <button type="button" className="workspace-view-all-tasks" onClick={props.onViewAllTasks}>
-                      {t("workspace.viewAllTasks", { count: props.taskCount || 0 })}
-                      <ChevronRight size={13} />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+        {folderTree}
 
         {!props.loading && folders.length === 0 ? (
           <button type="button" className="workspace-empty-folder-cta" onClick={props.onCreateFolder}>
