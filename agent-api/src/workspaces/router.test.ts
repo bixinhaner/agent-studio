@@ -53,6 +53,9 @@ function createTestApp(serviceOverrides: Record<string, unknown> = {}) {
       historyFolderId: "history-1"
     }),
     listNodes: vi.fn().mockResolvedValue([node()]),
+    listFolderAncestorPaths: vi.fn().mockResolvedValue({
+      "folder-1": ["folder-1", "root-1"]
+    }),
     getNode: vi.fn().mockResolvedValue(node({ id: "folder-1", kind: "folder", name: "Nested" })),
     createFolder: vi.fn().mockResolvedValue(node({ id: "folder-2", kind: "folder", name: "项目" })),
     saveFile: vi.fn().mockResolvedValue({ file: node(), version: version() }),
@@ -143,6 +146,21 @@ describe("createPortalWorkspaceRouter", () => {
     const response = await request(app).get("/api/portal/workspace/nodes/folder-1").expect(200);
     expect(response.body.node.name).toBe("Nested");
     expect(service.getNode).toHaveBeenCalledWith({ actor, nodeId: "folder-1" });
+  });
+
+  it("returns folder ancestor paths for collapsed tree state indicators", async () => {
+    const { app, service } = createTestApp();
+    const response = await request(app)
+      .get("/api/portal/workspace/folder-ancestor-paths?folder_ids=folder-1,root-1,folder-1")
+      .expect(200);
+
+    expect(response.body.paths).toEqual({
+      "folder-1": ["folder-1", "root-1"]
+    });
+    expect(service.listFolderAncestorPaths).toHaveBeenCalledWith({
+      actor,
+      folderIds: ["folder-1", "root-1"]
+    });
   });
 
   it("uploads raw bytes with stable file metadata", async () => {

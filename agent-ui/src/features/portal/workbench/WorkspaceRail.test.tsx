@@ -108,4 +108,26 @@ describe("WorkspaceRail", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看全部 6 个任务" }));
     expect(onViewAllTasks).toHaveBeenCalledOnce();
   });
+
+  it("shows a running indicator on a folder", () => {
+    render(
+      <PortalI18nProvider>
+        <WorkspaceRail
+          workspace={null}
+          rootNodes={[folder("root-1", "员工AI培训")]}
+          selectedFolderId=""
+          searchValue=""
+          runningFolderIds={new Set(["root-1"])}
+          onSearchChange={vi.fn()}
+          onSelectFolder={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNewTask={vi.fn()}
+          onViewAllTasks={vi.fn()}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByLabelText("运行中任务")).toBeTruthy();
+    expect(screen.getByLabelText("运行中任务").querySelector(".workspace-folder-running-indicator")).toBeTruthy();
+  });
 });

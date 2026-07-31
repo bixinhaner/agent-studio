@@ -73,6 +73,25 @@ export async function fetchPortalWorkspaceNode(nodeId: string): Promise<PortalWo
   return out.node;
 }
 
+export async function fetchPortalWorkspaceFolderAncestorPaths(
+  folderIds: readonly string[]
+): Promise<Record<string, string[]>> {
+  const normalizedFolderIds = Array.from(
+    new Set(folderIds.map((folderId) => String(folderId || "").trim()).filter(Boolean))
+  );
+  if (normalizedFolderIds.length === 0) return {};
+  const query = new URLSearchParams({ folder_ids: normalizedFolderIds.join(",") });
+  const out = await api<{ paths?: Record<string, unknown> }>(
+    `/api/portal/workspace/folder-ancestor-paths?${query.toString()}`
+  );
+  const paths: Record<string, string[]> = {};
+  for (const [folderId, value] of Object.entries(out.paths || {})) {
+    if (!Array.isArray(value)) continue;
+    paths[folderId] = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  }
+  return paths;
+}
+
 export async function fetchPortalFolderTasks(folderId: string): Promise<PortalWorkspaceFolderTasksResult> {
   const out = await api<{
     tasks: PortalWorkspaceTask[];

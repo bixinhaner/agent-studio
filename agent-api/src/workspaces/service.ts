@@ -319,6 +319,46 @@ export class PortalWorkspaceService {
       );
   }
 
+  async listFolderAncestorPaths(input: {
+    actor: WorkspaceActor;
+    folderIds: readonly string[];
+  }): Promise<Record<string, string[]>> {
+    const folderIds = Array.from(
+      new Set(input.folderIds.map((folderId) => String(folderId || "").trim()).filter(Boolean))
+    ).slice(0, 500);
+    if (folderIds.length === 0) return {};
+
+    const workspace = await this.getWorkspaceRecord(input.actor);
+    const rows = await this.db.workspaceNode.findMany({
+      where: {
+        workspaceId: workspace.id,
+        kind: "folder",
+        state: "active"
+      },
+      select: {
+        id: true,
+        parentId: true
+      }
+    });
+    const parentByFolderId = new Map(rows.map((row) => [row.id, row.parentId]));
+    const paths: Record<string, string[]> = {};
+
+    for (const folderId of folderIds) {
+      const path: string[] = [];
+      const seen = new Set<string>();
+      let currentId: string | null = folderId;
+      while (currentId && !seen.has(currentId) && path.length < 64) {
+        if (!parentByFolderId.has(currentId)) break;
+        seen.add(currentId);
+        path.push(currentId);
+        currentId = parentByFolderId.get(currentId) ?? null;
+      }
+      paths[folderId] = path;
+    }
+
+    return paths;
+  }
+
   async getNode(input: {
     actor: WorkspaceActor;
     nodeId: string;

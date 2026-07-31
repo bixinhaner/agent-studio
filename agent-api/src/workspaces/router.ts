@@ -151,6 +151,24 @@ export function createPortalWorkspaceRouter(input: {
     }
   });
 
+  router.get("/folder-ancestor-paths", async (req, res) => {
+    try {
+      const actor = await input.resolveActor(req);
+      const rawFolderIds = typeof req.query.folder_ids === "string" ? req.query.folder_ids : "";
+      const folderIds = Array.from(
+        new Set(rawFolderIds.split(",").map((folderId) => folderId.trim()).filter(Boolean))
+      );
+      if (folderIds.length > 500) {
+        res.status(400).json({ detail: "Too many folder ids" });
+        return;
+      }
+      const paths = await input.service.listFolderAncestorPaths({ actor, folderIds });
+      res.json({ paths });
+    } catch (error) {
+      sendWorkspaceError(res, error, "Failed to load folder ancestor paths");
+    }
+  });
+
   router.get("/nodes/:nodeId", async (req, res) => {
     try {
       const actor = await input.resolveActor(req);

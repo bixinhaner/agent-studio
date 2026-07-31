@@ -35,6 +35,7 @@ export function WorkspaceRail(props: {
   selectedFolderPath?: PortalWorkspaceNode[];
   selectedFolderId: string;
   searchValue: string;
+  runningFolderIds?: ReadonlySet<string>;
   unreadFolderIds?: ReadonlySet<string>;
   loading?: boolean;
   errorText?: string;
@@ -116,7 +117,12 @@ export function WorkspaceRail(props: {
     const folderName = folder.system_key === "history_unfiled"
       ? t("workspace.historyTasks")
       : folder.name;
+    const hasRunningTasks = props.runningFolderIds?.has(folder.id) ?? false;
     const hasUnreadTasks = props.unreadFolderIds?.has(folder.id) ?? false;
+    const folderStateLabel = [
+      hasRunningTasks ? t("workspace.runningTasks") : "",
+      hasUnreadTasks ? t("workspace.unreadTasks") : ""
+    ].filter(Boolean).join(", ");
     const canExpand = !folder.system_key;
     const treeStyle = { "--workspace-tree-depth": depth } as CSSProperties;
 
@@ -149,12 +155,15 @@ export function WorkspaceRail(props: {
           >
             <FolderIcon size={17} />
             <span className="workspace-tree-item-label" title={folderName}>{folderName}</span>
-            {hasUnreadTasks ? (
+            {folderStateLabel ? (
               <span
-                className="workspace-folder-unread-indicator"
-                aria-label={t("workspace.unreadTasks")}
-                title={t("workspace.unreadTasks")}
-              />
+                className="workspace-folder-state-indicators"
+                aria-label={folderStateLabel}
+                title={folderStateLabel}
+              >
+                {hasRunningTasks ? <span className="thread-running-indicator workspace-folder-running-indicator" aria-hidden="true" /> : null}
+                {hasUnreadTasks ? <span className="workspace-folder-unread-indicator" aria-hidden="true" /> : null}
+              </span>
             ) : null}
           </button>
           {selected ? (
@@ -200,6 +209,7 @@ export function WorkspaceRail(props: {
     props.selectedFolderId,
     props.taskCount,
     props.taskList,
+    props.runningFolderIds,
     props.unreadFolderIds,
     t,
     toggleFolder

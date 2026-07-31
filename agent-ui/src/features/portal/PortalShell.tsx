@@ -155,6 +155,8 @@ import {
   TRASH_WORKSPACE_VIEW,
   WORKSPACE_RAIL_TASK_LIMIT
 } from "./workbench/WorkspaceRail";
+import { expandWorkspaceFolderIds } from "./workspace-folder-state";
+import { filterStaleRuntimeThreadIds } from "./thread-running-state";
 import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
 import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
 import { WorkspaceTaskFilesPanel } from "./workbench/WorkspaceTaskFilesPanel";
@@ -183,6 +185,7 @@ import {
 import {
   createPortalWorkspaceFolder,
   fetchPortalWorkspace,
+  fetchPortalWorkspaceFolderAncestorPaths,
   fetchPortalWorkspaceNode,
   fetchPortalWorkspaceNodes,
   type PortalWorkspaceNode,
@@ -6307,6 +6310,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [activeRunThreadIds, setActiveRunThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [runtimeRunningThreadIds, setRuntimeRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [serverRunningThreadIds, setServerRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [serverRunningSnapshotReady, setServerRunningSnapshotReady] = useState(false);
   const [completedNoticeThreadIds, setCompletedNoticeThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [persistedCompletionNoticeThreadIds, setPersistedCompletionNoticeThreadIds] =
     useState<RunningThreadIdsContextValue>({});
@@ -6334,8 +6338,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [productFeedbackError, setProductFeedbackError] = useState("");
   const [productFeedbackSubmitted, setProductFeedbackSubmitted] = useState(false);
   const runningThreadIds = useMemo(
-    () => mergeRunningThreadMaps(activeRunThreadIds, runtimeRunningThreadIds, serverRunningThreadIds),
-    [activeRunThreadIds, runtimeRunningThreadIds, serverRunningThreadIds]
+    () => mergeRunningThreadMaps(
+      activeRunThreadIds,
+      serverRunningSnapshotReady
+        ? filterStaleRuntimeThreadIds(runtimeRunningThreadIds, activeRunThreadIds, serverRunningThreadIds)
+        : runtimeRunningThreadIds,
+      serverRunningThreadIds
+    ),
+    [activeRunThreadIds, runtimeRunningThreadIds, serverRunningSnapshotReady, serverRunningThreadIds]
   );
   const completionNoticeThreadIds = useMemo(
     () => mergeRunningThreadMaps(completedNoticeThreadIds, persistedCompletionNoticeThreadIds),
@@ -6343,6 +6353,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   );
   const refreshServerRunningThreadIds = useCallback(async () => {
     if (!props.currentUser) {
+      setServerRunningSnapshotReady(false);
       setServerRunningThreadIds({});
       return;
     }
@@ -6353,6 +6364,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const normalized = String(threadId || "").trim();
         if (normalized) next[normalized] = true;
       }
+      setServerRunningSnapshotReady(true);
       setServerRunningThreadIds((previous) => (areRunningThreadMapsEqual(previous, next) ? previous : next));
     } catch {
       // Keep the last successful snapshot during a transient status request failure.
@@ -6360,6 +6372,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   }, [props.currentUser]);
   useEffect(() => {
     if (!props.currentUser || typeof window === "undefined") {
+      setServerRunningSnapshotReady(false);
       setServerRunningThreadIds({});
       return undefined;
     }
@@ -7457,7 +7470,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       .flatMap((thread) => [thread.id, thread.external_id].filter((value): value is string => Boolean(value))),
     [selectedWorkspaceThreads, visibleWorkspaceThreadIds]
   );
-  const unreadWorkspaceFolderIds = useMemo(() => {
+  const directRunningWorkspaceFolderIds = useMemo(() => {
+    const folderIds = new Set<string>();
+    const historyFolderId = portalWorkspace?.history_folder_id?.trim() || "";
+    for (const thread of workspaceThreads) {
+      if (thread.status !== "regular") continue;
+      const isRunning = normalizeThreadIdentityKeys(thread.id, thread.external_id).some(
+        (key) => runningThreadIds[key]
+      );
+      if (!isRunning) continue;
+      const folderId = thread.folder_id?.trim() || historyFolderId;
+      if (folderId) folderIds.add(folderId);
+    }
+    return folderIds;
+  }, [portalWorkspace?.history_folder_id, runningThreadIds, workspaceThreads]);
+  const directUnreadWorkspaceFolderIds = useMemo(() => {
     const folderIds = new Set<string>();
     const historyFolderId = portalWorkspace?.history_folder_id?.trim() || "";
     for (const thread of workspaceThreads) {
@@ -7472,6 +7499,40 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }
     return folderIds;
   }, [completionNoticeThreadIds, portalWorkspace?.history_folder_id, workspaceThreads]);
+  const workspaceFolderStateSourceKey = useMemo(
+    () => Array.from(new Set([
+      ...directRunningWorkspaceFolderIds,
+      ...directUnreadWorkspaceFolderIds
+    ])).sort().join(","),
+    [directRunningWorkspaceFolderIds, directUnreadWorkspaceFolderIds]
+  );
+  const [workspaceFolderAncestorPaths, setWorkspaceFolderAncestorPaths] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    const folderIds = workspaceFolderStateSourceKey ? workspaceFolderStateSourceKey.split(",") : [];
+    if (folderIds.length === 0) {
+      setWorkspaceFolderAncestorPaths({});
+      return undefined;
+    }
+    let cancelled = false;
+    void fetchPortalWorkspaceFolderAncestorPaths(folderIds)
+      .then((paths) => {
+        if (!cancelled) setWorkspaceFolderAncestorPaths(paths);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceFolderAncestorPaths({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceFolderStateSourceKey]);
+  const runningWorkspaceFolderIds = useMemo(
+    () => expandWorkspaceFolderIds(directRunningWorkspaceFolderIds, workspaceFolderAncestorPaths),
+    [directRunningWorkspaceFolderIds, workspaceFolderAncestorPaths]
+  );
+  const unreadWorkspaceFolderIds = useMemo(
+    () => expandWorkspaceFolderIds(directUnreadWorkspaceFolderIds, workspaceFolderAncestorPaths),
+    [directUnreadWorkspaceFolderIds, workspaceFolderAncestorPaths]
+  );
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
@@ -9480,6 +9541,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       selectedFolderPath={selectedWorkspaceFolderPath}
       selectedFolderId={selectedWorkspaceFolderId}
       searchValue={sessionSearchValue}
+      runningFolderIds={runningWorkspaceFolderIds}
       unreadFolderIds={unreadWorkspaceFolderIds}
       loading={workspaceLoading}
       errorText={workspaceErrorText}

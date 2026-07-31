@@ -23,6 +23,33 @@ afterEach(async () => {
 });
 
 describe("PortalWorkspaceService history compatibility", () => {
+  it("returns every active ancestor for state propagation", async () => {
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "workspace-1",
+          status: "active"
+        })
+      },
+      workspaceNode: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "root-1", parentId: null },
+          { id: "parent-1", parentId: "root-1" },
+          { id: "child-1", parentId: "parent-1" }
+        ])
+      }
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    await expect(service.listFolderAncestorPaths({
+      actor,
+      folderIds: ["child-1", "root-1"]
+    })).resolves.toEqual({
+      "child-1": ["child-1", "parent-1", "root-1"],
+      "root-1": ["root-1"]
+    });
+  });
+
   it("keeps migrated history files collapsed by default and reveals them on demand", async () => {
     const now = new Date("2026-07-27T00:00:00.000Z");
     const db = {
