@@ -42,6 +42,57 @@ function snapshot(input: {
 }
 
 describe("local Codex usage report pricing", () => {
+  it("matches the current GPT-5.6 Terra and Luna prices", () => {
+    expect(estimatedCost({
+      model: "gpt-5.6-terra",
+      tier: "standard",
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100_000
+    }).cost).toBe(1.4);
+    expect(estimatedCost({
+      model: "gpt-5.6-luna",
+      tier: "standard",
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100_000
+    }).cost).toBe(0.14);
+    expect(estimatedCost({
+      model: "gpt-5.6-terra",
+      tier: "priority",
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100_000
+    }).cost).toBe(2.8);
+    expect(estimatedCost({
+      model: "gpt-5.6-luna",
+      tier: "priority",
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100_000
+    }).cost).toBe(0.28);
+    expect(estimatedCost({
+      model: "gpt-5.6-terra",
+      tier: "standard",
+      inputTokens: 100_000,
+      cachedInputTokens: 20_000,
+      cacheWriteTokens: 30_000,
+      outputTokens: 0
+    }).cost).toBe(0.179);
+    expect(estimatedCost({
+      model: "gpt-5.6-luna",
+      tier: "standard",
+      inputTokens: 100_000,
+      cachedInputTokens: 20_000,
+      cacheWriteTokens: 30_000,
+      outputTokens: 0
+    }).cost).toBe(0.0179);
+  });
+
   it("uses the production upper-bound cache-write policy when telemetry is missing", () => {
     const upperBound = estimatedCost({
       model: "gpt-5.6-sol",

@@ -228,8 +228,8 @@ var MODEL_NOTES_SOURCE_URLS = [
 var PRICING = {
   standard: {
     "gpt-5.6-sol": withLongContext({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
-    "gpt-5.6-terra": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
-    "gpt-5.6-luna": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
+    "gpt-5.6-terra": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 }),
+    "gpt-5.6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 }),
     "gpt-5.5": withLongContext({ input: 5, cachedInput: 0.5, output: 30 }),
     "gpt-5.5-pro": withLongContext({ input: 30, output: 180 }),
     "gpt-5.4": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
@@ -254,8 +254,8 @@ var PRICING = {
   },
   batch: {
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
-    "gpt-5.6-terra": withLongContext({ input: 1.25, cachedInput: 0.125, cacheWrite: 1.5625, output: 7.5 }),
-    "gpt-5.6-luna": withLongContext({ input: 0.5, cachedInput: 0.05, cacheWrite: 0.625, output: 3 }),
+    "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
+    "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
     "gpt-5.5": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
     "gpt-5.5-pro": withLongContext({ input: 15, output: 90 }),
     "gpt-5.4": withLongContext({ input: 1.25, cachedInput: 0.13, output: 7.5 }),
@@ -278,8 +278,8 @@ var PRICING = {
   },
   flex: {
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
-    "gpt-5.6-terra": withLongContext({ input: 1.25, cachedInput: 0.125, cacheWrite: 1.5625, output: 7.5 }),
-    "gpt-5.6-luna": withLongContext({ input: 0.5, cachedInput: 0.05, cacheWrite: 0.625, output: 3 }),
+    "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
+    "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
     "gpt-5.5": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
     "gpt-5.5-pro": withLongContext({ input: 15, output: 90 }),
     "gpt-5.4": withLongContext({ input: 1.25, cachedInput: 0.13, output: 7.5 }),
@@ -296,8 +296,8 @@ var PRICING = {
   },
   priority: {
     "gpt-5.6-sol": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 60 },
-    "gpt-5.6-terra": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 },
-    "gpt-5.6-luna": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
+    "gpt-5.6-terra": { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 24 },
+    "gpt-5.6-luna": { input: 0.4, cachedInput: 0.04, cacheWrite: 0.5, output: 2.4 },
     "gpt-5.5": { input: 12.5, cachedInput: 1.25, output: 75 },
     "gpt-5.4": { input: 5, cachedInput: 0.5, output: 30 },
     "gpt-5.4-mini": { input: 1.5, cachedInput: 0.15, output: 9 },
