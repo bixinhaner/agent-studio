@@ -458,7 +458,30 @@ body.portal-workbench-mode {
 }
 
 .workspace-task-list .agent-thread-item-actions {
-  display: none;
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  padding-right: 2px;
+}
+
+.workspace-task-list .thread-item-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .workspace-task-list .agent-thread-item-actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms var(--workbench-motion-ease-soft);
+  }
+
+  .workspace-task-list .agent-thread-list-item:hover .agent-thread-item-actions,
+  .workspace-task-list .agent-thread-list-item:focus-within .agent-thread-item-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .workspace-task-list .thread-running-indicator-slot {
