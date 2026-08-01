@@ -9,11 +9,15 @@ import {
   FileSpreadsheet,
   FileText,
   Folder,
+  FolderInput,
   FolderPlus,
   MessageSquare,
   MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Trash2,
   Upload
 } from "lucide-react";
 
@@ -259,6 +263,21 @@ export function WorkspaceFolderHome(props: {
       props.onWorkspaceChanged?.();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : t("workspace.moveFailed"));
+    }
+  };
+
+  const renameTask = async (task: PortalWorkspaceTask) => {
+    const title = window.prompt(t("workspace.renamePrompt"), task.title)?.trim();
+    if (!title || title === task.title) return;
+    try {
+      await api(`/api/threads/${encodeURIComponent(task.id)}`, {
+        method: "PATCH",
+        json: { title }
+      });
+      await load();
+      props.onWorkspaceChanged?.();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : t("workspace.renameFailed"));
     }
   };
 
@@ -665,38 +684,82 @@ export function WorkspaceFolderHome(props: {
                         <span className="workspace-task-file-count" data-empty={task.file_count > 0 ? undefined : "true"}>
                           {task.file_count > 0
                             ? t("workspace.filesCount", { count: task.file_count })
-                            : t("workspace.pureConversation")}
+                          : t("workspace.pureConversation")}
                         </span>
                       </button>
-                      <Dropdown
-                        trigger={["click"]}
-                        menu={{
-                          items: trashView
-                            ? [{ key: "restore", label: t("workspace.restore") }]
-                            : [
-                                ...(moveTargets.length > 0
-                                  ? [{
-                                      key: "move",
-                                      label: t("workspace.moveTo"),
-                                      children: moveTargets
-                                        .filter((folder) => folder.id !== task.folder_id)
-                                        .map((folder) => ({ key: `move:${folder.id}`, label: folder.name }))
-                                    }]
-                                  : []),
-                                { key: "archive", label: t("workspace.archiveTask") }
-                              ],
-                          onClick: ({ key, domEvent }) => {
-                            domEvent.stopPropagation();
-                            if (key === "archive") void archiveTask(task);
-                            if (key === "restore") void restoreTask(task);
-                            if (key.startsWith("move:")) void moveTask(task, key.slice(5));
-                          }
-                        }}
-                      >
-                        <button type="button" className="workspace-card-menu" aria-label={t("workspace.moreTaskActions")}>
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </Dropdown>
+                      <div className="workspace-task-actions">
+                        {trashView ? (
+                          <button
+                            type="button"
+                            className="workspace-task-action-btn"
+                            aria-label={t("workspace.restore")}
+                            title={t("workspace.restore")}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void restoreTask(task);
+                            }}
+                          >
+                            <RotateCcw size={15} />
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="workspace-task-action-btn"
+                              aria-label={t("workspace.rename")}
+                              title={t("workspace.rename")}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void renameTask(task);
+                              }}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                            {moveTargets.length > 0 ? (
+                              <Dropdown
+                                trigger={["click"]}
+                                menu={{
+                                  items: moveTargets
+                                    .filter((folder) => folder.id !== task.folder_id)
+                                    .map((folder) => ({ key: `move:${folder.id}`, label: folder.name })),
+                                  onClick: ({ key, domEvent }) => {
+                                    domEvent.stopPropagation();
+                                    if (key.startsWith("move:")) void moveTask(task, key.slice(5));
+                                  }
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  className="workspace-task-action-btn"
+                                  aria-label={t("workspace.moveTo")}
+                                  title={t("workspace.moveTo")}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                >
+                                  <FolderInput size={15} />
+                                </button>
+                              </Dropdown>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="workspace-task-action-btn is-danger"
+                              aria-label={t("workspace.archiveTask")}
+                              title={t("workspace.archiveTask")}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void archiveTask(task);
+                              }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </article>
                   ))}
                 </div>

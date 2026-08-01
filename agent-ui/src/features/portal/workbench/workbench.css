@@ -1047,7 +1047,7 @@ body.portal-workbench-mode {
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 10px 48px 10px 14px;
+  padding: 10px 10px 10px 14px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1078,6 +1078,39 @@ body.portal-workbench-mode {
 .workspace-task-main > .workspace-task-file-count[data-empty="true"] {
   background: #f4f4f5;
   color: #71717a;
+}
+
+.workspace-task-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 10px;
+}
+
+.workspace-task-action-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+}
+
+.workspace-task-action-btn:hover,
+.workspace-task-action-btn:focus-visible {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.workspace-task-action-btn.is-danger:hover,
+.workspace-task-action-btn.is-danger:focus-visible {
+  background: #fff1f2;
+  color: #be123c;
 }
 
 .workspace-task-pagination {
