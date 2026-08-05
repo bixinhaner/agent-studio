@@ -110,6 +110,10 @@ function isInternalLoginPath(pathname: string): boolean {
   return /^\/login\/internal\/?$/.test(pathname);
 }
 
+function isTrainingPath(pathname: string): boolean {
+  return /^\/training\/?$/.test(pathname);
+}
+
 function isNeutralAuthEntryPath(pathname: string): boolean {
   return /^\/?$/.test(pathname) || /^\/login\/?$/.test(pathname) || isInternalLoginPath(pathname);
 }
@@ -526,6 +530,18 @@ function AppContent(props: {
     }
     setView("portal");
   };
+  const trainingMode = isTrainingPath(props.pathname);
+  const openTraining = trainingMode
+    ? undefined
+    : () => {
+        if (typeof window === "undefined") return;
+        const nextUrl = new URL("/training", window.location.origin);
+        const nextWindow = window.open(nextUrl.toString(), "_blank", "noopener,noreferrer");
+        nextWindow?.focus?.();
+      };
+  const exitTraining = trainingMode
+    ? () => replaceLocationPath("/login/internal")
+    : undefined;
 
   const effectiveAuthMode: AuthEntryMode =
     !props.inviteToken &&
@@ -615,6 +631,9 @@ function AppContent(props: {
           currentUser={auth.user}
           onOpenAdmin={openAdmin}
           onSignOut={() => void auth.signOut()}
+          trainingReadOnly={trainingMode}
+          onOpenTraining={openTraining}
+          onExitTraining={exitTraining}
         />
       </Suspense>
     </PortalI18nProvider>
@@ -683,6 +702,7 @@ function AppRoutes() {
     reviewRequestId ||
     aiResponseReviewId ||
     isInternalLoginPath(pathname) ||
+    isTrainingPath(pathname) ||
     (isNeutralAuthEntryPath(pathname) && readPreferredAuthEntryMode() === "internal")
       ? "internal"
       : "external";

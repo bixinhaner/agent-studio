@@ -1737,6 +1737,53 @@ body.portal-workbench-mode {
   transform: scale(0.98);
 }
 
+.portal-topbar-training-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid #dbe7dc;
+  border-radius: 999px;
+  background: #f4faf4;
+  color: #35623d;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.portal-training-help-item {
+  display: grid;
+  gap: 2px;
+  min-width: 210px;
+  padding: 2px 0;
+}
+
+.portal-training-help-item strong {
+  color: #18181b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.portal-training-help-item small {
+  color: var(--workbench-muted-text);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.portal-training-exit-btn.ant-btn {
+  height: 34px;
+  border-color: #e2e5e9;
+  border-radius: 8px;
+  color: #32363d;
+  box-shadow: none;
+}
+
+.portal-training-exit-btn.ant-btn:hover {
+  border-color: #bcc4cc;
+  color: #111827;
+}
+
 .portal-topbar-language-btn.ant-btn {
   width: 36px;
   min-width: 36px;
@@ -2551,6 +2598,44 @@ button.session-rail-new-btn:active,
   box-shadow: 0 12px 48px rgba(0,0,0,0.08), inset 0 2px 4px rgba(255,255,255,0.6);
   border: 1px solid rgba(255, 255, 255, 0.8);
   text-align: center;
+}
+
+.training-readonly-notice {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 4;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  padding: 7px 12px;
+  border: 1px solid #dbe7dc;
+  border-radius: 999px;
+  background: rgba(244, 250, 244, 0.96);
+  color: #35623d;
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 4px 16px rgba(31, 41, 55, 0.06);
+  pointer-events: none;
+}
+
+.is-training-readonly .aui-thread-viewport {
+  padding-bottom: 24px;
+}
+
+@media (max-width: 767px) {
+  .portal-topbar-training-badge {
+    max-width: 116px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .training-readonly-notice {
+    top: 8px;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    border-radius: 8px;
+    text-align: center;
+  }
 }
 
 /* @assistant-ui customized tokens */

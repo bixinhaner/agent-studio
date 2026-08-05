@@ -6,6 +6,7 @@ import { PortalI18nProvider } from "../i18n";
 import {
   fetchPortalFolderTasks,
   fetchPortalWorkspaceNodes,
+  PORTAL_WORKSPACE_DATA_SOURCE,
   type PortalWorkspaceNode,
   type PortalWorkspaceTask
 } from "../workspace";
@@ -50,6 +51,12 @@ const task: PortalWorkspaceTask = {
   updated_at: "2026-07-31T00:00:00.000Z"
 };
 
+const testDataSource = {
+  ...PORTAL_WORKSPACE_DATA_SOURCE,
+  fetchNodes: (...args: Parameters<typeof fetchPortalWorkspaceNodes>) => fetchPortalWorkspaceNodes(...args),
+  fetchFolderTasks: (folderId: string) => fetchPortalFolderTasks(folderId)
+};
+
 beforeEach(() => {
   window.localStorage.setItem("agent-studio.portal.locale.v1", "zh-CN");
   vi.mocked(api).mockResolvedValue({});
@@ -77,6 +84,7 @@ describe("WorkspaceFolderHome", () => {
           onOpenFile={vi.fn()}
           onOpenTask={vi.fn()}
           onNewTask={vi.fn()}
+          dataSource={testDataSource}
         />
       </PortalI18nProvider>
     );
@@ -105,6 +113,7 @@ describe("WorkspaceFolderHome", () => {
           onOpenFile={vi.fn()}
           onOpenTask={vi.fn()}
           onNewTask={vi.fn()}
+          dataSource={testDataSource}
         />
       </PortalI18nProvider>
     );
@@ -120,5 +129,31 @@ describe("WorkspaceFolderHome", () => {
     });
     expect(prompt).toHaveBeenCalledWith("请输入新名称", "检查两张考核表");
     prompt.mockRestore();
+  });
+
+  it("preserves tasks and files while removing folder write controls in read-only mode", async () => {
+    render(
+      <PortalI18nProvider>
+        <WorkspaceFolderHome
+          folderId="folder-1"
+          folderName="01 数据与表格"
+          readOnly
+          dataSource={testDataSource}
+          onOpenFolder={vi.fn()}
+          onOpenFile={vi.fn()}
+          onOpenTask={vi.fn()}
+          onNewTask={vi.fn()}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(await screen.findByText("检查两张考核表")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新任务" })).toBeNull();
+    expect(screen.queryByText("上传文件")).toBeNull();
+    expect(screen.queryByText("新建文件夹")).toBeNull();
+    expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "文件 1" }));
+    expect(await screen.findByText("检查结果.xlsx")).toBeTruthy();
   });
 });

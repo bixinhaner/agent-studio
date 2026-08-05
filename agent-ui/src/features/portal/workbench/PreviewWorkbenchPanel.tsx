@@ -735,13 +735,14 @@ async function fetchThreadFileBlob(
 async function fetchWorkspaceFileBlob(
   fileId: string,
   versionId?: string,
-  options?: PreviewFetchOptions
+  options?: PreviewFetchOptions,
+  workspaceApiBasePath = "/api/portal/workspace"
 ): Promise<Response> {
   const query = new URLSearchParams();
   if (versionId) query.set("version_id", versionId);
   appendPreviewOptions(query, options);
   const response = await fetch(
-    `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(fileId)}/content${query.toString() ? `?${query.toString()}` : ""}`,
+    `${apiBase()}${workspaceApiBasePath}/files/${encodeURIComponent(fileId)}/content${query.toString() ? `?${query.toString()}` : ""}`,
     {
       method: "GET",
       credentials: "include",
@@ -1360,6 +1361,8 @@ export function PreviewWorkbenchPanel(props: {
   workspaceFileId?: string;
   workspaceFileName?: string;
   workspaceFileMimeType?: string;
+  workspaceApiBasePath?: string;
+  workspaceFileReadOnly?: boolean;
 }) {
   const { locale, t } = usePortalI18n();
   const requestedTarget = useMemo(
@@ -1470,8 +1473,9 @@ export function PreviewWorkbenchPanel(props: {
       return;
     }
     let cancelled = false;
+    const workspaceApiBasePath = props.workspaceApiBasePath || "/api/portal/workspace";
     void api<{ versions: WorkspaceFileVersionApiRecord[] }>(
-      `/api/portal/workspace/files/${encodeURIComponent(fileId)}/versions`
+      `${workspaceApiBasePath}/files/${encodeURIComponent(fileId)}/versions`
     )
       .then((out) => {
         if (cancelled) return;
@@ -1484,7 +1488,7 @@ export function PreviewWorkbenchPanel(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.workspaceFileId]);
+  }, [props.workspaceApiBasePath, props.workspaceFileId]);
 
   const activeFile = useMemo(() => {
     if (String(props.workspaceFileId || "").trim()) {
@@ -1574,15 +1578,15 @@ export function PreviewWorkbenchPanel(props: {
                   : undefined;
         if (workspaceFileId) {
           response = structuredOptions
-            ? await fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, structuredOptions)
+            ? await fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, structuredOptions, props.workspaceApiBasePath)
             : await fetchPaginatedOfficePreview(
                 supportsPaginatedOfficePreview(fileForKind.filePath, fileForKind.mimeType),
                 (options) =>
-                  fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, options)
+                  fetchWorkspaceFileBlob(workspaceFileId, selectedWorkspaceVersionId || undefined, options, props.workspaceApiBasePath)
               );
           const query = new URLSearchParams({ disposition: "attachment" });
           if (selectedWorkspaceVersionId) query.set("version_id", selectedWorkspaceVersionId);
-          downloadUrl = `${apiBase()}/api/portal/workspace/files/${encodeURIComponent(workspaceFileId)}/content?${query.toString()}`;
+          downloadUrl = `${apiBase()}${props.workspaceApiBasePath || "/api/portal/workspace"}/files/${encodeURIComponent(workspaceFileId)}/content?${query.toString()}`;
         } else if (isKnowledgeSetFile) {
           response = structuredOptions
             ? await fetchPortalResourceFileBlob(filePath, structuredOptions)
@@ -1797,6 +1801,7 @@ export function PreviewWorkbenchPanel(props: {
     fileCitationTarget?.sheet,
     props.externalArtifactMode,
     props.threadId,
+    props.workspaceApiBasePath,
     props.workspaceFileId,
     selectedWorkspaceVersionId,
     tableColumnOffset,
@@ -2277,7 +2282,7 @@ export function PreviewWorkbenchPanel(props: {
                               : formatWorkspaceVersionDate(version.created_at, locale)}
                           </span>
                         </button>
-                        {!current ? (
+                        {!props.workspaceFileReadOnly && !current ? (
                           <Button
                             type="link"
                             size="small"

@@ -345,6 +345,8 @@ import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
+import { createTrainingCatalogRouter } from "./workspaces/training-catalog-router.js";
+import { TrainingCatalogService } from "./workspaces/training-catalog-service.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
@@ -523,6 +525,7 @@ const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.
 const db = getDbClient();
 const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
 const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage);
+const trainingCatalog = new TrainingCatalogService(db, portalWorkspaces, appConfig.portalTraining);
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
@@ -5866,6 +5869,20 @@ async function getPortalOwnedThread(threadId: string, actor: CurrentActor): Prom
   return trimOrUndefined(thread.securityDomainId) === trimOrUndefined(securityDomainId) ? thread : undefined;
 }
 
+async function getPortalReadableThread(threadId: string, actor: CurrentActor): Promise<ThreadRecord | undefined> {
+  const owned = await getPortalOwnedThread(threadId, actor);
+  if (owned) return owned;
+  if (!isInternalOrganizationType(actor.organizationType)) return undefined;
+  return trainingCatalog.getThread({
+    viewer: {
+      userId: actor.id,
+      organizationId: actor.organizationId,
+      organizationType: actor.organizationType || ""
+    },
+    threadId
+  });
+}
+
 function roleIdsForActor(actor: CurrentActor): string[] {
   return resolveResourceRoleIds({
     platformRole: actor.role,
@@ -10006,7 +10023,7 @@ async function sendThreadArtifactContent(input: {
     input.authorizedThread
       ? Promise.resolve(input.authorizedThread.id === threadId ? input.authorizedThread : undefined)
       : input.enforcePortalSecurityDomain
-        ? getPortalOwnedThread(threadId, input.currentUser)
+        ? getPortalReadableThread(threadId, input.currentUser)
         : threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
     resolveArtifactPolicyForActor(input.currentUser)
   ]);
@@ -10076,7 +10093,7 @@ async function sendThreadArtifactContent(input: {
     try {
       const stableFile = await portalWorkspaces.getFile({
         actor: {
-          userId: input.currentUser.id,
+          userId: thread.userId ?? input.currentUser.id,
           organizationId: input.currentUser.organizationId,
           securityDomainId: thread.securityDomainId
         },
@@ -10711,6 +10728,21 @@ app.use(
   })
 );
 
+app.use(
+  "/api/portal/training",
+  createTrainingCatalogRouter({
+    service: trainingCatalog,
+    async resolveViewer(req) {
+      const currentUser = currentActorFromRequest(req);
+      return {
+        userId: currentUser.id,
+        organizationId: currentUser.organizationId,
+        organizationType: currentUser.organizationType || ""
+      };
+    }
+  })
+);
+
 app.use("/api/admin", createAdminBillingRouter(billingService));
 app.use(
   "/api/portal",
@@ -10933,7 +10965,7 @@ app.get("/api/threads/:threadId/attachments/:attachmentId/content", async (req: 
       relative_path: typeof req.query.relative_path === "string" ? req.query.relative_path : undefined
     });
 
-    const thread = await getPortalOwnedThread(threadId, currentUser);
+    const thread = await getPortalReadableThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -11006,7 +11038,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
       column_limit: typeof req.query.column_limit === "string" ? req.query.column_limit : undefined
     });
 
-    const thread = await getPortalOwnedThread(threadId, currentUser);
+    const thread = await getPortalReadableThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -11079,7 +11111,7 @@ app.get("/api/threads/:threadId/artifacts", async (req: Request, res: Response) 
       return;
     }
 
-    const thread = await getPortalOwnedThread(threadId, currentUser);
+    const thread = await getPortalReadableThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -11104,7 +11136,7 @@ app.get("/api/threads/:threadId/artifacts/resolve", async (req: Request, res: Re
     const query = artifactResolveQuerySchema.parse({
       path: typeof req.query.path === "string" ? req.query.path : ""
     });
-    const thread = await getPortalOwnedThread(threadId, currentUser);
+    const thread = await getPortalReadableThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -11178,7 +11210,7 @@ app.get("/api/threads/:threadId/visualizations/content", async (req: Request, re
       file: typeof req.query.file === "string" ? req.query.file : ""
     });
     const [thread, policy] = await Promise.all([
-      getPortalOwnedThread(threadId, currentUser),
+      getPortalReadableThread(threadId, currentUser),
       resolveArtifactPolicyForActor(currentUser)
     ]);
     if (!thread) {
@@ -11728,7 +11760,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
 
 app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
-  const thread = await getPortalOwnedThread(String(req.params.threadId || "").trim(), currentUser);
+  const thread = await getPortalReadableThread(String(req.params.threadId || "").trim(), currentUser);
   if (!thread) {
     res.status(404).json({ detail: "Thread does not exist" });
     return;
@@ -11938,7 +11970,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await getPortalOwnedThread(threadId, currentUser);
+    const thread = await getPortalReadableThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;

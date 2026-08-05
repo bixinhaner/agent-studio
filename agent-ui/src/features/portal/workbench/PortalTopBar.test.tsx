@@ -78,4 +78,50 @@ describe("PortalTopBar language menu", () => {
     expect(await screen.findByText("简体中文")).toBeTruthy();
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
   });
+
+  it("opens the read-only training catalog from Help", async () => {
+    const onOpenTraining = vi.fn();
+    render(
+      <PortalI18nProvider>
+        <PortalTopBar
+          sessionRailCollapsed={false}
+          onToggleRail={vi.fn()}
+          onOpenAdvancedSettings={vi.fn()}
+          onToggleDrawer={vi.fn()}
+          onOpenTraining={onOpenTraining}
+          showRuntimeSummary={false}
+          showAdvancedSettings={false}
+          showRightPanelToggle={false}
+        />
+      </PortalI18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    fireEvent.click(await screen.findByText("Training cases"));
+
+    expect(onOpenTraining).toHaveBeenCalledOnce();
+  });
+
+  it("shows a read-only badge and return action inside training mode", () => {
+    const onExitTraining = vi.fn();
+    render(
+      <PortalI18nProvider>
+        <PortalTopBar
+          sessionRailCollapsed={false}
+          onToggleRail={vi.fn()}
+          onOpenAdvancedSettings={vi.fn()}
+          onToggleDrawer={vi.fn()}
+          trainingMode
+          onExitTraining={onExitTraining}
+          showRuntimeSummary={false}
+          showAdvancedSettings={false}
+          showRightPanelToggle={false}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByText("Training cases · Read only")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }));
+    expect(onExitTraining).toHaveBeenCalledOnce();
+  });
 });

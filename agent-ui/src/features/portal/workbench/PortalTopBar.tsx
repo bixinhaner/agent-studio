@@ -2,6 +2,9 @@ import { useMemo, useState } from "react";
 import { Button, Drawer, Dropdown, Space, Tooltip, type MenuProps } from "antd";
 import {
   Check,
+  ArrowLeft,
+  BookOpen,
+  CircleHelp,
   Ellipsis,
   CreditCard,
   Globe,
@@ -36,6 +39,9 @@ export function PortalTopBar(props: {
   showAdvancedSettings?: boolean;
   showRightPanelToggle?: boolean;
   mobile?: boolean;
+  trainingMode?: boolean;
+  onOpenTraining?: () => void;
+  onExitTraining?: () => void;
 }) {
   const { branding } = useBranding();
   const { locale, setLocale, t } = usePortalI18n();
@@ -46,9 +52,21 @@ export function PortalTopBar(props: {
   const isMobile = props.mobile ?? false;
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const hasOverflowActions = true;
   const mobileActionItems = useMemo(
     () => [
+      props.trainingMode && props.onExitTraining
+        ? {
+            key: "exit-training",
+            label: t("training.backToWorkspace"),
+            icon: <ArrowLeft size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              props.onExitTraining?.();
+            }
+          }
+        : null,
       props.onOpenFeedback
         ? {
             key: "feedback",
@@ -57,6 +75,17 @@ export function PortalTopBar(props: {
             onClick: () => {
               setMobileActionsOpen(false);
               props.onOpenFeedback?.();
+            }
+          }
+        : null,
+      props.onOpenTraining
+        ? {
+            key: "training",
+            label: t("training.open"),
+            icon: <BookOpen size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              props.onOpenTraining?.();
             }
           }
         : null,
@@ -99,7 +128,7 @@ export function PortalTopBar(props: {
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings, t]
+    [props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenTraining, props.trainingMode, showAdvancedSettings, t]
   );
   const languageMenu: MenuProps = {
     items: PORTAL_LANGUAGE_OPTIONS.map((option) => ({
@@ -155,6 +184,12 @@ export function PortalTopBar(props: {
         </div>
 
         <div className="portal-topbar-right">
+          {props.trainingMode ? (
+            <span className="portal-topbar-training-badge">
+              <BookOpen size={15} aria-hidden="true" />
+              {t("training.readOnlyBadge")}
+            </span>
+          ) : null}
           {!isMobile && showRuntimeSummary && props.runtimeSummary ? (
             <span className="portal-topbar-runtime-chip" title={props.runtimeSummary}>
               {props.runtimeSummary}
@@ -162,6 +197,47 @@ export function PortalTopBar(props: {
           ) : null}
 
           <Space size={8} className="portal-topbar-action-group">
+            {!isMobile && props.onOpenTraining ? (
+              <Dropdown
+                trigger={["click"]}
+                placement="bottomRight"
+                open={helpMenuOpen}
+                onOpenChange={setHelpMenuOpen}
+                menu={{
+                  items: [
+                    {
+                      key: "training",
+                      icon: <BookOpen size={17} />,
+                      label: (
+                        <span className="portal-training-help-item">
+                          <strong>{t("training.open")}</strong>
+                          <small>{t("training.openDetail")}</small>
+                        </span>
+                      )
+                    }
+                  ],
+                  onClick: () => props.onOpenTraining?.()
+                }}
+              >
+                <Button
+                  type="text"
+                  className="portal-topbar-ghost-btn"
+                  icon={<CircleHelp size={18} />}
+                  aria-label={t("topbar.help")}
+                  aria-haspopup="menu"
+                  aria-expanded={helpMenuOpen}
+                />
+              </Dropdown>
+            ) : null}
+            {!isMobile && props.trainingMode && props.onExitTraining ? (
+              <Button
+                className="portal-training-exit-btn"
+                icon={<ArrowLeft size={16} />}
+                onClick={props.onExitTraining}
+              >
+                {t("training.backToWorkspace")}
+              </Button>
+            ) : null}
             {!isMobile && props.onOpenFeedback ? (
               <Tooltip title={t("topbar.feedback")} placement="bottom">
                 <Button

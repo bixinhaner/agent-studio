@@ -19,7 +19,8 @@ import {
 
 import { usePortalI18n } from "../i18n";
 import {
-  fetchPortalWorkspaceNodes,
+  PORTAL_WORKSPACE_DATA_SOURCE,
+  type PortalWorkspaceDataSource,
   type PortalWorkspaceNode,
   type PortalWorkspaceSummary
 } from "../workspace";
@@ -48,6 +49,9 @@ export function WorkspaceRail(props: {
   onCreateFolder(): void;
   onNewTask(): void;
   onViewAllTasks(): void;
+  dataSource?: PortalWorkspaceDataSource;
+  readOnly?: boolean;
+  title?: string;
 }) {
   const { t } = usePortalI18n();
   const folders = props.rootNodes.filter((node) => node.kind === "folder");
@@ -58,7 +62,7 @@ export function WorkspaceRail(props: {
   const loadChildren = useCallback(async (folderId: string) => {
     setLoadingFolderIds((current) => new Set(current).add(folderId));
     try {
-      const children = await fetchPortalWorkspaceNodes(folderId);
+      const children = await (props.dataSource ?? PORTAL_WORKSPACE_DATA_SOURCE).fetchNodes(folderId);
       setChildrenByFolderId((current) => ({ ...current, [folderId]: children }));
     } catch {
       setChildrenByFolderId((current) => ({ ...current, [folderId]: [] }));
@@ -69,7 +73,7 @@ export function WorkspaceRail(props: {
         return next;
       });
     }
-  }, []);
+  }, [props.dataSource]);
 
   useEffect(() => {
     setChildrenByFolderId({});
@@ -166,7 +170,7 @@ export function WorkspaceRail(props: {
               </span>
             ) : null}
           </button>
-          {selected ? (
+          {selected && !props.readOnly ? (
             <button
               type="button"
               className="workspace-folder-inline-new"
@@ -206,6 +210,7 @@ export function WorkspaceRail(props: {
     props.onNewTask,
     props.onSelectFolder,
     props.onViewAllTasks,
+    props.readOnly,
     props.selectedFolderId,
     props.taskCount,
     props.taskList,
@@ -224,7 +229,7 @@ export function WorkspaceRail(props: {
     <aside className="workspace-rail" aria-label={t("workspace.title")}>
       <div className="workspace-rail-head">
         <div className="workspace-rail-heading-row">
-          <h2>{t("workspace.mine")}</h2>
+          <h2>{props.title || t("workspace.mine")}</h2>
         </div>
         <Input
           className="workspace-search"
@@ -240,15 +245,17 @@ export function WorkspaceRail(props: {
       <nav className="workspace-folder-nav" aria-label={t("workspace.folders")}>
         <div className="workspace-nav-section-label">
           <span>{t("workspace.folders")}</span>
-          <button type="button" onClick={props.onCreateFolder}>
-            <Plus size={13} />
-            {t("workspace.addFolder")}
-          </button>
+          {!props.readOnly ? (
+            <button type="button" onClick={props.onCreateFolder}>
+              <Plus size={13} />
+              {t("workspace.addFolder")}
+            </button>
+          ) : null}
         </div>
 
         {folderTree}
 
-        {!props.loading && folders.length === 0 ? (
+        {!props.readOnly && !props.loading && folders.length === 0 ? (
           <button type="button" className="workspace-empty-folder-cta" onClick={props.onCreateFolder}>
             <Plus size={16} />
             {t("workspace.createFirstFolder")}
@@ -258,7 +265,7 @@ export function WorkspaceRail(props: {
         {props.errorText ? <p className="workspace-rail-error">{props.errorText}</p> : null}
       </nav>
 
-      <div className="workspace-rail-footer">
+      {!props.readOnly ? <div className="workspace-rail-footer">
         <button
           type="button"
           className={props.selectedFolderId === TRASH_WORKSPACE_VIEW ? "workspace-nav-item is-active" : "workspace-nav-item"}
@@ -269,7 +276,7 @@ export function WorkspaceRail(props: {
           <ChevronRight size={14} className="workspace-nav-chevron" />
         </button>
         {props.footer}
-      </div>
+      </div> : props.footer ? <div className="workspace-rail-footer">{props.footer}</div> : null}
     </aside>
   );
 }

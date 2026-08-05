@@ -46,68 +46,107 @@ export type PortalWorkspaceFolderTasksResult = {
   summary: PortalWorkspaceFolderTaskSummary;
 };
 
+export type PortalWorkspaceDataSource = {
+  apiBasePath: string;
+  fetchWorkspace(): Promise<{ workspace: PortalWorkspaceSummary; nodes: PortalWorkspaceNode[] }>;
+  fetchNodes(parentId?: string, options?: { includeMigrated?: boolean }): Promise<PortalWorkspaceNode[]>;
+  fetchNode(nodeId: string): Promise<PortalWorkspaceNode>;
+  fetchFolderAncestorPaths(folderIds: readonly string[]): Promise<Record<string, string[]>>;
+  fetchFolderTasks(folderId: string): Promise<PortalWorkspaceFolderTasksResult>;
+  fetchTaskFiles(threadId: string): Promise<PortalWorkspaceNode[]>;
+  search(query: string): Promise<{ nodes: PortalWorkspaceNode[]; tasks: PortalWorkspaceTask[] }>;
+};
+
+function createWorkspaceReadDataSource(apiBasePath: string): PortalWorkspaceDataSource {
+  const normalizedBasePath = apiBasePath.replace(/\/$/, "");
+  return {
+    apiBasePath: normalizedBasePath,
+    fetchWorkspace: () => api(normalizedBasePath),
+    async fetchNodes(parentId, options) {
+      const query = new URLSearchParams();
+      if (parentId) query.set("parent_id", parentId);
+      if (options?.includeMigrated) query.set("include_migrated", "1");
+      const out = await api<{ nodes: PortalWorkspaceNode[] }>(
+        `${normalizedBasePath}/nodes${query.toString() ? `?${query.toString()}` : ""}`
+      );
+      return Array.isArray(out.nodes) ? out.nodes : [];
+    },
+    async fetchNode(nodeId) {
+      const out = await api<{ node: PortalWorkspaceNode }>(
+        `${normalizedBasePath}/nodes/${encodeURIComponent(nodeId)}`
+      );
+      return out.node;
+    },
+    async fetchFolderAncestorPaths(folderIds) {
+      const normalizedFolderIds = Array.from(
+        new Set(folderIds.map((folderId) => String(folderId || "").trim()).filter(Boolean))
+      );
+      if (normalizedFolderIds.length === 0) return {};
+      const query = new URLSearchParams({ folder_ids: normalizedFolderIds.join(",") });
+      const out = await api<{ paths?: Record<string, unknown> }>(
+        `${normalizedBasePath}/folder-ancestor-paths?${query.toString()}`
+      );
+      const paths: Record<string, string[]> = {};
+      for (const [folderId, value] of Object.entries(out.paths || {})) {
+        if (!Array.isArray(value)) continue;
+        paths[folderId] = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      }
+      return paths;
+    },
+    async fetchFolderTasks(folderId) {
+      const out = await api<{
+        tasks: PortalWorkspaceTask[];
+        summary?: PortalWorkspaceFolderTaskSummary;
+      }>(`${normalizedBasePath}/folders/${encodeURIComponent(folderId)}/tasks?take=500`);
+      const tasks = Array.isArray(out.tasks) ? out.tasks : [];
+      return {
+        tasks,
+        summary: out.summary || {
+          task_count: tasks.length,
+          tasks_with_files: tasks.filter((task) => task.file_count > 0).length,
+          file_count: tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
+        }
+      };
+    },
+    async fetchTaskFiles(threadId) {
+      const out = await api<{ files: PortalWorkspaceNode[] }>(
+        `${normalizedBasePath}/tasks/${encodeURIComponent(threadId)}/files`
+      );
+      return Array.isArray(out.files) ? out.files : [];
+    },
+    search: (query) => api(`${normalizedBasePath}/search?q=${encodeURIComponent(query.trim())}`)
+  };
+}
+
+export const PORTAL_WORKSPACE_DATA_SOURCE = createWorkspaceReadDataSource("/api/portal/workspace");
+export const TRAINING_WORKSPACE_DATA_SOURCE = createWorkspaceReadDataSource("/api/portal/training");
+
 export async function fetchPortalWorkspace(): Promise<{
   workspace: PortalWorkspaceSummary;
   nodes: PortalWorkspaceNode[];
 }> {
-  return api("/api/portal/workspace");
+  return PORTAL_WORKSPACE_DATA_SOURCE.fetchWorkspace();
 }
 
 export async function fetchPortalWorkspaceNodes(
   parentId?: string,
   options?: { includeMigrated?: boolean }
 ): Promise<PortalWorkspaceNode[]> {
-  const query = new URLSearchParams();
-  if (parentId) query.set("parent_id", parentId);
-  if (options?.includeMigrated) query.set("include_migrated", "1");
-  const out = await api<{ nodes: PortalWorkspaceNode[] }>(
-    `/api/portal/workspace/nodes${query.toString() ? `?${query.toString()}` : ""}`
-  );
-  return Array.isArray(out.nodes) ? out.nodes : [];
+  return PORTAL_WORKSPACE_DATA_SOURCE.fetchNodes(parentId, options);
 }
 
 export async function fetchPortalWorkspaceNode(nodeId: string): Promise<PortalWorkspaceNode> {
-  const out = await api<{ node: PortalWorkspaceNode }>(
-    `/api/portal/workspace/nodes/${encodeURIComponent(nodeId)}`
-  );
-  return out.node;
+  return PORTAL_WORKSPACE_DATA_SOURCE.fetchNode(nodeId);
 }
 
 export async function fetchPortalWorkspaceFolderAncestorPaths(
   folderIds: readonly string[]
 ): Promise<Record<string, string[]>> {
-  const normalizedFolderIds = Array.from(
-    new Set(folderIds.map((folderId) => String(folderId || "").trim()).filter(Boolean))
-  );
-  if (normalizedFolderIds.length === 0) return {};
-  const query = new URLSearchParams({ folder_ids: normalizedFolderIds.join(",") });
-  const out = await api<{ paths?: Record<string, unknown> }>(
-    `/api/portal/workspace/folder-ancestor-paths?${query.toString()}`
-  );
-  const paths: Record<string, string[]> = {};
-  for (const [folderId, value] of Object.entries(out.paths || {})) {
-    if (!Array.isArray(value)) continue;
-    paths[folderId] = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-  }
-  return paths;
+  return PORTAL_WORKSPACE_DATA_SOURCE.fetchFolderAncestorPaths(folderIds);
 }
 
 export async function fetchPortalFolderTasks(folderId: string): Promise<PortalWorkspaceFolderTasksResult> {
-  const out = await api<{
-    tasks: PortalWorkspaceTask[];
-    summary?: PortalWorkspaceFolderTaskSummary;
-  }>(
-    `/api/portal/workspace/folders/${encodeURIComponent(folderId)}/tasks?take=500`
-  );
-  const tasks = Array.isArray(out.tasks) ? out.tasks : [];
-  return {
-    tasks,
-    summary: out.summary || {
-      task_count: tasks.length,
-      tasks_with_files: tasks.filter((task) => task.file_count > 0).length,
-      file_count: tasks.reduce((count, task) => count + Math.max(task.file_count || 0, 0), 0)
-    }
-  };
+  return PORTAL_WORKSPACE_DATA_SOURCE.fetchFolderTasks(folderId);
 }
 
 export async function fetchPortalRecentWorkspace(): Promise<{
@@ -135,7 +174,7 @@ export async function searchPortalWorkspace(query: string): Promise<{
   nodes: PortalWorkspaceNode[];
   tasks: PortalWorkspaceTask[];
 }> {
-  return api(`/api/portal/workspace/search?q=${encodeURIComponent(query.trim())}`);
+  return PORTAL_WORKSPACE_DATA_SOURCE.search(query);
 }
 
 export async function createPortalWorkspaceFolder(name: string, parentId?: string): Promise<PortalWorkspaceNode> {

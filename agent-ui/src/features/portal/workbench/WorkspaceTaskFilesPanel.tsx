@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { Empty, Spin } from "antd";
 import { File, FileImage, FileSpreadsheet, FileText } from "lucide-react";
 
-import { api } from "../../../lib/api";
 import { usePortalI18n } from "../i18n";
-import type { PortalWorkspaceNode } from "../workspace";
+import {
+  PORTAL_WORKSPACE_DATA_SOURCE,
+  type PortalWorkspaceDataSource,
+  type PortalWorkspaceNode
+} from "../workspace";
 
 function fileIcon(node: PortalWorkspaceNode) {
   const name = node.name.toLowerCase();
@@ -18,6 +21,7 @@ function fileIcon(node: PortalWorkspaceNode) {
 export function WorkspaceTaskFilesPanel(props: {
   threadId: string;
   onOpenFile(file: PortalWorkspaceNode): void;
+  dataSource?: PortalWorkspaceDataSource;
 }) {
   const { locale, t } = usePortalI18n();
   const [files, setFiles] = useState<PortalWorkspaceNode[]>([]);
@@ -33,11 +37,9 @@ export function WorkspaceTaskFilesPanel(props: {
     let cancelled = false;
     setLoading(true);
     setErrorText("");
-    void api<{ files: PortalWorkspaceNode[] }>(
-      `/api/portal/workspace/tasks/${encodeURIComponent(threadId)}/files`
-    )
-      .then((out) => {
-        if (!cancelled) setFiles(Array.isArray(out.files) ? out.files : []);
+    void (props.dataSource ?? PORTAL_WORKSPACE_DATA_SOURCE).fetchTaskFiles(threadId)
+      .then((nextFiles) => {
+        if (!cancelled) setFiles(nextFiles);
       })
       .catch((error) => {
         if (!cancelled) setErrorText(error instanceof Error ? error.message : t("workspace.loadFailed"));
@@ -48,7 +50,7 @@ export function WorkspaceTaskFilesPanel(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.threadId, t]);
+  }, [props.dataSource, props.threadId, t]);
 
   return (
     <div className="workspace-task-files-panel">

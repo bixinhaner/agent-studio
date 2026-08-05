@@ -26,13 +26,13 @@ import { usePortalI18n } from "../i18n";
 import {
   createPortalWorkspaceFolder,
   fetchPortalAgentOutputs,
-  fetchPortalFolderTasks,
   fetchPortalRecentWorkspace,
-  fetchPortalWorkspaceNodes,
   fetchPortalWorkspaceTrash,
+  PORTAL_WORKSPACE_DATA_SOURCE,
   searchPortalWorkspace,
   uploadPortalWorkspaceFile,
   type PortalWorkspaceNode,
+  type PortalWorkspaceDataSource,
   type PortalWorkspaceFolderTaskSummary,
   type PortalWorkspaceTask
 } from "../workspace";
@@ -85,6 +85,8 @@ export function WorkspaceFolderHome(props: {
   onOpenTask(task: PortalWorkspaceTask): void;
   onNewTask(): void;
   onWorkspaceChanged?(): void;
+  dataSource?: PortalWorkspaceDataSource;
+  readOnly?: boolean;
 }) {
   const { locale, t } = usePortalI18n();
   const [nodes, setNodes] = useState<PortalWorkspaceNode[]>([]);
@@ -109,13 +111,14 @@ export function WorkspaceFolderHome(props: {
   const searchQuery = String(props.searchQuery || "").trim();
   const searchView = Boolean(searchQuery);
   const historyView = props.folderSystemKey === "history_unfiled";
+  const dataSource = props.dataSource ?? PORTAL_WORKSPACE_DATA_SOURCE;
 
   const load = useCallback(async () => {
     setLoading(true);
     setErrorText("");
     try {
       if (searchView) {
-        const result = await searchPortalWorkspace(searchQuery);
+        const result = props.readOnly ? await dataSource.search(searchQuery) : await searchPortalWorkspace(searchQuery);
         setNodes(result.nodes);
         setTasks(result.tasks);
         setFolderTaskSummary({
@@ -152,8 +155,8 @@ export function WorkspaceFolderHome(props: {
         });
       } else {
         const [nextNodes, taskResult] = await Promise.all([
-          fetchPortalWorkspaceNodes(props.folderId, { includeMigrated: historyView && showHistoryFiles }),
-          fetchPortalFolderTasks(props.folderId)
+          dataSource.fetchNodes(props.folderId, { includeMigrated: historyView && showHistoryFiles }),
+          dataSource.fetchFolderTasks(props.folderId)
         ]);
         setNodes(nextNodes);
         setTasks(taskResult.tasks);
@@ -164,7 +167,7 @@ export function WorkspaceFolderHome(props: {
     } finally {
       setLoading(false);
     }
-  }, [agentOutputsView, historyView, props.folderId, recentView, searchQuery, searchView, showHistoryFiles, t, trashView]);
+  }, [agentOutputsView, dataSource, historyView, props.folderId, props.readOnly, recentView, searchQuery, searchView, showHistoryFiles, t, trashView]);
 
   useEffect(() => {
     setTaskPage(1);
@@ -339,24 +342,26 @@ export function WorkspaceFolderHome(props: {
       ? t("workspace.createdByAgent")
       : node.created_by_type === "migration"
         ? t("workspace.fromHistory")
-        : t("workspace.uploadedByMe");
+        : props.readOnly
+          ? t("workspace.workspaceFile")
+          : t("workspace.uploadedByMe");
 
   return (
     <main
       className={dragActive ? "workspace-folder-home is-dragging" : "workspace-folder-home"}
       onDragEnter={(event) => {
-        if (recentView || agentOutputsView || trashView || searchView) return;
+        if (props.readOnly || recentView || agentOutputsView || trashView || searchView) return;
         event.preventDefault();
         setDragActive(true);
       }}
       onDragOver={(event) => {
-        if (recentView || agentOutputsView || trashView || searchView) return;
+        if (props.readOnly || recentView || agentOutputsView || trashView || searchView) return;
         event.preventDefault();
       }}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
       }}
-      onDrop={handleDrop}
+      onDrop={props.readOnly ? undefined : handleDrop}
     >
       <header className="workspace-folder-head">
         <div>
@@ -418,7 +423,7 @@ export function WorkspaceFolderHome(props: {
         </div>
         <div className="workspace-folder-actions">
           <Button icon={<RefreshCw size={16} />} onClick={() => void load()} aria-label={t("common.refresh")} />
-          {!recentView && !agentOutputsView && !trashView && !searchView ? (
+          {!props.readOnly && !recentView && !agentOutputsView && !trashView && !searchView ? (
             <>
               <Button type="primary" icon={<Plus size={16} />} onClick={props.onNewTask}>
                 {t("workspace.newTask")}
@@ -524,7 +529,7 @@ export function WorkspaceFolderHome(props: {
                     <h2>{t("workspace.filesAndFolders")}</h2>
                     <span>{t("workspace.itemCount", { count: nodes.length })}</span>
                   </div>
-                  {!recentView && !agentOutputsView && !trashView && !searchView ? <span>{t("workspace.dropHint")}</span> : null}
+                  {!props.readOnly && !recentView && !agentOutputsView && !trashView && !searchView ? <span>{t("workspace.dropHint")}</span> : null}
                 </div>
                 {visibleNodes.length > 0 ? (
                   <div className="workspace-file-grid">
@@ -584,7 +589,7 @@ export function WorkspaceFolderHome(props: {
                             {node.kind === "folder" ? "—" : sourceLabel(node)}
                           </span>
                         </button>
-                        {!node.system_key ? (
+                        {!props.readOnly && !node.system_key ? (
                           <Dropdown
                             trigger={["click"]}
                             menu={{
@@ -635,7 +640,7 @@ export function WorkspaceFolderHome(props: {
                           : t("workspace.folderEmpty")
                     }
                   >
-                    {!recentView && !agentOutputsView && !trashView && !searchView ? (
+                    {!props.readOnly && !recentView && !agentOutputsView && !trashView && !searchView ? (
                       <Button type="primary" icon={<Upload size={16} />} onClick={() => fileInputRef.current?.click()}>
                         {t("workspace.uploadFirstFile")}
                       </Button>
@@ -661,7 +666,7 @@ export function WorkspaceFolderHome(props: {
                   <h2>{t("workspace.tasks")}</h2>
                   <span>{t("workspace.taskCount", { count: tasks.length })}</span>
                 </div>
-                {!recentView && !agentOutputsView && !searchView ? (
+                {!props.readOnly && !recentView && !agentOutputsView && !searchView ? (
                   <Button type="text" icon={<Plus size={16} />} onClick={props.onNewTask}>
                     {t("workspace.newTask")}
                   </Button>
@@ -687,7 +692,7 @@ export function WorkspaceFolderHome(props: {
                           : t("workspace.pureConversation")}
                         </span>
                       </button>
-                      <div className="workspace-task-actions">
+                      {!props.readOnly ? <div className="workspace-task-actions">
                         {trashView ? (
                           <button
                             type="button"
@@ -759,7 +764,7 @@ export function WorkspaceFolderHome(props: {
                             </button>
                           </>
                         )}
-                      </div>
+                      </div> : null}
                     </article>
                   ))}
                 </div>
@@ -788,18 +793,20 @@ export function WorkspaceFolderHome(props: {
         </>
       )}
 
-      {dragActive ? (
+      {!props.readOnly && dragActive ? (
         <div className="workspace-drop-overlay">
           <Upload size={28} />
           <strong>{t("workspace.dropNow")}</strong>
         </div>
       ) : null}
-      <CreateWorkspaceFolderModal
-        open={createFolderOpen}
-        parentName={props.folderName}
-        onCancel={() => setCreateFolderOpen(false)}
-        onCreate={createSubfolder}
-      />
+      {!props.readOnly ? (
+        <CreateWorkspaceFolderModal
+          open={createFolderOpen}
+          parentName={props.folderName}
+          onCancel={() => setCreateFolderOpen(false)}
+          onCreate={createSubfolder}
+        />
+      ) : null}
     </main>
   );
 }

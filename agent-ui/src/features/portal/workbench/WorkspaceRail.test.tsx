@@ -2,16 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PortalI18nProvider } from "../i18n";
-import { fetchPortalWorkspaceNodes, type PortalWorkspaceNode } from "../workspace";
+import { PORTAL_WORKSPACE_DATA_SOURCE, type PortalWorkspaceNode } from "../workspace";
 import { WORKSPACE_RAIL_TASK_LIMIT, WorkspaceRail } from "./WorkspaceRail";
-
-vi.mock("../workspace", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../workspace")>();
-  return {
-    ...original,
-    fetchPortalWorkspaceNodes: vi.fn()
-  };
-});
 
 function folder(id: string, name: string, parentId: string | null = null): PortalWorkspaceNode {
   return {
@@ -33,7 +25,6 @@ function folder(id: string, name: string, parentId: string | null = null): Porta
 
 beforeEach(() => {
   window.localStorage.setItem("agent-studio.portal.locale.v1", "zh-CN");
-  vi.mocked(fetchPortalWorkspaceNodes).mockReset();
 });
 
 afterEach(() => {
@@ -44,7 +35,8 @@ afterEach(() => {
 describe("WorkspaceRail", () => {
   it("loads child folders when expanded and keeps folder navigation separate", async () => {
     const onSelectFolder = vi.fn();
-    vi.mocked(fetchPortalWorkspaceNodes).mockResolvedValue([folder("child-1", "01 数据与表格", "root-1")]);
+    const fetchNodes = vi.fn().mockResolvedValue([folder("child-1", "01 数据与表格", "root-1")]);
+    const dataSource = { ...PORTAL_WORKSPACE_DATA_SOURCE, fetchNodes };
 
     render(
       <PortalI18nProvider>
@@ -58,13 +50,14 @@ describe("WorkspaceRail", () => {
           onCreateFolder={vi.fn()}
           onNewTask={vi.fn()}
           onViewAllTasks={vi.fn()}
+          dataSource={dataSource}
         />
       </PortalI18nProvider>
     );
 
     fireEvent.click(screen.getByRole("button", { name: "展开员工AI培训" }));
     expect(await screen.findByRole("button", { name: "01 数据与表格" })).toBeTruthy();
-    expect(fetchPortalWorkspaceNodes).toHaveBeenCalledWith("root-1");
+    expect(fetchNodes).toHaveBeenCalledWith("root-1");
     expect(onSelectFolder).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "01 数据与表格" }));
@@ -129,5 +122,34 @@ describe("WorkspaceRail", () => {
 
     expect(screen.getByLabelText("运行中任务")).toBeTruthy();
     expect(screen.getByLabelText("运行中任务").querySelector(".workspace-folder-running-indicator")).toBeTruthy();
+  });
+
+  it("keeps folder browsing but removes write actions in read-only mode", () => {
+    render(
+      <PortalI18nProvider>
+        <WorkspaceRail
+          workspace={null}
+          rootNodes={[folder("root-1", "员工AI培训")]}
+          selectedFolderId="root-1"
+          searchValue=""
+          taskList={<button type="button">培训任务</button>}
+          taskCount={1}
+          readOnly
+          title="培训案例"
+          onSearchChange={vi.fn()}
+          onSelectFolder={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNewTask={vi.fn()}
+          onViewAllTasks={vi.fn()}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByText("培训案例")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "员工AI培训" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "培训任务" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新任务" })).toBeNull();
+    expect(screen.queryByText("+ 文件夹")).toBeNull();
+    expect(screen.queryByText("回收站")).toBeNull();
   });
 });

@@ -27,6 +27,8 @@ const schema = z.object({
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_WORKSPACE_ROOT: z.string().optional(),
   USER_WORKSPACE_STORAGE_ROOT: z.string().optional(),
+  PORTAL_TRAINING_SOURCE_EMAIL: z.string().default("like@baicells.com"),
+  PORTAL_TRAINING_ROOT_FOLDER: z.string().default("员工AI培训"),
   SESSION_TTL_MINUTES: z.string().default("0"),
   SESSION_COOKIE_NAME: z.string().default("agent_studio_session"),
   SESSION_COOKIE_SECRET: z.string().optional(),
@@ -219,6 +221,10 @@ export const appConfig = {
   defaultWorkspace,
   sessionWorkspaceRoot,
   userWorkspaceStorageRoot,
+  portalTraining: {
+    sourceEmail: env.PORTAL_TRAINING_SOURCE_EMAIL.trim(),
+    rootFolderName: env.PORTAL_TRAINING_ROOT_FOLDER.trim()
+  },
   sessionTtlMs: ttlMs,
   sessionCookie: {
     name: (env.SESSION_COOKIE_NAME || "").trim() || "agent_studio_session",

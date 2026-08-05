@@ -184,10 +184,9 @@ import {
 } from "./workspace-thread-order";
 import {
   createPortalWorkspaceFolder,
-  fetchPortalWorkspace,
-  fetchPortalWorkspaceFolderAncestorPaths,
-  fetchPortalWorkspaceNode,
-  fetchPortalWorkspaceNodes,
+  PORTAL_WORKSPACE_DATA_SOURCE,
+  TRAINING_WORKSPACE_DATA_SOURCE,
+  type PortalWorkspaceDataSource,
   type PortalWorkspaceNode,
   type PortalWorkspaceSummary,
   type PortalWorkspaceTask
@@ -4999,7 +4998,12 @@ const AgentAssistantMessage: FC = () => {
   );
 };
 
-const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void }> = ({ onSelectThread }) => {
+const ReadOnlyComposer: FC = () => null;
+
+const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void; readOnly?: boolean }> = ({
+  onSelectThread,
+  readOnly = false
+}) => {
   const aui = useAui();
   const { locale, t } = usePortalI18n();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
@@ -5063,7 +5067,7 @@ const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void }> =
   }, [isRenaming]);
 
   const openRename = () => {
-    if (renameSaving) return;
+    if (readOnly || renameSaving) return;
     setRenameDraft(threadTitle.trim());
     setIsRenaming(true);
   };
@@ -5165,7 +5169,7 @@ const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void }> =
             </p>
           </ThreadListItemPrimitive.Trigger>
         )}
-        <div className="agent-thread-item-actions">
+        {!readOnly ? <div className="agent-thread-item-actions">
           {isRenaming ? (
             <>
               <button
@@ -5254,7 +5258,7 @@ const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void }> =
               </ThreadListItemPrimitive.Delete>
             </>
           )}
-        </div>
+        </div> : null}
       </ThreadListItemPrimitive.Root>
     </>
   );
@@ -5277,7 +5281,8 @@ const StableThreadListItems: FC<{
   orderedRemoteIds?: readonly string[];
   maxItems?: number;
   onSelectThread?: (threadId: string) => void;
-}> = ({ visibleRemoteIds, orderedRemoteIds, maxItems, onSelectThread }) => {
+  readOnly?: boolean;
+}> = ({ visibleRemoteIds, orderedRemoteIds, maxItems, onSelectThread, readOnly = false }) => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const stableThreadIds = useMemo(() => {
@@ -5314,7 +5319,7 @@ const StableThreadListItems: FC<{
     <>
       {stableThreadIds.map((threadId) => (
         <ThreadListItemByIdProvider key={threadId} threadId={threadId}>
-          <AgentThreadListItem onSelectThread={onSelectThread} />
+          <AgentThreadListItem onSelectThread={onSelectThread} readOnly={readOnly} />
         </ThreadListItemByIdProvider>
       ))}
     </>
@@ -5605,9 +5610,10 @@ const ThreadPublicShareControls: FC<
   PropsWithChildren<{
     threadId: string;
     disabled: boolean;
+    skipStatusLookup?: boolean;
     onStatusChange?: (text: string) => void;
   }>
-> = ({ threadId, disabled, onStatusChange, children }) => {
+> = ({ threadId, disabled, skipStatusLookup = false, onStatusChange, children }) => {
   const { t } = usePortalI18n();
   const messages = useAuiState((s) => s.thread.messages);
   const threadRunning = useAuiState((s) => s.thread.isRunning);
@@ -5720,7 +5726,7 @@ const ThreadPublicShareControls: FC<
   useEffect(() => {
     let cancelled = false;
     setActiveShare(null);
-    if (!threadId) return;
+    if (!threadId || skipStatusLookup) return;
     void fetchThreadPublicShareStatus(threadId)
       .then((share) => {
         if (!cancelled) setActiveShare(share);
@@ -5731,7 +5737,7 @@ const ThreadPublicShareControls: FC<
     return () => {
       cancelled = true;
     };
-  }, [threadId]);
+  }, [skipStatusLookup, threadId]);
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -6210,10 +6216,21 @@ const AgentRuntimeAdapterProvider: FC<
   );
 };
 
-export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
+export function PortalShell(props: {
+  currentUser?: AuthUser;
+  onOpenAdmin?: () => void;
+  onSignOut?: () => void;
+  trainingReadOnly?: boolean;
+  onOpenTraining?: () => void;
+  onExitTraining?: () => void;
+}) {
   const auth = useAuth();
   const { branding, behavior } = useBranding();
   const { locale, intlLocale, antdLocale, t } = usePortalI18n();
+  const trainingReadOnly = props.trainingReadOnly ?? false;
+  const workspaceDataSource: PortalWorkspaceDataSource = trainingReadOnly
+    ? TRAINING_WORKSPACE_DATA_SOURCE
+    : PORTAL_WORKSPACE_DATA_SOURCE;
   const productFeedbackTypeLabel = (value: ProductFeedbackType): string => {
     if (value === "usability_issue") return t("feedback.typeImprovement");
     if (value === "bug") return t("feedback.typeBug");
@@ -6503,12 +6520,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) return;
     clearPortalThreadUnreadState(normalizedThreadId);
+    if (trainingReadOnly) return;
     try {
       await api(`/api/threads/${encodeURIComponent(normalizedThreadId)}/read`, { method: "POST" });
     } catch {
       // The next thread-list refresh can restore the persisted unread state.
     }
-  }, [clearPortalThreadUnreadState]);
+  }, [clearPortalThreadUnreadState, trainingReadOnly]);
 
   const syncActiveThreadIdentity = useCallback((identity: ThreadIdentity) => {
     const normalizedRemoteId = String(identity.remoteId || "").trim();
@@ -6578,7 +6596,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     let cancelled = false;
     setWorkspaceLoading(true);
     setWorkspaceErrorText("");
-    void fetchPortalWorkspace()
+    void workspaceDataSource.fetchWorkspace()
       .then((out) => {
         if (cancelled) return;
         setPortalWorkspace(out.workspace);
@@ -6588,8 +6606,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           !new URLSearchParams(window.location.search).has(PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM) &&
           !readPortalThreadIdFromLocation(window.location.search)
         ) {
-          setSelectedWorkspaceFolderId(out.workspace.history_folder_id);
-          writePortalWorkspaceLocation({ folderId: out.workspace.history_folder_id }, "replace");
+          const initialFolderId = trainingReadOnly
+            ? String(out.nodes?.[0]?.id || "").trim()
+            : out.workspace.history_folder_id;
+          if (initialFolderId) {
+            setSelectedWorkspaceFolderId(initialFolderId);
+            writePortalWorkspaceLocation({ folderId: initialFolderId }, "replace");
+          }
         }
       })
       .catch((error) => {
@@ -6601,7 +6624,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     return () => {
       cancelled = true;
     };
-  }, [auth.activeOrganization?.id, props.currentUser?.id, t, workspaceRefreshToken]);
+  }, [auth.activeOrganization?.id, props.currentUser?.id, t, trainingReadOnly, workspaceDataSource, workspaceRefreshToken]);
 
   const refreshPortalSubscriptionStatus = useCallback(async (options?: { silent?: boolean }) => {
     if (!props.currentUser) {
@@ -7159,7 +7182,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const threadListAdapter = useMemo<RemoteThreadListAdapter>(
     () => ({
       async list() {
-        const out = await api<ThreadListOut>("/api/threads");
+        const out = await api<ThreadListOut>(trainingReadOnly ? "/api/portal/training/threads" : "/api/threads");
         const threads = Array.isArray(out.threads) ? out.threads : [];
         setWorkspaceThreads(threads);
         const nextPersistedCompletionNotices: RunningThreadIdsContextValue = {};
@@ -7194,6 +7217,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         };
       },
       async initialize(threadId: string) {
+        if (trainingReadOnly) throw new Error("Training catalog is read-only.");
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
@@ -7251,6 +7275,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         };
       },
       async rename(remoteId: string, newTitle: string) {
+        if (trainingReadOnly) throw new Error("Training catalog is read-only.");
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { title: newTitle }
@@ -7260,6 +7285,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         );
       },
       async archive(remoteId: string) {
+        if (trainingReadOnly) throw new Error("Training catalog is read-only.");
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "archived" }
@@ -7269,6 +7295,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         );
       },
       async unarchive(remoteId: string) {
+        if (trainingReadOnly) throw new Error("Training catalog is read-only.");
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "regular" }
@@ -7278,6 +7305,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         );
       },
       async delete(remoteId: string) {
+        if (trainingReadOnly) throw new Error("Training catalog is read-only.");
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "archived" }
@@ -7285,7 +7313,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         setWorkspaceThreads((current) => current.filter((thread) => thread.id !== remoteId));
       },
       async fetch(threadId: string) {
-        const out = await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`);
+        const out = await api<ThreadOneOut>(
+          trainingReadOnly
+            ? `/api/portal/training/threads/${encodeURIComponent(threadId)}`
+            : `/api/threads/${encodeURIComponent(threadId)}`
+        );
         setWorkspaceThreads((current) => [
           out.thread,
           ...current.filter((thread) => thread.id !== out.thread.id)
@@ -7298,6 +7330,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         };
       },
       async generateTitle(remoteId: string, messages: readonly ThreadMessage[]): Promise<AssistantStream> {
+        if (trainingReadOnly) {
+          const existing = guessThreadTitle(messages);
+          return createAssistantStream((controller) => {
+            controller.appendText(existing || "New conversation");
+            controller.close();
+          });
+        }
         let existingTitle = "";
         try {
           const current = await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(remoteId)}`);
@@ -7321,7 +7360,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       },
       unstable_Provider: ({ children }: PropsWithChildren) => (
         <AgentRuntimeAdapterProvider
-          canUpload={runtimeOptions?.canUpload ?? false}
+          canUpload={!trainingReadOnly && (runtimeOptions?.canUpload ?? false)}
           onThreadIdentityChange={syncActiveThreadIdentity}
         >
           {children}
@@ -7330,10 +7369,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }),
     // Changing the adapter identity temporarily clears assistant-ui's message lookup.
     // Keep it stable across locale changes so mounted history items retain valid indexes.
-    [runtimeOptions?.canUpload, syncActiveThreadIdentity]
+    [runtimeOptions?.canUpload, syncActiveThreadIdentity, trainingReadOnly]
   );
 
-  const canUpload = runtimeOptions?.canUpload ?? false;
+  const canUpload = !trainingReadOnly && (runtimeOptions?.canUpload ?? false);
   const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
@@ -7411,7 +7450,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       let nodeId: string | null = selectedWorkspaceFolderId;
       for (let depth = 0; nodeId && depth < 20; depth += 1) {
         const rootNode = workspaceRootNodes.find((node) => node.id === nodeId);
-        const node: PortalWorkspaceNode = rootNode ?? await fetchPortalWorkspaceNode(nodeId);
+        const node: PortalWorkspaceNode = rootNode ?? await workspaceDataSource.fetchNode(nodeId);
         if (node.kind !== "folder") break;
         chain.unshift(node);
         nodeId = node.parent_id;
@@ -7430,7 +7469,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     return () => {
       cancelled = true;
     };
-  }, [selectedWorkspaceFolder, selectedWorkspaceFolderId, workspaceRootNodes]);
+  }, [selectedWorkspaceFolder, selectedWorkspaceFolderId, workspaceDataSource, workspaceRootNodes]);
   const selectedWorkspaceFolderName =
     selectedWorkspaceFolderId === RECENT_WORKSPACE_VIEW
       ? t("workspace.recent")
@@ -7527,7 +7566,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       return undefined;
     }
     let cancelled = false;
-    void fetchPortalWorkspaceFolderAncestorPaths(folderIds)
+    void workspaceDataSource.fetchFolderAncestorPaths(folderIds)
       .then((paths) => {
         if (!cancelled) setWorkspaceFolderAncestorPaths(paths);
       })
@@ -7537,7 +7576,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     return () => {
       cancelled = true;
     };
-  }, [workspaceFolderStateSourceKey]);
+  }, [workspaceDataSource, workspaceFolderStateSourceKey]);
   const runningWorkspaceFolderIds = useMemo(
     () => expandWorkspaceFolderIds(directRunningWorkspaceFolderIds, workspaceFolderAncestorPaths),
     [directRunningWorkspaceFolderIds, workspaceFolderAncestorPaths]
@@ -7571,6 +7610,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const sharedThreadReadonly = Boolean(
     activeThreadCollaboration && activeThreadCollaboration.access.canRead && !activeThreadCollaboration.access.canRun
   );
+  const threadReadOnly = trainingReadOnly || sharedThreadReadonly;
   const selectedModelLabel = appliedConfig.model;
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
@@ -7913,6 +7953,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
       run: async function* (options) {
+        if (trainingReadOnly) {
+          throw new Error("Training catalog is read-only.");
+        }
         const prompt = extractLatestPrompt(options.messages);
         if (!prompt) {
           throw new Error("No user input text detected");
@@ -9156,7 +9199,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
       }
     }),
-    [markPortalThreadRead]
+    [markPortalThreadRead, trainingReadOnly]
   );
 
   const runtime = useRemoteThreadListRuntime({
@@ -9214,7 +9257,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           setSelectedWorkspaceFile(null);
           return;
         }
-        void fetchPortalWorkspaceNodes(location.folderId, { includeMigrated: true })
+        void workspaceDataSource.fetchNodes(location.folderId, { includeMigrated: true })
           .then((nodes) => {
             const file = nodes.find((node) => node.id === location.fileId && node.kind === "file");
             setSelectedWorkspaceFile(file || null);
@@ -9240,7 +9283,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       restoreFromLocation();
     }
     return () => window.removeEventListener("popstate", restoreFromLocation);
-  }, [runtime]);
+  }, [runtime, workspaceDataSource]);
 
   useEffect(() => {
     const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
@@ -9400,11 +9443,15 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const threadContent = (
     <div
-      className={sharedThreadReadonly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
-      aria-disabled={sharedThreadReadonly}
+      className={threadReadOnly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
+      aria-disabled={threadReadOnly}
       onClickCapture={handleThreadLinkClickCapture}
     >
-      {sharedThreadReadonly ? (
+      {trainingReadOnly ? (
+        <div className="training-readonly-notice" role="status">
+          <span>{t("training.readOnlyNotice")}</span>
+        </div>
+      ) : sharedThreadReadonly ? (
         <div className="thread-readonly-banner" role="status">
           <strong>{t("readonly.title")}</strong>
           <span>{t("readonly.detail")}</span>
@@ -9430,7 +9477,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       <RunningThreadIdsContext.Provider value={runningThreadIds}>
         <ThreadPublicShareControls
           threadId={activeRemoteThreadId}
-          disabled={sharedThreadReadonly}
+          disabled={threadReadOnly}
+          skipStatusLookup={trainingReadOnly}
           onStatusChange={setStatusText}
         >
         <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
@@ -9474,21 +9522,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }}
               assistantAvatar={assistantAvatar}
               components={{
-                Composer: canUpload ? UploadAwareComposer : MobileAwareComposer,
+                Composer: trainingReadOnly ? ReadOnlyComposer : canUpload ? UploadAwareComposer : MobileAwareComposer,
                 UserMessage: AgentUserMessage,
                 AssistantMessage: AgentAssistantMessage,
                 ThreadWelcome: DraftOnlyThreadWelcome
               }}
               assistantMessage={{
                 allowCopy: true,
-                allowReload: true,
-                allowFeedbackPositive: true,
-                allowFeedbackNegative: true,
+                allowReload: !threadReadOnly,
+                allowFeedbackPositive: !threadReadOnly,
+                allowFeedbackNegative: !threadReadOnly,
                 components: {
                   ToolFallback: HiddenToolFallback as any
                 }
               }}
-              userMessage={{ allowEdit: true }}
+              userMessage={{ allowEdit: !threadReadOnly }}
             />
           </PreviewRequestContext.Provider>
           </ExternalPortalUserContext.Provider>
@@ -9496,7 +9544,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </ActiveThreadIdContext.Provider>
         </ThreadPublicShareControls>
       </RunningThreadIdsContext.Provider>
-      {sharedThreadReadonly ? (
+      {sharedThreadReadonly && !trainingReadOnly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
             <p>{t("readonly.changed")}</p>
@@ -9539,6 +9587,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
                   if (thread?.folder_id) setSelectedWorkspaceFolderId(thread.folder_id);
                 }}
+                readOnly={trainingReadOnly}
               />
             </ActiveThreadIdContext.Provider>
           </ThreadCompletionNoticeContext.Provider>
@@ -9549,6 +9598,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const workspaceRail = (
     <WorkspaceRail
+      dataSource={workspaceDataSource}
+      readOnly={trainingReadOnly}
+      title={trainingReadOnly ? t("training.title") : undefined}
       workspace={portalWorkspace}
       rootNodes={workspaceRootNodes}
       selectedFolderPath={selectedWorkspaceFolderPath}
@@ -9594,6 +9646,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const workspaceCenterContent =
     workspaceMainView === "folder" ? (
       <WorkspaceFolderHome
+        dataSource={workspaceDataSource}
+        readOnly={trainingReadOnly}
         key={`${selectedWorkspaceFolderId}-${workspaceRefreshToken}`}
         folderId={selectedWorkspaceFolderId}
         folderName={selectedWorkspaceFolderName}
@@ -9626,7 +9680,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           </strong>
         </div>
         <div className="thread-wrap">
-          {canUpload && !sharedThreadReadonly ? (
+          {canUpload && !threadReadOnly ? (
             <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
           ) : (
             threadContent
@@ -9637,9 +9691,15 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const workspacePreviewPanel =
     workspaceMainView === "task" && activeRemoteThreadId && !selectedWorkspaceFile && !requestedPreviewPath ? (
-      <WorkspaceTaskFilesPanel threadId={activeRemoteThreadId} onOpenFile={openWorkspaceFile} />
+      <WorkspaceTaskFilesPanel
+        threadId={activeRemoteThreadId}
+        onOpenFile={openWorkspaceFile}
+        dataSource={workspaceDataSource}
+      />
     ) : (
       <PreviewWorkbenchPanel
+        workspaceApiBasePath={workspaceDataSource.apiBasePath}
+        workspaceFileReadOnly={trainingReadOnly}
         threadId={activeRemoteThreadId}
         requestedFilePath={selectedWorkspaceFile ? undefined : requestedPreviewPath}
         requestNonce={previewRequestNonce}
@@ -9660,13 +9720,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       <SkillComposerContext.Provider value={skillComposerContext}>
       <SkillDraftActionContext.Provider value={skillDraftActionContext}>
         <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
-        <ComposerActivationGuard runtime={runtime} />
+        {!trainingReadOnly ? <ComposerActivationGuard runtime={runtime} /> : null}
         <ThreadRuntimeSubscriptionBridge runtime={runtime} />
         <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
         <RunningStageTextContext.Provider value={runningStageContextValue}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={PORTAL_ANTD_THEME} locale={antdLocale}>
-            <div className="portal-workbench-root">
+            <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>
               <PortalTopBar
                 sessionRailCollapsed={layoutState.isSessionRailCollapsed}
                 onToggleRail={() => setLayoutState((prev) => toggleSessionRail(prev))}
@@ -9689,15 +9749,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         : openWorkbenchDrawer(prev, "preview")
                   )
                 }
-                onOpenAdmin={props.onOpenAdmin}
-                onOpenFeedback={openProductFeedbackModal}
+                onOpenAdmin={trainingReadOnly ? undefined : props.onOpenAdmin}
+                onOpenFeedback={trainingReadOnly ? undefined : openProductFeedbackModal}
                 onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
                 runtimeSummary={topbarRuntimeSummaryText}
-                showRuntimeSummary={!isExternalPortalUser}
-                showAdvancedSettings={!isExternalPortalUser}
+                showRuntimeSummary={!isExternalPortalUser && !trainingReadOnly}
+                showAdvancedSettings={!isExternalPortalUser && !trainingReadOnly}
                 showRightPanelToggle={!isExternalPortalUser}
                 drawerOpen={layoutState.isRightDrawerOpen}
                 mobile={isMobile}
+                trainingMode={trainingReadOnly}
+                onOpenTraining={props.onOpenTraining}
+                onExitTraining={props.onExitTraining}
               />
 
               <div className="portal-workbench-body">
@@ -9800,11 +9863,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               )}
             </div>
 
-            <CreateWorkspaceFolderModal
-              open={createRootFolderOpen}
-              onCancel={() => setCreateRootFolderOpen(false)}
-              onCreate={createRootWorkspaceFolder}
-            />
+            {!trainingReadOnly ? (
+              <CreateWorkspaceFolderModal
+                open={createRootFolderOpen}
+                onCancel={() => setCreateRootFolderOpen(false)}
+                onCreate={createRootWorkspaceFolder}
+              />
+            ) : null}
             <Modal
               open={productFeedbackOpen}
               title={t("feedback.title")}
