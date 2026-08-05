@@ -7988,7 +7988,7 @@ export function PortalShell(props: {
   }, []);
 
   useEffect(() => {
-    if (!trainingReadOnly || !activeRemoteThreadId) {
+    if (!activeRemoteThreadId) {
       setActiveTaskFiles([]);
       return undefined;
     }
@@ -8004,10 +8004,10 @@ export function PortalShell(props: {
     return () => {
       cancelled = true;
     };
-  }, [activeRemoteThreadId, trainingReadOnly, workspaceDataSource]);
+  }, [activeRemoteThreadId, workspaceDataSource]);
   const attachmentWorkspaceFilesValue = useMemo<AttachmentWorkspaceFilesContextValue | null>(
-    () => trainingReadOnly ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null,
-    [activeTaskFiles, trainingReadOnly, workspaceDataSource.apiBasePath]
+    () => activeRemoteThreadId ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null,
+    [activeRemoteThreadId, activeTaskFiles, workspaceDataSource.apiBasePath]
   );
 
   const requestPortalRunCancel = useCallback(() => {
