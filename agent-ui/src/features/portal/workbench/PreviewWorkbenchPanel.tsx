@@ -766,6 +766,19 @@ async function fetchWorkspaceFileBlob(
   return response;
 }
 
+async function fetchDirectPreviewBlob(url: string): Promise<Response> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    throw new Error(`Failed to read attachment (${response.status})`);
+  }
+  return response;
+}
+
 async function resolveThreadArtifact(threadId: string, filePath: string): Promise<{
   artifact: ThreadArtifactApiRecord;
   policy: ThreadArtifactPolicyApiRecord;
@@ -1355,6 +1368,10 @@ function PreviewText(props: { text: string; filePath: string; anchor: string; ju
 export function PreviewWorkbenchPanel(props: {
   threadId: string;
   requestedFilePath?: string;
+  requestedContentUrl?: string;
+  requestedDownloadUrl?: string;
+  requestedFileName?: string;
+  requestedFileMimeType?: string;
   requestNonce?: number;
   allowDownload?: boolean;
   externalArtifactMode?: boolean;
@@ -1503,14 +1520,23 @@ export function PreviewWorkbenchPanel(props: {
     }
     const normalizedSelected = normalizeFilePath(selectedFilePath);
     if (!normalizedSelected) return null;
+    const requestedFileName = String(props.requestedFileName || "").trim();
     return {
       filePath: normalizedSelected,
-      displayName: fileNameFromPath(normalizedSelected),
-      mimeType: "",
+      displayName: requestedFileName || fileNameFromPath(normalizedSelected),
+      mimeType: String(props.requestedFileMimeType || "").trim(),
       source: "file_change" as const,
       updatedAt: Date.now()
     };
-  }, [props.workspaceFileId, props.workspaceFileMimeType, props.workspaceFileName, selectedFilePath, t]);
+  }, [
+    props.requestedFileMimeType,
+    props.requestedFileName,
+    props.workspaceFileId,
+    props.workspaceFileMimeType,
+    props.workspaceFileName,
+    selectedFilePath,
+    t
+  ]);
   const activeFilePath = useMemo(() => normalizeFilePath(activeFile?.filePath || ""), [activeFile?.filePath]);
   const activeFileDisplayName = activeFile?.displayName || fileNameFromPath(activeFilePath);
   const activeFileMimeType = activeFile?.mimeType || "";
@@ -1587,6 +1613,9 @@ export function PreviewWorkbenchPanel(props: {
           const query = new URLSearchParams({ disposition: "attachment" });
           if (selectedWorkspaceVersionId) query.set("version_id", selectedWorkspaceVersionId);
           downloadUrl = `${apiBase()}${props.workspaceApiBasePath || "/api/portal/workspace"}/files/${encodeURIComponent(workspaceFileId)}/content?${query.toString()}`;
+        } else if (props.requestedContentUrl) {
+          response = await fetchDirectPreviewBlob(props.requestedContentUrl);
+          downloadUrl = props.requestedDownloadUrl || props.requestedContentUrl;
         } else if (isKnowledgeSetFile) {
           response = structuredOptions
             ? await fetchPortalResourceFileBlob(filePath, structuredOptions)
@@ -1800,6 +1829,8 @@ export function PreviewWorkbenchPanel(props: {
     activeFilePath,
     fileCitationTarget?.sheet,
     props.externalArtifactMode,
+    props.requestedContentUrl,
+    props.requestedDownloadUrl,
     props.threadId,
     props.workspaceApiBasePath,
     props.workspaceFileId,

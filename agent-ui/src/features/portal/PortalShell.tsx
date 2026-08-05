@@ -514,7 +514,16 @@ const AnswerFeedbackConfigContext = createContext<AnswerFeedbackUiConfig>({
   enabled: false,
   prompt: "Was this answer helpful?"
 });
-const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
+type PreviewRequestOptions = {
+  contentUrl?: string;
+  downloadUrl?: string;
+  displayName?: string;
+  mimeType?: string;
+};
+const PreviewRequestContext = createContext<(
+  filePath: string,
+  options?: PreviewRequestOptions
+) => void>(() => undefined);
 const ExternalPortalUserContext = createContext(false);
 const ThreadMutationReadOnlyContext = createContext(false);
 const PortalSubscriptionAccessContext = createContext<{
@@ -2065,7 +2074,12 @@ const UploadAwareAttachment: FC = () => {
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            requestPreview(previewPath);
+            requestPreview(previewPath, {
+              contentUrl: downloadHref,
+              downloadUrl: downloadHref,
+              displayName: downloadMeta.name,
+              mimeType: downloadMeta.mimeType
+            });
           }}
         >
           <EyeIcon size={12} strokeWidth={2.2} aria-hidden="true" />
@@ -6377,6 +6391,7 @@ export function PortalShell(props: {
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
   const [, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
+  const [requestedDirectPreview, setRequestedDirectPreview] = useState<PreviewRequestOptions | null>(null);
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
   const [productFeedbackOpen, setProductFeedbackOpen] = useState(false);
   const [productFeedbackType, setProductFeedbackType] = useState<ProductFeedbackType>("usability_issue");
@@ -7918,11 +7933,12 @@ export function PortalShell(props: {
     clearProductFeedbackImages
   ]);
 
-  const requestPreviewForPath = useCallback((filePath: string) => {
+  const requestPreviewForPath = useCallback((filePath: string, options?: PreviewRequestOptions) => {
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
     setSelectedWorkspaceFile(null);
     setRequestedPreviewPath(normalizedPath);
+    setRequestedDirectPreview(options?.contentUrl ? options : null);
     setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
   }, []);
@@ -9270,6 +9286,7 @@ export function PortalShell(props: {
   const openWorkspaceFile = useCallback((file: PortalWorkspaceNode) => {
     setSelectedWorkspaceFile(file);
     setRequestedPreviewPath("");
+    setRequestedDirectPreview(null);
     writePortalWorkspaceLocation({
       folderId: selectedWorkspaceFolderId,
       threadId: workspaceMainView === "task" ? activeRemoteThreadId || undefined : undefined,
@@ -9740,6 +9757,10 @@ export function PortalShell(props: {
         workspaceFileReadOnly={trainingReadOnly}
         threadId={activeRemoteThreadId}
         requestedFilePath={selectedWorkspaceFile ? undefined : requestedPreviewPath}
+        requestedContentUrl={selectedWorkspaceFile ? undefined : requestedDirectPreview?.contentUrl}
+        requestedDownloadUrl={selectedWorkspaceFile ? undefined : requestedDirectPreview?.downloadUrl}
+        requestedFileName={selectedWorkspaceFile ? undefined : requestedDirectPreview?.displayName}
+        requestedFileMimeType={selectedWorkspaceFile ? undefined : requestedDirectPreview?.mimeType}
         requestNonce={previewRequestNonce}
         allowDownload
         externalArtifactMode={isExternalPortalUser && !selectedWorkspaceFile}

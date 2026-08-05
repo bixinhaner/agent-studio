@@ -135,6 +135,43 @@ describe("supportsPaginatedOfficePreview", () => {
 });
 
 describe("structured file preview", () => {
+  it("previews a historical attachment from its authenticated content URL", async () => {
+    const attachmentUrl = "/api/threads/thread-attachment/attachments/abc123def456/content?relative_path=input.csv";
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:attachment-preview");
+    URL.revokeObjectURL = vi.fn();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("region,amount\nNorth,120", {
+        status: 200,
+        headers: { "content-type": "text/csv" }
+      })
+    );
+
+    try {
+      const { container } = render(
+        createElement(PreviewWorkbenchPanel, {
+          threadId: "thread-attachment",
+          requestedFilePath: "input.csv",
+          requestedContentUrl: attachmentUrl,
+          requestedDownloadUrl: attachmentUrl,
+          requestedFileName: "销售数据.csv",
+          requestedFileMimeType: "text/csv"
+        })
+      );
+
+      await waitFor(() => expect(container.textContent).toContain("North,120"));
+      expect(fetchMock).toHaveBeenCalledWith(
+        attachmentUrl,
+        expect.objectContaining({ method: "GET", credentials: "include" })
+      );
+      expect(container.textContent).toContain("销售数据.csv");
+    } finally {
+      URL.createObjectURL = originalCreateObjectUrl;
+      URL.revokeObjectURL = originalRevokeObjectUrl;
+    }
+  });
+
   it("loads logs in bounded pages and searches through the backend", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
