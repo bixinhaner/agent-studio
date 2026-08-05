@@ -148,6 +148,26 @@ async function main(): Promise<void> {
           data: { userWorkspaceId: workspaceId, workspaceFolderId: folderId }
         });
       }
+      if (!dryRun && workspaceId && folderId) {
+        const storedFolder = await db.workspaceNode.findFirst({
+          where: {
+            id: folderId,
+            workspaceId,
+            kind: "folder",
+            state: "active"
+          },
+          select: { id: true }
+        });
+        if (!storedFolder) {
+          const workspace = await service.ensureWorkspace(actor);
+          workspaceId = workspace.id;
+          folderId = workspace.historyFolderId;
+          await db.thread.update({
+            where: { id: thread.id },
+            data: { userWorkspaceId: workspaceId, workspaceFolderId: folderId }
+          });
+        }
+      }
 
       const workspacePath = thread.workspace ? path.resolve(thread.workspace) : "";
       if (!workspacePath) {
