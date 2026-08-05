@@ -519,7 +519,6 @@ type PreviewRequestOptions = {
   downloadUrl?: string;
   displayName?: string;
   mimeType?: string;
-  workspaceFile?: PortalWorkspaceNode;
 };
 const PreviewRequestContext = createContext<(
   filePath: string,
@@ -2091,9 +2090,8 @@ const UploadAwareAttachment: FC = () => {
             event.preventDefault();
             event.stopPropagation();
             requestPreview(previewPath, {
-              workspaceFile: workspaceFile || undefined,
-              contentUrl: workspaceFile ? undefined : downloadHref,
-              downloadUrl: workspaceFile ? undefined : downloadHref,
+              contentUrl: workspaceContentHref || downloadHref,
+              downloadUrl: downloadHref,
               displayName: downloadMeta.name,
               mimeType: downloadMeta.mimeType
             });
@@ -7954,8 +7952,8 @@ export function PortalShell(props: {
   const requestPreviewForPath = useCallback((filePath: string, options?: PreviewRequestOptions) => {
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
-    setSelectedWorkspaceFile(options?.workspaceFile || null);
-    setRequestedPreviewPath(options?.workspaceFile ? "" : normalizedPath);
+    setSelectedWorkspaceFile(null);
+    setRequestedPreviewPath(normalizedPath);
     setRequestedDirectPreview(options?.contentUrl ? options : null);
     setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
