@@ -531,6 +531,22 @@ type AttachmentWorkspaceFilesContextValue = {
   files: PortalWorkspaceNode[];
 };
 const AttachmentWorkspaceFilesContext = createContext<AttachmentWorkspaceFilesContextValue | null>(null);
+function workspaceFilePreviewOptions(
+  context: AttachmentWorkspaceFilesContextValue | null,
+  displayName: string
+): PreviewRequestOptions | undefined {
+  const normalizedName = displayName.trim();
+  if (!context || !normalizedName) return undefined;
+  const workspaceFile = context.files.find((file) => file.name === normalizedName);
+  if (!workspaceFile) return undefined;
+  const contentUrl = `${apiBase()}${context.apiBasePath}/files/${encodeURIComponent(workspaceFile.id)}/content`;
+  return {
+    contentUrl,
+    downloadUrl: `${contentUrl}?disposition=attachment`,
+    displayName: workspaceFile.name,
+    mimeType: workspaceFile.mime_type || undefined
+  };
+}
 const PortalSubscriptionAccessContext = createContext<{
   status: PortalSubscriptionStatus | null;
   loading: boolean;
@@ -1056,6 +1072,7 @@ function AssistantMarkdownLink(props: {
   const { t } = usePortalI18n();
   const { href, className, children, ...rest } = props;
   const requestPreview = useContext(PreviewRequestContext);
+  const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const fileCitation = typeof href === "string" ? parseCodexFileCitationHref(href) : null;
   if (fileCitation) {
@@ -1068,7 +1085,10 @@ function AssistantMarkdownLink(props: {
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          requestPreview(previewPath);
+          requestPreview(
+            previewPath,
+            workspaceFilePreviewOptions(attachmentWorkspaceFiles, fileCitation.displayName)
+          );
         }}
         {...rest}
       >
@@ -1110,7 +1130,10 @@ function AssistantMarkdownLink(props: {
           ? (event) => {
               event.preventDefault();
               event.stopPropagation();
-              requestPreview(previewPathForRequest);
+              requestPreview(
+                previewPathForRequest,
+                workspaceFilePreviewOptions(attachmentWorkspaceFiles, linkLabel)
+              );
             }
           : undefined
       }
@@ -4087,6 +4110,7 @@ const ProcessDataFallback: FC<any> = ({
 }) => {
   const { t } = usePortalI18n();
   const requestPreview = useContext(PreviewRequestContext);
+  const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
@@ -4337,19 +4361,23 @@ const ProcessDataFallback: FC<any> = ({
             const canDownload = item.canDownload && activeThreadId.trim();
             const imageExtension = fileExtensionFromPreviewPath(item.path);
             const imageName = fileNameFromPreviewPath(item.path);
+            const workspacePreviewOptions = workspaceFilePreviewOptions(attachmentWorkspaceFiles, imageName);
             const isImageArtifact = IMAGE_FILE_EXTENSIONS.has(imageExtension);
-            const inlineImageHref = canPreview && isImageArtifact && activeThreadId.trim()
-              ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
-                  path: item.path,
-                  disposition: "inline"
-                }).toString()}`
+            const inlineImageHref = canPreview && isImageArtifact
+              ? workspacePreviewOptions?.contentUrl || (activeThreadId.trim()
+                ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
+                    path: item.path,
+                    disposition: "inline"
+                  }).toString()}`
+                : "")
               : "";
             const downloadHref = canDownload
-              ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
-                  path: item.path,
-                  disposition: "attachment"
-                }).toString()}`
+              ? workspacePreviewOptions?.downloadUrl || `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
+                path: item.path,
+                disposition: "attachment"
+              }).toString()}`
               : "";
+            const previewArtifact = () => requestPreview(item.path, workspacePreviewOptions);
             return (
               <li
                 key={`${item.kind}-${item.path}`}
@@ -4359,7 +4387,7 @@ const ProcessDataFallback: FC<any> = ({
                   <button
                     type="button"
                     className="assistant-file-change-image-preview"
-                    onClick={() => requestPreview(item.path)}
+                    onClick={previewArtifact}
                     aria-label={t("files.previewNamed", { name: imageName })}
                   >
                     <img className="assistant-file-change-image" src={inlineImageHref} alt={imageName} loading="lazy" />
@@ -4379,7 +4407,7 @@ const ProcessDataFallback: FC<any> = ({
                 </div>
                 <div className="assistant-file-change-actions">
                   {canPreview ? (
-                    <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
+                    <button type="button" className="assistant-file-change-btn" onClick={previewArtifact}>
                       {t("files.preview")}
                     </button>
                   ) : null}
@@ -7977,6 +8005,10 @@ export function PortalShell(props: {
       cancelled = true;
     };
   }, [activeRemoteThreadId, trainingReadOnly, workspaceDataSource]);
+  const attachmentWorkspaceFilesValue = useMemo<AttachmentWorkspaceFilesContextValue | null>(
+    () => trainingReadOnly ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null,
+    [activeTaskFiles, trainingReadOnly, workspaceDataSource.apiBasePath]
+  );
 
   const requestPortalRunCancel = useCallback(() => {
     const run = activePortalRunRef.current;
@@ -8009,9 +8041,10 @@ export function PortalShell(props: {
 
       event.preventDefault();
       event.stopPropagation();
-      requestPreviewForPath(previewPath);
+      const displayName = (anchor.textContent || "").trim() || fileNameFromPreviewPath(previewPath);
+      requestPreviewForPath(previewPath, workspaceFilePreviewOptions(attachmentWorkspaceFilesValue, displayName));
     },
-    [activeRemoteThreadId, requestPreviewForPath]
+    [activeRemoteThreadId, attachmentWorkspaceFilesValue, requestPreviewForPath]
   );
 
   useEffect(() => {
@@ -9574,7 +9607,7 @@ export function PortalShell(props: {
           <ExternalPortalUserContext.Provider value={isExternalPortalUser}>
           <ThreadMutationReadOnlyContext.Provider value={threadReadOnly}>
           <AttachmentWorkspaceFilesContext.Provider
-            value={trainingReadOnly ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null}
+            value={attachmentWorkspaceFilesValue}
           >
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <PortalThread
