@@ -519,6 +519,7 @@ type PreviewRequestOptions = {
   downloadUrl?: string;
   displayName?: string;
   mimeType?: string;
+  workspaceFile?: PortalWorkspaceNode;
 };
 const PreviewRequestContext = createContext<(
   filePath: string,
@@ -526,6 +527,11 @@ const PreviewRequestContext = createContext<(
 ) => void>(() => undefined);
 const ExternalPortalUserContext = createContext(false);
 const ThreadMutationReadOnlyContext = createContext(false);
+type AttachmentWorkspaceFilesContextValue = {
+  apiBasePath: string;
+  files: PortalWorkspaceNode[];
+};
+const AttachmentWorkspaceFilesContext = createContext<AttachmentWorkspaceFilesContextValue | null>(null);
 const PortalSubscriptionAccessContext = createContext<{
   status: PortalSubscriptionStatus | null;
   loading: boolean;
@@ -1977,6 +1983,7 @@ const UploadAwareAttachment: FC = () => {
   const activeThreadId = useContext(ActiveThreadIdContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const requestPreview = useContext(PreviewRequestContext);
+  const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
   const attachment = useAttachment((item) => item as Attachment & { source?: string; uploadError?: string });
   const status = attachment.status;
   const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
@@ -1985,9 +1992,18 @@ const UploadAwareAttachment: FC = () => {
   const isImage = attachment.type === "image";
   const canRetry = isFailed && attachment.source !== "message" && attachment.file instanceof File;
   const downloadMeta = useMemo(() => uploadedAttachmentDownloadMetaFromAttachment(attachment), [attachment]);
+  const workspaceFile = useMemo(
+    () => attachmentWorkspaceFiles?.files.find((file) => file.name === downloadMeta?.name) || null,
+    [attachmentWorkspaceFiles, downloadMeta?.name]
+  );
+  const workspaceContentHref = workspaceFile && attachmentWorkspaceFiles
+    ? `${apiBase()}${attachmentWorkspaceFiles.apiBasePath}/files/${encodeURIComponent(workspaceFile.id)}/content`
+    : "";
   const downloadHref =
     attachment.source === "message" && !isExternalPortalUser
-      ? buildUploadedAttachmentDownloadHref(activeThreadId, downloadMeta)
+      ? workspaceContentHref
+        ? `${workspaceContentHref}?disposition=attachment`
+        : buildUploadedAttachmentDownloadHref(activeThreadId, downloadMeta)
       : "";
   const previewPath =
     attachment.source === "message" && !isExternalPortalUser
@@ -2075,8 +2091,9 @@ const UploadAwareAttachment: FC = () => {
             event.preventDefault();
             event.stopPropagation();
             requestPreview(previewPath, {
-              contentUrl: downloadHref,
-              downloadUrl: downloadHref,
+              workspaceFile: workspaceFile || undefined,
+              contentUrl: workspaceFile ? undefined : downloadHref,
+              downloadUrl: workspaceFile ? undefined : downloadHref,
               displayName: downloadMeta.name,
               mimeType: downloadMeta.mimeType
             });
@@ -6392,6 +6409,7 @@ export function PortalShell(props: {
   const [, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
   const [requestedDirectPreview, setRequestedDirectPreview] = useState<PreviewRequestOptions | null>(null);
+  const [activeTaskFiles, setActiveTaskFiles] = useState<PortalWorkspaceNode[]>([]);
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
   const [productFeedbackOpen, setProductFeedbackOpen] = useState(false);
   const [productFeedbackType, setProductFeedbackType] = useState<ProductFeedbackType>("usability_issue");
@@ -7936,12 +7954,31 @@ export function PortalShell(props: {
   const requestPreviewForPath = useCallback((filePath: string, options?: PreviewRequestOptions) => {
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
-    setSelectedWorkspaceFile(null);
-    setRequestedPreviewPath(normalizedPath);
+    setSelectedWorkspaceFile(options?.workspaceFile || null);
+    setRequestedPreviewPath(options?.workspaceFile ? "" : normalizedPath);
     setRequestedDirectPreview(options?.contentUrl ? options : null);
     setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
   }, []);
+
+  useEffect(() => {
+    if (!trainingReadOnly || !activeRemoteThreadId) {
+      setActiveTaskFiles([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setActiveTaskFiles([]);
+    void workspaceDataSource.fetchTaskFiles(activeRemoteThreadId)
+      .then((files) => {
+        if (!cancelled) setActiveTaskFiles(files);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveTaskFiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRemoteThreadId, trainingReadOnly, workspaceDataSource]);
 
   const requestPortalRunCancel = useCallback(() => {
     const run = activePortalRunRef.current;
@@ -9538,6 +9575,9 @@ export function PortalShell(props: {
           <AnswerFeedbackConfigContext.Provider value={answerFeedbackConfig}>
           <ExternalPortalUserContext.Provider value={isExternalPortalUser}>
           <ThreadMutationReadOnlyContext.Provider value={threadReadOnly}>
+          <AttachmentWorkspaceFilesContext.Provider
+            value={trainingReadOnly ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null}
+          >
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <PortalThread
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
@@ -9593,6 +9633,7 @@ export function PortalShell(props: {
               userMessage={{ allowEdit: !threadReadOnly }}
             />
           </PreviewRequestContext.Provider>
+          </AttachmentWorkspaceFilesContext.Provider>
           </ThreadMutationReadOnlyContext.Provider>
           </ExternalPortalUserContext.Provider>
           </AnswerFeedbackConfigContext.Provider>
