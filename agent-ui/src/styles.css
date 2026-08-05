@@ -1827,8 +1827,10 @@ body.access-request-route #root {
 /* Show attachment actions on hover */
 .thread-wrap .portal-upload-attachment:hover .portal-upload-remove,
 .thread-wrap .portal-upload-attachment:hover .portal-upload-download,
+.thread-wrap .portal-upload-attachment:hover .portal-upload-preview,
 .thread-wrap .portal-upload-remove:focus-visible,
-.thread-wrap .portal-upload-download:focus-visible {
+.thread-wrap .portal-upload-download:focus-visible,
+.thread-wrap .portal-upload-preview:focus-visible {
   opacity: 1;
   transform: scale(1);
 }
@@ -1971,7 +1973,8 @@ body.access-request-route #root {
 }
 
 .portal-upload-remove,
-.portal-upload-download {
+.portal-upload-download,
+.portal-upload-preview {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -2004,12 +2007,34 @@ body.access-request-route #root {
   background: rgba(15, 23, 42, 0.68);
 }
 
+.portal-upload-preview {
+  left: 5px;
+  right: auto;
+  background: rgba(15, 23, 42, 0.68);
+}
+
 .portal-upload-download:hover {
   background: rgba(37, 99, 235, 0.92);
 }
 
+.portal-upload-preview:hover {
+  background: rgba(37, 99, 235, 0.92);
+}
+
+.portal-upload-preview:focus-visible,
+.portal-upload-download:focus-visible,
+.portal-upload-remove:focus-visible {
+  outline: 2px solid var(--workbench-accent-strong, #2563eb);
+  outline-offset: 2px;
+}
+
 @media (hover: none), (pointer: coarse) {
   .thread-wrap .portal-upload-attachment[data-upload-status="complete"] .portal-upload-download {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .thread-wrap .portal-upload-attachment[data-upload-status="complete"] .portal-upload-preview {
     opacity: 1;
     transform: scale(1);
   }

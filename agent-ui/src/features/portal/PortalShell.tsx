@@ -68,6 +68,7 @@ import {
   CreditCardIcon,
   LinkIcon,
   ExternalLinkIcon,
+  EyeIcon,
   Folder,
   ChevronRight,
   ChevronLeft
@@ -108,6 +109,7 @@ import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import type { PortalResourcesResponse } from "../resources/types";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
+import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
@@ -514,6 +516,7 @@ const AnswerFeedbackConfigContext = createContext<AnswerFeedbackUiConfig>({
 });
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 const ExternalPortalUserContext = createContext(false);
+const ThreadMutationReadOnlyContext = createContext(false);
 const PortalSubscriptionAccessContext = createContext<{
   status: PortalSubscriptionStatus | null;
   loading: boolean;
@@ -1961,8 +1964,10 @@ function uploadStatusLabel(attachment: Attachment & { uploadError?: string }): s
 
 const UploadAwareAttachment: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const activeThreadId = useContext(ActiveThreadIdContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
+  const requestPreview = useContext(PreviewRequestContext);
   const attachment = useAttachment((item) => item as Attachment & { source?: string; uploadError?: string });
   const status = attachment.status;
   const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
@@ -1974,6 +1979,10 @@ const UploadAwareAttachment: FC = () => {
   const downloadHref =
     attachment.source === "message" && !isExternalPortalUser
       ? buildUploadedAttachmentDownloadHref(activeThreadId, downloadMeta)
+      : "";
+  const previewPath =
+    attachment.source === "message" && !isExternalPortalUser
+      ? String(downloadMeta?.relativePath || "").trim()
       : "";
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -2045,6 +2054,21 @@ const UploadAwareAttachment: FC = () => {
       {canRetry ? (
         <button type="button" className="portal-upload-retry-overlay" onClick={retryUpload}>
           Retry
+        </button>
+      ) : null}
+      {previewPath && downloadMeta ? (
+        <button
+          type="button"
+          className="portal-upload-preview"
+          title={t("files.previewNamed", { name: downloadMeta.name })}
+          aria-label={t("files.previewNamed", { name: downloadMeta.name })}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            requestPreview(previewPath);
+          }}
+        >
+          <EyeIcon size={12} strokeWidth={2.2} aria-hidden="true" />
         </button>
       ) : null}
       {downloadHref && downloadMeta ? (
@@ -3814,6 +3838,7 @@ function metadataValueAsString(metadata: unknown, key: string): string {
 
 const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = ({ data }) => {
   const { t } = usePortalI18n();
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   const payload = asRecord(data) || {};
   const draftId = typeof payload.draftId === "string" ? payload.draftId.trim() : "";
   const [draft, setDraft] = useState<CodexSkillDraft | null>(null);
@@ -3945,7 +3970,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
         </div>
       ) : null}
       {errorText ? <p className="skill-draft-error">{errorText}</p> : null}
-      <div className="skill-draft-actions">
+      {!mutationReadOnly ? <div className="skill-draft-actions">
         <button type="button" onClick={() => void loadDraft()} disabled={loading}>
           {t("skill.refreshStatus")}
         </button>
@@ -3964,7 +3989,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
             {t("skill.useNewChat")}
           </button>
         ) : null}
-      </div>
+      </div> : null}
       {canUse ? (
         <p className="skill-draft-footnote">
           {t("skill.publishedHelp")}
@@ -4034,6 +4059,7 @@ const ProcessDataFallback: FC<any> = ({
   const { t } = usePortalI18n();
   const requestPreview = useContext(PreviewRequestContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const runningThreadIds = useContext(RunningThreadIdsContext);
   const skillDraftActions = useContext(SkillDraftActionContext);
@@ -4373,14 +4399,16 @@ const ProcessDataFallback: FC<any> = ({
               return (
                 <div key={skillPath} style={{ display: "grid", gap: 10 }}>
                   <div className="assistant-file-change-actions">
-                    <button
-                      type="button"
-                      className="assistant-file-change-btn"
-                      disabled={!activeThreadId || activeThreadRunning || installingSkillPath === skillPath}
-                      onClick={() => void installSkillPath(skillPath)}
-                    >
-                      {installLabel}
-                    </button>
+                    {!mutationReadOnly ? (
+                      <button
+                        type="button"
+                        className="assistant-file-change-btn"
+                        disabled={!activeThreadId || activeThreadRunning || installingSkillPath === skillPath}
+                        onClick={() => void installSkillPath(skillPath)}
+                      >
+                        {installLabel}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="assistant-file-change-btn"
@@ -4422,7 +4450,7 @@ const ProcessDataFallback: FC<any> = ({
                         </div>
                       </div>
                       {installedSkill.description ? <p className="skill-draft-description">{installedSkill.description}</p> : null}
-                      <div className="skill-draft-actions">
+                      {!mutationReadOnly ? <div className="skill-draft-actions">
                         {installedSkill.status === "active" ? (
                           <button
                             type="button"
@@ -4469,7 +4497,7 @@ const ProcessDataFallback: FC<any> = ({
                         <button type="button" onClick={() => void skillDraftActions.refreshRuntimeOptions()}>
                           {t("skill.refresh")}
                         </button>
-                      </div>
+                      </div> : null}
                       <p className="skill-draft-footnote">
                         {t("skill.installedHelp")}
                       </p>
@@ -4863,6 +4891,7 @@ const AgentAssistantAnswerFeedback: FC = () => {
   const config = useContext(AnswerFeedbackConfigContext);
   const draftsRef = useContext(FeedbackCommentDraftContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   const message = useAuiState((s) => s.message);
   const messageId = useAuiState((s) => s.message.id);
   const submittedType = useAuiState((s) => s.message.metadata.submittedFeedback?.type);
@@ -4875,7 +4904,7 @@ const AgentAssistantAnswerFeedback: FC = () => {
     setErrorText("");
   }, [messageId]);
 
-  if (!config.enabled || hidden) {
+  if (mutationReadOnly || !config.enabled || hidden) {
     return null;
   }
 
@@ -4966,12 +4995,17 @@ const AgentAssistantAnswerFeedback: FC = () => {
 };
 
 const AgentAssistantActionBar: FC = () => {
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   return (
     <AssistantActionBar.Root hideWhenRunning autohide="not-last" autohideFloat="single-branch">
       <AssistantActionBar.Copy />
-      <AgentAssistantReloadButton />
-      <AssistantActionBar.FeedbackPositive />
-      <AgentAssistantFeedbackNegativeButton />
+      {!mutationReadOnly ? (
+        <>
+          <AgentAssistantReloadButton />
+          <AssistantActionBar.FeedbackPositive />
+          <AgentAssistantFeedbackNegativeButton />
+        </>
+      ) : null}
     </AssistantActionBar.Root>
   );
 };
@@ -7610,7 +7644,8 @@ export function PortalShell(props: {
   const sharedThreadReadonly = Boolean(
     activeThreadCollaboration && activeThreadCollaboration.access.canRead && !activeThreadCollaboration.access.canRun
   );
-  const threadReadOnly = trainingReadOnly || sharedThreadReadonly;
+  const threadReadOnlyPresentation = resolveThreadReadOnlyPresentation({ trainingReadOnly, sharedThreadReadonly });
+  const threadReadOnly = threadReadOnlyPresentation.mutationReadOnly;
   const selectedModelLabel = appliedConfig.model;
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
@@ -9444,7 +9479,8 @@ export function PortalShell(props: {
   const threadContent = (
     <div
       className={threadReadOnly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
-      aria-disabled={threadReadOnly}
+      aria-disabled={threadReadOnlyPresentation.contentAriaDisabled || undefined}
+      data-read-only={threadReadOnly ? "true" : undefined}
       onClickCapture={handleThreadLinkClickCapture}
     >
       {trainingReadOnly ? (
@@ -9484,6 +9520,7 @@ export function PortalShell(props: {
         <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
           <AnswerFeedbackConfigContext.Provider value={answerFeedbackConfig}>
           <ExternalPortalUserContext.Provider value={isExternalPortalUser}>
+          <ThreadMutationReadOnlyContext.Provider value={threadReadOnly}>
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <PortalThread
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
@@ -9539,6 +9576,7 @@ export function PortalShell(props: {
               userMessage={{ allowEdit: !threadReadOnly }}
             />
           </PreviewRequestContext.Provider>
+          </ThreadMutationReadOnlyContext.Provider>
           </ExternalPortalUserContext.Provider>
           </AnswerFeedbackConfigContext.Provider>
         </ActiveThreadIdContext.Provider>
