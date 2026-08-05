@@ -116,7 +116,10 @@ async function main(): Promise<void> {
       orderBy: { createdAt: "asc" }
     });
 
-    const ensuredScopes = new Set<string>();
+    const ensuredScopes = new Map<
+      string,
+      Awaited<ReturnType<PortalWorkspaceService["ensureWorkspace"]>> | null
+    >();
     for (const thread of threads) {
       const organizationId = thread.organizationId;
       const userId = thread.userId;
@@ -130,23 +133,37 @@ async function main(): Promise<void> {
       const scopeKey = `${organizationId}:${thread.securityDomainId ?? "_"}:${userId}`;
       let workspaceId = thread.userWorkspaceId ?? undefined;
       let folderId = thread.workspaceFolderId ?? undefined;
-      if (!ensuredScopes.has(scopeKey)) {
-        if (!dryRun) {
-          const workspace = await service.ensureWorkspace(actor);
-          workspaceId = workspace.id;
-          folderId ||= workspace.historyFolderId;
-        }
-        ensuredScopes.add(scopeKey);
+      let canonicalWorkspace = ensuredScopes.get(scopeKey);
+      if (canonicalWorkspace === undefined) {
+        canonicalWorkspace = dryRun ? null : await service.ensureWorkspace(actor);
+        ensuredScopes.set(scopeKey, canonicalWorkspace);
         stats.workspacesEnsured += 1;
       }
-      if (!dryRun && (!workspaceId || !folderId)) {
-        const workspace = await service.ensureWorkspace(actor);
-        workspaceId = workspace.id;
-        folderId = workspace.historyFolderId;
-        await db.thread.update({
-          where: { id: thread.id },
-          data: { userWorkspaceId: workspaceId, workspaceFolderId: folderId }
+      if (!dryRun && canonicalWorkspace) {
+        const workspaceChanged = workspaceId !== canonicalWorkspace.id;
+        workspaceId = canonicalWorkspace.id;
+        if (workspaceChanged || !folderId) folderId = canonicalWorkspace.historyFolderId;
+        const storedFolder = await db.workspaceNode.findFirst({
+          where: {
+            id: folderId,
+            workspaceId,
+            kind: "folder",
+            state: "active"
+          },
+          select: { id: true }
         });
+        if (!storedFolder) {
+          folderId = canonicalWorkspace.historyFolderId;
+        }
+        if (
+          thread.userWorkspaceId !== workspaceId ||
+          thread.workspaceFolderId !== folderId
+        ) {
+          await db.thread.update({
+            where: { id: thread.id },
+            data: { userWorkspaceId: workspaceId, workspaceFolderId: folderId }
+          });
+        }
       }
 
       const workspacePath = thread.workspace ? path.resolve(thread.workspace) : "";
