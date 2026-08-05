@@ -156,4 +156,28 @@ describe("WorkspaceFolderHome", () => {
     fireEvent.click(screen.getByRole("tab", { name: "文件 1" }));
     expect(await screen.findByText("检查结果.xlsx")).toBeTruthy();
   });
+
+  it("does not offer a new task from an empty read-only folder", async () => {
+    vi.mocked(fetchPortalFolderTasks).mockResolvedValue({
+      tasks: [],
+      summary: { task_count: 0, tasks_with_files: 0, file_count: 0 }
+    });
+    render(
+      <PortalI18nProvider>
+        <WorkspaceFolderHome
+          folderId="empty-folder"
+          folderName="空目录"
+          readOnly
+          dataSource={testDataSource}
+          onOpenFolder={vi.fn()}
+          onOpenFile={vi.fn()}
+          onOpenTask={vi.fn()}
+          onNewTask={vi.fn()}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(await screen.findByText("这个文件夹中还没有任务。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新任务" })).toBeNull();
+  });
 });

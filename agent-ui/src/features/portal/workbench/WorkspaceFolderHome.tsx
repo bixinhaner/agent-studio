@@ -772,7 +772,7 @@ export function WorkspaceFolderHome(props: {
                 <div className="workspace-task-empty">
                   <MessageSquare size={22} />
                   <p>{t("workspace.taskEmpty")}</p>
-                  {!recentView && !agentOutputsView && !searchView ? (
+                  {!props.readOnly && !recentView && !agentOutputsView && !searchView ? (
                     <Button onClick={props.onNewTask}>{t("workspace.newTask")}</Button>
                   ) : null}
                 </div>
