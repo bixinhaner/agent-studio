@@ -76,6 +76,8 @@ export type DingTalkOrgProviderOptions = {
   now?: () => Date;
 };
 
+export type DingTalkUserPresence = "present" | "missing" | "unknown";
+
 const DEFAULT_DETAIL_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_DETAIL_FETCH_CONCURRENCY = 3;
 
@@ -335,7 +337,10 @@ export class DingTalkOrgProvider {
   async fetchFullOrganization(): Promise<NormalizedOrgSnapshot> {
     const departments = await this.collectDepartmentTree(DINGTALK_ROOT_DEPARTMENT_ID);
     const departmentIds = new Set(departments.map((department) => department.externalId));
-    const users = await this.collectUsersForDepartments(departments.map((department) => department.externalId));
+    const users = await this.collectUsersForDepartments([
+      DINGTALK_ROOT_DEPARTMENT_ID,
+      ...departments.map((department) => department.externalId)
+    ]);
     await this.enrichUsersWithCachedAndFreshDetails(users);
 
     return sortSnapshot({
@@ -382,6 +387,14 @@ export class DingTalkOrgProvider {
       departments: linkedDepartments.map(normalizeDepartment),
       users: [normalizedUser]
     });
+  }
+
+  async confirmUserPresence(externalUserId: string): Promise<DingTalkUserPresence> {
+    try {
+      return (await this.client.getUser({ userId: externalUserId })) ? "present" : "missing";
+    } catch {
+      return "unknown";
+    }
   }
 
   private async collectDepartmentTree(parentId: string): Promise<DingTalkDepartment[]> {
@@ -449,6 +462,9 @@ export class DingTalkOrgProvider {
     }
 
     const now = this.now();
+    const baseUsers = new Map(
+      [...users.entries()].map(([userId, user]) => [userId, { ...user }] as const)
+    );
     const cache = await this.loadDetailCache([...users.keys()]);
     const dueUserIds: string[] = [];
 
@@ -463,10 +479,15 @@ export class DingTalkOrgProvider {
       }
     }
 
-    await this.fetchFreshDetails(users, dueUserIds, now);
+    await this.fetchFreshDetails(users, baseUsers, dueUserIds, now);
   }
 
-  private async fetchFreshDetails(users: Map<string, NormalizedOrgUser>, userIds: string[], attemptedAt: Date): Promise<void> {
+  private async fetchFreshDetails(
+    users: Map<string, NormalizedOrgUser>,
+    baseUsers: Map<string, NormalizedOrgUser>,
+    userIds: string[],
+    attemptedAt: Date
+  ): Promise<void> {
     if (userIds.length === 0) {
       return;
     }
@@ -480,6 +501,7 @@ export class DingTalkOrgProvider {
 
         const existing = users.get(userId);
         if (!existing) continue;
+        const baseUser = baseUsers.get(userId) ?? existing;
 
         try {
           const detail = await this.client.getUser({ userId });
@@ -492,7 +514,7 @@ export class DingTalkOrgProvider {
             continue;
           }
           users.set(userId, {
-            ...applyEnterpriseDetail(existing, detail),
+            ...applyEnterpriseDetail(baseUser, detail),
             detailAttemptedAt: attemptedAt.toISOString(),
             detailSyncedAt: attemptedAt.toISOString(),
             detailSyncStatus: "success"
@@ -516,7 +538,14 @@ export class DingTalkOrgProvider {
     for (const departmentId of departmentIds) {
       const members = await this.client.listDepartmentUsers({ departmentId });
       for (const member of members) {
-        users.set(member.userId, mergeUser(users.get(member.userId), member, departmentId));
+        users.set(
+          member.userId,
+          mergeUser(
+            users.get(member.userId),
+            member,
+            departmentId === DINGTALK_ROOT_DEPARTMENT_ID ? undefined : departmentId
+          )
+        );
       }
     }
 

@@ -8,6 +8,9 @@ type OrgSyncSchedulerOptions = {
   intervalMinutes: number;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
+  setTimeoutFn?: typeof setTimeout;
+  clearTimeoutFn?: typeof clearTimeout;
+  nowFn?: () => number;
 };
 
 const RUNNING_JOB_STATUSES = new Set(["running"]);
@@ -25,8 +28,18 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
-function getDb(repository: { [key: string]: unknown }) {
-  const db = (repository as { db?: { syncJob: { findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>> } } }).db;
+type SchedulerDb = {
+  syncJob: {
+    findMany(args?: {
+      where?: Record<string, unknown>;
+      orderBy?: { createdAt?: "asc" | "desc" };
+      take?: number;
+    }): Promise<Array<Record<string, unknown>>>;
+  };
+};
+
+function getDb(repository: { [key: string]: unknown }): SchedulerDb {
+  const db = (repository as { db?: SchedulerDb }).db;
   if (!db) {
     throw new Error("repository db is unavailable");
   }
@@ -58,10 +71,15 @@ function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): bool
 }
 
 export class OrgSyncScheduler {
-  private timer: SchedulerTimer | null = null;
+  private initialTimer: SchedulerTimer | null = null;
+  private intervalTimer: SchedulerTimer | null = null;
+  private started = false;
   private inFlight = false;
   private readonly setIntervalFn: typeof setInterval;
   private readonly clearIntervalFn: typeof clearInterval;
+  private readonly setTimeoutFn: typeof setTimeout;
+  private readonly clearTimeoutFn: typeof clearTimeout;
+  private readonly nowFn: () => number;
 
   constructor(
     private readonly service: Pick<OrgSyncService, "run">,
@@ -70,28 +88,84 @@ export class OrgSyncScheduler {
   ) {
     this.setIntervalFn = options.setIntervalFn ?? setInterval;
     this.clearIntervalFn = options.clearIntervalFn ?? clearInterval;
+    this.setTimeoutFn = options.setTimeoutFn ?? setTimeout;
+    this.clearTimeoutFn = options.clearTimeoutFn ?? clearTimeout;
+    this.nowFn = options.nowFn ?? Date.now;
   }
 
   start(): void {
-    if (!this.options.enabled || this.timer) {
+    if (!this.options.enabled || this.started) {
       return;
     }
 
-    void this.recoverStaleJobs().catch(() => undefined);
-    const intervalMs = Math.max(1, Math.trunc(this.options.intervalMinutes)) * 60_000;
-    this.timer = this.setIntervalFn(() => {
-      void this.tick().catch(() => undefined);
-    }, intervalMs);
-    this.timer?.unref?.();
+    this.started = true;
+    void this.scheduleFromLastSuccessfulRun().catch(() => {
+      if (this.started) this.startInterval();
+    });
   }
 
   stop(): void {
-    if (!this.timer) {
+    this.started = false;
+    if (this.initialTimer) {
+      this.clearTimeoutFn(this.initialTimer);
+      this.initialTimer = null;
+    }
+    if (this.intervalTimer) {
+      this.clearIntervalFn(this.intervalTimer);
+      this.intervalTimer = null;
+    }
+  }
+
+  private get intervalMs(): number {
+    return Math.max(1, Math.trunc(this.options.intervalMinutes)) * 60_000;
+  }
+
+  private async scheduleFromLastSuccessfulRun(): Promise<void> {
+    await this.recoverStaleJobs();
+    if (!this.started) return;
+
+    const db = getDb(this.jobs as unknown as { db: SchedulerDb });
+    const [lastSuccessfulJob] = await db.syncJob.findMany({
+      where: {
+        provider: "dingtalk",
+        scopeType: "full",
+        status: "succeeded"
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1
+    });
+    const lastSuccessfulAt = lastSuccessfulJob
+      ? toTimestamp(lastSuccessfulJob.finishedAt) ??
+        toTimestamp(lastSuccessfulJob.updatedAt) ??
+        toTimestamp(lastSuccessfulJob.createdAt)
+      : null;
+    const delayMs = lastSuccessfulAt === null
+      ? 0
+      : Math.max(0, lastSuccessfulAt + this.intervalMs - this.nowFn());
+
+    if (delayMs === 0) {
+      await this.tick().catch(() => undefined);
+      if (this.started) this.startInterval();
       return;
     }
 
-    this.clearIntervalFn(this.timer);
-    this.timer = null;
+    this.initialTimer = this.setTimeoutFn(() => {
+      this.initialTimer = null;
+      void this.tick()
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.started) this.startInterval();
+        });
+    }, delayMs);
+    this.initialTimer?.unref?.();
+  }
+
+  private startInterval(): void {
+    if (!this.started || this.intervalTimer) return;
+    this.intervalTimer = this.setIntervalFn(() => {
+      void this.tick().catch(() => undefined);
+    }, this.intervalMs);
+    this.intervalTimer?.unref?.();
   }
 
   private async tick(): Promise<void> {

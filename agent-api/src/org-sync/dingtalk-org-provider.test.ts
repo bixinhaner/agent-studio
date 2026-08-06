@@ -67,7 +67,7 @@ describe("DingTalkOrgProvider", () => {
     const snapshot = await provider.fetchFullOrganization();
 
     expect(requestedParentIds).toEqual(["1", "dept-a"]);
-    expect(requestedMemberDepartmentIds).toEqual(["dept-a"]);
+    expect(requestedMemberDepartmentIds).toEqual(["1", "dept-a"]);
     expect(snapshot.departments).toEqual([
       {
         externalId: "dept-a",
@@ -175,5 +175,38 @@ describe("DingTalkOrgProvider", () => {
         }
       ]
     });
+  });
+
+  it("drops stale cached detail fields after a successful detail refresh clears them", async () => {
+    const client = buildClient({
+      getUser: vi.fn(async () => ({
+        userId: "user-1",
+        displayName: "Alice",
+        departmentExternalIds: ["dept-a"],
+        lifecycleState: "active" as const
+      }))
+    });
+    const provider = new DingTalkOrgProvider(client, {
+      now: () => new Date("2026-06-14T00:00:00.000Z"),
+      detailRefreshIntervalMs: 7 * 24 * 60 * 60 * 1000,
+      loadUserDetailCache: vi.fn(async () =>
+        new Map([
+          [
+            "user-1",
+            {
+              detailAttemptedAt: new Date("2026-06-01T00:00:00.000Z"),
+              detailSyncedAt: new Date("2026-06-01T00:00:00.000Z"),
+              detail: { title: "Former title", workPlace: "Former office" }
+            }
+          ]
+        ])
+      )
+    });
+
+    const snapshot = await provider.fetchFullOrganization();
+
+    expect(snapshot.users[0]?.detailSyncStatus).toBe("success");
+    expect(snapshot.users[0]?.title).toBeUndefined();
+    expect(snapshot.users[0]?.workPlace).toBeUndefined();
   });
 });

@@ -557,6 +557,15 @@ function isInvalidAccessTokenError(error: unknown): boolean {
   return /40014|invalid|illegal|not legal|不合法/i.test(error.message);
 }
 
+function isDingTalkUserNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /could\s+not\s+be\s+found|not\s+found|not\s+exist|user(?:id|\s+id).*(?:invalid|不存在)|用户不存在/i.test(
+    error.message
+  );
+}
+
 export function resolveDingTalkConfig(config: DingTalkConfig):
   | { ok: true; config: Required<Pick<DingTalkConfig, "clientId" | "clientSecret" | "redirectUri" | "scope" | "apiBaseUrl">>; publicConfig: DingTalkPublicConfig }
   | { ok: false; missing: string[] } {
@@ -882,10 +891,7 @@ export function createDingTalkClient(
         const payload = await requestOrgApi("/topapi/v2/user/get", { userid: userId });
         return normalizeOrganizationUser(asRecord(payload)?.result ?? payload);
       } catch (error) {
-        if (
-          error instanceof Error &&
-          /not\s*found|not\s*exist|userid/i.test(error.message)
-        ) {
+        if (isDingTalkUserNotFoundError(error)) {
           return null;
         }
         throw error;

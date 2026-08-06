@@ -179,6 +179,26 @@ describe("createDingTalkClient", () => {
     });
   });
 
+  it("maps DingTalk's could-not-be-found response to a missing user", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({ accessToken: "app-token", expireIn: 7200 });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/topapi/v2/user/get")) {
+        return jsonResponse({
+          errcode: 60121,
+          errmsg: "The user could not be found"
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock);
+
+    await expect(client.getUser({ userId: "departed-user" })).resolves.toBeNull();
+  });
+
   it("refreshes the cached app access token after it expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T00:00:00.000Z"));

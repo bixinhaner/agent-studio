@@ -231,8 +231,14 @@ function formatJobSummaryLine(job: OrgSyncJob): string {
 
   const summary = getSummaryRecord(job);
   if (!summary) return "暂无摘要";
+  const reconciliation = asRecord(summary.reconciliation);
+  const reconciliationBlocked = reconciliation?.enabled === true && reconciliation.safe === false;
   const total = asNumber(summary.total);
-  if (!total) return "未发现通讯录变化。";
+  if (!total) {
+    return reconciliationBlocked
+      ? "通讯录已更新；完整性校验未通过，本轮没有自动停用缺失员工或部门。"
+      : "未发现通讯录变化。";
+  }
 
   const entityParts = [
     ["department", "部门"],
@@ -243,7 +249,10 @@ function formatJobSummaryLine(job: OrgSyncJob): string {
     .filter((item) => item.count > 0)
     .map((item) => `${item.label} ${item.count}`);
 
-  return `发现 ${total} 项变化：${entityParts.join("、") || formatChangeBreakdown(summary)}。`;
+  const changeText = `发现 ${total} 项变化：${entityParts.join("、") || formatChangeBreakdown(summary)}。`;
+  return reconciliationBlocked
+    ? `${changeText} 完整性校验未通过，本轮没有自动停用缺失员工或部门。`
+    : changeText;
 }
 
 function getSummaryChips(job: OrgSyncJob): SummaryChip[] {
@@ -270,6 +279,28 @@ function getSummaryChips(job: OrgSyncJob): SummaryChip[] {
     const count = asNumber(value) ?? 0;
     if (count > 0) {
       chips.push({ label: CHANGE_LABELS[key] ?? key, value: String(count) });
+    }
+  }
+
+  const reconciliation = asRecord(summary.reconciliation);
+  if (reconciliation?.enabled === true) {
+    const safe = reconciliation.safe === true;
+    chips.push({
+      label: "离职校验",
+      value: safe ? "已执行" : "已保护跳过",
+      tone: safe ? "success" : "warning"
+    });
+    const confirmedMissingUsers = asNumber(reconciliation.confirmedMissingUsers) ?? 0;
+    if (confirmedMissingUsers > 0) {
+      chips.push({ label: "确认离职", value: String(confirmedMissingUsers), tone: "warning" });
+    }
+    const userCoverage = asNumber(reconciliation.userCoverage);
+    const departmentCoverage = asNumber(reconciliation.departmentCoverage);
+    if (userCoverage !== undefined) {
+      chips.push({ label: "员工覆盖", value: `${Math.round(userCoverage * 100)}%` });
+    }
+    if (departmentCoverage !== undefined) {
+      chips.push({ label: "部门覆盖", value: `${Math.round(departmentCoverage * 100)}%` });
     }
   }
   return chips;

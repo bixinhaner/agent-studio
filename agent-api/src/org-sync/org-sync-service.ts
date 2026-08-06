@@ -29,7 +29,7 @@ export type OrgSyncRunResult = {
 
 type OrgSyncProvider = Pick<
   DingTalkOrgProvider,
-  "fetchFullOrganization" | "fetchDepartmentScope" | "fetchUserScope"
+  "fetchFullOrganization" | "fetchDepartmentScope" | "fetchUserScope" | "confirmUserPresence"
 >;
 
 type OrgSyncDb = {
@@ -42,6 +42,7 @@ type OrgSyncDb = {
   department: {
     findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
     findUnique(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+    update(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
   };
   departmentMembership: {
     findMany(args?: {
@@ -144,7 +145,7 @@ type AuthIdentityRow = {
 type DepartmentDiff = {
   entityType: "department";
   entityExternalId: string;
-  changeType: "created" | "updated";
+  changeType: "created" | "updated" | "disabled";
   beforePayload?: Record<string, unknown>;
   afterPayload?: Record<string, unknown>;
 };
@@ -178,6 +179,25 @@ const STALE_RUNNING_JOB_AGE_MS = 15 * 60 * 1000;
 const JOB_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 const FULL_SYNC_DEPARTURE_MIN_COVERAGE = 0.8;
 const FULL_SYNC_DEPARTURE_SMALL_DIRECTORY_MAX = 10;
+const FULL_SYNC_CONFIRMATION_CONCURRENCY = 3;
+
+type FullSyncReconciliation = {
+  enabled: boolean;
+  safe: boolean;
+  baselineSource: "previous_full_snapshot" | "active_managed_records" | "not_applicable";
+  baselineJobId?: string;
+  currentUsers: number;
+  baselineUsers: number;
+  userCoverage: number | null;
+  currentDepartments: number;
+  baselineDepartments: number;
+  departmentCoverage: number | null;
+  candidateUserIds: Set<string>;
+  confirmedMissingUserIds: Set<string>;
+  presentUserIds: Set<string>;
+  unknownUserIds: Set<string>;
+  missingDepartmentIds: Set<string>;
+};
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -254,6 +274,77 @@ function hasSafeFullSyncDepartureCoverage(snapshotUserCount: number, existingMan
     return true;
   }
   return snapshotUserCount / existingManagedUserCount >= FULL_SYNC_DEPARTURE_MIN_COVERAGE;
+}
+
+function hasSafeFullSyncDepartmentCoverage(snapshotDepartmentCount: number, baselineDepartmentCount: number): boolean {
+  if (snapshotDepartmentCount <= 0 || baselineDepartmentCount <= 0) {
+    return false;
+  }
+  return snapshotDepartmentCount / baselineDepartmentCount >= FULL_SYNC_DEPARTURE_MIN_COVERAGE;
+}
+
+function coverageRatio(currentCount: number, baselineCount: number): number | null {
+  if (baselineCount <= 0) return null;
+  return currentCount / baselineCount;
+}
+
+function emptyFullSyncReconciliation(): FullSyncReconciliation {
+  return {
+    enabled: false,
+    safe: false,
+    baselineSource: "not_applicable",
+    currentUsers: 0,
+    baselineUsers: 0,
+    userCoverage: null,
+    currentDepartments: 0,
+    baselineDepartments: 0,
+    departmentCoverage: null,
+    candidateUserIds: new Set(),
+    confirmedMissingUserIds: new Set(),
+    presentUserIds: new Set(),
+    unknownUserIds: new Set(),
+    missingDepartmentIds: new Set()
+  };
+}
+
+function serializeFullSyncReconciliation(input: FullSyncReconciliation) {
+  return {
+    enabled: input.enabled,
+    safe: input.safe,
+    baselineSource: input.baselineSource,
+    baselineJobId: input.baselineJobId ?? null,
+    currentUsers: input.currentUsers,
+    baselineUsers: input.baselineUsers,
+    userCoverage: input.userCoverage,
+    currentDepartments: input.currentDepartments,
+    baselineDepartments: input.baselineDepartments,
+    departmentCoverage: input.departmentCoverage,
+    candidateUsers: input.candidateUserIds.size,
+    confirmedMissingUsers: input.confirmedMissingUserIds.size,
+    stillPresentUsers: input.presentUserIds.size,
+    unconfirmedUsers: input.unknownUserIds.size,
+    missingDepartments: input.missingDepartmentIds.size
+  };
+}
+
+function buildUserFieldCoverage(users: UserSnapshot[]) {
+  const populated = (read: (user: UserSnapshot) => unknown) =>
+    users.reduce((count, user) => count + (read(user) ? 1 : 0), 0);
+  return {
+    total: users.length,
+    email: populated((user) => user.email),
+    employeeNo: populated((user) => user.jobNumber),
+    title: populated((user) => user.title),
+    mobile: populated((user) => user.mobile),
+    telephone: populated((user) => user.telephone),
+    avatar: populated((user) => user.avatarUrl),
+    workPlace: populated((user) => user.workPlace),
+    hiredAt: populated((user) => user.hiredAt),
+    manager: populated((user) => user.managerDingTalkUserId),
+    detailSuccess: users.filter((user) => user.detailSyncStatus === "success").length,
+    detailFailed: users.filter((user) => user.detailSyncStatus === "failed").length,
+    detailNotFound: users.filter((user) => user.detailSyncStatus === "not_found").length
+  };
 }
 
 function shouldHandleMissingFullSyncUser(row: UserRow, processedUserIds: Set<string>): boolean {
@@ -438,6 +529,29 @@ function compareDepartment(
     };
   }
   return null;
+}
+
+function compareMissingFullSyncDepartment(before: DepartmentRow): DepartmentDiff | null {
+  if ((before.status ?? "active") === "disabled") {
+    return null;
+  }
+  return {
+    entityType: "department",
+    entityExternalId: before.externalId,
+    changeType: "disabled",
+    beforePayload: {
+      externalId: before.externalId,
+      name: before.name,
+      sortOrder: before.sortOrder,
+      status: before.status ?? "active"
+    },
+    afterPayload: {
+      externalId: before.externalId,
+      name: before.name,
+      sortOrder: before.sortOrder,
+      status: "disabled"
+    }
+  };
 }
 
 function compareUser(
@@ -793,11 +907,26 @@ export class OrgSyncService {
         message: "Organization fetch completed",
         payload: {
           departments: snapshot.departments.length,
-          users: snapshot.users.length
+          users: snapshot.users.length,
+          userFieldCoverage: buildUserFieldCoverage(snapshot.users)
         }
       });
 
-      const diffData = await this.computeDiffs(snapshot, input.scopeType);
+      const reconciliation = await this.buildFullSyncReconciliation(snapshot, input.scopeType);
+      if (reconciliation.enabled) {
+        await this.dependencies.jobs.appendEvent(jobId, {
+          level: reconciliation.safe ? "info" : "warn",
+          eventType: reconciliation.safe
+            ? "full_sync_reconciliation_ready"
+            : "full_sync_reconciliation_skipped",
+          message: reconciliation.safe
+            ? "Full sync reconciliation passed completeness checks"
+            : "Full sync reconciliation was skipped because the snapshot may be incomplete",
+          payload: serializeFullSyncReconciliation(reconciliation)
+        });
+      }
+
+      const diffData = await this.computeDiffs(snapshot, input.scopeType, reconciliation);
       await this.dependencies.jobs.appendEvent(jobId, {
         level: "info",
         eventType: "diff_summary",
@@ -805,7 +934,7 @@ export class OrgSyncService {
         payload: buildDiffSummary(diffData.diffs)
       });
 
-      await this.persistSnapshot(snapshot, diffData, input.scopeType);
+      await this.persistSnapshot(snapshot, diffData, input.scopeType, reconciliation);
 
       await this.dependencies.jobs.replaceSnapshots(jobId, [
         {
@@ -927,7 +1056,131 @@ export class OrgSyncService {
     return this.dependencies.provider.fetchUserScope(trimOrUndefined(input.scopeExternalId) ?? "");
   }
 
-  private async computeDiffs(snapshot: NormalizedOrgSnapshot, scopeType: OrgSyncScopeType): Promise<{
+  private async buildFullSyncReconciliation(
+    snapshot: NormalizedOrgSnapshot,
+    scopeType: OrgSyncScopeType
+  ): Promise<FullSyncReconciliation> {
+    if (scopeType !== "full") {
+      return emptyFullSyncReconciliation();
+    }
+
+    const db = getDb(this.dependencies.jobs as unknown as { db: OrgSyncDb });
+    const [userRows, departmentRows] = await Promise.all([
+      db.user.findMany() as Promise<UserRow[]>,
+      db.department.findMany() as Promise<DepartmentRow[]>
+    ]);
+    const activeManagedUsers = userRows.filter(
+      (row) => isDingTalkSyncManagedUser(row) && row.syncState !== "departed"
+    );
+    const activeManagedDepartments = departmentRows.filter(
+      (row) => Boolean(row.lastSyncedAt) && (row.status ?? "active") === "active"
+    );
+
+    const snapshotRepository = this.dependencies.jobs as SyncJobRepository & {
+      getLatestSuccessfulFullSnapshot?: SyncJobRepository["getLatestSuccessfulFullSnapshot"];
+    };
+    const previous =
+      typeof snapshotRepository.getLatestSuccessfulFullSnapshot === "function"
+        ? await snapshotRepository.getLatestSuccessfulFullSnapshot()
+        : null;
+    const hasPreviousBaseline = Boolean(previous?.users.length && previous?.departments.length);
+    const baselineUsers = hasPreviousBaseline ? previous?.users.length ?? 0 : activeManagedUsers.length;
+    const baselineDepartments = hasPreviousBaseline
+      ? previous?.departments.length ?? 0
+      : activeManagedDepartments.length;
+    const userCoverage = coverageRatio(snapshot.users.length, baselineUsers);
+    const departmentCoverage = coverageRatio(snapshot.departments.length, baselineDepartments);
+    const safe =
+      hasPreviousBaseline &&
+      hasSafeFullSyncDepartureCoverage(snapshot.users.length, baselineUsers) &&
+      hasSafeFullSyncDepartmentCoverage(snapshot.departments.length, baselineDepartments);
+
+    const reconciliation: FullSyncReconciliation = {
+      enabled: true,
+      safe,
+      baselineSource: hasPreviousBaseline ? "previous_full_snapshot" : "active_managed_records",
+      baselineJobId: hasPreviousBaseline ? previous?.jobId : undefined,
+      currentUsers: snapshot.users.length,
+      baselineUsers,
+      userCoverage,
+      currentDepartments: snapshot.departments.length,
+      baselineDepartments,
+      departmentCoverage,
+      candidateUserIds: new Set(),
+      confirmedMissingUserIds: new Set(),
+      presentUserIds: new Set(),
+      unknownUserIds: new Set(),
+      missingDepartmentIds: new Set()
+    };
+
+    if (!safe) {
+      return reconciliation;
+    }
+
+    const snapshotUserKeys = new Set<string>();
+    for (const user of snapshot.users) {
+      snapshotUserKeys.add(user.userId);
+      if (user.unionId) snapshotUserKeys.add(user.unionId);
+    }
+    const candidates = activeManagedUsers.filter((row) => {
+      const keys = [row.dingtalkUserId, row.externalId].filter(Boolean) as string[];
+      return keys.every((key) => !snapshotUserKeys.has(key));
+    });
+    for (const candidate of candidates) {
+      reconciliation.candidateUserIds.add(candidate.id);
+    }
+
+    let cursor = 0;
+    const workers = Array.from(
+      { length: Math.min(FULL_SYNC_CONFIRMATION_CONCURRENCY, candidates.length) },
+      async () => {
+        for (;;) {
+          const candidate = candidates[cursor];
+          cursor += 1;
+          if (!candidate) return;
+          const dingTalkUserId = trimOrUndefined(candidate.dingtalkUserId);
+          if (!dingTalkUserId) {
+            reconciliation.unknownUserIds.add(candidate.id);
+            continue;
+          }
+          const presence = await this.dependencies.provider.confirmUserPresence(dingTalkUserId);
+          if (presence === "missing") {
+            reconciliation.confirmedMissingUserIds.add(candidate.id);
+          } else if (presence === "present") {
+            reconciliation.presentUserIds.add(candidate.id);
+          } else {
+            reconciliation.unknownUserIds.add(candidate.id);
+          }
+        }
+      }
+    );
+    await Promise.all(workers);
+
+    const snapshotDepartmentIds = new Set(snapshot.departments.map((department) => department.externalId));
+    const currentMemberships = (await db.departmentMembership.findMany()) as MembershipRow[];
+    const usersThatStillBlockDepartmentRemoval = new Set(
+      activeManagedUsers
+        .filter((user) => !reconciliation.confirmedMissingUserIds.has(user.id))
+        .map((user) => user.id)
+    );
+    for (const department of activeManagedDepartments) {
+      if (snapshotDepartmentIds.has(department.externalId)) continue;
+      const hasRetainedUser = currentMemberships.some(
+        (membership) =>
+          membership.departmentId === department.id &&
+          membership.source === "sync" &&
+          usersThatStillBlockDepartmentRemoval.has(membership.userId)
+      );
+      if (!hasRetainedUser) reconciliation.missingDepartmentIds.add(department.id);
+    }
+    return reconciliation;
+  }
+
+  private async computeDiffs(
+    snapshot: NormalizedOrgSnapshot,
+    scopeType: OrgSyncScopeType,
+    reconciliation: FullSyncReconciliation
+  ): Promise<{
     diffs: SyncDiff[];
     summary: Record<string, unknown>;
     departmentRowsByExternalId: Map<string, DepartmentRow>;
@@ -970,17 +1223,19 @@ export class OrgSyncService {
     const snapshotUserKeys = new Set(snapshot.users.map((user) => getSnapshotUserKey(user)));
     const processedUserIds = new Set<string>();
     const uniqueUserRowsByKey = uniqueUserRows(userRowsByKey.values());
-    const canHandleMissingFullSyncUsers =
-      scopeType === "full" &&
-      hasSafeFullSyncDepartureCoverage(
-        snapshot.users.length,
-        uniqueUserRowsByKey.filter((row) => isDingTalkSyncManagedUser(row)).length
-      );
 
     for (const department of snapshot.departments) {
       const before = departmentRowsByExternalId.get(department.externalId) ?? null;
       const diff = compareDepartment(before, department, departmentRowsById, knownDepartmentExternalIds);
       if (diff) diffs.push(diff);
+    }
+    if (scopeType === "full" && reconciliation.safe) {
+      for (const departmentId of reconciliation.missingDepartmentIds) {
+        const department = departmentRowsById.get(departmentId);
+        if (!department) continue;
+        const diff = compareMissingFullSyncDepartment(department);
+        if (diff) diffs.push(diff);
+      }
     }
 
     for (const user of snapshot.users) {
@@ -1029,9 +1284,12 @@ export class OrgSyncService {
       if (diff) diffs.push(diff);
     }
 
-    if (canHandleMissingFullSyncUsers) {
+    if (scopeType === "full" && reconciliation.safe) {
       for (const staleUser of uniqueUserRowsByKey) {
-        if (!shouldHandleMissingFullSyncUser(staleUser, processedUserIds)) {
+        if (
+          !reconciliation.confirmedMissingUserIds.has(staleUser.id) ||
+          !shouldHandleMissingFullSyncUser(staleUser, processedUserIds)
+        ) {
           continue;
         }
 
@@ -1104,7 +1362,11 @@ export class OrgSyncService {
 
     return {
       diffs,
-      summary: buildDiffSummary(diffs),
+      summary: {
+        ...buildDiffSummary(diffs),
+        reconciliation: serializeFullSyncReconciliation(reconciliation),
+        userFieldCoverage: buildUserFieldCoverage(snapshot.users)
+      },
       departmentRowsByExternalId,
       userRowsByKey
     };
@@ -1113,7 +1375,8 @@ export class OrgSyncService {
   private async persistSnapshot(
     snapshot: NormalizedOrgSnapshot,
     diffData: Awaited<ReturnType<OrgSyncService["computeDiffs"]>>,
-    scopeType: OrgSyncScopeType
+    scopeType: OrgSyncScopeType,
+    reconciliation: FullSyncReconciliation
   ): Promise<void> {
     const now = new Date();
     const internalOrganizationId = await this.resolveInternalOrganizationId();
@@ -1134,6 +1397,17 @@ export class OrgSyncService {
     for (const row of departmentRows) {
       departmentIdsByExternalId.set(row.externalId, row.id);
     }
+    if (scopeType === "full" && reconciliation.safe) {
+      for (const departmentId of reconciliation.missingDepartmentIds) {
+        await db.department.update({
+          where: { id: departmentId },
+          data: {
+            status: "disabled",
+            lastSyncedAt: now
+          }
+        });
+      }
+    }
     const scopedDepartmentIds =
       scopeType === "department"
         ? [...new Set(snapshot.departments.map((department) => departmentIdsByExternalId.get(department.externalId)).filter(Boolean) as string[])]
@@ -1142,12 +1416,6 @@ export class OrgSyncService {
     const persistedUserRowsByKey = new Map(diffData.userRowsByKey);
     const processedUserIds = new Set<string>();
     const uniquePersistedUserRowsByKey = uniqueUserRows(persistedUserRowsByKey.values());
-    const canHandleMissingFullSyncUsers =
-      scopeType === "full" &&
-      hasSafeFullSyncDepartureCoverage(
-        snapshot.users.length,
-        uniquePersistedUserRowsByKey.filter((row) => isDingTalkSyncManagedUser(row)).length
-      );
 
     for (const user of snapshot.users) {
       const key = getSnapshotUserKey(user);
@@ -1216,9 +1484,12 @@ export class OrgSyncService {
       });
     }
 
-    if (canHandleMissingFullSyncUsers) {
+    if (scopeType === "full" && reconciliation.safe) {
       for (const staleUser of uniquePersistedUserRowsByKey) {
-        if (!shouldHandleMissingFullSyncUser(staleUser, processedUserIds)) {
+        if (
+          !reconciliation.confirmedMissingUserIds.has(staleUser.id) ||
+          !shouldHandleMissingFullSyncUser(staleUser, processedUserIds)
+        ) {
           continue;
         }
         const status = resolveMissingFullSyncStatus(staleUser);

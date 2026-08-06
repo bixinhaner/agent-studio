@@ -195,7 +195,10 @@ describe("OrgSyncService", () => {
       provider: {
         fetchFullOrganization: vi.fn(async () => snapshot),
         fetchDepartmentScope: vi.fn(async () => snapshot),
-        fetchUserScope: vi.fn(async () => snapshot)
+        fetchUserScope: vi.fn(async () => snapshot),
+        confirmUserPresence: vi.fn(async (userId: string) =>
+          userId === "stale-ding-user" ? "missing" : "present"
+        )
       },
       departments: {
         upsertMany: upsertDepartments
@@ -288,6 +291,28 @@ describe("OrgSyncService", () => {
   });
 
   it("disables previously synced DingTalk users missing from a full organization sync", async () => {
+    const activeUsers = Array.from({ length: 11 }, (_, index) =>
+      buildUserRow({
+        id: `active-user-${index}`,
+        externalId: `active-union-${index}`,
+        displayName: `Active Employee ${index}`,
+        statusSource: "sync",
+        lastSyncedAt: new Date("2026-04-01T00:00:00.000Z"),
+        dingtalkUserId: `active-ding-user-${index}`
+      })
+    );
+    const alreadyDepartedUsers = Array.from({ length: 100 }, (_, index) =>
+      buildUserRow({
+        id: `departed-user-${index}`,
+        externalId: `departed-union-${index}`,
+        displayName: `Departed Employee ${index}`,
+        status: "disabled",
+        statusSource: "sync",
+        syncState: "departed",
+        lastSyncedAt: new Date("2026-04-01T00:00:00.000Z"),
+        dingtalkUserId: `departed-ding-user-${index}`
+      })
+    );
     const users = [
       buildUserRow({
         id: "stale-user",
@@ -297,14 +322,8 @@ describe("OrgSyncService", () => {
         lastSyncedAt: new Date("2026-04-01T00:00:00.000Z"),
         dingtalkUserId: "stale-ding-user"
       }),
-      buildUserRow({
-        id: "active-user",
-        externalId: "active-union",
-        displayName: "Active Employee",
-        statusSource: "sync",
-        lastSyncedAt: new Date("2026-04-01T00:00:00.000Z"),
-        dingtalkUserId: "active-ding-user"
-      }),
+      ...activeUsers,
+      ...alreadyDepartedUsers,
       buildUserRow({
         id: "local-user",
         externalId: "local-dev-admin",
@@ -312,7 +331,23 @@ describe("OrgSyncService", () => {
         lastSyncedAt: null
       })
     ];
-    const departments = [buildDepartmentRow()];
+    const departments = [
+      buildDepartmentRow({ lastSyncedAt: new Date("2026-04-01T00:00:00.000Z") }),
+      ...Array.from({ length: 3 }, (_, index) =>
+        buildDepartmentRow({
+          id: `dept-row-${index + 2}`,
+          externalId: `dept-${index + 2}`,
+          name: `Department ${index + 2}`,
+          lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
+        })
+      ),
+      buildDepartmentRow({
+        id: "stale-dept-row",
+        externalId: "stale-dept",
+        name: "Former Department",
+        lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
+      })
+    ];
     const memberships: Array<{ userId: string; departmentId: string; isPrimary: boolean; source: string }> = [
       {
         userId: "stale-user",
@@ -328,19 +363,23 @@ describe("OrgSyncService", () => {
           name: "Engineering",
           parentExternalId: null,
           sortOrder: 1
-        }
+        },
+        ...Array.from({ length: 3 }, (_, index) => ({
+          externalId: `dept-${index + 2}`,
+          name: `Department ${index + 2}`,
+          parentExternalId: null,
+          sortOrder: index + 2
+        }))
       ],
-      users: [
-        {
-          userId: "active-ding-user",
-          unionId: "active-union",
-          displayName: "Active Employee",
-          email: "active@example.com",
-          departmentExternalIds: ["dept-1"],
-          primaryDepartmentExternalId: "dept-1",
-          lifecycleState: "active"
-        }
-      ]
+      users: activeUsers.map((user, index) => ({
+        userId: user.dingtalkUserId ?? `active-ding-user-${index}`,
+        unionId: user.externalId ?? `active-union-${index}`,
+        displayName: user.displayName ?? `Active Employee ${index}`,
+        email: `active-${index}@example.com`,
+        departmentExternalIds: ["dept-1"],
+        primaryDepartmentExternalId: "dept-1",
+        lifecycleState: "active" as const
+      }))
     };
 
     const db = {
@@ -361,7 +400,13 @@ describe("OrgSyncService", () => {
       },
       department: {
         findMany: vi.fn(async () => departments),
-        findUnique: vi.fn(async () => null)
+        findUnique: vi.fn(async () => null),
+        update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+          const department = departments.find((row) => row.id === args.where.id);
+          if (!department) throw new Error("department not found");
+          Object.assign(department, args.data);
+          return department;
+        })
       },
       departmentMembership: {
         findMany: vi.fn(
@@ -423,7 +468,10 @@ describe("OrgSyncService", () => {
       provider: {
         fetchFullOrganization: vi.fn(async () => snapshot),
         fetchDepartmentScope: vi.fn(async () => snapshot),
-        fetchUserScope: vi.fn(async () => snapshot)
+        fetchUserScope: vi.fn(async () => snapshot),
+        confirmUserPresence: vi.fn(async (userId: string) =>
+          userId === "stale-ding-user" ? "missing" : "present"
+        )
       },
       departments: {
         upsertMany: vi.fn(async () => undefined)
@@ -436,6 +484,17 @@ describe("OrgSyncService", () => {
       organizationMemberships,
       jobs: {
         db,
+        getLatestSuccessfulFullSnapshot: vi.fn(async () => ({
+          jobId: "job-previous",
+          departments: [
+            { externalId: "dept-1" },
+            { externalId: "dept-2" },
+            { externalId: "dept-3" },
+            { externalId: "dept-4" },
+            { externalId: "stale-dept" }
+          ],
+          users: Array.from({ length: 12 }, (_, index) => ({ userId: `previous-user-${index}` }))
+        })),
         create: vi.fn(async () => ({ id: "job-1" })),
         markRunning: vi.fn(async () => undefined),
         appendEvent: vi.fn(async () => undefined),
@@ -469,11 +528,18 @@ describe("OrgSyncService", () => {
     );
     expect(organizationMemberships.upsert).toHaveBeenCalledWith({
       organizationId: "org_internal",
-      userId: "active-user",
+      userId: "active-user-0",
       membershipType: "employee",
       status: "active",
       title: null,
       joinedAt: expect.any(Date)
+    });
+    expect(db.department.update).toHaveBeenCalledWith({
+      where: { id: "stale-dept-row" },
+      data: {
+        status: "disabled",
+        lastSyncedAt: expect.any(Date)
+      }
     });
     expect(organizationMemberships.upsert).toHaveBeenCalledWith({
       organizationId: "org_internal",
@@ -664,13 +730,17 @@ describe("OrgSyncService", () => {
 
     expect(result).toEqual({ jobId: "job-1", status: "succeeded" });
     expect(replaceDiffs).toHaveBeenCalledWith("job-1", []);
-    expect(markSucceeded).toHaveBeenCalledWith("job-1", {
-      total: 0,
-      department: 0,
-      user: 0,
-      membership: 0,
-      byChangeType: {}
-    });
+    expect(markSucceeded).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({
+        total: 0,
+        department: 0,
+        user: 0,
+        membership: 0,
+        byChangeType: {},
+        reconciliation: expect.objectContaining({ enabled: true })
+      })
+    );
     expect(users[0]).toMatchObject({
       dingtalkOpenId: "open-1",
       dingtalkUserId: "ding-user-1"

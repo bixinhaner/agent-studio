@@ -97,7 +97,11 @@ type SyncDiffRow = {
 
 type SyncJobTable = {
   findUnique(args: { where: { id: string } }): Promise<SyncJobRow | null>;
-  findMany(args?: { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }): Promise<SyncJobRow[]>;
+  findMany(args?: {
+    where?: Record<string, unknown>;
+    orderBy?: { createdAt?: "asc" | "desc" };
+    take?: number;
+  }): Promise<SyncJobRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<SyncJobRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<SyncJobRow>;
 };
@@ -332,6 +336,42 @@ export class SyncJobRepository {
       take: limit
     });
     return rows.map(mapJob);
+  }
+
+  async getLatestSuccessfulFullSnapshot(): Promise<{
+    jobId: string;
+    finishedAt?: string;
+    departments: unknown[];
+    users: unknown[];
+  } | null> {
+    const rows = await this.db.syncJob.findMany({
+      where: {
+        provider: "dingtalk",
+        scopeType: "full",
+        status: "succeeded"
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10
+    });
+
+    for (const row of rows) {
+      const snapshots = await this.db.syncSnapshot.findMany({
+        where: { syncJobId: row.id },
+        orderBy: { createdAt: "asc" }
+      });
+      const departmentSnapshot = snapshots.find((snapshot) => snapshot.entityType === "department");
+      const userSnapshot = snapshots.find((snapshot) => snapshot.entityType === "user");
+      if (!Array.isArray(departmentSnapshot?.snapshotPayload) || !Array.isArray(userSnapshot?.snapshotPayload)) {
+        continue;
+      }
+      return {
+        jobId: row.id,
+        finishedAt: row.finishedAt ? toIsoString(row.finishedAt) : undefined,
+        departments: departmentSnapshot.snapshotPayload,
+        users: userSnapshot.snapshotPayload
+      };
+    }
+    return null;
   }
 
   private async updateJob(jobId: string, data: Record<string, unknown>): Promise<void> {
