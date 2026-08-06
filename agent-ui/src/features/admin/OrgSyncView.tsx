@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Empty, Input, Space, Spin, Tag, Typography } from "antd";
-import { Activity, Building, ChevronDown, ChevronRight, Clock, ListTree, RefreshCcw, UserPlus, Zap } from "lucide-react";
+import { Alert, Button, Card, Drawer, Empty, Input, Segmented, Space, Spin, Tag, Tooltip, Typography } from "antd";
+import { Building, ChevronDown, ChevronRight, ListTree, MoreHorizontal, RefreshCcw, UserPlus, Zap } from "lucide-react";
 
 import {
   fetchOrgSyncConfig,
@@ -26,12 +26,8 @@ type JobDiffState = {
   diffs?: OrgSyncDiff[];
   departmentLookup?: Record<string, OrgSyncDepartmentLookupEntry>;
   userLookup?: Record<string, OrgSyncUserLookupEntry>;
-};
-
-type SummaryChip = {
-  label: string;
-  value: string;
-  tone?: "neutral" | "success" | "warning" | "danger";
+  entityFilter?: string;
+  query?: string;
 };
 
 type HiddenChange = {
@@ -47,6 +43,8 @@ type FieldChangeRows = {
 type FormattedDiff = {
   id: string;
   entityType: string;
+  changeType: string;
+  changeLabel: string;
   title: string;
   meta: string;
   changes: string[];
@@ -118,7 +116,7 @@ const USER_VISIBLE_FIELDS = [
 
 const DEPARTMENT_VISIBLE_FIELDS = ["name", "parentExternalId", "sortOrder", "status"];
 const USER_SYSTEM_FIELDS = new Set(["userId", "openId", "corpId", "unionId", "managerDingTalkUserId"]);
-const PREVIEW_DIFF_LIMIT = 8;
+const PREVIEW_DIFF_LIMIT = 6;
 
 function formatLocalTime(value: string | null | undefined): string {
   if (!value) return "未执行";
@@ -169,24 +167,6 @@ function getJobStatusText(status: string | undefined): string {
   if (status === "pending") return "排队中";
   if (status === "failed") return "异常结束";
   return status || "未知状态";
-}
-
-function getJobStatusTagColor(status: string | undefined): string {
-  if (isSucceededStatus(status)) return "success";
-  if (status === "running" || status === "pending") return "processing";
-  return "error";
-}
-
-function formatScope(job: OrgSyncJob): string {
-  if (job.scopeType === "department") return job.scopeExternalId ? "指定部门增量同步" : "部门增量同步";
-  if (job.scopeType === "user") return job.scopeExternalId ? "指定员工增量同步" : "员工增量同步";
-  return "全部通讯录";
-}
-
-function formatScopeTitle(scopeType: string | undefined): string {
-  if (scopeType === "department") return "部门同步";
-  if (scopeType === "user") return "用户同步";
-  return "全量同步";
 }
 
 function formatTriggerType(triggerType: string | undefined): string {
@@ -253,57 +233,6 @@ function formatJobSummaryLine(job: OrgSyncJob): string {
   return reconciliationBlocked
     ? `${changeText} 完整性校验未通过，本轮没有自动停用缺失员工或部门。`
     : changeText;
-}
-
-function getSummaryChips(job: OrgSyncJob): SummaryChip[] {
-  const summary = getSummaryRecord(job);
-  const chips: SummaryChip[] = [
-    { label: "耗时", value: formatDuration(job) },
-    { label: "范围", value: formatScope(job) },
-    { label: "触发", value: formatTriggerType(job.triggerType) }
-  ];
-
-  if (!summary) return chips;
-  const total = asNumber(summary.total) ?? 0;
-  chips.unshift({ label: "变化", value: String(total), tone: total > 0 ? "warning" : "success" });
-
-  for (const key of ["user", "department", "membership"]) {
-    const count = asNumber(summary[key]) ?? 0;
-    if (count > 0) {
-      chips.push({ label: ENTITY_LABELS[key] ?? key, value: String(count) });
-    }
-  }
-
-  const byChangeType = asRecord(summary.byChangeType);
-  for (const [key, value] of Object.entries(byChangeType ?? {})) {
-    const count = asNumber(value) ?? 0;
-    if (count > 0) {
-      chips.push({ label: CHANGE_LABELS[key] ?? key, value: String(count) });
-    }
-  }
-
-  const reconciliation = asRecord(summary.reconciliation);
-  if (reconciliation?.enabled === true) {
-    const safe = reconciliation.safe === true;
-    chips.push({
-      label: "离职校验",
-      value: safe ? "已执行" : "已保护跳过",
-      tone: safe ? "success" : "warning"
-    });
-    const confirmedMissingUsers = asNumber(reconciliation.confirmedMissingUsers) ?? 0;
-    if (confirmedMissingUsers > 0) {
-      chips.push({ label: "确认离职", value: String(confirmedMissingUsers), tone: "warning" });
-    }
-    const userCoverage = asNumber(reconciliation.userCoverage);
-    const departmentCoverage = asNumber(reconciliation.departmentCoverage);
-    if (userCoverage !== undefined) {
-      chips.push({ label: "员工覆盖", value: `${Math.round(userCoverage * 100)}%` });
-    }
-    if (departmentCoverage !== undefined) {
-      chips.push({ label: "部门覆盖", value: `${Math.round(departmentCoverage * 100)}%` });
-    }
-  }
-  return chips;
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -574,7 +503,9 @@ function formatDiff(
   return {
     id: diff.id,
     entityType: diff.entityType,
-    title: `${changeLabel} ${entityLabel} · ${target}`,
+    changeType: diff.changeType,
+    changeLabel,
+    title: `${entityLabel} · ${target}`,
     meta: idText,
     changes: rows.visible,
     hiddenChanges: rows.hidden
@@ -582,14 +513,29 @@ function formatDiff(
 }
 
 function groupDiffs(diffs: FormattedDiff[]) {
-  const order = ["user", "department", "membership", "other"];
+  const order = ["created", "updated", "relationship", "removed", "other"];
   const groups = new Map<string, FormattedDiff[]>();
   for (const diff of diffs) {
-    const key = diff.entityType === "user" || diff.entityType === "department" || diff.entityType === "membership" ? diff.entityType : "other";
+    const key = diff.changeType === "created" || diff.changeType === "restored"
+      ? "created"
+      : diff.entityType === "membership" || diff.changeType === "primary_changed"
+        ? "relationship"
+        : diff.changeType === "updated"
+          ? "updated"
+          : diff.changeType === "disabled" || diff.changeType === "removed"
+            ? "removed"
+            : "other";
     groups.set(key, [...(groups.get(key) ?? []), diff]);
   }
+  const labels: Record<string, string> = {
+    created: "新增",
+    updated: "更新",
+    relationship: "关系调整",
+    removed: "停用与移除",
+    other: "其他变化"
+  };
   return order
-    .map((key) => ({ key, label: ENTITY_LABELS[key] ?? "其他变化", diffs: groups.get(key) ?? [] }))
+    .map((key) => ({ key, label: labels[key], diffs: groups.get(key) ?? [] }))
     .filter((group) => group.diffs.length > 0);
 }
 
@@ -616,6 +562,7 @@ export function OrgSyncView() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [operationsOpen, setOperationsOpen] = useState(false);
   const [diffStateByJobId, setDiffStateByJobId] = useState<Record<string, JobDiffState>>({});
 
   async function reload() {
@@ -678,6 +625,8 @@ export function OrgSyncView() {
         diffs: state[jobId]?.diffs,
         departmentLookup: state[jobId]?.departmentLookup,
         userLookup: state[jobId]?.userLookup,
+        entityFilter: state[jobId]?.entityFilter,
+        query: state[jobId]?.query,
         errorText: undefined
       }
     }));
@@ -725,184 +674,89 @@ export function OrgSyncView() {
     });
   }
 
+  function updateDiffView(jobId: string, patch: Pick<JobDiffState, "entityFilter" | "query">) {
+    setDiffStateByJobId((state) => {
+      const current = state[jobId];
+      if (!current) return state;
+      return {
+        ...state,
+        [jobId]: {
+          ...current,
+          ...patch,
+          showAll: false
+        }
+      };
+    });
+  }
+
   const latestJob = jobs[0];
   const isRunning = latestJob?.status === "running";
 
   return (
-    <Card className="admin-tree-card antd-admin-card" bordered={false} bodyStyle={{ padding: 0 }}>
-      <div className="admin-tree-header" style={{ padding: "24px 24px 0 24px" }}>
-        <Typography.Title level={4} style={{ margin: "0 0 8px 0", fontSize: 18 }}>
-          同步中心
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }}>
-          管理与身份提供商的同步任务状态与策略。
-        </Typography.Paragraph>
-      </div>
+    <>
+      <Card className="admin-tree-card admin-sync-panel antd-admin-card" bordered={false} bodyStyle={{ padding: 0 }}>
+        <div className="admin-tree-header admin-sync-panel-header">
+          <Typography.Title level={4}>最近同步任务</Typography.Title>
+          <div className="admin-sync-panel-actions">
+            <Tooltip title="同步设置与手动执行">
+              <Button aria-label="同步设置与手动执行" icon={<MoreHorizontal size={16} />} onClick={() => setOperationsOpen(true)} />
+            </Tooltip>
+            <Tooltip title="刷新任务">
+              <Button aria-label="刷新任务" icon={<RefreshCcw size={15} />} onClick={() => void reload()} loading={loading} />
+            </Tooltip>
+          </div>
+        </div>
 
-      <div className="admin-tree-container" style={{ padding: 24 }}>
-        {loading ? <div style={{ textAlign: "center", padding: 48 }}><Spin size="large" /></div> : null}
-        {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} /> : null}
+        {errorText ? <Alert type="error" showIcon message={errorText} className="admin-sync-alert" /> : null}
+        {loading ? <div className="admin-sync-panel-loading"><Spin size="large" /></div> : null}
 
-        {config && !loading && (
-          <>
-            <div className="admin-sync-dashboard">
-              <div className="admin-sync-stat-card">
-                <div className="admin-sync-stat-label"><Clock size={16} /> 自动化策略</div>
-                <div className="admin-sync-stat-value" style={{ color: config.enabled ? "var(--admin-color-text)" : "var(--admin-color-subtle)" }}>
-                  {config.enabled ? formatCadence(config.intervalMinutes) : "已关闭"}
-                </div>
-                <div style={{ marginTop: "auto" }}>
-                  <Tag color={config.enabled ? "success" : "default"} style={{ borderRadius: 12 }}>
-                    {config.enabled ? "Enabled" : "Disabled"}
-                  </Tag>
-                </div>
-              </div>
-
-              <div className="admin-sync-stat-card">
-                <div className="admin-sync-stat-label"><Activity size={16} /> 最近任务状态</div>
-                {latestJob ? (
-                  <>
-                    <div className="admin-sync-stat-value">
-                      {getJobStatusText(latestJob.status)}
-                    </div>
-                    <div style={{ marginTop: "auto", fontSize: 12, color: "var(--admin-color-subtle)" }}>
-                      耗时: {formatDuration(latestJob)}
-                      <br />
-                      结束于: {formatLocalTime(latestJob.finishedAt)}
-                    </div>
-                  </>
-                ) : (
-                  <div className="admin-sync-stat-value" style={{ color: "var(--admin-color-subtle)" }}>暂无记录</div>
-                )}
-              </div>
+        {!loading ? (
+          <div className="admin-sync-job-table">
+            <div className="admin-sync-job-table-head" aria-hidden="true">
+              <span />
+              <span>开始时间</span>
+              <span>状态</span>
+              <span>触发方式</span>
+              <span>耗时</span>
+              <span>摘要</span>
             </div>
-
-            <div style={{ marginBottom: 32 }}>
-              <Typography.Title level={5} style={{ fontSize: 15, marginBottom: 16 }}>触发手动同步</Typography.Title>
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <Card size="small" style={{ borderRadius: 12, border: "1px solid var(--admin-color-border)", boxShadow: "var(--admin-shadow-sm)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ padding: 8, background: "var(--admin-color-bg)", borderRadius: 8 }}><Zap size={18} color="var(--admin-color-accent)" /></div>
-                      <div>
-                        <div style={{ fontWeight: 500 }}>全量同步</div>
-                        <div style={{ fontSize: 12, color: "var(--admin-color-subtle)" }}>立即同步所有用户与组织架构信息</div>
-                      </div>
-                    </div>
-                    <Button type="primary" loading={submitting || isRunning} onClick={() => handleTrigger(triggerFullOrgSync)}>
-                      立即执行
-                    </Button>
-                  </div>
-                </Card>
-
-                <div style={{ display: "flex", gap: 16 }}>
-                  <Card size="small" style={{ flex: 1, borderRadius: 12, border: "1px solid var(--admin-color-border)", boxShadow: "var(--admin-shadow-sm)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                      <div style={{ padding: 8, background: "var(--admin-color-bg)", borderRadius: 8 }}><Building size={18} color="var(--admin-color-subtle)" /></div>
-                      <div style={{ fontWeight: 500 }}>部门增量同步</div>
-                    </div>
-                    <Space.Compact style={{ width: "100%" }}>
-                      <Input
-                        placeholder="输入钉钉后台中的部门编号"
-                        value={departmentId}
-                        onChange={(event) => setDepartmentId(event.target.value)}
-                      />
-                      <Button loading={submitting} disabled={!departmentId.trim()} onClick={() => handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}>
-                        执行
-                      </Button>
-                    </Space.Compact>
-                  </Card>
-
-                  <Card size="small" style={{ flex: 1, borderRadius: 12, border: "1px solid var(--admin-color-border)", boxShadow: "var(--admin-shadow-sm)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                      <div style={{ padding: 8, background: "var(--admin-color-bg)", borderRadius: 8 }}><UserPlus size={18} color="var(--admin-color-subtle)" /></div>
-                      <div style={{ fontWeight: 500 }}>用户增量同步</div>
-                    </div>
-                    <Space.Compact style={{ width: "100%" }}>
-                      <Input
-                        placeholder="输入钉钉后台中的员工账号"
-                        value={userId}
-                        onChange={(event) => setUserId(event.target.value)}
-                      />
-                      <Button loading={submitting} disabled={!userId.trim()} onClick={() => handleTrigger(() => triggerUserOrgSync(userId.trim()))}>
-                        执行
-                      </Button>
-                    </Space.Compact>
-                  </Card>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <Typography.Title level={5} style={{ fontSize: 15, margin: 0 }}>最近同步任务</Typography.Title>
-                <Button type="text" icon={<RefreshCcw size={14} />} onClick={reload} loading={loading}>刷新列表</Button>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {jobs.map((job) => {
+            <div className="admin-sync-job-table-body">
+              {jobs.map((job) => {
                   const diffState = diffStateByJobId[job.id];
                   const formattedDiffs = (diffState?.diffs ?? []).map((diff) =>
                     formatDiff(diff, diffState?.departmentLookup, diffState?.userLookup)
                   );
                   const businessDiffs = formattedDiffs.filter((diff) => diff.changes.length > 0);
-                  const groups = groupDiffs(businessDiffs);
+                  const entityFilter = diffState?.entityFilter ?? "all";
+                  const diffQuery = diffState?.query?.trim().toLowerCase() ?? "";
+                  const filteredBusinessDiffs = businessDiffs.filter((diff) => {
+                    if (entityFilter !== "all" && diff.entityType !== entityFilter) return false;
+                    if (!diffQuery) return true;
+                    return [diff.title, diff.changeLabel, ...diff.changes].join(" ").toLowerCase().includes(diffQuery);
+                  });
+                  const groups = groupDiffs(filteredBusinessDiffs);
                   const hiddenChangeSummary = summarizeHiddenChanges(formattedDiffs);
                   const visibleDiffCount = groups.reduce(
                     (count, group) => count + (diffState?.showAll ? group.diffs.length : Math.min(group.diffs.length, PREVIEW_DIFF_LIMIT)),
                     0
                   );
-                  const collapsedBusinessDiffCount = businessDiffs.length - visibleDiffCount;
+                  const collapsedBusinessDiffCount = filteredBusinessDiffs.length - visibleDiffCount;
 
                   return (
-                    <div key={job.id} className="admin-sync-job-item">
-                      <div className="admin-sync-job-header">
-                        <div className="admin-sync-job-title">
-                          {job.status === "running" && <Spin size="small" />}
-                          {formatScopeTitle(job.scopeType)}
-                          <Tag color={getJobStatusTagColor(job.status)} style={{ borderRadius: 12, marginLeft: 8 }}>
-                            {getJobStatusText(job.status)}
-                          </Tag>
-                        </div>
-                        <div className="admin-sync-job-meta">
-                          {formatLocalTime(job.updatedAt || job.finishedAt || job.createdAt)}
-                        </div>
-                      </div>
-
-                      <div className="admin-sync-job-description">
-                        {formatJobSummaryLine(job)}
-                      </div>
-
-                      <div className="admin-sync-job-chip-row">
-                        {getSummaryChips(job).map((chip) => (
-                          <span key={`${chip.label}:${chip.value}`} className={`admin-sync-job-chip ${chip.tone ?? "neutral"}`}>
-                            <span>{chip.label}</span>
-                            <strong>{chip.value}</strong>
-                          </span>
-                        ))}
-                      </div>
-
-                      <div className="admin-sync-job-meta-row">
-                        <span>同步范围: {formatScope(job)}</span>
-                      </div>
-
-                      <div className="admin-sync-job-actions">
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={diffState?.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          onClick={() => toggleJobDiffs(job.id)}
-                          aria-expanded={Boolean(diffState?.expanded)}
-                        >
-                          {diffState?.expanded ? "收起变化明细" : "查看变化明细"}
-                        </Button>
-                        {job.summary ? (
-                          <details className="admin-sync-debug-json">
-                            <summary>原始摘要</summary>
-                            <pre>{formatJson(job.summary)}</pre>
-                          </details>
-                        ) : null}
-                      </div>
+                    <div key={job.id} className={`admin-sync-job-record${diffState?.expanded ? " expanded" : ""}`}>
+                      <button className="admin-sync-job-row" type="button" onClick={() => void toggleJobDiffs(job.id)} aria-expanded={Boolean(diffState?.expanded)}>
+                        <span className="admin-sync-job-chevron">
+                          {diffState?.expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </span>
+                        <span>{formatLocalTime(job.startedAt || job.createdAt)}</span>
+                        <span className="admin-sync-job-status">
+                          {job.status === "running" ? <Spin size="small" /> : <i className={`admin-sync-status-dot ${isSucceededStatus(job.status) ? "success" : job.status}`} />}
+                          {getJobStatusText(job.status)}
+                        </span>
+                        <span>{formatTriggerType(job.triggerType)}</span>
+                        <span>{formatDuration(job)}</span>
+                        <span className="admin-sync-job-row-summary">{formatJobSummaryLine(job)}</span>
+                      </button>
 
                       {diffState?.expanded ? (
                         <div className="admin-sync-diff-panel">
@@ -915,11 +769,32 @@ export function OrgSyncView() {
                           ) : (
                             <>
                               <div className="admin-sync-diff-panel-head">
-                                <span><ListTree size={14} /> 业务变化</span>
+                                <span><ListTree size={14} /> 变化明细</span>
                                 <span>
                                   {businessDiffs.length} 项业务变化
                                   {hiddenChangeSummary.count > 0 ? `，已收起 ${hiddenChangeSummary.count} 项系统字段` : ""}
                                 </span>
+                              </div>
+                              <div className="admin-sync-diff-toolbar">
+                                <Segmented
+                                  size="small"
+                                  value={entityFilter}
+                                  options={[
+                                    { label: "全部", value: "all" },
+                                    { label: "员工", value: "user" },
+                                    { label: "部门", value: "department" },
+                                    { label: "部门关系", value: "membership" }
+                                  ]}
+                                  onChange={(value) => updateDiffView(job.id, { entityFilter: String(value) })}
+                                />
+                                <Input
+                                  size="small"
+                                  allowClear
+                                  aria-label="搜索变化内容"
+                                  placeholder="搜索姓名、部门或变化内容"
+                                  value={diffState.query ?? ""}
+                                  onChange={(event) => updateDiffView(job.id, { query: event.target.value })}
+                                />
                               </div>
                               {hiddenChangeSummary.count > 0 ? (
                                 <div className="admin-sync-diff-system-summary">
@@ -938,17 +813,25 @@ export function OrgSyncView() {
                                 groups.map((group) => {
                                   const visibleDiffs = diffState.showAll ? group.diffs : group.diffs.slice(0, PREVIEW_DIFF_LIMIT);
                                   return (
-                                    <section key={group.key} className="admin-sync-diff-group">
+                                    <section key={group.key} className={`admin-sync-diff-group ${group.key}`}>
                                       <div className="admin-sync-diff-group-title">
                                         <span>{group.label}</span>
-                                        <Tag>{group.diffs.length}</Tag>
+                                        <strong>({group.diffs.length})</strong>
                                       </div>
-                                      <div className="admin-sync-diff-list">
+                                      <div className="admin-sync-diff-table">
+                                        <div className="admin-sync-diff-table-head" aria-hidden="true">
+                                          <span>类型</span>
+                                          <span>名称</span>
+                                          <span>变更内容</span>
+                                        </div>
                                         {visibleDiffs.map((formatted) => (
                                           <article key={formatted.id} className="admin-sync-diff-row">
-                                            <div className="admin-sync-diff-row-title">{formatted.title}</div>
-                                            <div className="admin-sync-diff-row-meta">{formatted.meta}</div>
-                                            <ul>
+                                            <span className={`admin-sync-change-type ${formatted.changeType}`}>{formatted.changeLabel}</span>
+                                            <div className="admin-sync-diff-row-title">
+                                              <span>{formatted.title}</span>
+                                              <small>{formatted.meta}</small>
+                                            </div>
+                                            <ul className="admin-sync-diff-row-changes">
                                               {formatted.changes.map((change) => (
                                                 <li key={change}>{change}</li>
                                               ))}
@@ -969,8 +852,8 @@ export function OrgSyncView() {
                                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                                   description={
                                     hiddenChangeSummary.count > 0
-                                      ? "本次没有需要人工判断的业务变化"
-                                      : "本次同步没有具体变化"
+                                      ? "当前筛选下没有需要人工判断的业务变化"
+                                      : "当前筛选下没有具体变化"
                                   }
                                 />
                               )}
@@ -979,6 +862,12 @@ export function OrgSyncView() {
                                   {diffState.showAll ? "收起部分明细" : `显示全部，另有 ${collapsedBusinessDiffCount} 项业务变化`}
                                 </Button>
                               ) : null}
+                              {job.summary ? (
+                                <details className="admin-sync-debug-json">
+                                  <summary><ChevronRight size={14} /> 诊断信息 <span>展开查看原始数据</span></summary>
+                                  <pre>{formatJson(job.summary)}</pre>
+                                </details>
+                              ) : null}
                             </>
                           )}
                         </div>
@@ -986,12 +875,51 @@ export function OrgSyncView() {
                     </div>
                   );
                 })}
-                {jobs.length === 0 && <div style={{ textAlign: "center", color: "var(--admin-color-subtle)", padding: 24 }}>暂无同步任务记录</div>}
-              </div>
+              {jobs.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无同步任务记录" /> : null}
             </div>
-          </>
-        )}
-      </div>
-    </Card>
+          </div>
+        ) : null}
+      </Card>
+
+      <Drawer
+        title="同步设置与手动执行"
+        width={440}
+        open={operationsOpen}
+        onClose={() => setOperationsOpen(false)}
+      >
+        {config ? (
+          <div className="admin-sync-operations">
+            <div className="admin-sync-policy-summary">
+              <div>
+                <span>自动化策略</span>
+                <strong>{config.enabled ? formatCadence(config.intervalMinutes) : "已关闭"}</strong>
+              </div>
+              <Tag color={config.enabled ? "success" : "default"}>{config.enabled ? "已启用" : "已关闭"}</Tag>
+            </div>
+            <section className="admin-sync-operation-block">
+              <div className="admin-sync-operation-title"><Zap size={17} /> 全量同步</div>
+              <p>立即同步全部员工、部门和部门关系。</p>
+              <Button type="primary" block loading={submitting || isRunning} onClick={() => handleTrigger(triggerFullOrgSync)}>立即执行</Button>
+            </section>
+            <section className="admin-sync-operation-block">
+              <div className="admin-sync-operation-title"><Building size={17} /> 部门增量同步</div>
+              <p>只同步指定钉钉部门及相关组织信息。</p>
+              <Space.Compact block>
+                <Input placeholder="钉钉部门编号" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} />
+                <Button loading={submitting} disabled={!departmentId.trim()} onClick={() => handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}>执行</Button>
+              </Space.Compact>
+            </section>
+            <section className="admin-sync-operation-block">
+              <div className="admin-sync-operation-title"><UserPlus size={17} /> 员工增量同步</div>
+              <p>只同步指定员工账号及其部门关系。</p>
+              <Space.Compact block>
+                <Input placeholder="钉钉员工账号" value={userId} onChange={(event) => setUserId(event.target.value)} />
+                <Button loading={submitting} disabled={!userId.trim()} onClick={() => handleTrigger(() => triggerUserOrgSync(userId.trim()))}>执行</Button>
+              </Space.Compact>
+            </section>
+          </div>
+        ) : <Spin />}
+      </Drawer>
+    </>
   );
 }

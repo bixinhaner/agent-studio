@@ -28,6 +28,55 @@ function buildUserRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe("UserRepository", () => {
+  it("does not replace an organization-synced name with a DingTalk OAuth nickname", async () => {
+    const existing = buildUserRow({
+      externalId: "union_1",
+      displayName: "李可",
+      lastSyncedAt: new Date("2026-08-06T00:00:00.000Z")
+    });
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => buildUserRow({ ...existing, ...data }));
+    const repository = new UserRepository({
+      user: {
+        count: vi.fn(async () => 0),
+        findUnique: vi.fn(async () => existing),
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => existing),
+        update
+      }
+    } as UserRepositoryDb);
+
+    await repository.upsertFromDingTalk({
+      unionId: "union_1",
+      displayName: "Like李可15686172592"
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ displayName: "李可" })
+    }));
+  });
+
+  it("uses a DingTalk OAuth name before the first organization sync", async () => {
+    const existing = buildUserRow({ externalId: "union_1", displayName: "旧名称", lastSyncedAt: null });
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => buildUserRow({ ...existing, ...data }));
+    const repository = new UserRepository({
+      user: {
+        count: vi.fn(async () => 0),
+        findUnique: vi.fn(async () => existing),
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => existing),
+        update
+      }
+    } as UserRepositoryDb);
+
+    await repository.upsertFromDingTalk({ unionId: "union_1", displayName: "首次登录名称" });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ displayName: "首次登录名称" })
+    }));
+  });
+
   it("looks up users by email with findFirst instead of findUnique", async () => {
     const findFirst = vi.fn(async () => buildUserRow());
     const findUnique = vi.fn(async () => null);

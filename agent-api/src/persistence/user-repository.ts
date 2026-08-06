@@ -285,7 +285,11 @@ export class UserRepository implements UserRepositoryLike {
           userType: existingByExternalId.userType ?? "internal_employee",
           externalId,
           email: email ?? existingByExternalId.email,
-          displayName: displayName ?? existingByExternalId.displayName,
+          // The organization directory owns an already-synced employee's canonical name.
+          // OAuth nicknames may contain phone numbers or aliases and must not overwrite it on every login.
+          displayName: existingByExternalId.lastSyncedAt
+            ? existingByExternalId.displayName ?? displayName ?? null
+            : displayName ?? existingByExternalId.displayName,
           dingtalkOpenId: dingtalkOpenId ?? existingByExternalId.dingtalkOpenId ?? null,
           dingtalkUserId: dingtalkUserId ?? existingByExternalId.dingtalkUserId ?? null,
           dingtalkCorpId: dingtalkCorpId ?? existingByExternalId.dingtalkCorpId ?? null

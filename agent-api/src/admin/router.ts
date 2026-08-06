@@ -612,14 +612,93 @@ async function getDepartmentById(db: AdminDb, departmentId: string): Promise<Dep
   );
 }
 
-async function attachMemberCount(db: AdminDb, node: DepartmentTreeNode): Promise<DepartmentTreeNode & { memberCount: number }> {
-  const count = (await (db.departmentMembership as any).findMany({ where: { departmentId: { in: [node.id] } } })) as DepartmentMembershipRow[];
-  const children = await Promise.all(node.children.map((child) => attachMemberCount(db, child)));
-  return {
-    ...node,
-    memberCount: count.length,
-    children
+type DepartmentDirectoryUser = {
+  id: string;
+  displayName: string;
+  email: string | null;
+  title: string | null;
+  avatarUrl: string | null;
+  isPrimary: boolean;
+  isLeader: boolean;
+};
+
+type DepartmentDirectoryNode = DepartmentTreeNode & {
+  memberCount: number;
+  subtreeMemberCount: number;
+  users: DepartmentDirectoryUser[];
+  children: DepartmentDirectoryNode[];
+};
+
+async function attachDepartmentDirectory(db: AdminDb, roots: DepartmentTreeNode[]): Promise<DepartmentDirectoryNode[]> {
+  const departmentIds: string[] = [];
+  const collectDepartmentIds = (nodes: DepartmentTreeNode[]) => {
+    for (const node of nodes) {
+      departmentIds.push(node.id);
+      collectDepartmentIds(node.children);
+    }
   };
+  collectDepartmentIds(roots);
+
+  const memberships = departmentIds.length
+    ? ((await (db.departmentMembership as any).findMany({
+        where: { departmentId: { in: departmentIds } }
+      })) as DepartmentMembershipRow[])
+    : [];
+  const userIds = [...new Set(memberships.map((membership) => membership.userId))];
+  const users = userIds.length
+    ? ((await (db.user as any).findMany({ where: { id: { in: userIds }, status: "active" } })) as UserRow[])
+    : [];
+  const profiles = userIds.length && typeof (db.enterpriseUserProfile as any)?.findMany === "function"
+    ? ((await (db.enterpriseUserProfile as any).findMany({ where: { userId: { in: userIds } } })) as EnterpriseUserProfileRow[])
+    : [];
+  const userById = new Map(users.map((user) => [user.id, user]));
+  const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
+  const membershipsByDepartmentId = new Map<string, DepartmentMembershipRow[]>();
+  for (const membership of memberships) {
+    if (!userById.has(membership.userId)) continue;
+    const departmentMemberships = membershipsByDepartmentId.get(membership.departmentId) ?? [];
+    departmentMemberships.push(membership);
+    membershipsByDepartmentId.set(membership.departmentId, departmentMemberships);
+  }
+
+  const decorate = (node: DepartmentTreeNode): DepartmentDirectoryNode => {
+    const children = node.children.map(decorate);
+    const directMemberships = membershipsByDepartmentId.get(node.id) ?? [];
+    const directoryUsers = directMemberships
+      .map((membership) => {
+        const user = userById.get(membership.userId);
+        if (!user) return null;
+        const profile = profileByUserId.get(user.id);
+        return {
+          id: user.id,
+          displayName: trimOrUndefined(user.displayName) ?? trimOrUndefined(user.email) ?? "未命名员工",
+          email: trimOrUndefined(user.email) ?? null,
+          title: trimOrUndefined(membership.position) ?? trimOrUndefined(profile?.title) ?? null,
+          avatarUrl: trimOrUndefined(profile?.avatarUrl) ?? null,
+          isPrimary: Boolean(membership.isPrimary),
+          isLeader: Boolean(membership.isLeader)
+        } satisfies DepartmentDirectoryUser;
+      })
+      .filter((user): user is DepartmentDirectoryUser => Boolean(user))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN"));
+    const subtreeUserIds = new Set(directoryUsers.map((user) => user.id));
+    for (const child of children) {
+      const collectChildUsers = (childNode: DepartmentDirectoryNode) => {
+        for (const user of childNode.users) subtreeUserIds.add(user.id);
+        for (const grandchild of childNode.children) collectChildUsers(grandchild);
+      };
+      collectChildUsers(child);
+    }
+    return {
+      ...node,
+      memberCount: directoryUsers.length,
+      subtreeMemberCount: subtreeUserIds.size,
+      users: directoryUsers,
+      children
+    };
+  };
+
+  return roots.map(decorate);
 }
 
 async function listDepartmentUsers(db: AdminDb, departmentId: string): Promise<AdminDetailUser[]> {
@@ -924,8 +1003,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       const db = getDbInstance();
       const repositories = getRepositories();
       const tree = await repositories.departments.listTree();
-      const withCounts = await Promise.all(tree.map((node) => attachMemberCount(db, node)));
-      res.json({ departments: withCounts });
+      res.json({ departments: await attachDepartmentDirectory(db, tree) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }

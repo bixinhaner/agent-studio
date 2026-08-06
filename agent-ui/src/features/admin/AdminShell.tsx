@@ -474,27 +474,19 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
       );
     case "organization":
       return (
-        <div className="admin-page-container">
-          <div className="admin-page-header">
-            <div>
-              <h1 className="admin-page-title">组织同步</h1>
-              <p className="admin-page-desc">查看部门树与同步任务，定位组织数据偏差。</p>
-            </div>
-          </div>
-          <div style={{ marginTop: 4 }}>
-            <Row gutter={[24, 24]}>
-              <Col xs={24} lg={10}>
+        <div className="admin-page-container admin-organization-sync-page">
+          <Row gutter={[16, 16]} className="admin-organization-sync-layout">
+              <Col xs={24} xl={10}>
                 <Suspense fallback={<AdminSectionLazyFallback />}>
                   <DepartmentTreeViewLazy />
                 </Suspense>
               </Col>
-              <Col xs={24} lg={14}>
+              <Col xs={24} xl={14}>
                 <Suspense fallback={<AdminSectionLazyFallback />}>
                   <OrgSyncViewLazy />
                 </Suspense>
               </Col>
-            </Row>
-          </div>
+          </Row>
         </div>
       );
     default:

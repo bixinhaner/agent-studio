@@ -1155,6 +1155,16 @@ export type AdminDepartmentNode = {
   createdAt: string;
   updatedAt: string;
   memberCount: number;
+  subtreeMemberCount: number;
+  users: Array<{
+    id: string;
+    displayName: string;
+    email?: string | null;
+    title?: string | null;
+    avatarUrl?: string | null;
+    isPrimary: boolean;
+    isLeader: boolean;
+  }>;
   children: AdminDepartmentNode[];
 };
 

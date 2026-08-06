@@ -1,60 +1,95 @@
-import { useEffect, useState, useMemo } from "react";
-import { Alert, Card, Space, Spin, Tag, Tree, Input, Typography } from "antd";
-import type { TreeDataNode } from "antd";
-import { Search, Building2, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Avatar, Button, Card, Empty, Input, Spin, Switch, Tag, Tooltip, Tree, Typography } from "antd";
+import type { DataNode } from "antd/es/tree";
+import { Building2, RefreshCcw, Search, UserRound } from "lucide-react";
 
 import { fetchDepartmentTree } from "./api";
 import type { AdminDepartmentNode } from "./types";
 
-function toTreeData(node: AdminDepartmentNode, searchValue: string): TreeDataNode {
-  const index = node.name.toLowerCase().indexOf(searchValue.toLowerCase());
-  const beforeStr = node.name.substring(0, index);
-  const matchStr = node.name.substring(index, index + searchValue.length);
-  const afterStr = node.name.substring(index + searchValue.length);
+type DirectoryTreeNode = AdminDepartmentNode & {
+  children: DirectoryTreeNode[];
+};
 
-  const title =
-    index > -1 ? (
-      <span>
-        {beforeStr}
-        <span style={{ color: 'var(--admin-color-accent)', fontWeight: 600 }}>{matchStr}</span>
-        {afterStr}
-      </span>
-    ) : (
-      <span>{node.name}</span>
-    );
+function highlightedText(value: string, query: string) {
+  const index = query ? value.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (index < 0) return value;
+  return (
+    <>
+      {value.slice(0, index)}
+      <mark className="admin-directory-highlight">{value.slice(index, index + query.length)}</mark>
+      {value.slice(index + query.length)}
+    </>
+  );
+}
+
+function matchesUser(user: AdminDepartmentNode["users"][number], query: string): boolean {
+  return [user.displayName, user.email, user.title]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+}
+
+function filterDirectory(nodes: AdminDepartmentNode[], rawQuery: string): DirectoryTreeNode[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return nodes;
+  return nodes.flatMap((node) => {
+    const departmentMatches = node.name.toLowerCase().includes(query);
+    const children = filterDirectory(node.children, rawQuery);
+    const users = departmentMatches ? node.users : node.users.filter((user) => matchesUser(user, query));
+    if (!departmentMatches && children.length === 0 && users.length === 0) return [];
+    return [{ ...node, users, children }];
+  });
+}
+
+function collectDepartmentKeys(nodes: AdminDepartmentNode[]): string[] {
+  return nodes.flatMap((node) => [node.id, ...collectDepartmentKeys(node.children)]);
+}
+
+function toTreeData(node: DirectoryTreeNode, query: string, showUsers: boolean): DataNode {
+  const userNodes: DataNode[] = showUsers
+    ? node.users.map((user) => ({
+        key: `user:${node.id}:${user.id}`,
+        selectable: false,
+        isLeaf: true,
+        title: (
+          <div className="admin-directory-row admin-directory-person-row">
+            <div className="admin-directory-person">
+              <Avatar size={26} src={user.avatarUrl || undefined} icon={<UserRound size={13} />} />
+              <div className="admin-directory-person-copy">
+                <span className="admin-directory-person-name">{highlightedText(user.displayName, query)}</span>
+                <span className="admin-directory-person-detail">
+                  {[user.email, user.title].filter(Boolean).map((value, index) => (
+                    <span key={`${value}:${index}`}>{highlightedText(String(value), query)}</span>
+                  ))}
+                </span>
+              </div>
+              {user.isLeader ? <Tag color="blue">部门负责人</Tag> : null}
+            </div>
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </div>
+        )
+      }))
+    : [];
 
   return {
     key: node.id,
     title: (
-      <div className="admin-tree-node">
+      <div className="admin-directory-row admin-directory-department-row">
         <div className="admin-tree-node-title">
-          <Building2 size={14} style={{ color: 'var(--admin-color-subtle)' }} />
-          <Typography.Text strong style={{ fontSize: 14 }}>{title}</Typography.Text>
+          <Building2 size={15} />
+          <Typography.Text strong>{highlightedText(node.name, query)}</Typography.Text>
+          {node.status !== "active" ? <Tag>已停用</Tag> : null}
         </div>
-        <div className="admin-tree-node-meta">
-          <Tag icon={<Users size={12} />} style={{ border: 'none', background: 'var(--admin-color-bg)' }}>
-            {node.memberCount} 人
-          </Tag>
-        </div>
+        <span className="admin-directory-count">{node.memberCount}</span>
+        <span className="admin-directory-count">{node.subtreeMemberCount}</span>
       </div>
     ),
-    children: node.children.map(child => toTreeData(child, searchValue))
+    children: [...node.children.map((child) => toTreeData(child, query, showUsers)), ...userNodes]
   };
 }
 
-function getParentKey(key: string, tree: AdminDepartmentNode[]): string | null {
-  let parentKey: string | null = null;
-  for (let i = 0; i < tree.length; i++) {
-    const node = tree[i];
-    if (node.children) {
-      if (node.children.some((item) => item.id === key)) {
-        parentKey = node.id;
-      } else if (getParentKey(key, node.children)) {
-        parentKey = getParentKey(key, node.children);
-      }
-    }
-  }
-  return parentKey;
+function countDepartments(nodes: AdminDepartmentNode[]): number {
+  return nodes.reduce((count, node) => count + 1 + countDepartments(node.children), 0);
 }
 
 export function DepartmentTreeView() {
@@ -63,101 +98,96 @@ export function DepartmentTreeView() {
   const [errorText, setErrorText] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [searchValue, setSearchValue] = useState("");
-  const [autoExpandParent, setAutoExpandParent] = useState(true);
+  const [showUsers, setShowUsers] = useState(false);
 
-  // Extract all flat data for search
-  const dataList: { key: string; title: string }[] = useMemo(() => {
-    const list: { key: string; title: string }[] = [];
-    const generateList = (data: AdminDepartmentNode[]) => {
-      for (let i = 0; i < data.length; i++) {
-        const node = data[i];
-        list.push({ key: node.id, title: node.name });
-        if (node.children) {
-          generateList(node.children);
-        }
-      }
-    };
-    generateList(departments);
-    return list;
-  }, [departments]);
-
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      setLoading(true);
-      setErrorText("");
-      try {
-        const response = await fetchDepartmentTree();
-        if (active) {
-          setDepartments(response.departments);
-          // Expand first level by default
-          setExpandedKeys(response.departments.map(d => d.id));
-        }
-      } catch (error) {
-        if (active) setErrorText(error instanceof Error ? error.message : "加载部门树失败");
-      } finally {
-        if (active) setLoading(false);
-      }
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErrorText("");
+    try {
+      const response = await fetchDepartmentTree();
+      setDepartments(response.departments);
+      setExpandedKeys(response.departments.map((department) => department.id));
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "加载部门树失败");
+    } finally {
+      setLoading(false);
     }
-    void load();
-    return () => {
-      active = false;
-    };
   }, []);
 
-  const onExpand = (newExpandedKeys: React.Key[]) => {
-    setExpandedKeys(newExpandedKeys);
-    setAutoExpandParent(false);
-  };
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { value } = e.target;
-    const newExpandedKeys = dataList
-      .map((item) => {
-        if (item.title.toLowerCase().includes(value.toLowerCase())) {
-          return getParentKey(item.key, departments);
-        }
-        return null;
-      })
-      .filter((item, i, self) => item && self.indexOf(item) === i);
-    setExpandedKeys(newExpandedKeys as React.Key[]);
-    setSearchValue(value);
-    setAutoExpandParent(true);
-  };
-
-  const treeData = useMemo(() => departments.map(d => toTreeData(d, searchValue)), [departments, searchValue]);
+  const filteredDepartments = useMemo(
+    () => filterDirectory(departments, searchValue),
+    [departments, searchValue]
+  );
+  const treeData = useMemo(
+    () => filteredDepartments.map((department) => (
+      toTreeData(department, searchValue.trim(), showUsers || Boolean(searchValue.trim()))
+    )),
+    [filteredDepartments, searchValue, showUsers]
+  );
+  const visibleExpandedKeys = searchValue.trim() ? collectDepartmentKeys(filteredDepartments) : expandedKeys;
+  const departmentCount = useMemo(() => countDepartments(departments), [departments]);
+  const activeUserCount = useMemo(() => {
+    const ids = new Set<string>();
+    const visit = (nodes: AdminDepartmentNode[]) => {
+      for (const node of nodes) {
+        for (const user of node.users) ids.add(user.id);
+        visit(node.children);
+      }
+    };
+    visit(departments);
+    return ids.size;
+  }, [departments]);
 
   return (
-    <Card className="admin-tree-card antd-admin-card" bordered={false} bodyStyle={{ padding: 0 }}>
-      <div className="admin-tree-header" style={{ padding: '24px 24px 0 24px' }}>
-        <Typography.Title level={4} style={{ margin: '0 0 8px 0', fontSize: 18 }}>
-          部门结构树
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ margin: '0 0 16px 0', fontSize: 13 }}>
-          展示从身份提供商同步的最新组织架构，支持按部门名称搜索。
-        </Typography.Paragraph>
-        <Input 
-          placeholder="搜索部门名称..." 
-          prefix={<Search size={16} style={{ color: 'var(--admin-color-subtle)' }} />}
-          onChange={onChange} 
-          style={{ width: '100%', borderRadius: 'var(--admin-radius-full)' }}
-          size="large"
-          allowClear
-        />
+    <Card className="admin-tree-card admin-directory-card antd-admin-card" bordered={false} bodyStyle={{ padding: 0 }}>
+      <div className="admin-tree-header admin-directory-header">
+        <Typography.Title level={4}>部门结构树</Typography.Title>
+        <div className="admin-directory-toolbar">
+          <Input
+            aria-label="搜索部门、姓名或邮箱"
+            placeholder="搜索部门、姓名或邮箱"
+            prefix={<Search size={15} />}
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            allowClear
+          />
+          <label className="admin-directory-switch">
+            <Switch checked={showUsers} onChange={setShowUsers} size="small" />
+            <span>显示人员</span>
+          </label>
+          <Tooltip title="刷新组织树">
+            <Button aria-label="刷新组织树" icon={<RefreshCcw size={15} />} onClick={() => void load()} loading={loading} />
+          </Tooltip>
+        </div>
       </div>
-      <div className="admin-tree-container" style={{ padding: '24px' }}>
-        {errorText && <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} />}
+      <div className="admin-directory-summary">
+        <span>{departmentCount} 个部门</span>
+        <span><strong>{activeUserCount}</strong> 名在职员工</span>
+      </div>
+      <div className="admin-directory-column-head" aria-hidden="true">
+        <span>名称</span>
+        <span>直属人数</span>
+        <span>含下级人数</span>
+      </div>
+      <div className="admin-tree-container">
+        {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
         {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin size="large" /></div>
+          <div className="admin-directory-loading"><Spin size="large" /></div>
+        ) : treeData.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的部门或员工" />
         ) : (
           <Tree
-            onExpand={onExpand}
-            expandedKeys={expandedKeys}
-            autoExpandParent={autoExpandParent}
+            onExpand={(keys) => setExpandedKeys(keys)}
+            expandedKeys={visibleExpandedKeys}
+            autoExpandParent={Boolean(searchValue.trim())}
             treeData={treeData}
             blockNode
             showLine={{ showLeafIcon: false }}
-            style={{ background: 'transparent' }}
+            className="admin-directory-tree"
           />
         )}
       </div>
