@@ -20,6 +20,10 @@ function createService() {
     updatedAt: "2026-07-31T00:00:00.000Z"
   };
   const db = {
+    portalTrainingConfiguration: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({})
+    },
     user: {
       findFirst: vi.fn().mockResolvedValue({ id: "source-1" })
     },
@@ -41,7 +45,8 @@ function createService() {
     },
     thread: {
       findMany: vi.fn().mockResolvedValue([]),
-      findFirst: vi.fn().mockResolvedValue(null)
+      findFirst: vi.fn().mockResolvedValue(null),
+      count: vi.fn().mockResolvedValue(4)
     }
   };
   const workspaces = {
@@ -85,5 +90,42 @@ describe("TrainingCatalogService", () => {
     await expect(service.getNode({ viewer, nodeId: "private-file" }))
       .rejects.toMatchObject({ status: 404 } satisfies Partial<TrainingCatalogAccessError>);
     expect(workspaces.getNode).not.toHaveBeenCalledWith(expect.objectContaining({ nodeId: "private-file" }));
+  });
+
+  it("uses persisted configuration and can disable the catalog", async () => {
+    const { db, service } = createService();
+    db.portalTrainingConfiguration.findUnique.mockResolvedValue({
+      enabled: false,
+      sourceEmail: "owner@baicells.com",
+      rootFolderName: "培训目录",
+      updatedAt: new Date("2026-08-06T00:00:00.000Z")
+    });
+
+    await expect(service.getCatalog(viewer))
+      .rejects.toMatchObject({ status: 404, message: "培训案例尚未启用" });
+    const status = await service.getConfigurationStatus(viewer);
+    expect(status).toMatchObject({
+      enabled: false,
+      sourceEmail: "owner@baicells.com",
+      validationStatus: "disabled"
+    });
+  });
+
+  it("validates and persists enabled configuration before exposing it", async () => {
+    const { db, service } = createService();
+
+    const status = await service.saveConfiguration({
+      viewer,
+      actorUserId: "admin-1",
+      enabled: true,
+      sourceEmail: "like@baicells.com",
+      rootFolderName: "员工AI培训"
+    });
+
+    expect(db.portalTrainingConfiguration.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { organizationId: "org-1" },
+      update: expect.objectContaining({ updatedByUserId: "admin-1" })
+    }));
+    expect(status).toMatchObject({ validationStatus: "valid", folderCount: 1, threadCount: 4 });
   });
 });

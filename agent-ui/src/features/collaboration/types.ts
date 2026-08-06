@@ -117,6 +117,23 @@ export type BroadcastStatus = "draft" | "published" | "archived";
 export type BroadcastTestStatus = "not_tested" | "passed" | "failed" | "stale";
 export type BroadcastLanguage = "zh" | "en";
 
+export type TrainingCatalogConfiguration = {
+  enabled: boolean;
+  sourceEmail: string;
+  rootFolderName: string;
+  validationStatus: "valid" | "invalid" | "disabled";
+  validationMessage: string;
+  folderCount: number;
+  threadCount: number;
+  updatedAt?: string;
+};
+
+export type TrainingCatalogRootFolderOption = {
+  id: string;
+  name: string;
+  workspaceId: string;
+};
+
 export type BroadcastTargetRecord = {
   id: string;
   broadcastId: string;

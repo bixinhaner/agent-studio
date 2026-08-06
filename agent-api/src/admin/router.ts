@@ -79,6 +79,7 @@ type AdminRouterOptions = {
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   orgSyncConfig?: { enabled: boolean; intervalMinutes: number };
   broadcastRouter?: Router;
+  trainingCatalogRouter?: Router;
   recoveryRouter?: Router;
   securityDomains?: SecurityDomainService;
   securityDomainAccess?: SecurityDomainAccessControl;
@@ -966,6 +967,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
   });
 
   router.use(options.broadcastRouter ?? Router());
+  router.use(options.trainingCatalogRouter ?? Router());
 
   return router;
 }

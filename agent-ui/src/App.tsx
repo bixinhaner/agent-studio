@@ -11,6 +11,7 @@ import {
 import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
+import { canAccessPortalTraining } from "./features/portal/training-access";
 import { fetchPublicExternalWebAccessState } from "./features/external-web-access/api";
 import { MaintenancePage } from "./features/external-web-access/MaintenancePage";
 import { EXTERNAL_WEB_MAINTENANCE_EVENT } from "./lib/api";
@@ -530,19 +531,6 @@ function AppContent(props: {
     }
     setView("portal");
   };
-  const trainingMode = isTrainingPath(props.pathname);
-  const openTraining = trainingMode
-    ? undefined
-    : () => {
-        if (typeof window === "undefined") return;
-        const nextUrl = new URL("/training", window.location.origin);
-        const nextWindow = window.open(nextUrl.toString(), "_blank", "noopener,noreferrer");
-        nextWindow?.focus?.();
-      };
-  const exitTraining = trainingMode
-    ? () => replaceLocationPath("/login/internal")
-    : undefined;
-
   const effectiveAuthMode: AuthEntryMode =
     !props.inviteToken &&
     !props.reviewRequestId &&
@@ -554,6 +542,27 @@ function AppContent(props: {
   const isExternalWebActor =
     auth.user?.userType === "external_user" ||
     auth.activeOrganization?.type === "customer";
+  const trainingMode = isTrainingPath(props.pathname);
+  const trainingAccessAllowed = canAccessPortalTraining({
+    userType: auth.user?.userType,
+    organizationType: auth.activeOrganization?.type
+  });
+  const openTraining = trainingMode || !trainingAccessAllowed
+    ? undefined
+    : () => {
+        if (typeof window === "undefined") return;
+        const nextUrl = new URL("/training", window.location.origin);
+        const nextWindow = window.open(nextUrl.toString(), "_blank", "noopener,noreferrer");
+        nextWindow?.focus?.();
+      };
+  const exitTraining = trainingMode
+    ? () => replaceLocationPath("/login/internal")
+    : undefined;
+
+  useEffect(() => {
+    if (auth.loading || !auth.user || !trainingMode || trainingAccessAllowed) return;
+    replaceLocationPath("/");
+  }, [auth.loading, auth.user, trainingAccessAllowed, trainingMode]);
 
   useEffect(() => {
     if (auth.loading || auth.user) return;
@@ -598,6 +607,10 @@ function AppContent(props: {
 
   if (!auth.user) {
     return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} mode={effectiveAuthMode} />;
+  }
+
+  if (trainingMode && !trainingAccessAllowed) {
+    return <AccessStateLoadingFallback />;
   }
 
   if (props.reviewRequestId) {

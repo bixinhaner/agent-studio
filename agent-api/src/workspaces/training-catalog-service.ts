@@ -37,6 +37,26 @@ export type TrainingCatalogThread = {
   updatedAt: string;
 };
 
+export type TrainingCatalogConfiguration = {
+  enabled: boolean;
+  sourceEmail: string;
+  rootFolderName: string;
+  updatedAt?: string;
+};
+
+export type TrainingCatalogConfigurationStatus = TrainingCatalogConfiguration & {
+  validationStatus: "valid" | "invalid" | "disabled";
+  validationMessage: string;
+  folderCount: number;
+  threadCount: number;
+};
+
+export type TrainingCatalogRootFolderOption = {
+  id: string;
+  name: string;
+  workspaceId: string;
+};
+
 const toIso = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
@@ -59,8 +79,164 @@ export class TrainingCatalogService {
 
   async getCatalog(viewer: TrainingCatalogViewer): Promise<TrainingCatalogSummary> {
     this.assertInternalViewer(viewer);
-    const sourceEmail = this.config.sourceEmail.trim();
-    const rootFolderName = this.config.rootFolderName.trim();
+    const configuration = await this.resolveConfiguration(viewer.organizationId);
+    if (!configuration.enabled) {
+      throw new TrainingCatalogAccessError("培训案例尚未启用", 404);
+    }
+    return this.resolveCatalog(viewer, configuration);
+  }
+
+  async getConfigurationStatus(viewer: TrainingCatalogViewer): Promise<TrainingCatalogConfigurationStatus> {
+    this.assertInternalViewer(viewer);
+    const configuration = await this.resolveConfiguration(viewer.organizationId);
+    if (!configuration.enabled) {
+      return {
+        ...configuration,
+        validationStatus: "disabled",
+        validationMessage: "培训案例当前未启用",
+        folderCount: 0,
+        threadCount: 0
+      };
+    }
+    try {
+      const catalog = await this.resolveCatalog(viewer, configuration);
+      const threadCount = await this.db.thread.count({
+        where: {
+          organizationId: viewer.organizationId,
+          userId: catalog.sourceActor.userId,
+          userWorkspaceId: catalog.workspaceId,
+          workspaceFolderId: { in: Array.from(catalog.folderIds) },
+          status: "active"
+        }
+      });
+      return {
+        ...configuration,
+        validationStatus: "valid",
+        validationMessage: "配置有效，内容会从来源工作区实时同步",
+        folderCount: Math.max(0, catalog.folderIds.size - 1),
+        threadCount
+      };
+    } catch (error) {
+      return {
+        ...configuration,
+        validationStatus: "invalid",
+        validationMessage: error instanceof Error ? error.message : "培训案例配置无效",
+        folderCount: 0,
+        threadCount: 0
+      };
+    }
+  }
+
+  async saveConfiguration(input: {
+    viewer: TrainingCatalogViewer;
+    actorUserId: string;
+    enabled: boolean;
+    sourceEmail: string;
+    rootFolderName: string;
+  }): Promise<TrainingCatalogConfigurationStatus> {
+    this.assertInternalViewer(input.viewer);
+    const configuration: TrainingCatalogConfiguration = {
+      enabled: input.enabled,
+      sourceEmail: input.sourceEmail.trim(),
+      rootFolderName: input.rootFolderName.trim()
+    };
+    if (!configuration.sourceEmail || !configuration.rootFolderName) {
+      throw new TrainingCatalogAccessError("来源账号和根目录不能为空", 400);
+    }
+    if (configuration.enabled) {
+      await this.resolveCatalog(input.viewer, configuration);
+    }
+    await this.db.portalTrainingConfiguration.upsert({
+      where: { organizationId: input.viewer.organizationId },
+      create: {
+        organizationId: input.viewer.organizationId,
+        enabled: configuration.enabled,
+        sourceEmail: configuration.sourceEmail,
+        rootFolderName: configuration.rootFolderName,
+        updatedByUserId: input.actorUserId
+      },
+      update: {
+        enabled: configuration.enabled,
+        sourceEmail: configuration.sourceEmail,
+        rootFolderName: configuration.rootFolderName,
+        updatedByUserId: input.actorUserId
+      }
+    });
+    return this.getConfigurationStatus(input.viewer);
+  }
+
+  async listRootFolderOptions(input: {
+    viewer: TrainingCatalogViewer;
+    sourceEmail: string;
+  }): Promise<TrainingCatalogRootFolderOption[]> {
+    this.assertInternalViewer(input.viewer);
+    const sourceEmail = input.sourceEmail.trim();
+    if (!sourceEmail) return [];
+    const sourceUser = await this.db.user.findFirst({
+      where: {
+        email: { equals: sourceEmail, mode: "insensitive" },
+        status: "active",
+        organizationMemberships: {
+          some: { organizationId: input.viewer.organizationId, status: "active" }
+        }
+      },
+      select: { id: true }
+    });
+    if (!sourceUser) return [];
+    const workspace = await this.db.userWorkspace.findFirst({
+      where: {
+        organizationId: input.viewer.organizationId,
+        ownerUserId: sourceUser.id,
+        status: "active"
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true }
+    });
+    if (!workspace) return [];
+    const folders = await this.db.workspaceNode.findMany({
+      where: {
+        workspaceId: workspace.id,
+        parentId: null,
+        kind: "folder",
+        state: "active"
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true }
+    });
+    return folders.map((folder) => ({ ...folder, workspaceId: workspace.id }));
+  }
+
+  private async resolveConfiguration(organizationId: string): Promise<TrainingCatalogConfiguration> {
+    const stored = await this.db.portalTrainingConfiguration.findUnique({
+      where: { organizationId },
+      select: {
+        enabled: true,
+        sourceEmail: true,
+        rootFolderName: true,
+        updatedAt: true
+      }
+    });
+    if (stored) {
+      return {
+        enabled: stored.enabled,
+        sourceEmail: stored.sourceEmail,
+        rootFolderName: stored.rootFolderName,
+        updatedAt: toIso(stored.updatedAt)
+      };
+    }
+    return {
+      enabled: true,
+      sourceEmail: this.config.sourceEmail.trim(),
+      rootFolderName: this.config.rootFolderName.trim()
+    };
+  }
+
+  private async resolveCatalog(
+    viewer: TrainingCatalogViewer,
+    configuration: TrainingCatalogConfiguration
+  ): Promise<TrainingCatalogSummary> {
+    const sourceEmail = configuration.sourceEmail.trim();
+    const rootFolderName = configuration.rootFolderName.trim();
     if (!sourceEmail || !rootFolderName) {
       throw new TrainingCatalogAccessError("培训案例尚未配置", 404);
     }

@@ -18,6 +18,8 @@ import type {
   ThreadShareRecord,
   ThreadShareSubjectType,
   ThreadAssignmentRecord,
+  TrainingCatalogConfiguration,
+  TrainingCatalogRootFolderOption,
   UpdateBroadcastDraftInput
 } from "./types";
 
@@ -253,4 +255,63 @@ export async function fetchBroadcastDeliveries(broadcastId: string): Promise<Bro
     `/api/admin/broadcasts/${encodeURIComponent(trim(broadcastId))}/deliveries`
   );
   return response.deliveries;
+}
+
+function mapTrainingConfiguration(input: {
+  enabled: boolean;
+  source_email: string;
+  root_folder_name: string;
+  validation_status: TrainingCatalogConfiguration["validationStatus"];
+  validation_message: string;
+  folder_count: number;
+  thread_count: number;
+  updated_at?: string | null;
+}): TrainingCatalogConfiguration {
+  return {
+    enabled: input.enabled,
+    sourceEmail: input.source_email,
+    rootFolderName: input.root_folder_name,
+    validationStatus: input.validation_status,
+    validationMessage: input.validation_message,
+    folderCount: input.folder_count,
+    threadCount: input.thread_count,
+    updatedAt: input.updated_at ?? undefined
+  };
+}
+
+export async function fetchTrainingCatalogConfiguration(): Promise<TrainingCatalogConfiguration> {
+  const response = await api<{ configuration: Parameters<typeof mapTrainingConfiguration>[0] }>(
+    "/api/admin/training-catalog/config"
+  );
+  return mapTrainingConfiguration(response.configuration);
+}
+
+export async function saveTrainingCatalogConfiguration(input: {
+  enabled: boolean;
+  sourceEmail: string;
+  rootFolderName: string;
+}): Promise<TrainingCatalogConfiguration> {
+  const response = await api<{ configuration: Parameters<typeof mapTrainingConfiguration>[0] }>(
+    "/api/admin/training-catalog/config",
+    {
+      method: "PUT",
+      json: {
+        enabled: input.enabled,
+        source_email: trim(input.sourceEmail),
+        root_folder_name: trim(input.rootFolderName)
+      }
+    }
+  );
+  return mapTrainingConfiguration(response.configuration);
+}
+
+export async function fetchTrainingRootFolders(sourceEmail: string): Promise<TrainingCatalogRootFolderOption[]> {
+  const response = await api<{
+    folders: Array<{ id: string; name: string; workspace_id: string }>;
+  }>(`/api/admin/training-catalog/root-folders?source_email=${encodeURIComponent(trim(sourceEmail))}`);
+  return response.folders.map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    workspaceId: folder.workspace_id
+  }));
 }

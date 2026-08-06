@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
+import { createTrainingCatalogAdminRouter } from "./admin/training-catalog-admin-router.js";
 import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
 import { createAdminRouter } from "./admin/router.js";
 import { SecurityDomainAccessControl } from "./security-domains/access-control.js";
@@ -10601,6 +10602,10 @@ registerCommonApiRoutes(app, {
     broadcastRouter: createBroadcastAdminRouter({
       broadcasts,
       service: broadcastService,
+      requirePermission
+    }),
+    trainingCatalogRouter: createTrainingCatalogAdminRouter({
+      service: trainingCatalog,
       requirePermission
     }),
     recoveryRouter: createConversationRecoveryRouter(conversationRecovery),

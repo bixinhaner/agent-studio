@@ -69,6 +69,7 @@ model User {
   createdWorkspaceNodes WorkspaceNode[] @relation("WorkspaceNodeCreatedBy")
   createdWorkspaceVersions WorkspaceFileVersion[] @relation("WorkspaceVersionCreatedBy")
   threadReadStates ThreadReadState[]
+  portalTrainingConfigurationsUpdated PortalTrainingConfiguration[] @relation("PortalTrainingConfigurationUpdatedBy")
 
   @@index([email])
   @@index([status, role])
@@ -96,6 +97,7 @@ model Organization {
   securityDomains SecurityDomain[]
   securityDomainAccessPolicy SecurityDomainAccessPolicy?
   userWorkspaces UserWorkspace[] @relation("UserWorkspaceOrganization")
+  portalTrainingConfiguration PortalTrainingConfiguration?
 
   @@index([type, status])
   @@map("organizations")
@@ -2339,6 +2341,20 @@ model RuntimeControl {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("runtime_controls")
+}
+
+model PortalTrainingConfiguration {
+  organizationId  String       @id @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enabled         Boolean      @default(true)
+  sourceEmail     String       @map("source_email")
+  rootFolderName  String       @map("root_folder_name")
+  updatedByUserId String?      @map("updated_by_user_id")
+  updatedByUser   User?        @relation("PortalTrainingConfigurationUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@map("portal_training_configurations")
 }
 
 enum ThreadStatus {

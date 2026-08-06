@@ -18,6 +18,7 @@ import {
   Spin,
   Steps,
   Switch,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -63,6 +64,7 @@ import type {
   BroadcastRecord,
   BroadcastStatus
 } from "./types";
+import { TrainingCatalogSettings } from "./TrainingCatalogSettings";
 
 type CampaignDraft = {
   title: string;
@@ -81,6 +83,13 @@ type CampaignDraft = {
 };
 
 type WorkspaceMode = "overview" | "editor";
+type OperationsOutreachTab = "broadcasts" | "training";
+
+function readOperationsOutreachTab(): OperationsOutreachTab {
+  if (typeof window === "undefined") return "broadcasts";
+  const query = window.location.hash.split("?")[1] ?? "";
+  return new URLSearchParams(query).get("tab") === "training" ? "training" : "broadcasts";
+}
 
 const DEFAULT_AUDIENCE: BroadcastAudienceConfig = {
   include: [{ type: "organization_type", value: "external" }],
@@ -416,7 +425,20 @@ export function BroadcastAdminView() {
   const [testEmail, setTestEmail] = useState("");
   const [simulatedUserId, setSimulatedUserId] = useState<string | undefined>();
   const [publishConfirmed, setPublishConfirmed] = useState(false);
+  const [activeTab, setActiveTab] = useState<OperationsOutreachTab>(readOperationsOutreachTab);
   const isNarrowScreen = useIsNarrowScreen(1080);
+
+  useEffect(() => {
+    const syncTab = () => setActiveTab(readOperationsOutreachTab());
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, []);
+
+  function changeTab(nextTab: OperationsOutreachTab) {
+    setActiveTab(nextTab);
+    const nextHash = nextTab === "training" ? "#admin/broadcasts?tab=training" : "#admin/broadcasts";
+    window.history.replaceState(null, "", nextHash);
+  }
 
   useEffect(() => {
     let active = true;
@@ -757,10 +779,25 @@ export function BroadcastAdminView() {
           </Typography.Title>
           <Typography.Text type="secondary">用邮件、站内信和钉钉把合适内容发送给合适用户，并完整追踪测试与送达结果。</Typography.Text>
         </div>
-        <Button type="primary" icon={<MousePointerClick size={16} />} onClick={startNew}>
-          新建触达
-        </Button>
+        {activeTab === "broadcasts" ? (
+          <Button type="primary" icon={<MousePointerClick size={16} />} onClick={startNew}>
+            新建触达
+          </Button>
+        ) : null}
       </div>
+
+      <Tabs
+        className="engagement-page-tabs"
+        activeKey={activeTab}
+        items={[
+          { key: "broadcasts", label: "触达活动" },
+          { key: "training", label: "培训案例" }
+        ]}
+        onChange={(key) => changeTab(key as OperationsOutreachTab)}
+      />
+
+      {activeTab === "training" ? <TrainingCatalogSettings users={users} /> : (
+        <>
 
       <div className="admin-page-summary-grid">
         {summaryItems.map((item) => (
@@ -844,6 +881,8 @@ export function BroadcastAdminView() {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

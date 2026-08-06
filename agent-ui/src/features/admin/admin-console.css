@@ -1741,6 +1741,137 @@
   min-height: 0;
 }
 
+.engagement-page-tabs {
+  margin-top: -4px;
+}
+
+.engagement-page-tabs .ant-tabs-nav {
+  margin-bottom: 18px;
+}
+
+.training-config-loading {
+  display: flex;
+  justify-content: center;
+  padding: 64px;
+}
+
+.training-config-panel {
+  overflow: hidden;
+  background: var(--admin-color-surface-solid);
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-md);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.training-config-panel-head,
+.training-config-row,
+.training-config-actions {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--admin-color-border);
+}
+
+.training-config-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.training-config-panel-head .ant-typography {
+  margin: 0;
+}
+
+.training-config-panel-head .ant-typography + .ant-typography {
+  display: block;
+  margin-top: 4px;
+}
+
+.training-config-label,
+.training-config-form-row > label {
+  display: grid;
+  gap: 4px;
+}
+
+.training-config-label strong,
+.training-config-form-row > label strong {
+  color: var(--admin-color-text);
+  font-size: 14px;
+}
+
+.training-config-label span,
+.training-config-form-row > label span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.training-config-row > .ant-switch {
+  justify-self: start;
+}
+
+.training-config-row > .ant-input {
+  max-width: 160px;
+}
+
+.training-config-visibility {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.training-config-visibility svg {
+  margin-top: 1px;
+  color: var(--admin-color-accent);
+}
+
+.training-config-validation-row {
+  align-items: start;
+}
+
+.training-config-validation-row .ant-alert {
+  width: 100%;
+}
+
+.training-config-actions {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  border-bottom: 0;
+}
+
+.training-config-actions > span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .training-config-panel-head,
+  .training-config-row,
+  .training-config-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .training-config-panel-head {
+    display: flex;
+  }
+
+  .training-config-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .training-config-actions > span {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .training-config-actions .ant-btn {
+    width: 100%;
+  }
+}
+
 .engagement-step-card .ant-card-body {
   padding: 18px 22px;
 }
