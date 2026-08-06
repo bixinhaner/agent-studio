@@ -107,9 +107,10 @@ export function createPortalWorkspaceRouter(input: {
   resolveActor(req: Request): Promise<WorkspaceActor>;
 }): Router {
   const router = Router();
+  const PORTAL_WORKSPACE_FILE_MAX_BYTES = 512 * 1024 * 1024;
   const uploadParser = express.raw({
     type: () => true,
-    limit: "128mb"
+    limit: PORTAL_WORKSPACE_FILE_MAX_BYTES
   });
 
   router.get("/", async (req, res) => {

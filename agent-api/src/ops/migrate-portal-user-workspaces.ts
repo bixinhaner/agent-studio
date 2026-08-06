@@ -6,7 +6,7 @@ import { createDbClient } from "../db/client.js";
 import { LocalFsWorkspaceStorage, workspaceObjectChecksum } from "../workspaces/storage.js";
 import { PortalWorkspaceService, type WorkspaceActor } from "../workspaces/service.js";
 
-// Historical ready artifacts may predate the current 128 MB upload boundary.
+// Historical ready artifacts may predate the current 512 MB upload boundary.
 // Import them without changing the limit for new Portal uploads.
 const MAX_MIGRATION_FILE_BYTES = 512 * 1024 * 1024;
 

@@ -1,5 +1,20 @@
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 
+export const PORTAL_WORKSPACE_UPLOAD_MAX_BYTES = 512 * 1024 * 1024;
+
+export type PortalWorkspaceUploadFailureCode = "too-large" | "quota" | "request";
+
+export class PortalWorkspaceUploadError extends Error {
+  constructor(
+    public readonly code: PortalWorkspaceUploadFailureCode,
+    message: string,
+    public readonly status?: number
+  ) {
+    super(message);
+    this.name = "PortalWorkspaceUploadError";
+  }
+}
+
 export type PortalWorkspaceSummary = {
   id: string;
   name: string;
@@ -193,6 +208,9 @@ export async function uploadPortalWorkspaceFile(input: {
   parentId?: string;
   threadId?: string;
 }): Promise<PortalWorkspaceNode> {
+  if (input.file.size > PORTAL_WORKSPACE_UPLOAD_MAX_BYTES) {
+    throw new PortalWorkspaceUploadError("too-large", "File exceeds the workspace upload limit.");
+  }
   const response = await fetch(`${apiBase()}/api/portal/workspace/files`, {
     method: "POST",
     credentials: "include",
@@ -209,9 +227,19 @@ export async function uploadPortalWorkspaceFile(input: {
   });
   const text = await response.text();
   if (!response.ok) notifyAuthInvalidStatus(response.status);
-  const payload = text ? JSON.parse(text) as { file?: PortalWorkspaceNode; detail?: string } : {};
+  let payload: { file?: PortalWorkspaceNode; detail?: string } = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text) as { file?: PortalWorkspaceNode; detail?: string };
+    } catch {
+      payload = {};
+    }
+  }
   if (!response.ok || !payload.file) {
-    throw new Error(payload.detail || `Failed to upload file (${response.status})`);
+    const detail = String(payload.detail || "");
+    const code: PortalWorkspaceUploadFailureCode =
+      response.status === 413 && /quota/i.test(detail) ? "quota" : response.status === 413 ? "too-large" : "request";
+    throw new PortalWorkspaceUploadError(code, detail || `Failed to upload file (${response.status})`, response.status);
   }
   return payload.file;
 }

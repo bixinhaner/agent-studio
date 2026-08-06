@@ -1287,7 +1287,6 @@ function errorCodeFromUnknown(error: unknown): string | undefined {
 const DIRECT_MESSAGE_TEXT_MAX_CHARS = 20_000;
 const LARGE_DIRECT_MESSAGE_NOTICE =
   "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
-const LARGE_PASTE_UPLOAD_FALLBACK_TEXT = "Please analyze the attached text file.";
 const GENERIC_ASSISTANT_ERROR_NOTICE =
   "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_PROCESS_ERROR_DETAIL =
@@ -1559,12 +1558,48 @@ type UploadedAttachmentMeta = {
 
 type UploadedAttachmentDownloadMeta = Omit<UploadedAttachmentMeta, "path">;
 
+type UploadFailureCode =
+  | "too-large"
+  | "size-mismatch"
+  | "network"
+  | "timeout"
+  | "cancelled"
+  | "auth"
+  | "server"
+  | "request"
+  | "session"
+  | "invalid-response";
+
+type UploadFailure = Error & {
+  uploadFailureCode: UploadFailureCode;
+  status?: number;
+};
+
 type WorkspacePendingAttachment = PendingAttachment & {
   uploadError?: string;
+  uploadFailureCode?: UploadFailureCode;
   uploadedMeta?: UploadedAttachmentMeta;
 };
 
-const THREAD_ATTACHMENT_MAX_BYTES = 128 * 1024 * 1024;
+const THREAD_ATTACHMENT_MAX_BYTES = 512 * 1024 * 1024;
+
+function createUploadFailure(code: UploadFailureCode, message: string, status?: number): UploadFailure {
+  const failure = new Error(message) as UploadFailure;
+  failure.uploadFailureCode = code;
+  if (status !== undefined) failure.status = status;
+  return failure;
+}
+
+function uploadFailureFromUnknown(error: unknown, fallbackCode: UploadFailureCode = "request"): UploadFailure {
+  if (error && typeof error === "object" && "uploadFailureCode" in error) {
+    const candidate = error as Partial<UploadFailure>;
+    if (candidate.uploadFailureCode) return error as UploadFailure;
+  }
+  return createUploadFailure(
+    fallbackCode,
+    error instanceof Error ? error.message : "Attachment upload failed"
+  );
+}
 
 function decodeMaybeUri(value: string): string {
   if (!value.trim()) return "";
@@ -1675,12 +1710,26 @@ function parseUploadResponse(rawText: string): Record<string, unknown> {
   }
 }
 
-function uploadErrorMessageFromResponse(status: number, rawText: string): string {
+function uploadFailureFromResponse(status: number, rawText: string): UploadFailure {
   const data = parseUploadResponse(rawText);
   const detail = typeof data.detail === "string" ? data.detail.trim() : "";
-  if (detail) return detail;
-  if (status === 413) return `File is larger than the ${formatFileSize(THREAD_ATTACHMENT_MAX_BYTES)} upload limit.`;
-  return `Upload failed (${status})`;
+  if (status === 413) {
+    return createUploadFailure(
+      "too-large",
+      `File is larger than the ${formatFileSize(THREAD_ATTACHMENT_MAX_BYTES)} upload limit.`,
+      status
+    );
+  }
+  if (/size\s+does\s+not\s+match|大小.*一致|size.*mismatch/i.test(detail)) {
+    return createUploadFailure("size-mismatch", detail || "Upload size does not match the original file.", status);
+  }
+  if (status === 401 || status === 403) {
+    return createUploadFailure("auth", detail || "The upload session is no longer valid.", status);
+  }
+  if (status >= 500) {
+    return createUploadFailure("server", detail || "The upload service is temporarily unavailable.", status);
+  }
+  return createUploadFailure("request", detail || `Upload failed (${status})`, status);
 }
 
 function uploadThreadAttachment(
@@ -1710,14 +1759,17 @@ function uploadThreadAttachment(
         options?.onProgress?.(Math.min(event.loaded / event.total, 0.99));
       }
     };
-    request.onerror = () => reject(new Error("Network error while uploading attachment. Check the connection and try again."));
-    request.ontimeout = () => reject(new Error("Attachment upload timed out. Check the connection and try again."));
-    request.onabort = () => reject(new Error("Attachment upload was cancelled."));
+    request.onerror = () =>
+      reject(createUploadFailure("network", "Network error while uploading attachment."));
+    request.ontimeout = () =>
+      reject(createUploadFailure("timeout", "Attachment upload timed out."));
+    request.onabort = () =>
+      reject(createUploadFailure("cancelled", "Attachment upload was cancelled."));
     request.onload = () => {
       const rawText = typeof request.responseText === "string" ? request.responseText : "";
       if (request.status < 200 || request.status >= 300) {
         notifyAuthInvalidStatus(request.status);
-        reject(new Error(uploadErrorMessageFromResponse(request.status, rawText)));
+        reject(uploadFailureFromResponse(request.status, rawText));
         return;
       }
 
@@ -1726,7 +1778,7 @@ function uploadThreadAttachment(
         const data = parseUploadResponse(rawText);
         resolve(uploadedMetaFromUnknown(data.attachment));
       } catch (error) {
-        reject(error instanceof Error ? error : new Error("Invalid upload response"));
+        reject(uploadFailureFromUnknown(error, "invalid-response"));
       }
     };
 
@@ -1875,7 +1927,8 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
     if (state.file.size > THREAD_ATTACHMENT_MAX_BYTES) {
       yield {
         ...baseAttachment,
-        uploadError: `File is larger than the ${formatFileSize(THREAD_ATTACHMENT_MAX_BYTES)} upload limit.`,
+        uploadError: "File exceeds the upload limit.",
+        uploadFailureCode: "too-large",
         status: { type: "incomplete", reason: "error" }
       } as WorkspacePendingAttachment;
       return;
@@ -1887,10 +1940,10 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
     const uploadPromise = (async () => {
       const threadId = await this.resolveThreadId();
       if (!threadId) {
-        throw new Error("Failed to initialize the current session. Please try again.");
+        throw createUploadFailure("session", "Failed to initialize the current session.");
       }
       if (this.cancelledAttachmentIds.has(id)) {
-        throw new Error("Attachment upload was cancelled.");
+        throw createUploadFailure("cancelled", "Attachment upload was cancelled.");
       }
       return uploadThreadAttachment(threadId, state.file, {
         onProgress: (progress) => progressQueue.push(progress),
@@ -1932,9 +1985,11 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
       } as WorkspacePendingAttachment;
     } catch (error) {
       if (this.cancelledAttachmentIds.has(id)) return;
+      const failure = uploadFailureFromUnknown(error);
       yield {
         ...baseAttachment,
-        uploadError: error instanceof Error ? error.message : "Failed to upload attachment.",
+        uploadError: failure.message,
+        uploadFailureCode: failure.uploadFailureCode,
         status: { type: "incomplete", reason: "error" }
       } as WorkspacePendingAttachment;
     } finally {
@@ -1999,6 +2054,36 @@ function uploadStatusLabel(attachment: Attachment & { uploadError?: string }): s
   return "Uploaded";
 }
 
+function localizedUploadFailureMessage(
+  attachment: Pick<WorkspacePendingAttachment, "uploadError" | "uploadFailureCode">,
+  t: ReturnType<typeof usePortalI18n>["t"]
+): string {
+  switch (attachment.uploadFailureCode) {
+    case "too-large":
+      return t("thread.uploadTooLarge", { limit: formatFileSize(THREAD_ATTACHMENT_MAX_BYTES) });
+    case "size-mismatch":
+      return t("thread.uploadSizeMismatch");
+    case "network":
+      return t("thread.uploadNetworkError");
+    case "timeout":
+      return t("thread.uploadTimeout");
+    case "cancelled":
+      return t("thread.uploadCancelled");
+    case "auth":
+      return t("thread.uploadAuthError");
+    case "server":
+      return t("thread.uploadServerError");
+    case "session":
+      return t("thread.uploadSessionError");
+    case "invalid-response":
+      return t("thread.uploadResponseError");
+    case "request":
+      return t("thread.uploadRequestError");
+    default:
+      return t("thread.uploadFailedHelp");
+  }
+}
+
 const UploadAwareAttachment: FC = () => {
   const aui = useAui();
   const { t } = usePortalI18n();
@@ -2006,11 +2091,16 @@ const UploadAwareAttachment: FC = () => {
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const requestPreview = useContext(PreviewRequestContext);
   const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
-  const attachment = useAttachment((item) => item as Attachment & { source?: string; uploadError?: string });
+  const attachment = useAttachment(
+    (item) => item as Attachment & { source?: string; uploadError?: string; uploadFailureCode?: UploadFailureCode }
+  );
   const status = attachment.status;
   const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
   const isUploading = status.type === "running";
   const isFailed = status.type === "incomplete";
+  const uploadFailureMessage = isFailed
+    ? localizedUploadFailureMessage(attachment, t)
+    : "";
   const isImage = attachment.type === "image";
   const canRetry = isFailed && attachment.source !== "message" && attachment.file instanceof File;
   const downloadMeta = useMemo(() => uploadedAttachmentDownloadMetaFromAttachment(attachment), [attachment]);
@@ -2094,13 +2184,19 @@ const UploadAwareAttachment: FC = () => {
           </div>
         ) : (
           <span className={`portal-upload-status-badge${isFailed ? " portal-upload-status-error" : ""}`}>
-            {isFailed ? "Failed" : attachmentTypeLabel(attachment.type)}
+            {isFailed ? t("thread.uploadFailedShort") : attachmentTypeLabel(attachment.type)}
           </span>
         )}
       </div>
       {canRetry ? (
-        <button type="button" className="portal-upload-retry-overlay" onClick={retryUpload}>
-          Retry
+        <button
+          type="button"
+          className="portal-upload-retry-overlay"
+          onClick={retryUpload}
+          title={uploadFailureMessage}
+          aria-label={`${t("common.retry")}: ${uploadFailureMessage}`}
+        >
+          {t("common.retry")}
         </button>
       ) : null}
       {previewPath && downloadMeta ? (
@@ -2181,8 +2277,11 @@ function largePasteFileName(now = new Date()): string {
   return `pasted-text-${stamp}.txt`;
 }
 
-function largePasteAttachedNotice(fileName: string): string {
-  return `Large pasted text was attached as ${fileName}. Add a short question and send it when the upload finishes.`;
+function largePasteAttachedNotice(
+  fileName: string,
+  t: ReturnType<typeof usePortalI18n>["t"]
+): string {
+  return t("thread.pastedTextAttached", { name: fileName });
 }
 
 function useComposerMultilineRef(composerText: string) {
@@ -2243,8 +2342,9 @@ function useLargeTextPasteAttachmentGuard(input: {
   aui: ReturnType<typeof useAui>;
   enabled: boolean;
   onNotice: (notice: string) => void;
+  t: ReturnType<typeof usePortalI18n>["t"];
 }) {
-  const { composerWrapRef, aui, enabled, onNotice } = input;
+  const { composerWrapRef, aui, enabled, onNotice, t } = input;
 
   useEffect(() => {
     const wrap = composerWrapRef.current;
@@ -2262,11 +2362,7 @@ function useLargeTextPasteAttachmentGuard(input: {
 
       const pastedBytes = new Blob([pastedText]).size;
       if (pastedBytes > THREAD_ATTACHMENT_MAX_BYTES) {
-        onNotice(
-          `The pasted text is too large to upload as one file. Save it as a smaller .txt or .log file and upload it. File uploads are limited to ${formatFileSize(
-            THREAD_ATTACHMENT_MAX_BYTES
-          )}.`
-        );
+        onNotice(t("thread.pastedTextTooLarge", { limit: formatFileSize(THREAD_ATTACHMENT_MAX_BYTES) }));
         return;
       }
 
@@ -2274,17 +2370,17 @@ function useLargeTextPasteAttachmentGuard(input: {
       const file = new File([pastedText], fileName, { type: "text/plain" });
       const currentText = aui.composer().getState().text.trim();
       if (!currentText) {
-        aui.composer().setText(LARGE_PASTE_UPLOAD_FALLBACK_TEXT);
+        aui.composer().setText(t("thread.pastedTextFallback"));
       }
-      onNotice(largePasteAttachedNotice(fileName));
-      void aui.composer().addAttachment(file).catch((error) => {
-        onNotice(error instanceof Error ? error.message : "Failed to attach pasted text. Save it as a file and upload it.");
+      onNotice(largePasteAttachedNotice(fileName, t));
+      void aui.composer().addAttachment(file).catch(() => {
+        onNotice(t("thread.pastedTextAttachFailed"));
       });
     };
 
     textarea.addEventListener("paste", handlePaste);
     return () => textarea.removeEventListener("paste", handlePaste);
-  }, [aui, composerWrapRef, enabled, onNotice]);
+  }, [aui, composerWrapRef, enabled, onNotice, t]);
 }
 
 const SkillComposerControls: FC = () => {
@@ -2325,6 +2421,24 @@ const UploadAwareComposer: FC = () => {
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
+  const composerAttachments = useAuiState((state) => state.composer.attachments);
+  const failedUploadDetails = useMemo(
+    () =>
+      composerAttachments
+        .filter((attachment) => attachment.status.type === "incomplete")
+        .map((attachment) => {
+          const failedAttachment = attachment as Attachment & {
+            uploadError?: string;
+            uploadFailureCode?: UploadFailureCode;
+          };
+          return {
+            id: attachment.id,
+            name: attachment.name,
+            message: localizedUploadFailureMessage(failedAttachment, t)
+          };
+        }),
+    [composerAttachments, t]
+  );
   const sendBlockedByUpload = uploadBlockReason !== "";
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
   const sendDisabled =
@@ -2347,7 +2461,8 @@ const UploadAwareComposer: FC = () => {
     composerWrapRef,
     aui,
     enabled: !accessBlock.blocked,
-    onNotice: setLargeTextNotice
+    onNotice: setLargeTextNotice,
+    t
   });
 
   useEffect(() => {
@@ -2409,11 +2524,21 @@ const UploadAwareComposer: FC = () => {
             {accessBlock.notice}
           </p>
         ) : sendBlockedByUpload ? (
-          <p className="portal-upload-composer-hint" role="status">
-            {uploadBlockReason === "uploading"
-              ? t("thread.uploadingHelp")
-              : t("thread.uploadFailedHelp")}
-          </p>
+          <div className="portal-upload-composer-hint" role="status">
+            {uploadBlockReason === "uploading" ? (
+              t("thread.uploadingHelp")
+            ) : failedUploadDetails.length > 0 ? (
+              <div className="portal-upload-failure-list">
+                {failedUploadDetails.map((item) => (
+                  <div className="portal-upload-failure-item" key={item.id}>
+                    <strong>{item.name}:</strong> {item.message}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              t("thread.uploadFailedHelp")
+            )}
+          </div>
         ) : sendBlockedByLargeText ? (
           <p className="portal-upload-composer-hint" role="alert">
             {largeDirectMessageNotice(composerText.length)}

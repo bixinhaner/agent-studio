@@ -28,9 +28,11 @@ import {
   fetchPortalAgentOutputs,
   fetchPortalRecentWorkspace,
   fetchPortalWorkspaceTrash,
+  PORTAL_WORKSPACE_UPLOAD_MAX_BYTES,
   PORTAL_WORKSPACE_DATA_SOURCE,
   searchPortalWorkspace,
   uploadPortalWorkspaceFile,
+  PortalWorkspaceUploadError,
   type PortalWorkspaceNode,
   type PortalWorkspaceDataSource,
   type PortalWorkspaceFolderTaskSummary,
@@ -193,7 +195,13 @@ export function WorkspaceFolderHome(props: {
       await load();
       props.onWorkspaceChanged?.();
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : t("workspace.uploadFailed"));
+      if (error instanceof PortalWorkspaceUploadError && error.code === "too-large") {
+        setErrorText(t("workspace.uploadTooLarge", { limit: formatFileSize(PORTAL_WORKSPACE_UPLOAD_MAX_BYTES) }));
+      } else if (error instanceof PortalWorkspaceUploadError && error.code === "quota") {
+        setErrorText(t("workspace.uploadQuotaExceeded"));
+      } else {
+        setErrorText(t("workspace.uploadFailed"));
+      }
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

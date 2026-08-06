@@ -2058,6 +2058,19 @@ body.access-request-route #root {
   line-height: 1.4;
 }
 
+.portal-upload-failure-list {
+  display: grid;
+  gap: 4px;
+}
+
+.portal-upload-failure-item {
+  overflow-wrap: anywhere;
+}
+
+.portal-upload-failure-item strong {
+  font-weight: 600;
+}
+
 .portal-access-composer-hint {
   color: #991b1b;
   font-weight: 600;

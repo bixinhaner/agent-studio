@@ -10303,9 +10303,11 @@ async function listDirectories(cwd: string): Promise<Array<{ name: string; path:
   return directories;
 }
 
+const PORTAL_THREAD_ATTACHMENT_MAX_BYTES = 512 * 1024 * 1024;
+
 const uploadRawParser = express.raw({
   type: () => true,
-  limit: "128mb"
+  limit: PORTAL_THREAD_ATTACHMENT_MAX_BYTES
 });
 
 function isLocalDevOrigin(origin: string): boolean {
