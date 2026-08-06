@@ -22,6 +22,7 @@ import {
   type EmailRequestResponse
 } from "./api";
 import { rememberPreferredAuthEntryMode, rememberSessionAuthEntryMode } from "./auth-entry-preference";
+import { currentBrowserLocation, replaceBrowserLocation } from "./auth-navigation";
 
 type AuthContextValue = {
   loading: boolean;
@@ -134,7 +135,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           setError(null);
           const redirectPath = window.sessionStorage.getItem(POST_AUTH_REDIRECT_KEY)?.trim();
           const nextLocation = redirectPath || `${window.location.pathname}${window.location.hash}`;
-          window.history.replaceState({}, document.title, nextLocation);
+          replaceBrowserLocation(nextLocation);
         } catch (err) {
           resetSession();
           setError(authErrorMessage(err));
@@ -162,7 +163,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const { config } = await fetchDingTalkConfig();
       rememberPreferredAuthEntryMode("internal");
       window.sessionStorage.setItem(DINGTALK_NONCE_KEY, config.nonce);
-      window.sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, `${window.location.pathname}${window.location.hash}`);
+      window.sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, currentBrowserLocation());
       redirectTo(buildDingTalkAuthorizeUrl(config));
     } catch (err) {
       setError(authErrorMessage(err));
