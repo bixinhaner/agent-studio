@@ -650,11 +650,17 @@ export class TrainingCatalogService {
       await this.localizeNodes(viewer, nodes, "en");
       status.totalThreads = threads.length;
       status.totalMessages = await this.db.message.count({ where: { threadId: { in: threads.map((thread) => thread.id) } } });
-      for (const thread of threads) {
-        const repository = await this.listThreadMessages({ viewer, threadId: thread.id, locale: "en" });
-        status.completedThreads += 1;
-        status.completedMessages += repository.messages.length;
-      }
+      let nextThreadIndex = 0;
+      const workerCount = Math.min(4, threads.length);
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextThreadIndex < threads.length) {
+          const thread = threads[nextThreadIndex];
+          nextThreadIndex += 1;
+          const repository = await this.listThreadMessages({ viewer, threadId: thread.id, locale: "en" });
+          status.completedThreads += 1;
+          status.completedMessages += repository.messages.length;
+        }
+      }));
       status.status = "completed";
       status.completedAt = new Date().toISOString();
     } catch (error) {
