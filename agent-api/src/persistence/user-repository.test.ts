@@ -77,6 +77,69 @@ describe("UserRepository", () => {
     }));
   });
 
+  it("preserves an organization-synced name during a generic identity profile refresh", async () => {
+    const existing = buildUserRow({
+      userType: "internal_employee",
+      externalId: "union_1",
+      displayName: "王力",
+      lastSyncedAt: new Date("2026-08-08T06:11:12.962Z")
+    });
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => buildUserRow({ ...existing, ...data }));
+    const repository = new UserRepository({
+      user: {
+        count: vi.fn(async () => 0),
+        findUnique: vi.fn(async () => existing),
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => existing),
+        update
+      }
+    } as UserRepositoryDb);
+
+    await repository.updateUserProfile({
+      userId: existing.id,
+      email: "wangli@baicells.com",
+      displayName: "王力/Wangli (会议请发邮件邀请谢谢)",
+      userType: "internal_employee"
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        displayName: "王力",
+        email: "wangli@baicells.com",
+        userType: "internal_employee"
+      })
+    }));
+  });
+
+  it("accepts an identity display name before organization sync establishes a canonical name", async () => {
+    const existing = buildUserRow({
+      userType: "internal_employee",
+      displayName: "旧登录名称",
+      lastSyncedAt: null
+    });
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => buildUserRow({ ...existing, ...data }));
+    const repository = new UserRepository({
+      user: {
+        count: vi.fn(async () => 0),
+        findUnique: vi.fn(async () => existing),
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => existing),
+        update
+      }
+    } as UserRepositoryDb);
+
+    await repository.updateUserProfile({
+      userId: existing.id,
+      displayName: "首次身份登录名称"
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ displayName: "首次身份登录名称" })
+    }));
+  });
+
   it("looks up users by email with findFirst instead of findUnique", async () => {
     const findFirst = vi.fn(async () => buildUserRow());
     const findUnique = vi.fn(async () => null);

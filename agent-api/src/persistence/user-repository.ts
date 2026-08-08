@@ -114,6 +114,19 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+function resolveProfileDisplayName(
+  existing: Pick<UserRow, "displayName" | "lastSyncedAt">,
+  incoming: string | null | undefined
+): string | null {
+  if (existing.lastSyncedAt) {
+    return existing.displayName ?? trimOrUndefined(incoming) ?? null;
+  }
+  if (incoming === undefined) {
+    return existing.displayName;
+  }
+  return trimOrUndefined(incoming) ?? null;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
@@ -285,11 +298,7 @@ export class UserRepository implements UserRepositoryLike {
           userType: existingByExternalId.userType ?? "internal_employee",
           externalId,
           email: email ?? existingByExternalId.email,
-          // The organization directory owns an already-synced employee's canonical name.
-          // OAuth nicknames may contain phone numbers or aliases and must not overwrite it on every login.
-          displayName: existingByExternalId.lastSyncedAt
-            ? existingByExternalId.displayName ?? displayName ?? null
-            : displayName ?? existingByExternalId.displayName,
+          displayName: resolveProfileDisplayName(existingByExternalId, displayName),
           dingtalkOpenId: dingtalkOpenId ?? existingByExternalId.dingtalkOpenId ?? null,
           dingtalkUserId: dingtalkUserId ?? existingByExternalId.dingtalkUserId ?? null,
           dingtalkCorpId: dingtalkCorpId ?? existingByExternalId.dingtalkCorpId ?? null
@@ -369,8 +378,9 @@ export class UserRepository implements UserRepositoryLike {
           input.externalId === undefined ? existing.externalId : trimOrUndefined(input.externalId ?? undefined) ?? null,
         email:
           input.email === undefined ? existing.email : trimOrUndefined(input.email ?? undefined)?.toLowerCase() ?? null,
-        displayName:
-          input.displayName === undefined ? existing.displayName : trimOrUndefined(input.displayName ?? undefined) ?? null,
+        // Organization sync owns the canonical name after the first successful sync.
+        // Identity providers may still refresh login metadata without replacing it with aliases or phone numbers.
+        displayName: resolveProfileDisplayName(existing, input.displayName),
         userType: input.userType === undefined ? existing.userType : trimOrUndefined(input.userType) ?? existing.userType,
         primaryOrganizationId:
           input.primaryOrganizationId === undefined
