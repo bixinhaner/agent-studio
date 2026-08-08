@@ -23,9 +23,34 @@ export function buildTrainingTranslationPrompt(texts: string[], purpose: Trainin
 
 export function parseTrainingTranslations(value: string, expectedCount: number): string[] {
   const trimmed = value.trim();
-  const candidate = trimmed.startsWith("```")
+  const unfenced = trimmed.startsWith("```")
     ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
     : trimmed;
+  let candidate = unfenced;
+  const start = unfenced.indexOf("{");
+  if (start >= 0) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < unfenced.length; index += 1) {
+      const char = unfenced[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          candidate = unfenced.slice(start, index + 1);
+          break;
+        }
+      }
+    }
+  }
   const parsed = JSON.parse(candidate) as { translations?: unknown };
   if (!Array.isArray(parsed.translations)) {
     throw new Error("培训案例英文翻译未返回 translations 数组");
