@@ -53,6 +53,15 @@ function createApp() {
     }),
     listThreadFiles: vi.fn().mockResolvedValue([]),
     listThreads: vi.fn().mockResolvedValue([]),
+    listThreadMessages: vi.fn().mockResolvedValue({
+      headId: "assistant-1",
+      messages: [{
+        parentId: null,
+        message: { id: "user-1", role: "user", content: [{ type: "text", text: "Analyze this KPI." }] },
+        createdAt: "2026-07-31T00:00:00.000Z",
+        updatedAt: "2026-07-31T00:00:00.000Z"
+      }]
+    }),
     search: vi.fn().mockResolvedValue({ nodes: [], tasks: [] }),
     getFile: vi.fn(),
     listFileVersions: vi.fn()
@@ -83,6 +92,19 @@ describe("createTrainingCatalogRouter", () => {
     expect(service.listFolderTasks).toHaveBeenCalledWith(expect.objectContaining({
       viewer,
       folderId: rootFolder.id
+    }));
+  });
+
+  it("passes the English locale through catalog and message reads", async () => {
+    const { app, service } = createApp();
+
+    await request(app).get("/api/portal/training/nodes?parent_id=training-root&lang=en").expect(200);
+    await request(app).get("/api/portal/training/threads/thread-1/messages?lang=en").expect(200);
+
+    expect(service.listNodes).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
+    expect(service.listThreadMessages).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread-1",
+      locale: "en"
     }));
   });
 

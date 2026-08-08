@@ -98,6 +98,7 @@ model Organization {
   securityDomainAccessPolicy SecurityDomainAccessPolicy?
   userWorkspaces UserWorkspace[] @relation("UserWorkspaceOrganization")
   portalTrainingConfiguration PortalTrainingConfiguration?
+  portalTrainingTranslations PortalTrainingTranslation[]
 
   @@index([type, status])
   @@map("organizations")
@@ -2355,6 +2356,23 @@ model PortalTrainingConfiguration {
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
   @@map("portal_training_configurations")
+}
+
+model PortalTrainingTranslation {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceType     String       @map("source_type")
+  sourceId       String       @map("source_id")
+  locale         String
+  sourceHash     String       @map("source_hash")
+  translatedJson Json         @map("translated_json")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@unique([organizationId, sourceType, sourceId, locale])
+  @@index([organizationId, locale, updatedAt])
+  @@map("portal_training_translations")
 }
 
 enum ThreadStatus {

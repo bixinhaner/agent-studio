@@ -1049,6 +1049,10 @@ const PortalI18nContext = createContext<PortalI18nValue>(DEFAULT_PORTAL_I18N);
 
 function readInitialLocale(): PortalLocale {
   if (typeof window === "undefined") return "en";
+  if (window.location.pathname === "/training") {
+    const requested = new URLSearchParams(window.location.search).get("lang");
+    return requested === "en" ? "en" : "zh-CN";
+  }
   let storedLocale: string | null = null;
   try {
     storedLocale = window.localStorage.getItem(PORTAL_LOCALE_STORAGE_KEY);
@@ -1076,6 +1080,12 @@ export function PortalI18nProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     document.documentElement.lang = locale;
     persistPortalLocale(locale);
+    if (window.location.pathname === "/training") {
+      const nextUrl = new URL(window.location.href);
+      if (locale === "en") nextUrl.searchParams.set("lang", "en");
+      else nextUrl.searchParams.delete("lang");
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
   }, [locale]);
 
   const updateLocale = useCallback((nextLocale: PortalLocale) => {

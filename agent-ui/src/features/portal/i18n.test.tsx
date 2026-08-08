@@ -24,6 +24,7 @@ function LocaleProbe() {
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.lang = "";
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(cleanup);
@@ -33,6 +34,22 @@ describe("portal i18n", () => {
     expect(normalizePortalLocale("zh-Hans-CN")).toBe("zh-CN");
     expect(normalizePortalLocale("en-GB")).toBe("en");
     expect(normalizePortalLocale("fr-FR")).toBeNull();
+  });
+
+  it("defaults the training page to Chinese and keeps an English deep link in the URL", async () => {
+    window.localStorage.setItem("agent-studio.portal.locale.v1", "en");
+    window.history.replaceState(null, "", "/training");
+    render(
+      <PortalI18nProvider>
+        <LocaleProbe />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByText("新建会话")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to English" }));
+
+    expect(await screen.findByText("New session")).toBeTruthy();
+    await waitFor(() => expect(window.location.search).toBe("?lang=en"));
   });
 
   it("prefers a saved choice and otherwise falls back to a supported browser language", () => {

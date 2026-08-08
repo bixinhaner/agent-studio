@@ -72,23 +72,28 @@ export type PortalWorkspaceDataSource = {
   search(query: string): Promise<{ nodes: PortalWorkspaceNode[]; tasks: PortalWorkspaceTask[] }>;
 };
 
-function createWorkspaceReadDataSource(apiBasePath: string): PortalWorkspaceDataSource {
+function createWorkspaceReadDataSource(apiBasePath: string, locale?: "en"): PortalWorkspaceDataSource {
   const normalizedBasePath = apiBasePath.replace(/\/$/, "");
+  const requestPath = (path: string): string => {
+    if (!locale) return path;
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}lang=${encodeURIComponent(locale)}`;
+  };
   return {
     apiBasePath: normalizedBasePath,
-    fetchWorkspace: () => api(normalizedBasePath),
+    fetchWorkspace: () => api(requestPath(normalizedBasePath)),
     async fetchNodes(parentId, options) {
       const query = new URLSearchParams();
       if (parentId) query.set("parent_id", parentId);
       if (options?.includeMigrated) query.set("include_migrated", "1");
       const out = await api<{ nodes: PortalWorkspaceNode[] }>(
-        `${normalizedBasePath}/nodes${query.toString() ? `?${query.toString()}` : ""}`
+        requestPath(`${normalizedBasePath}/nodes${query.toString() ? `?${query.toString()}` : ""}`)
       );
       return Array.isArray(out.nodes) ? out.nodes : [];
     },
     async fetchNode(nodeId) {
       const out = await api<{ node: PortalWorkspaceNode }>(
-        `${normalizedBasePath}/nodes/${encodeURIComponent(nodeId)}`
+        requestPath(`${normalizedBasePath}/nodes/${encodeURIComponent(nodeId)}`)
       );
       return out.node;
     },
@@ -99,7 +104,7 @@ function createWorkspaceReadDataSource(apiBasePath: string): PortalWorkspaceData
       if (normalizedFolderIds.length === 0) return {};
       const query = new URLSearchParams({ folder_ids: normalizedFolderIds.join(",") });
       const out = await api<{ paths?: Record<string, unknown> }>(
-        `${normalizedBasePath}/folder-ancestor-paths?${query.toString()}`
+        requestPath(`${normalizedBasePath}/folder-ancestor-paths?${query.toString()}`)
       );
       const paths: Record<string, string[]> = {};
       for (const [folderId, value] of Object.entries(out.paths || {})) {
@@ -112,7 +117,7 @@ function createWorkspaceReadDataSource(apiBasePath: string): PortalWorkspaceData
       const out = await api<{
         tasks: PortalWorkspaceTask[];
         summary?: PortalWorkspaceFolderTaskSummary;
-      }>(`${normalizedBasePath}/folders/${encodeURIComponent(folderId)}/tasks?take=500`);
+      }>(requestPath(`${normalizedBasePath}/folders/${encodeURIComponent(folderId)}/tasks?take=500`));
       const tasks = Array.isArray(out.tasks) ? out.tasks : [];
       return {
         tasks,
@@ -125,16 +130,19 @@ function createWorkspaceReadDataSource(apiBasePath: string): PortalWorkspaceData
     },
     async fetchTaskFiles(threadId) {
       const out = await api<{ files: PortalWorkspaceNode[] }>(
-        `${normalizedBasePath}/tasks/${encodeURIComponent(threadId)}/files`
+        requestPath(`${normalizedBasePath}/tasks/${encodeURIComponent(threadId)}/files`)
       );
       return Array.isArray(out.files) ? out.files : [];
     },
-    search: (query) => api(`${normalizedBasePath}/search?q=${encodeURIComponent(query.trim())}`)
+    search: (query) => api(requestPath(`${normalizedBasePath}/search?q=${encodeURIComponent(query.trim())}`))
   };
 }
 
 export const PORTAL_WORKSPACE_DATA_SOURCE = createWorkspaceReadDataSource("/api/portal/workspace");
 export const TRAINING_WORKSPACE_DATA_SOURCE = createWorkspaceReadDataSource("/api/portal/training");
+export function createTrainingWorkspaceDataSource(locale: "en" | "zh-CN"): PortalWorkspaceDataSource {
+  return createWorkspaceReadDataSource("/api/portal/training", locale === "en" ? "en" : undefined);
+}
 
 export async function fetchPortalWorkspace(): Promise<{
   workspace: PortalWorkspaceSummary;

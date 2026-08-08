@@ -187,7 +187,7 @@ import {
 import {
   createPortalWorkspaceFolder,
   PORTAL_WORKSPACE_DATA_SOURCE,
-  TRAINING_WORKSPACE_DATA_SOURCE,
+  createTrainingWorkspaceDataSource,
   type PortalWorkspaceDataSource,
   type PortalWorkspaceNode,
   type PortalWorkspaceSummary,
@@ -6271,8 +6271,10 @@ const AgentRuntimeAdapterProvider: FC<
   PropsWithChildren<{
     onThreadIdentityChange?: (identity: ThreadIdentity) => void;
     canUpload?: boolean;
+    trainingReadOnly?: boolean;
+    locale?: "en" | "zh-CN";
   }>
-> = ({ children, onThreadIdentityChange, canUpload = true }) => {
+> = ({ children, onThreadIdentityChange, canUpload = true, trainingReadOnly = false, locale = "zh-CN" }) => {
   const aui = useAui();
   const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const activeLocalId = useAuiState((s) => s.threadListItem.id);
@@ -6293,7 +6295,11 @@ const AgentRuntimeAdapterProvider: FC<
       async load() {
         const remoteId = aui.threadListItem().getState().remoteId;
         if (!remoteId) return { messages: [] };
-        const out = await api<ThreadMessagesOut>(`/api/threads/${encodeURIComponent(remoteId)}/messages`);
+        const out = await api<ThreadMessagesOut>(
+          trainingReadOnly
+            ? `/api/portal/training/threads/${encodeURIComponent(remoteId)}/messages${locale === "en" ? "?lang=en" : ""}`
+            : `/api/threads/${encodeURIComponent(remoteId)}/messages`
+        );
         const feedbackByMessageId = new Map<string, ThreadFeedbackOut>();
         for (const item of out.feedback ?? []) {
           const messageId = typeof item.message_id === "string" ? item.message_id.trim() : "";
@@ -6357,7 +6363,7 @@ const AgentRuntimeAdapterProvider: FC<
         });
       }
     }),
-    [aui]
+    [aui, locale, trainingReadOnly]
   );
 
   const feedback = useMemo(
@@ -6444,9 +6450,10 @@ export function PortalShell(props: {
   const { branding, behavior } = useBranding();
   const { locale, intlLocale, antdLocale, t } = usePortalI18n();
   const trainingReadOnly = props.trainingReadOnly ?? false;
-  const workspaceDataSource: PortalWorkspaceDataSource = trainingReadOnly
-    ? TRAINING_WORKSPACE_DATA_SOURCE
-    : PORTAL_WORKSPACE_DATA_SOURCE;
+  const workspaceDataSource: PortalWorkspaceDataSource = useMemo(
+    () => trainingReadOnly ? createTrainingWorkspaceDataSource(locale) : PORTAL_WORKSPACE_DATA_SOURCE,
+    [locale, trainingReadOnly]
+  );
   const productFeedbackTypeLabel = (value: ProductFeedbackType): string => {
     if (value === "usability_issue") return t("feedback.typeImprovement");
     if (value === "bug") return t("feedback.typeBug");
@@ -7400,7 +7407,11 @@ export function PortalShell(props: {
   const threadListAdapter = useMemo<RemoteThreadListAdapter>(
     () => ({
       async list() {
-        const out = await api<ThreadListOut>(trainingReadOnly ? "/api/portal/training/threads" : "/api/threads");
+        const out = await api<ThreadListOut>(
+          trainingReadOnly
+            ? `/api/portal/training/threads${locale === "en" ? "?lang=en" : ""}`
+            : "/api/threads"
+        );
         const threads = Array.isArray(out.threads) ? out.threads : [];
         setWorkspaceThreads(threads);
         const nextPersistedCompletionNotices: RunningThreadIdsContextValue = {};
@@ -7533,7 +7544,7 @@ export function PortalShell(props: {
       async fetch(threadId: string) {
         const out = await api<ThreadOneOut>(
           trainingReadOnly
-            ? `/api/portal/training/threads/${encodeURIComponent(threadId)}`
+            ? `/api/portal/training/threads/${encodeURIComponent(threadId)}${locale === "en" ? "?lang=en" : ""}`
             : `/api/threads/${encodeURIComponent(threadId)}`
         );
         setWorkspaceThreads((current) => [
@@ -7580,14 +7591,14 @@ export function PortalShell(props: {
         <AgentRuntimeAdapterProvider
           canUpload={!trainingReadOnly && (runtimeOptions?.canUpload ?? false)}
           onThreadIdentityChange={syncActiveThreadIdentity}
+          trainingReadOnly={trainingReadOnly}
+          locale={locale}
         >
           {children}
         </AgentRuntimeAdapterProvider>
       )
     }),
-    // Changing the adapter identity temporarily clears assistant-ui's message lookup.
-    // Keep it stable across locale changes so mounted history items retain valid indexes.
-    [runtimeOptions?.canUpload, syncActiveThreadIdentity, trainingReadOnly]
+    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity, trainingReadOnly]
   );
 
   const canUpload = !trainingReadOnly && (runtimeOptions?.canUpload ?? false);

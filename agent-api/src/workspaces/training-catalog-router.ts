@@ -14,6 +14,11 @@ import type {
   WorkspaceNodeSummary,
   WorkspaceTaskSummary
 } from "./service.js";
+import type { TrainingTranslationLocale } from "./training-translation-service.js";
+
+function requestedLocale(req: Request): TrainingTranslationLocale | undefined {
+  return req.query.lang === "en" ? "en" : undefined;
+}
 
 function nodeOut(node: WorkspaceNodeSummary) {
   return {
@@ -98,6 +103,7 @@ export function createTrainingCatalogRouter(input: {
     try {
       const viewer = await input.resolveViewer(req);
       const catalog = await input.service.getCatalog(viewer);
+      const rootFolder = (await input.service.listNodes({ viewer, locale: requestedLocale(req) }))[0];
       res.setHeader("Cache-Control", "private, no-store");
       res.json({
         workspace: {
@@ -109,7 +115,7 @@ export function createTrainingCatalogRouter(input: {
           history_folder_id: catalog.rootFolder.id,
           read_only: true
         },
-        nodes: [nodeOut(catalog.rootFolder)],
+        nodes: [nodeOut(rootFolder ?? catalog.rootFolder)],
         root_folder_id: catalog.rootFolder.id
       });
     } catch (error) {
@@ -121,7 +127,11 @@ export function createTrainingCatalogRouter(input: {
     try {
       const viewer = await input.resolveViewer(req);
       const parentId = typeof req.query.parent_id === "string" ? req.query.parent_id.trim() : "";
-      const nodes = await input.service.listNodes({ viewer, parentId: parentId || undefined });
+      const nodes = await input.service.listNodes({
+        viewer,
+        parentId: parentId || undefined,
+        locale: requestedLocale(req)
+      });
       res.json({ nodes: nodes.map(nodeOut) });
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training items");
@@ -143,7 +153,11 @@ export function createTrainingCatalogRouter(input: {
   router.get("/nodes/:nodeId", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
-      const node = await input.service.getNode({ viewer, nodeId: String(req.params.nodeId || "").trim() });
+      const node = await input.service.getNode({
+        viewer,
+        nodeId: String(req.params.nodeId || "").trim(),
+        locale: requestedLocale(req)
+      });
       res.json({ node: nodeOut(node) });
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training item");
@@ -156,7 +170,8 @@ export function createTrainingCatalogRouter(input: {
       const result = await input.service.listFolderTasks({
         viewer,
         folderId: String(req.params.folderId || "").trim(),
-        take: Number(req.query.take) || undefined
+        take: Number(req.query.take) || undefined,
+        locale: requestedLocale(req)
       });
       res.json({
         tasks: result.tasks.map(taskOut),
@@ -187,7 +202,7 @@ export function createTrainingCatalogRouter(input: {
   router.get("/threads", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
-      const threads = await input.service.listThreads(viewer);
+      const threads = await input.service.listThreads(viewer, requestedLocale(req));
       res.json({ threads: threads.map(threadOut) });
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training conversations");
@@ -198,7 +213,7 @@ export function createTrainingCatalogRouter(input: {
     try {
       const viewer = await input.resolveViewer(req);
       const threadId = String(req.params.threadId || "").trim();
-      const thread = (await input.service.listThreads(viewer)).find((item) => item.id === threadId);
+      const thread = (await input.service.listThreads(viewer, requestedLocale(req))).find((item) => item.id === threadId);
       if (!thread) {
         res.status(404).json({ detail: "培训会话不存在" });
         return;
@@ -209,11 +224,35 @@ export function createTrainingCatalogRouter(input: {
     }
   });
 
+  router.get("/threads/:threadId/messages", async (req, res) => {
+    try {
+      const viewer = await input.resolveViewer(req);
+      const repository = await input.service.listThreadMessages({
+        viewer,
+        threadId: String(req.params.threadId || "").trim(),
+        locale: requestedLocale(req)
+      });
+      res.json({
+        head_id: repository.headId,
+        messages: repository.messages.map((item) => ({
+          parent_id: item.parentId,
+          message: item.message,
+          run_config: item.runConfig,
+          created_at: item.createdAt,
+          updated_at: item.updatedAt
+        })),
+        feedback: []
+      });
+    } catch (error) {
+      sendTrainingError(res, error, "Failed to load training conversation messages");
+    }
+  });
+
   router.get("/search", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
       const query = typeof req.query.q === "string" ? req.query.q : "";
-      const result = await input.service.search({ viewer, query });
+      const result = await input.service.search({ viewer, query, locale: requestedLocale(req) });
       res.json({ nodes: result.nodes.map(nodeOut), tasks: result.tasks.map(taskOut) });
     } catch (error) {
       sendTrainingError(res, error, "Failed to search training catalog");

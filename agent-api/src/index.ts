@@ -348,6 +348,11 @@ import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
 import { createTrainingCatalogRouter } from "./workspaces/training-catalog-router.js";
 import { TrainingCatalogService } from "./workspaces/training-catalog-service.js";
+import { TrainingTranslationService } from "./workspaces/training-translation-service.js";
+import {
+  buildTrainingTranslationPrompt,
+  parseTrainingTranslations
+} from "./workspaces/training-translation-prompt.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
@@ -526,7 +531,6 @@ const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.
 const db = getDbClient();
 const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
 const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage);
-const trainingCatalog = new TrainingCatalogService(db, portalWorkspaces, appConfig.portalTraining);
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
@@ -935,6 +939,66 @@ const usageIngestion = new UsageIngestionService({
   afterRecord: rebuildUsageRollupForEvent
 });
 const usageRecorder = new UsageRecorder({ usageIngestion });
+const trainingTranslations = new TrainingTranslationService(db, async (input) => {
+  const providerSnapshot = await codexProviders.resolveActiveProviderSnapshot();
+  const model = providerSnapshot.config.defaultModel;
+  const runtime = createRuntimeForProviderSnapshot(providerSnapshot);
+  const workspace = path.join(appConfig.sessionWorkspaceRoot, ".training-translation");
+  try {
+    await fs.mkdir(workspace, { recursive: true });
+    const runtimeThread = await runtime.startThreadWithOptions({
+      model,
+      reasoningEffort: "low",
+      workspace,
+      codexRunConfig: {
+        sandboxMode: "read-only",
+        approvalPolicy: "never",
+        networkAccessEnabled: false,
+        webSearchMode: "disabled",
+        additionalDirectories: []
+      }
+    });
+    const result = await codexExecution.collectFromRuntime({
+      runtime,
+      thread: runtimeThread,
+      prompt: buildTrainingTranslationPrompt(input.texts),
+      workspace
+    });
+    await usageRecorder.recordCodexUsage({
+      organizationId: input.organizationId,
+      model,
+      featureType: "training_translation",
+      usage: result.usage,
+      codexThreadId: result.usage?.codexThreadId,
+      resultStatus: "success",
+      metadata: {
+        source: "portal_training_translation",
+        provider: providerSnapshot.kind,
+        textCount: input.texts.length
+      }
+    });
+    return parseTrainingTranslations(result.answer, input.texts.length);
+  } catch (error) {
+    await usageRecorder.recordCodexUsage({
+      organizationId: input.organizationId,
+      model,
+      featureType: "training_translation",
+      resultStatus: "failed",
+      metadata: {
+        source: "portal_training_translation",
+        provider: providerSnapshot.kind,
+        textCount: input.texts.length
+      }
+    }).catch(() => undefined);
+    throw error;
+  }
+});
+const trainingCatalog = new TrainingCatalogService(
+  db,
+  portalWorkspaces,
+  appConfig.portalTraining,
+  trainingTranslations
+);
 const conversationSecurityReview = new ConversationSecurityReviewService({
   db,
   reviews: conversationSecurityReviews,

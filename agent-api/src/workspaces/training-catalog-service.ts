@@ -8,6 +8,7 @@ import {
   type WorkspaceNodeSummary,
   type WorkspaceTaskSummary
 } from "./service.js";
+import { TrainingTranslationService, type TrainingTranslationLocale } from "./training-translation-service.js";
 
 export type TrainingCatalogViewer = {
   userId: string;
@@ -74,8 +75,41 @@ export class TrainingCatalogService {
   constructor(
     private readonly db: PrismaClient,
     private readonly workspaces: PortalWorkspaceService,
-    private readonly config: { sourceEmail: string; rootFolderName: string }
+    private readonly config: { sourceEmail: string; rootFolderName: string },
+    private readonly translations?: TrainingTranslationService
   ) {}
+
+  private async localizeNodes(
+    viewer: TrainingCatalogViewer,
+    nodes: WorkspaceNodeSummary[],
+    locale?: TrainingTranslationLocale
+  ): Promise<WorkspaceNodeSummary[]> {
+    if (locale !== "en" || !this.translations) return nodes;
+    const names = await this.translations.localizeStrings({
+      organizationId: viewer.organizationId,
+      requestedByUserId: viewer.userId,
+      sourceType: "workspace_node_name",
+      entries: nodes
+        .filter((node) => node.kind === "folder")
+        .map((node) => ({ sourceId: node.id, value: node.name }))
+    });
+    return nodes.map((node) => ({ ...node, name: names.get(node.id) ?? node.name }));
+  }
+
+  private async localizeTasks(
+    viewer: TrainingCatalogViewer,
+    tasks: WorkspaceTaskSummary[],
+    locale?: TrainingTranslationLocale
+  ): Promise<WorkspaceTaskSummary[]> {
+    if (locale !== "en" || !this.translations) return tasks;
+    const titles = await this.translations.localizeStrings({
+      organizationId: viewer.organizationId,
+      requestedByUserId: viewer.userId,
+      sourceType: "thread_title",
+      entries: tasks.map((task) => ({ sourceId: task.id, value: task.title }))
+    });
+    return tasks.map((task) => ({ ...task, title: titles.get(task.id) ?? task.title }));
+  }
 
   async getCatalog(viewer: TrainingCatalogViewer): Promise<TrainingCatalogSummary> {
     this.assertInternalViewer(viewer);
@@ -341,20 +375,24 @@ export class TrainingCatalogService {
   async listNodes(input: {
     viewer: TrainingCatalogViewer;
     parentId?: string;
+    locale?: TrainingTranslationLocale;
   }): Promise<WorkspaceNodeSummary[]> {
     const catalog = await this.getCatalog(input.viewer);
-    if (!input.parentId) return [catalog.rootFolder];
+    if (!input.parentId) return this.localizeNodes(input.viewer, [catalog.rootFolder], input.locale);
     this.assertFolderInCatalog(catalog, input.parentId);
-    return this.workspaces.listNodes({ actor: catalog.sourceActor, parentId: input.parentId });
+    const nodes = await this.workspaces.listNodes({ actor: catalog.sourceActor, parentId: input.parentId });
+    return this.localizeNodes(input.viewer, nodes, input.locale);
   }
 
   async getNode(input: {
     viewer: TrainingCatalogViewer;
     nodeId: string;
+    locale?: TrainingTranslationLocale;
   }): Promise<WorkspaceNodeSummary> {
     const catalog = await this.getCatalog(input.viewer);
     this.assertNodeInCatalog(catalog, input.nodeId);
-    return this.workspaces.getNode({ actor: catalog.sourceActor, nodeId: input.nodeId });
+    const node = await this.workspaces.getNode({ actor: catalog.sourceActor, nodeId: input.nodeId });
+    return (await this.localizeNodes(input.viewer, [node], input.locale))[0];
   }
 
   async listFolderAncestorPaths(input: {
@@ -376,6 +414,7 @@ export class TrainingCatalogService {
     viewer: TrainingCatalogViewer;
     folderId: string;
     take?: number;
+    locale?: TrainingTranslationLocale;
   }): Promise<{ tasks: WorkspaceTaskSummary[]; summary: { taskCount: number; tasksWithFiles: number; fileCount: number } }> {
     const catalog = await this.getCatalog(input.viewer);
     this.assertFolderInCatalog(catalog, input.folderId);
@@ -387,10 +426,10 @@ export class TrainingCatalogService {
       }),
       this.workspaces.getFolderTaskSummary({ actor: catalog.sourceActor, folderId: input.folderId })
     ]);
-    return { tasks, summary };
+    return { tasks: await this.localizeTasks(input.viewer, tasks, input.locale), summary };
   }
 
-  async listThreads(viewer: TrainingCatalogViewer): Promise<TrainingCatalogThread[]> {
+  async listThreads(viewer: TrainingCatalogViewer, locale?: TrainingTranslationLocale): Promise<TrainingCatalogThread[]> {
     const catalog = await this.getCatalog(viewer);
     const rows = await this.db.thread.findMany({
       where: {
@@ -414,7 +453,7 @@ export class TrainingCatalogService {
         updatedAt: true
       }
     });
-    return rows.map((row) => ({
+    const threads: TrainingCatalogThread[] = rows.map((row) => ({
       id: row.id,
       status: row.status === "archived" ? "archived" : "regular",
       title: row.title ?? undefined,
@@ -426,6 +465,64 @@ export class TrainingCatalogService {
       createdAt: toIso(row.createdAt),
       updatedAt: toIso(row.updatedAt)
     }));
+    if (locale !== "en" || !this.translations) return threads;
+    const titles = await this.translations.localizeStrings({
+      organizationId: viewer.organizationId,
+      requestedByUserId: viewer.userId,
+      sourceType: "thread_title",
+      entries: threads
+        .filter((thread) => thread.title)
+        .map((thread) => ({ sourceId: thread.id, value: thread.title! }))
+    });
+    return threads.map((thread) => ({ ...thread, title: titles.get(thread.id) ?? thread.title }));
+  }
+
+  async listThreadMessages(input: {
+    viewer: TrainingCatalogViewer;
+    threadId: string;
+    locale?: TrainingTranslationLocale;
+  }): Promise<{ headId: string | null; messages: Array<{
+    parentId: string | null;
+    message: unknown;
+    runConfig?: Record<string, unknown>;
+    createdAt: string;
+    updatedAt: string;
+  }> }> {
+    const thread = await this.getThread(input);
+    if (!thread) throw new TrainingCatalogAccessError("培训会话不存在", 404);
+    const rows = await this.db.message.findMany({
+      where: { threadId: input.threadId },
+      orderBy: { position: "asc" },
+      select: {
+        id: true,
+        parentId: true,
+        content: true,
+        runConfig: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    let localized = new Map<string, unknown>();
+    if (input.locale === "en" && this.translations) {
+      localized = await this.translations.localizeMessages({
+        organizationId: input.viewer.organizationId,
+        requestedByUserId: input.viewer.userId,
+        entries: rows.map((row) => ({ sourceId: row.id, value: row.content }))
+      });
+    }
+    return {
+      headId: thread.headId ?? null,
+      messages: rows.map((row) => ({
+        parentId: row.parentId,
+        message: localized.get(row.id) ?? row.content,
+        runConfig:
+          row.runConfig && typeof row.runConfig === "object" && !Array.isArray(row.runConfig)
+            ? row.runConfig as Record<string, unknown>
+            : undefined,
+        createdAt: toIso(row.createdAt),
+        updatedAt: toIso(row.updatedAt)
+      }))
+    };
   }
 
   async getThread(input: {
@@ -503,10 +600,64 @@ export class TrainingCatalogService {
   async search(input: {
     viewer: TrainingCatalogViewer;
     query: string;
+    locale?: TrainingTranslationLocale;
   }): Promise<{ nodes: WorkspaceNodeSummary[]; tasks: WorkspaceTaskSummary[] }> {
     const catalog = await this.getCatalog(input.viewer);
-    const query = input.query.trim().toLocaleLowerCase("zh-Hans-CN");
+    const query = input.query.trim().toLocaleLowerCase(input.locale === "en" ? "en-US" : "zh-Hans-CN");
     if (!query) return { nodes: [], tasks: [] };
+    if (input.locale === "en" && this.translations) {
+      const [nodeRows, threadRows] = await Promise.all([
+        this.db.workspaceNode.findMany({
+          where: {
+            workspaceId: catalog.workspaceId,
+            id: { in: Array.from(catalog.nodeIds) },
+            state: "active"
+          },
+          take: 500,
+          select: { id: true }
+        }),
+        this.db.thread.findMany({
+          where: {
+            organizationId: input.viewer.organizationId,
+            userId: catalog.sourceActor.userId,
+            userWorkspaceId: catalog.workspaceId,
+            workspaceFolderId: { in: Array.from(catalog.folderIds) },
+            status: "active"
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 500,
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            workspaceFolderId: true,
+            workspaceFileBindings: { select: { fileId: true } },
+            createdAt: true,
+            updatedAt: true
+          }
+        })
+      ]);
+      const allNodes = await Promise.all(
+        nodeRows.map((node) => this.workspaces.getNode({ actor: catalog.sourceActor, nodeId: node.id }))
+      );
+      const allTasks: WorkspaceTaskSummary[] = threadRows.map((thread) => ({
+        id: thread.id,
+        title: thread.title?.trim() || "New conversation",
+        status: thread.status === "archived" ? "archived" : "regular",
+        folderId: thread.workspaceFolderId ?? undefined,
+        fileCount: new Set(thread.workspaceFileBindings.map((binding) => binding.fileId)).size,
+        createdAt: toIso(thread.createdAt),
+        updatedAt: toIso(thread.updatedAt)
+      }));
+      const [localizedNodes, localizedTasks] = await Promise.all([
+        this.localizeNodes(input.viewer, allNodes, "en"),
+        this.localizeTasks(input.viewer, allTasks, "en")
+      ]);
+      return {
+        nodes: localizedNodes.filter((node) => node.name.toLocaleLowerCase("en-US").includes(query)).slice(0, 200),
+        tasks: localizedTasks.filter((task) => task.title.toLocaleLowerCase("en-US").includes(query)).slice(0, 200)
+      };
+    }
     const nodes = await this.db.workspaceNode.findMany({
       where: {
         workspaceId: catalog.workspaceId,
