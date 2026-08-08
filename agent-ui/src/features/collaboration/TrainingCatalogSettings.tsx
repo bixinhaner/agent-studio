@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Input, Select, Spin, Switch, Tag, Typography, message } from "antd";
-import { CheckCircle2, ExternalLink, Save, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ExternalLink, Languages, Save, ShieldCheck } from "lucide-react";
 
 import type { AdminUser } from "../admin/types";
 import {
   fetchTrainingCatalogConfiguration,
+  fetchTrainingEnglishPrewarm,
   fetchTrainingRootFolders,
-  saveTrainingCatalogConfiguration
+  saveTrainingCatalogConfiguration,
+  startTrainingEnglishPrewarm
 } from "./api";
-import type { TrainingCatalogConfiguration, TrainingCatalogRootFolderOption } from "./types";
+import type { TrainingCatalogConfiguration, TrainingCatalogRootFolderOption, TrainingEnglishPrewarmStatus } from "./types";
 
 type TrainingCatalogDraft = Pick<TrainingCatalogConfiguration, "enabled" | "sourceEmail" | "rootFolderName">;
 
@@ -27,6 +29,7 @@ export function TrainingCatalogSettings(props: { users: AdminUser[] }) {
   const [loading, setLoading] = useState(true);
   const [foldersLoading, setFoldersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [prewarm, setPrewarm] = useState<TrainingEnglishPrewarmStatus | null>(null);
 
   const sourceOptions = useMemo(
     () => props.users
@@ -70,7 +73,10 @@ export function TrainingCatalogSettings(props: { users: AdminUser[] }) {
         if (!active) return;
         setConfiguration(next);
         setDraft(draftFromConfiguration(next));
-        await loadFolders(next.sourceEmail);
+        await Promise.all([
+          loadFolders(next.sourceEmail),
+          fetchTrainingEnglishPrewarm().then((value) => { if (active) setPrewarm(value); })
+        ]);
       } catch (error) {
         if (active) message.error(error instanceof Error ? error.message : "加载培训案例配置失败");
       } finally {
@@ -82,6 +88,14 @@ export function TrainingCatalogSettings(props: { users: AdminUser[] }) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (prewarm?.status !== "running") return;
+    const timer = window.setInterval(() => {
+      void fetchTrainingEnglishPrewarm().then(setPrewarm).catch(() => undefined);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [prewarm?.status]);
 
   const dirty = Boolean(configuration && draft && (
     configuration.enabled !== draft.enabled ||
@@ -105,6 +119,15 @@ export function TrainingCatalogSettings(props: { users: AdminUser[] }) {
       message.error(error instanceof Error ? error.message : "保存培训案例配置失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handlePrewarm() {
+    try {
+      setPrewarm(await startTrainingEnglishPrewarm());
+      message.success("英文缓存任务已开始，可离开本页面继续运行");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "启动英文缓存失败");
     }
   }
 
@@ -196,6 +219,31 @@ export function TrainingCatalogSettings(props: { users: AdminUser[] }) {
             ? `${configuration.folderCount} 个目录 · ${configuration.threadCount} 个会话 · 内容实时同步`
             : configuration.validationMessage}
         />
+      </div>
+
+      <div className="training-config-row">
+        <div className="training-config-label training-config-visibility">
+          <Languages size={18} aria-hidden="true" />
+          <div>
+            <strong>英文内容缓存</strong>
+            <span>
+              {prewarm?.status === "running"
+                ? `正在处理 ${prewarm.completedThreads}/${prewarm.totalThreads || "…"} 个会话，已完成 ${prewarm.completedMessages}/${prewarm.totalMessages || "…"} 条消息`
+                : prewarm?.status === "completed"
+                  ? `已完成 ${prewarm.completedThreads} 个会话、${prewarm.completedMessages} 条消息；源内容变化后可重新生成`
+                  : prewarm?.status === "failed"
+                    ? `上次生成失败：${prewarm.error || "未知错误"}`
+                    : "预先生成全部英文会话和文件显示名，员工首次打开时无需等待翻译。"}
+            </span>
+          </div>
+        </div>
+        <Button
+          loading={prewarm?.status === "running"}
+          disabled={!configuration.enabled || configuration.validationStatus !== "valid"}
+          onClick={() => void handlePrewarm()}
+        >
+          {prewarm?.status === "completed" ? "重新生成" : "生成英文缓存"}
+        </Button>
       </div>
 
       <div className="training-config-actions">

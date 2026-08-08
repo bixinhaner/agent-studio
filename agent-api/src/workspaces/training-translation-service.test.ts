@@ -63,14 +63,15 @@ describe("TrainingTranslationService", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
-  it("translates visible message prose without changing attachments or tool payloads", async () => {
+  it("translates visible prose and file display names without changing tool payloads", async () => {
     const { service } = createService();
     const source = {
       id: "assistant-1",
       role: "assistant",
       content: [
         { type: "text", text: "已完成分析。" },
-        { type: "file", name: "切换抓包_现场.pcap" },
+        { type: "file", name: "切换抓包_现场.pcap", url: "/download/切换抓包_现场.pcap" },
+        { type: "data", name: "codex_file_change", data: { changes: [{ path: "销售分析_v04.xlsx" }] } },
         { type: "tool-call", argsText: "rg -n 中文参数", result: { text: "原始日志" } }
       ]
     };
@@ -85,7 +86,8 @@ describe("TrainingTranslationService", () => {
       ...source,
       content: [
         { type: "text", text: "EN:已完成分析。" },
-        { type: "file", name: "切换抓包_现场.pcap" },
+        { type: "file", name: "EN:切换抓包_现场.pcap", url: "/download/切换抓包_现场.pcap" },
+        { type: "data", name: "codex_file_change", data: { changes: [{ path: "销售分析_v04.xlsx", display_path: "EN:销售分析_v04.xlsx" }] } },
         { type: "tool-call", argsText: "rg -n 中文参数", result: { text: "原始日志" } }
       ]
     });

@@ -1,4 +1,16 @@
-export function buildTrainingTranslationPrompt(texts: string[]): string {
+import type { TrainingTranslationPurpose } from "./training-translation-service.js";
+
+export function buildTrainingTranslationPrompt(texts: string[], purpose: TrainingTranslationPurpose = "content"): string {
+  if (purpose === "filename") {
+    return [
+      "Translate these Chinese display file names into concise, natural English for an employee-training UI.",
+      "Return only valid JSON with this exact shape: {\"translations\":[\"...\"]}.",
+      "Keep the same number and order of strings.",
+      "Preserve file extensions, version numbers, dates, product/model names, IDs, codes, separators, and technical abbreviations.",
+      "Translate only the human-readable Chinese wording. Do not add explanations.",
+      JSON.stringify({ texts })
+    ].join("\n");
+  }
   return [
     "Translate the following Chinese Bailey employee-training UI content into natural, concise business English.",
     "Return only valid JSON with this exact shape: {\"translations\":[\"...\"]}.",

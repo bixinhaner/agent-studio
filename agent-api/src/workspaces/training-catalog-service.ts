@@ -58,6 +58,17 @@ export type TrainingCatalogRootFolderOption = {
   workspaceId: string;
 };
 
+export type TrainingEnglishPrewarmStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  totalThreads: number;
+  completedThreads: number;
+  totalMessages: number;
+  completedMessages: number;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
+
 const toIso = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
@@ -72,6 +83,8 @@ export class TrainingCatalogAccessError extends Error {
 }
 
 export class TrainingCatalogService {
+  private readonly englishPrewarmByOrganization = new Map<string, TrainingEnglishPrewarmStatus>();
+
   constructor(
     private readonly db: PrismaClient,
     private readonly workspaces: PortalWorkspaceService,
@@ -85,15 +98,25 @@ export class TrainingCatalogService {
     locale?: TrainingTranslationLocale
   ): Promise<WorkspaceNodeSummary[]> {
     if (locale !== "en" || !this.translations) return nodes;
-    const names = await this.translations.localizeStrings({
-      organizationId: viewer.organizationId,
-      requestedByUserId: viewer.userId,
-      sourceType: "workspace_node_name",
-      entries: nodes
-        .filter((node) => node.kind === "folder")
-        .map((node) => ({ sourceId: node.id, value: node.name }))
-    });
-    return nodes.map((node) => ({ ...node, name: names.get(node.id) ?? node.name }));
+    const [folderNames, fileNames] = await Promise.all([
+      this.translations.localizeStrings({
+        organizationId: viewer.organizationId,
+        requestedByUserId: viewer.userId,
+        sourceType: "workspace_node_name",
+        entries: nodes.filter((node) => node.kind === "folder").map((node) => ({ sourceId: node.id, value: node.name }))
+      }),
+      this.translations.localizeStrings({
+        organizationId: viewer.organizationId,
+        requestedByUserId: viewer.userId,
+        sourceType: "workspace_file_display_name",
+        purpose: "filename",
+        entries: nodes.filter((node) => node.kind === "file").map((node) => ({ sourceId: node.id, value: node.name }))
+      })
+    ]);
+    return nodes.map((node) => ({
+      ...node,
+      name: (node.kind === "folder" ? folderNames : fileNames).get(node.id) ?? node.name
+    }));
   }
 
   private async localizeTasks(
@@ -571,11 +594,74 @@ export class TrainingCatalogService {
   async listThreadFiles(input: {
     viewer: TrainingCatalogViewer;
     threadId: string;
+    locale?: TrainingTranslationLocale;
   }): Promise<WorkspaceNodeSummary[]> {
     const catalog = await this.getCatalog(input.viewer);
     const thread = await this.getThread(input);
     if (!thread) throw new TrainingCatalogAccessError("培训会话不存在", 404);
-    return this.workspaces.listThreadFiles({ actor: catalog.sourceActor, threadId: input.threadId });
+    const files = await this.workspaces.listThreadFiles({ actor: catalog.sourceActor, threadId: input.threadId });
+    return this.localizeNodes(input.viewer, files, input.locale);
+  }
+
+  getEnglishPrewarmStatus(viewer: TrainingCatalogViewer): TrainingEnglishPrewarmStatus {
+    this.assertInternalViewer(viewer);
+    return this.englishPrewarmByOrganization.get(viewer.organizationId) ?? {
+      status: "idle",
+      totalThreads: 0,
+      completedThreads: 0,
+      totalMessages: 0,
+      completedMessages: 0
+    };
+  }
+
+  async startEnglishPrewarm(viewer: TrainingCatalogViewer): Promise<TrainingEnglishPrewarmStatus> {
+    this.assertInternalViewer(viewer);
+    const current = this.getEnglishPrewarmStatus(viewer);
+    if (current.status === "running") return current;
+    const status: TrainingEnglishPrewarmStatus = {
+      status: "running",
+      totalThreads: 0,
+      completedThreads: 0,
+      totalMessages: 0,
+      completedMessages: 0,
+      startedAt: new Date().toISOString()
+    };
+    this.englishPrewarmByOrganization.set(viewer.organizationId, status);
+    void this.runEnglishPrewarm(viewer, status);
+    return status;
+  }
+
+  private async runEnglishPrewarm(
+    viewer: TrainingCatalogViewer,
+    status: TrainingEnglishPrewarmStatus
+  ): Promise<void> {
+    try {
+      const catalog = await this.getCatalog(viewer);
+      const [nodeRows, threads] = await Promise.all([
+        this.db.workspaceNode.findMany({
+          where: { workspaceId: catalog.workspaceId, id: { in: Array.from(catalog.nodeIds) }, state: "active" },
+          select: { id: true }
+        }),
+        this.listThreads(viewer, "en")
+      ]);
+      const nodes = await Promise.all(nodeRows.map((node) =>
+        this.workspaces.getNode({ actor: catalog.sourceActor, nodeId: node.id })
+      ));
+      await this.localizeNodes(viewer, nodes, "en");
+      status.totalThreads = threads.length;
+      status.totalMessages = await this.db.message.count({ where: { threadId: { in: threads.map((thread) => thread.id) } } });
+      for (const thread of threads) {
+        const repository = await this.listThreadMessages({ viewer, threadId: thread.id, locale: "en" });
+        status.completedThreads += 1;
+        status.completedMessages += repository.messages.length;
+      }
+      status.status = "completed";
+      status.completedAt = new Date().toISOString();
+    } catch (error) {
+      status.status = "failed";
+      status.error = error instanceof Error ? error.message : "英文缓存生成失败";
+      status.completedAt = new Date().toISOString();
+    }
   }
 
   async getFile(input: {

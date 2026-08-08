@@ -3,15 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   fetchTrainingCatalogConfiguration,
+  fetchTrainingEnglishPrewarm,
   fetchTrainingRootFolders,
-  saveTrainingCatalogConfiguration
+  saveTrainingCatalogConfiguration,
+  startTrainingEnglishPrewarm
 } from "./api";
 import { TrainingCatalogSettings } from "./TrainingCatalogSettings";
 
 vi.mock("./api", () => ({
   fetchTrainingCatalogConfiguration: vi.fn(),
+  fetchTrainingEnglishPrewarm: vi.fn(),
   fetchTrainingRootFolders: vi.fn(),
-  saveTrainingCatalogConfiguration: vi.fn()
+  saveTrainingCatalogConfiguration: vi.fn(),
+  startTrainingEnglishPrewarm: vi.fn()
 }));
 
 const configuration = {
@@ -31,6 +35,12 @@ describe("TrainingCatalogSettings", () => {
       { id: "folder-1", name: "员工AI培训", workspaceId: "workspace-1" }
     ]);
     vi.mocked(saveTrainingCatalogConfiguration).mockResolvedValue(configuration);
+    vi.mocked(fetchTrainingEnglishPrewarm).mockResolvedValue({
+      status: "idle", totalThreads: 0, completedThreads: 0, totalMessages: 0, completedMessages: 0
+    });
+    vi.mocked(startTrainingEnglishPrewarm).mockResolvedValue({
+      status: "running", totalThreads: 0, completedThreads: 0, totalMessages: 0, completedMessages: 0
+    });
 
     render(<TrainingCatalogSettings users={[{
       source: { userType: "internal_employee" },

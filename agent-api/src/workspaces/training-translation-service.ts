@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 export type TrainingTranslationLocale = "en";
+export type TrainingTranslationPurpose = "content" | "filename";
 
 export type TrainingTranslationRunner = (input: {
   organizationId: string;
   requestedByUserId: string;
   texts: string[];
+  purpose: TrainingTranslationPurpose;
 }) => Promise<string[]>;
 
 type TranslationEntry<T> = {
@@ -17,22 +19,22 @@ type TranslationEntry<T> = {
 
 type TextSlot = {
   value: string;
+  purpose: TrainingTranslationPurpose;
   apply(translated: string): void;
 };
 
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/u;
-const SKIPPED_CONTENT_TYPES = new Set([
-  "attachment",
-  "file",
-  "image",
-  "image_file",
-  "source",
-  "tool-call",
-  "tool-result"
-]);
+const TRAINING_TRANSLATION_VERSION = "v2";
+const FILE_CONTENT_TYPES = new Set(["attachment", "file", "image", "image_file"]);
+const SKIPPED_CONTENT_TYPES = new Set(["source", "tool-call", "tool-result"]);
+const FILE_NAME_KEYS = new Set(["name", "filename", "fileName", "displayName", "title"]);
 
 function sourceHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash("sha256")
+    .update(TRAINING_TRANSLATION_VERSION)
+    .update("\0")
+    .update(JSON.stringify(value))
+    .digest("hex");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -61,6 +63,37 @@ function collectMessageTextSlots(value: unknown, slots: TextSlot[]): void {
   if (!record) return;
   const contentType = typeof record.type === "string" ? record.type : "";
   if (SKIPPED_CONTENT_TYPES.has(contentType)) return;
+  if (contentType === "data" && record.name === "codex_file_change") {
+    const data = asRecord(record.data);
+    const changes = Array.isArray(data?.changes) ? data.changes : [];
+    for (const change of changes) {
+      const changeRecord = asRecord(change);
+      const path = typeof changeRecord?.path === "string" ? changeRecord.path : "";
+      if (!changeRecord || !CJK_RE.test(path)) continue;
+      slots.push({
+        value: path,
+        purpose: "filename",
+        apply: (translated) => {
+          changeRecord.display_path = translated;
+        }
+      });
+    }
+    return;
+  }
+  if (FILE_CONTENT_TYPES.has(contentType)) {
+    for (const [key, child] of Object.entries(record)) {
+      if (typeof child === "string" && FILE_NAME_KEYS.has(key) && CJK_RE.test(child)) {
+        slots.push({
+          value: child,
+          purpose: "filename",
+          apply: (translated) => {
+            record[key] = translated;
+          }
+        });
+      }
+    }
+    return;
+  }
 
   for (const [key, child] of Object.entries(record)) {
     if (
@@ -70,6 +103,7 @@ function collectMessageTextSlots(value: unknown, slots: TextSlot[]): void {
     ) {
       slots.push({
         value: child,
+        purpose: "content",
         apply: (translated) => {
           record[key] = translated;
         }
@@ -109,6 +143,7 @@ export class TrainingTranslationService {
     organizationId: string;
     requestedByUserId: string;
     sourceType: string;
+    purpose?: TrainingTranslationPurpose;
     entries: Array<{ sourceId: string; value: string }>;
   }): Promise<Map<string, string>> {
     const localized = await this.localizeEntries({
@@ -117,7 +152,7 @@ export class TrainingTranslationService {
       prepare: (value) => {
         const holder = { value };
         const slots: TextSlot[] = CJK_RE.test(value)
-          ? [{ value, apply: (translated) => { holder.value = translated; } }]
+          ? [{ value, purpose: input.purpose ?? "content", apply: (translated) => { holder.value = translated; } }]
           : [];
         return { localized: holder, slots };
       },
@@ -179,31 +214,32 @@ export class TrainingTranslationService {
         }
       }
       const prepared = input.prepare(entry.value);
-      if (prepared.slots.length === 0) {
-        result.set(entry.sourceId, input.finish(prepared.localized));
-        continue;
-      }
       missing.push({ entry, ...prepared });
     }
 
     if (missing.length === 0) return result;
-    const uniqueTexts = Array.from(new Set(missing.flatMap((item) => item.slots.map((slot) => slot.value))));
     const translatedBySource = new Map<string, string>();
-    for (const chunk of chunkTexts(uniqueTexts)) {
-      const translations = await this.runner({
-        organizationId: input.organizationId,
-        requestedByUserId: input.requestedByUserId,
-        texts: chunk
-      });
-      if (translations.length !== chunk.length || translations.some((item) => !item.trim())) {
-        throw new Error("培训案例英文翻译返回数量不匹配");
+    for (const purpose of ["content", "filename"] as const) {
+      const uniqueTexts = Array.from(new Set(missing.flatMap((item) =>
+        item.slots.filter((slot) => slot.purpose === purpose).map((slot) => slot.value)
+      )));
+      for (const chunk of chunkTexts(uniqueTexts)) {
+        const translations = await this.runner({
+          organizationId: input.organizationId,
+          requestedByUserId: input.requestedByUserId,
+          texts: chunk,
+          purpose
+        });
+        if (translations.length !== chunk.length || translations.some((item) => !item.trim())) {
+          throw new Error("培训案例英文翻译返回数量不匹配");
+        }
+        chunk.forEach((source, index) => translatedBySource.set(`${purpose}:${source}`, translations[index]));
       }
-      chunk.forEach((source, index) => translatedBySource.set(source, translations[index]));
     }
 
     await Promise.all(missing.map(async (item) => {
       for (const slot of item.slots) {
-        slot.apply(translatedBySource.get(slot.value) ?? slot.value);
+        slot.apply(translatedBySource.get(`${slot.purpose}:${slot.value}`) ?? slot.value);
       }
       const localized = input.finish(item.localized);
       result.set(item.entry.sourceId, localized);

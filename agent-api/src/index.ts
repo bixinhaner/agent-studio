@@ -961,7 +961,7 @@ const trainingTranslations = new TrainingTranslationService(db, async (input) =>
     const result = await codexExecution.collectFromRuntime({
       runtime,
       thread: runtimeThread,
-      prompt: buildTrainingTranslationPrompt(input.texts),
+      prompt: buildTrainingTranslationPrompt(input.texts, input.purpose),
       workspace
     });
     await usageRecorder.recordCodexUsage({
@@ -974,6 +974,7 @@ const trainingTranslations = new TrainingTranslationService(db, async (input) =>
       metadata: {
         source: "portal_training_translation",
         provider: providerSnapshot.kind,
+        purpose: input.purpose,
         textCount: input.texts.length
       }
     });
@@ -987,6 +988,7 @@ const trainingTranslations = new TrainingTranslationService(db, async (input) =>
       metadata: {
         source: "portal_training_translation",
         provider: providerSnapshot.kind,
+        purpose: input.purpose,
         textCount: input.texts.length
       }
     }).catch(() => undefined);

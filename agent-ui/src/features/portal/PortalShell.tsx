@@ -3196,6 +3196,7 @@ function isReadyFileChange(kind: string): boolean {
 
 type CodexFileChangeView = {
   path: string;
+  displayPath: string;
   kind: string;
   canPreview?: boolean;
   canDownload?: boolean;
@@ -3215,6 +3216,7 @@ function collectCodexFileChanges(data: unknown): CodexFileChangeView[] {
     if (!obj) continue;
     const path = normalizePreviewFilePath(asString(obj.path));
     if (!path) continue;
+    const displayPath = normalizePreviewFilePath(asString(obj.display_path ?? obj.displayPath)) || path;
     const kind = asString(obj.kind) || "update";
     const previewStatus = asString(obj.preview_status ?? obj.previewStatus);
     const downloadStatus = asString(obj.download_status ?? obj.downloadStatus);
@@ -3223,6 +3225,7 @@ function collectCodexFileChanges(data: unknown): CodexFileChangeView[] {
     dedup.add(key);
     out.push({
       path,
+      displayPath,
       kind,
       canPreview: obj.can_preview === true || obj.canPreview === true || previewStatus === "ready",
       canDownload: obj.can_download === true || obj.canDownload === true || downloadStatus === "ready",
@@ -4485,7 +4488,7 @@ const ProcessDataFallback: FC<any> = ({
             const canPreview = !isExternalPortalUser || item.canPreview;
             const canDownload = item.canDownload && activeThreadId.trim();
             const imageExtension = fileExtensionFromPreviewPath(item.path);
-            const imageName = fileNameFromPreviewPath(item.path);
+            const imageName = fileNameFromPreviewPath(item.displayPath);
             const workspacePreviewOptions = workspaceFilePreviewOptions(attachmentWorkspaceFiles, imageName);
             const isImageArtifact = IMAGE_FILE_EXTENSIONS.has(imageExtension);
             const inlineImageHref = canPreview && isImageArtifact

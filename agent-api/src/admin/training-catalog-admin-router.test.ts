@@ -26,7 +26,13 @@ function createApp() {
     }),
     listRootFolderOptions: vi.fn().mockResolvedValue([
       { id: "folder-1", name: "员工AI培训", workspaceId: "workspace-1" }
-    ])
+    ]),
+    getEnglishPrewarmStatus: vi.fn().mockReturnValue({
+      status: "idle", totalThreads: 0, completedThreads: 0, totalMessages: 0, completedMessages: 0
+    }),
+    startEnglishPrewarm: vi.fn().mockResolvedValue({
+      status: "running", totalThreads: 0, completedThreads: 0, totalMessages: 0, completedMessages: 0
+    })
   };
   const app = express();
   app.use(express.json());
@@ -77,5 +83,23 @@ describe("createTrainingCatalogAdminRouter", () => {
     expect(response.body.folders).toEqual([
       { id: "folder-1", name: "员工AI培训", workspace_id: "workspace-1" }
     ]);
+  });
+
+  it("starts and reports the English cache job", async () => {
+    const { app, service } = createApp();
+    await request(app).get("/api/admin/training-catalog/english-prewarm").expect(200, {
+      prewarm: {
+        status: "idle",
+        total_threads: 0,
+        completed_threads: 0,
+        total_messages: 0,
+        completed_messages: 0,
+        started_at: null,
+        completed_at: null,
+        error: null
+      }
+    });
+    await request(app).post("/api/admin/training-catalog/english-prewarm").expect(202);
+    expect(service.startEnglishPrewarm).toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   TrainingCatalogAccessError,
   type TrainingCatalogConfigurationStatus,
+  type TrainingEnglishPrewarmStatus,
   type TrainingCatalogService,
   type TrainingCatalogViewer
 } from "../workspaces/training-catalog-service.js";
@@ -22,6 +23,19 @@ function resolveViewer(req: Request): TrainingCatalogViewer {
     userId: req.currentUser.id,
     organizationId: req.currentOrganization.id,
     organizationType: req.currentOrganization.type
+  };
+}
+
+function prewarmStatusOut(status: TrainingEnglishPrewarmStatus) {
+  return {
+    status: status.status,
+    total_threads: status.totalThreads,
+    completed_threads: status.completedThreads,
+    total_messages: status.totalMessages,
+    completed_messages: status.completedMessages,
+    started_at: status.startedAt ?? null,
+    completed_at: status.completedAt ?? null,
+    error: status.error ?? null
   };
 }
 
@@ -99,6 +113,24 @@ export function createTrainingCatalogAdminRouter(input: {
           workspace_id: folder.workspaceId
         }))
       });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  router.get("/training-catalog/english-prewarm", async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json({ prewarm: prewarmStatusOut(input.service.getEnglishPrewarmStatus(resolveViewer(req))) });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  router.post("/training-catalog/english-prewarm", async (req, res) => {
+    try {
+      const status = await input.service.startEnglishPrewarm(resolveViewer(req));
+      res.status(202).json({ prewarm: prewarmStatusOut(status) });
     } catch (error) {
       sendError(res, error);
     }

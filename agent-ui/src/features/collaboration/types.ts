@@ -134,6 +134,17 @@ export type TrainingCatalogRootFolderOption = {
   workspaceId: string;
 };
 
+export type TrainingEnglishPrewarmStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  totalThreads: number;
+  completedThreads: number;
+  totalMessages: number;
+  completedMessages: number;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
+
 export type BroadcastTargetRecord = {
   id: string;
   broadcastId: string;

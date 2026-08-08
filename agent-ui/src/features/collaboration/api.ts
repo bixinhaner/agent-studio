@@ -20,6 +20,7 @@ import type {
   ThreadAssignmentRecord,
   TrainingCatalogConfiguration,
   TrainingCatalogRootFolderOption,
+  TrainingEnglishPrewarmStatus,
   UpdateBroadcastDraftInput
 } from "./types";
 
@@ -314,4 +315,41 @@ export async function fetchTrainingRootFolders(sourceEmail: string): Promise<Tra
     name: folder.name,
     workspaceId: folder.workspace_id
   }));
+}
+
+function mapTrainingPrewarm(input: {
+  status: TrainingEnglishPrewarmStatus["status"];
+  total_threads: number;
+  completed_threads: number;
+  total_messages: number;
+  completed_messages: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+}): TrainingEnglishPrewarmStatus {
+  return {
+    status: input.status,
+    totalThreads: input.total_threads,
+    completedThreads: input.completed_threads,
+    totalMessages: input.total_messages,
+    completedMessages: input.completed_messages,
+    startedAt: input.started_at ?? undefined,
+    completedAt: input.completed_at ?? undefined,
+    error: input.error ?? undefined
+  };
+}
+
+export async function fetchTrainingEnglishPrewarm(): Promise<TrainingEnglishPrewarmStatus> {
+  const response = await api<{ prewarm: Parameters<typeof mapTrainingPrewarm>[0] }>(
+    "/api/admin/training-catalog/english-prewarm"
+  );
+  return mapTrainingPrewarm(response.prewarm);
+}
+
+export async function startTrainingEnglishPrewarm(): Promise<TrainingEnglishPrewarmStatus> {
+  const response = await api<{ prewarm: Parameters<typeof mapTrainingPrewarm>[0] }>(
+    "/api/admin/training-catalog/english-prewarm",
+    { method: "POST" }
+  );
+  return mapTrainingPrewarm(response.prewarm);
 }

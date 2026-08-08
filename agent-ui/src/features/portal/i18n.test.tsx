@@ -36,7 +36,7 @@ describe("portal i18n", () => {
     expect(normalizePortalLocale("fr-FR")).toBeNull();
   });
 
-  it("defaults the training page to Chinese and keeps an English deep link in the URL", async () => {
+  it("inherits the saved portal language and normalizes an English training URL", async () => {
     window.localStorage.setItem("agent-studio.portal.locale.v1", "en");
     window.history.replaceState(null, "", "/training");
     render(
@@ -44,9 +44,6 @@ describe("portal i18n", () => {
         <LocaleProbe />
       </PortalI18nProvider>
     );
-
-    expect(screen.getByText("新建会话")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Switch to English" }));
 
     expect(await screen.findByText("New session")).toBeTruthy();
     await waitFor(() => expect(window.location.search).toBe("?lang=en"));

@@ -191,7 +191,8 @@ export function createTrainingCatalogRouter(input: {
       const viewer = await input.resolveViewer(req);
       const files = await input.service.listThreadFiles({
         viewer,
-        threadId: String(req.params.threadId || "").trim()
+        threadId: String(req.params.threadId || "").trim(),
+        locale: requestedLocale(req)
       });
       res.json({ files: files.map(nodeOut) });
     } catch (error) {
