@@ -223,17 +223,37 @@ export class TrainingTranslationService {
       const uniqueTexts = Array.from(new Set(missing.flatMap((item) =>
         item.slots.filter((slot) => slot.purpose === purpose).map((slot) => slot.value)
       )));
-      for (const chunk of chunkTexts(uniqueTexts)) {
-        const translations = await this.runner({
-          organizationId: input.organizationId,
-          requestedByUserId: input.requestedByUserId,
-          texts: chunk,
-          purpose
-        });
-        if (translations.length !== chunk.length || translations.some((item) => !item.trim())) {
-          throw new Error("培训案例英文翻译返回数量不匹配");
+      const translateChunk = async (chunk: string[]): Promise<void> => {
+        try {
+          const translations = await this.runner({
+            organizationId: input.organizationId,
+            requestedByUserId: input.requestedByUserId,
+            texts: chunk,
+            purpose
+          });
+          if (translations.length !== chunk.length || translations.some((item) => !item.trim())) {
+            throw new Error("培训案例英文翻译返回数量不匹配");
+          }
+          chunk.forEach((source, index) => translatedBySource.set(`${purpose}:${source}`, translations[index]));
+        } catch (error) {
+          if (chunk.length === 1) {
+            const retry = await this.runner({
+              organizationId: input.organizationId,
+              requestedByUserId: input.requestedByUserId,
+              texts: chunk,
+              purpose
+            });
+            if (retry.length !== 1 || !retry[0]?.trim()) throw error;
+            translatedBySource.set(`${purpose}:${chunk[0]}`, retry[0]);
+            return;
+          }
+          const midpoint = Math.ceil(chunk.length / 2);
+          await translateChunk(chunk.slice(0, midpoint));
+          await translateChunk(chunk.slice(midpoint));
         }
-        chunk.forEach((source, index) => translatedBySource.set(`${purpose}:${source}`, translations[index]));
+      };
+      for (const chunk of chunkTexts(uniqueTexts)) {
+        await translateChunk(chunk);
       }
     }
 

@@ -92,4 +92,25 @@ describe("TrainingTranslationService", () => {
       ]
     });
   });
+
+  it("splits an incomplete batch and retries smaller translation groups", async () => {
+    const { db } = createService();
+    const runner = vi.fn(async ({ texts }: { texts: string[] }) => {
+      if (texts.length > 1) throw new Error("培训案例英文翻译返回数量不匹配");
+      return [`EN:${texts[0]}`];
+    });
+    const service = new TrainingTranslationService(db as never, runner);
+    const result = await service.localizeStrings({
+      organizationId: "org-1",
+      requestedByUserId: "user-1",
+      sourceType: "thread_title",
+      entries: [
+        { sourceId: "thread-1", value: "第一个案例" },
+        { sourceId: "thread-2", value: "第二个案例" }
+      ]
+    });
+    expect(result.get("thread-1")).toBe("EN:第一个案例");
+    expect(result.get("thread-2")).toBe("EN:第二个案例");
+    expect(runner).toHaveBeenCalledTimes(3);
+  });
 });
