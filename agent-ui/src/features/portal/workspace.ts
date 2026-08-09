@@ -36,6 +36,12 @@ export type PortalWorkspaceNode = {
   state: "active" | "trashed";
   created_by_type: string;
   source_thread_id: string | null;
+  delete_at?: string | null;
+  trash_summary?: {
+    folder_count: number;
+    file_count: number;
+    conversation_count: number;
+  } | null;
   created_at: string;
   updated_at: string;
 };
@@ -64,7 +70,7 @@ export type PortalWorkspaceFolderTasksResult = {
 export type PortalWorkspaceDataSource = {
   apiBasePath: string;
   fetchWorkspace(): Promise<{ workspace: PortalWorkspaceSummary; nodes: PortalWorkspaceNode[] }>;
-  fetchNodes(parentId?: string, options?: { includeMigrated?: boolean }): Promise<PortalWorkspaceNode[]>;
+  fetchNodes(parentId?: string, options?: { includeMigrated?: boolean; all?: boolean }): Promise<PortalWorkspaceNode[]>;
   fetchNode(nodeId: string): Promise<PortalWorkspaceNode>;
   fetchFolderAncestorPaths(folderIds: readonly string[]): Promise<Record<string, string[]>>;
   fetchFolderTasks(folderId: string): Promise<PortalWorkspaceFolderTasksResult>;
@@ -86,6 +92,7 @@ function createWorkspaceReadDataSource(apiBasePath: string, locale?: "en"): Port
       const query = new URLSearchParams();
       if (parentId) query.set("parent_id", parentId);
       if (options?.includeMigrated) query.set("include_migrated", "1");
+      if (options?.all) query.set("all", "1");
       const out = await api<{ nodes: PortalWorkspaceNode[] }>(
         requestPath(`${normalizedBasePath}/nodes${query.toString() ? `?${query.toString()}` : ""}`)
       );
@@ -153,7 +160,7 @@ export async function fetchPortalWorkspace(): Promise<{
 
 export async function fetchPortalWorkspaceNodes(
   parentId?: string,
-  options?: { includeMigrated?: boolean }
+  options?: { includeMigrated?: boolean; all?: boolean }
 ): Promise<PortalWorkspaceNode[]> {
   return PORTAL_WORKSPACE_DATA_SOURCE.fetchNodes(parentId, options);
 }
@@ -208,6 +215,50 @@ export async function createPortalWorkspaceFolder(name: string, parentId?: strin
       parent_id: parentId || null
     }
   });
+  return out.node;
+}
+
+export type PortalWorkspaceTrashPreview = {
+  node_id: string;
+  name: string;
+  folder_count: number;
+  file_count: number;
+  conversation_count: number;
+  running_conversation_count: number;
+  delete_at: string;
+};
+
+export async function previewPortalWorkspaceTrash(nodeId: string): Promise<PortalWorkspaceTrashPreview> {
+  const out = await api<{ preview: PortalWorkspaceTrashPreview }>(
+    `/api/portal/workspace/nodes/${encodeURIComponent(nodeId)}/trash-preview`
+  );
+  return out.preview;
+}
+
+export async function updatePortalWorkspaceNode(
+  nodeId: string,
+  changes: { name?: string; parent_id?: string | null }
+): Promise<PortalWorkspaceNode> {
+  const out = await api<{ node: PortalWorkspaceNode }>(
+    `/api/portal/workspace/nodes/${encodeURIComponent(nodeId)}`,
+    { method: "PATCH", json: changes }
+  );
+  return out.node;
+}
+
+export async function trashPortalWorkspaceNode(nodeId: string): Promise<PortalWorkspaceNode> {
+  const out = await api<{ node: PortalWorkspaceNode }>(
+    `/api/portal/workspace/nodes/${encodeURIComponent(nodeId)}`,
+    { method: "DELETE" }
+  );
+  return out.node;
+}
+
+export async function restorePortalWorkspaceNode(nodeId: string): Promise<PortalWorkspaceNode> {
+  const out = await api<{ node: PortalWorkspaceNode }>(
+    `/api/portal/workspace/nodes/${encodeURIComponent(nodeId)}/restore`,
+    { method: "POST" }
+  );
   return out.node;
 }
 

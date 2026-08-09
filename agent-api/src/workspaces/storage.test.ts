@@ -40,6 +40,14 @@ describe("LocalFsWorkspaceStorage", () => {
     await expect(storage.putImmutable(saved.storageKey, Buffer.from("changed"))).rejects.toThrow(/different content/);
   });
 
+  it("removes immutable objects safely and treats an absent object as already removed", async () => {
+    const storage = new LocalFsWorkspaceStorage(testRoot);
+    const saved = await storage.putImmutable("user-workspaces/a/files/b/v1.txt", Buffer.from("hello"));
+    await storage.remove(saved.storageKey);
+    await expect(storage.read(saved.storageKey)).rejects.toThrow();
+    await expect(storage.remove(saved.storageKey)).resolves.toBeUndefined();
+  });
+
   it("rejects symlink sources during legacy import", async () => {
     const sourceRoot = path.join(testRoot, "source");
     const targetRoot = path.join(testRoot, "target");

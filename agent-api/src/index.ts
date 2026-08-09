@@ -535,7 +535,12 @@ const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
 const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
-const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage);
+const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage, async (thread) => {
+  if (thread.workspace && shouldRemoveWorkspaceOnThreadHardDelete(thread.id, thread.workspace)) {
+    await fs.rm(thread.workspace, { recursive: true, force: true });
+  }
+  await fs.rm(getThreadUploadTempDir(thread.id), { recursive: true, force: true });
+});
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
@@ -13102,6 +13107,11 @@ if (runsAdminService) {
       console.warn("billing reminder sweep failed", error instanceof Error ? error.message : String(error));
     });
   }, 60 * 60_000).unref();
+  setInterval(() => {
+    void portalWorkspaces.purgeExpiredTrash().catch((error) => {
+      console.warn("workspace trash cleanup failed", error instanceof Error ? error.message : String(error));
+    });
+  }, 60 * 60_000).unref();
 }
 
 if (runsChatService && isAppServerRuntimeEnabled()) {
@@ -13121,6 +13131,9 @@ if (runsChatService && isAppServerRuntimeEnabled()) {
 async function bootstrap() {
   await db.$connect();
   if (runsAdminService) {
+    await portalWorkspaces.purgeExpiredTrash().catch((error) => {
+      console.warn("workspace trash cleanup failed", error instanceof Error ? error.message : String(error));
+    });
     const legacyThreadOwnerId = await users.findLegacyImportOwnerId(appConfig.legacyThreadOwnerId);
     const imported = await importLegacyThreadsFromJson({
       filePath: appConfig.threadStoreFile,

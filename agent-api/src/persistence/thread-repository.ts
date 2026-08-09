@@ -134,6 +134,7 @@ type ThreadTable = {
       securityDomainId?: string | null;
       userWorkspaceId?: string | null;
       workspaceFolderId?: string | null;
+      workspaceTrashBatchId?: string | null;
     };
     orderBy?: { updatedAt: "asc" | "desc" };
   }): Promise<ThreadRow[]>;
@@ -297,6 +298,7 @@ export class ThreadRepository {
     const normalizedOrganizationId = trimOrUndefined(organizationId);
     const rows = await this.db.thread.findMany({
       where: {
+        workspaceTrashBatchId: null,
         ...(includeArchived ? {} : { status: "active" }),
         ...(normalizedOrganizationId ? { organizationId: normalizedOrganizationId } : {})
       },
@@ -310,6 +312,7 @@ export class ThreadRepository {
     const rows = await this.db.thread.findMany({
       where: {
         userId,
+        workspaceTrashBatchId: null,
         ...(normalizedOrganizationId ? { organizationId: normalizedOrganizationId } : {}),
         ...(includeArchived ? {} : { status: "active" })
       },
@@ -329,6 +332,7 @@ export class ThreadRepository {
         userId,
         organizationId,
         securityDomainId,
+        workspaceTrashBatchId: null,
         ...(includeArchived ? {} : { status: "active" })
       },
       orderBy: { updatedAt: "desc" }

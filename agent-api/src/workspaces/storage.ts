@@ -130,4 +130,17 @@ export class LocalFsWorkspaceStorage {
     }
     return { sizeBytes: stat.size };
   }
+
+  async remove(storageKey: string): Promise<void> {
+    const absolutePath = this.resolve(storageKey);
+    const stat = await fs.lstat(absolutePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!stat) return;
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error("Workspace object is not a regular file");
+    }
+    await fs.unlink(absolutePath);
+  }
 }

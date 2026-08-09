@@ -15,6 +15,8 @@ function LocaleProbe() {
       <span>{locale}</span>
       <span>{t("sessions.new")}</span>
       <span>{t("thread.steerCouldNotApply")}</span>
+      <span>{t("workspace.trashFolderTitle")}</span>
+      <span>{t("workspace.trashFolderPermanentWarning")}</span>
       <button type="button" onClick={toggleLocale}>
         {t("language.switchTo")}
       </button>
@@ -48,6 +50,8 @@ describe("portal i18n", () => {
 
     expect(await screen.findByText("New session")).toBeTruthy();
     expect(screen.getByText("Couldn’t apply this direction")).toBeTruthy();
+    expect(screen.getByText("Move folder to Trash?")).toBeTruthy();
+    expect(screen.getByText(/conversation history, attachments, files, and version history/)).toBeTruthy();
     await waitFor(() => expect(window.location.search).toBe("?lang=en"));
   });
 
@@ -69,6 +73,8 @@ describe("portal i18n", () => {
 
     expect(await screen.findByText("新建会话")).toBeTruthy();
     expect(screen.getByText("未能应用这条引导")).toBeTruthy();
+    expect(screen.getByText("将文件夹移到回收站？")).toBeTruthy();
+    expect(screen.getByText(/相关会话记录、附件、文件及历史版本将自动永久删除/)).toBeTruthy();
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
       expect(window.localStorage.getItem("agent-studio.portal.locale.v1")).toBe("zh-CN");

@@ -44,6 +44,7 @@ import {
   TRASH_WORKSPACE_VIEW
 } from "./WorkspaceRail";
 import { CreateWorkspaceFolderModal } from "./CreateWorkspaceFolderModal";
+import { WorkspaceFolderMoreMenu } from "./WorkspaceFolderMoreMenu";
 
 function fileIconFor(node: PortalWorkspaceNode) {
   if (node.kind === "folder") return <Folder size={21} />;
@@ -584,6 +585,16 @@ export function WorkspaceFolderHome(props: {
                           <span className="workspace-file-icon">{fileIconFor(node)}</span>
                           <span className="workspace-file-copy">
                             <strong title={node.name}>{node.name}</strong>
+                            {trashView && node.trash_summary ? (
+                              <small className="workspace-trash-batch-summary">
+                                {t("workspace.trashContentsSummary", {
+                                  folders: node.trash_summary.folder_count,
+                                  conversations: node.trash_summary.conversation_count,
+                                  files: node.trash_summary.file_count
+                                })}
+                                {node.delete_at ? ` · ${t("workspace.trashDeleteAt", { date: formatLocalDate(node.delete_at, locale) })}` : ""}
+                              </small>
+                            ) : null}
                             <small className="workspace-file-mobile-meta">
                               {node.kind === "folder"
                                 ? t("workspace.folder")
@@ -598,7 +609,15 @@ export function WorkspaceFolderHome(props: {
                           </span>
                         </button>
                         {!props.readOnly && !node.system_key ? (
-                          <Dropdown
+                          node.kind === "folder" && !trashView ? (
+                            <WorkspaceFolderMoreMenu
+                              folder={node}
+                              onChanged={() => {
+                                void load();
+                                props.onWorkspaceChanged?.();
+                              }}
+                            />
+                          ) : <Dropdown
                             trigger={["click"]}
                             menu={{
                               items: trashView

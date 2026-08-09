@@ -35,8 +35,23 @@ export type WorkspaceNodeSummary = {
   state: WorkspaceNodeState;
   createdByType: string;
   sourceThreadId?: string;
+  deleteAt?: string;
+  trashSummary?: WorkspaceTrashSummary;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorkspaceTrashSummary = {
+  folderCount: number;
+  fileCount: number;
+  threadCount: number;
+};
+
+export type WorkspaceTrashPreview = WorkspaceTrashSummary & {
+  nodeId: string;
+  name: string;
+  deleteAt: string;
+  runningThreadCount: number;
 };
 
 export type WorkspaceTaskSummary = {
@@ -120,7 +135,10 @@ export function normalizeWorkspaceNodeName(value: string): { name: string; norma
   };
 }
 
-function mapWorkspaceNode(row: WorkspaceNodeRecord): WorkspaceNodeSummary {
+function mapWorkspaceNode(
+  row: WorkspaceNodeRecord,
+  trashSummary?: WorkspaceTrashSummary
+): WorkspaceNodeSummary {
   return {
     id: row.id,
     parentId: row.parentId ?? undefined,
@@ -133,6 +151,8 @@ function mapWorkspaceNode(row: WorkspaceNodeRecord): WorkspaceNodeSummary {
     state: row.state === "trashed" ? "trashed" : "active",
     createdByType: row.createdByType,
     sourceThreadId: row.sourceThreadId ?? undefined,
+    deleteAt: row.purgeAt ? toIso(row.purgeAt) : undefined,
+    trashSummary,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt)
   };
@@ -192,7 +212,8 @@ function versionStorageKey(input: {
 export class PortalWorkspaceService {
   constructor(
     private readonly db: PrismaClient,
-    private readonly storage: LocalFsWorkspaceStorage
+    private readonly storage: LocalFsWorkspaceStorage,
+    private readonly cleanupThreadData?: (thread: { id: string; workspace?: string }) => Promise<void>
   ) {}
 
   async ensureWorkspace(actor: WorkspaceActor): Promise<WorkspaceSummary> {
@@ -309,7 +330,7 @@ export class PortalWorkspaceService {
       orderBy: [{ kind: "asc" }, { name: "asc" }]
     });
     return rows
-      .map(mapWorkspaceNode)
+      .map((row) => mapWorkspaceNode(row))
       .sort((left, right) =>
         left.kind === right.kind
           ? left.name.localeCompare(right.name, "zh-Hans-CN", { numeric: true, sensitivity: "base" })
@@ -408,6 +429,7 @@ export class PortalWorkspaceService {
         userId: input.actor.userId,
         userWorkspaceId: workspace.id,
         workspaceFolderId: input.folderId,
+        workspaceTrashBatchId: null,
         ...(input.includeArchived ? {} : { status: "active" })
       },
       select: {
@@ -440,6 +462,7 @@ export class PortalWorkspaceService {
       userId: input.actor.userId,
       userWorkspaceId: workspace.id,
       workspaceFolderId: input.folderId,
+      workspaceTrashBatchId: null,
       ...(input.includeArchived ? {} : { status: "active" as const })
     };
     const [taskCount, bindings] = await Promise.all([
@@ -981,15 +1004,59 @@ export class PortalWorkspaceService {
     const workspace = await this.getWorkspaceRecord(input.actor);
     const node = await this.requireNode(workspace.id, input.nodeId);
     if (node.systemKey) throw new Error("System workspace folders cannot be deleted");
-    const updated = await this.db.workspaceNode.update({
-      where: { id: node.id },
-      data: {
-        state: "trashed",
-        originalParentId: node.parentId,
-        trashedAt: new Date()
-      }
+    if (node.state !== "active") throw new Error("Workspace item is already in trash");
+    const ids = await this.collectNodeTreeIds(workspace.id, node.id);
+    const now = new Date();
+    const deleteAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const trashBatchId = randomUUID().replace(/-/g, "");
+    const summary = await this.countTrashContents(workspace.id, ids);
+    if (await this.countRunningTrashThreads(workspace.id, ids)) {
+      throw new Error("A conversation in this folder is still running");
+    }
+    const updated = await this.db.$transaction(async (tx) => {
+      await tx.workspaceNode.updateMany({
+        where: { workspaceId: workspace.id, id: { in: ids }, state: "active" },
+        data: {
+          state: "trashed",
+          trashedAt: now,
+          trashBatchId,
+          trashRootId: null,
+          purgeAt: deleteAt
+        }
+      });
+      await tx.workspaceNode.update({
+        where: { id: node.id },
+        data: { originalParentId: node.parentId, trashRootId: node.id }
+      });
+      await tx.thread.updateMany({
+        where: {
+          userWorkspaceId: workspace.id,
+          workspaceFolderId: { in: ids },
+          workspaceTrashBatchId: null
+        },
+        data: { workspaceTrashBatchId: trashBatchId }
+      });
+      return tx.workspaceNode.findUniqueOrThrow({ where: { id: node.id } });
     });
-    return mapWorkspaceNode(updated);
+    return mapWorkspaceNode(updated, summary);
+  }
+
+  async previewTrashNode(input: {
+    actor: WorkspaceActor;
+    nodeId: string;
+  }): Promise<WorkspaceTrashPreview> {
+    const workspace = await this.getWorkspaceRecord(input.actor);
+    const node = await this.requireNode(workspace.id, input.nodeId);
+    if (node.systemKey) throw new Error("System workspace folders cannot be deleted");
+    if (node.state !== "active") throw new Error("Workspace item is already in trash");
+    const ids = await this.collectNodeTreeIds(workspace.id, node.id);
+    return {
+      nodeId: node.id,
+      name: node.name,
+      ...(await this.countTrashContents(workspace.id, ids)),
+      deleteAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      runningThreadCount: await this.countRunningTrashThreads(workspace.id, ids)
+    };
   }
 
   async restoreNode(input: {
@@ -998,6 +1065,76 @@ export class PortalWorkspaceService {
   }): Promise<WorkspaceNodeSummary> {
     const workspace = await this.getWorkspaceRecord(input.actor);
     const node = await this.requireNode(workspace.id, input.nodeId);
+    if (node.trashBatchId) {
+      const batchId = node.trashBatchId;
+      const root = await this.db.workspaceNode.findFirst({
+        where: { id: node.trashRootId ?? node.id, workspaceId: workspace.id, trashBatchId: batchId }
+      });
+      if (!root) throw new Error("Workspace trash batch does not exist");
+      const targetParent = root.originalParentId
+        ? await this.db.workspaceNode.findFirst({
+            where: { id: root.originalParentId, workspaceId: workspace.id, kind: "folder", state: "active" },
+            select: { id: true }
+          })
+        : null;
+      let restoredName = root.name;
+      let restoredNormalizedName = root.normalizedName;
+      const conflict = await this.db.workspaceNode.findFirst({
+        where: {
+          workspaceId: workspace.id,
+          parentId: targetParent?.id ?? null,
+          normalizedName: restoredNormalizedName,
+          state: "active"
+        },
+        select: { id: true }
+      });
+      if (conflict) {
+        for (let suffix = 2; suffix <= 1000; suffix += 1) {
+          const candidate = normalizeWorkspaceNodeName(fileNameWithCopySuffix(root.name, suffix));
+          const duplicate = await this.db.workspaceNode.findFirst({
+            where: {
+              workspaceId: workspace.id,
+              parentId: targetParent?.id ?? null,
+              normalizedName: candidate.normalizedName,
+              state: "active"
+            },
+            select: { id: true }
+          });
+          if (!duplicate) {
+            restoredName = candidate.name;
+            restoredNormalizedName = candidate.normalizedName;
+            break;
+          }
+        }
+      }
+      const restored = await this.db.$transaction(async (tx) => {
+        await tx.workspaceNode.updateMany({
+          where: { workspaceId: workspace.id, trashBatchId: batchId },
+          data: {
+            state: "active",
+            trashedAt: null,
+            trashBatchId: null,
+            trashRootId: null,
+            purgeAt: null
+          }
+        });
+        const restoredRoot = await tx.workspaceNode.update({
+          where: { id: root.id },
+          data: {
+            parentId: targetParent?.id ?? null,
+            originalParentId: null,
+            name: restoredName,
+            normalizedName: restoredNormalizedName
+          }
+        });
+        await tx.thread.updateMany({
+          where: { userWorkspaceId: workspace.id, workspaceTrashBatchId: batchId },
+          data: { workspaceTrashBatchId: null }
+        });
+        return restoredRoot;
+      });
+      return mapWorkspaceNode(restored);
+    }
     const targetParent = node.originalParentId
       ? await this.db.workspaceNode.findFirst({
           where: {
@@ -1077,6 +1214,7 @@ export class PortalWorkspaceService {
           securityDomainId: input.actor.securityDomainId ?? null,
           userId: input.actor.userId,
           userWorkspaceId: workspace.id,
+          workspaceTrashBatchId: null,
           title: { contains: query, mode: "insensitive" }
         },
         select: {
@@ -1092,7 +1230,7 @@ export class PortalWorkspaceService {
       })
     ]);
     return {
-      nodes: nodes.map(mapWorkspaceNode),
+      nodes: nodes.map((row) => mapWorkspaceNode(row)),
       tasks: tasks.map(mapTask)
     };
   }
@@ -1120,7 +1258,8 @@ export class PortalWorkspaceService {
           securityDomainId: input.actor.securityDomainId ?? null,
           userId: input.actor.userId,
           userWorkspaceId: workspace.id,
-          status: "active"
+          status: "active",
+          workspaceTrashBatchId: null
         },
         select: {
           id: true,
@@ -1134,7 +1273,7 @@ export class PortalWorkspaceService {
         take
       })
     ]);
-    return { nodes: nodes.map(mapWorkspaceNode), tasks: tasks.map(mapTask) };
+    return { nodes: nodes.map((row) => mapWorkspaceNode(row)), tasks: tasks.map(mapTask) };
   }
 
   async trash(input: {
@@ -1147,7 +1286,8 @@ export class PortalWorkspaceService {
       this.db.workspaceNode.findMany({
         where: {
           workspaceId: workspace.id,
-          state: "trashed"
+          state: "trashed",
+          trashRootId: { not: null }
         },
         orderBy: { updatedAt: "desc" },
         take
@@ -1158,7 +1298,8 @@ export class PortalWorkspaceService {
           securityDomainId: input.actor.securityDomainId ?? null,
           userId: input.actor.userId,
           userWorkspaceId: workspace.id,
-          status: "archived"
+          status: "archived",
+          workspaceTrashBatchId: null
         },
         select: {
           id: true,
@@ -1172,7 +1313,37 @@ export class PortalWorkspaceService {
         take
       })
     ]);
-    return { nodes: nodes.map(mapWorkspaceNode), tasks: tasks.map(mapTask) };
+    const batchIds = nodes.map((node) => node.trashBatchId).filter((id): id is string => Boolean(id));
+    const [nodeCounts, threadCounts] = batchIds.length > 0 ? await Promise.all([
+      this.db.workspaceNode.groupBy({
+        by: ["trashBatchId", "kind"],
+        where: { workspaceId: workspace.id, trashBatchId: { in: batchIds } },
+        _count: { _all: true }
+      }),
+      this.db.thread.groupBy({
+        by: ["workspaceTrashBatchId"],
+        where: { userWorkspaceId: workspace.id, workspaceTrashBatchId: { in: batchIds } },
+        _count: { _all: true }
+      })
+    ]) : [[], []];
+    const summaries = new Map<string, WorkspaceTrashSummary>();
+    for (const batchId of batchIds) summaries.set(batchId, { folderCount: 0, fileCount: 0, threadCount: 0 });
+    for (const count of nodeCounts) {
+      if (!count.trashBatchId) continue;
+      const summary = summaries.get(count.trashBatchId);
+      if (!summary) continue;
+      if (count.kind === "folder") summary.folderCount = count._count._all;
+      else summary.fileCount = count._count._all;
+    }
+    for (const count of threadCounts) {
+      if (!count.workspaceTrashBatchId) continue;
+      const summary = summaries.get(count.workspaceTrashBatchId);
+      if (summary) summary.threadCount = count._count._all;
+    }
+    return {
+      nodes: nodes.map((node) => mapWorkspaceNode(node, node.trashBatchId ? summaries.get(node.trashBatchId) : undefined)),
+      tasks: tasks.map(mapTask)
+    };
   }
 
   async agentOutputs(input: {
@@ -1203,7 +1374,8 @@ export class PortalWorkspaceService {
               organizationId: input.actor.organizationId,
               securityDomainId: input.actor.securityDomainId ?? null,
               userId: input.actor.userId,
-              userWorkspaceId: workspace.id
+              userWorkspaceId: workspace.id,
+              workspaceTrashBatchId: null
             },
             select: {
               id: true,
@@ -1217,7 +1389,7 @@ export class PortalWorkspaceService {
             take
           });
     return {
-      nodes: nodes.map(mapWorkspaceNode),
+      nodes: nodes.map((row) => mapWorkspaceNode(row)),
       tasks: tasks.map(mapTask)
     };
   }
@@ -1246,6 +1418,74 @@ export class PortalWorkspaceService {
       }
     });
     return mapTask(updated);
+  }
+
+  async purgeExpiredTrash(input: { now?: Date; take?: number } = {}): Promise<{
+    batches: number;
+    nodes: number;
+    threads: number;
+    storageObjects: number;
+  }> {
+    const now = input.now ?? new Date();
+    const candidates = await this.db.workspaceNode.findMany({
+      where: { state: "trashed", purgeAt: { lte: now }, trashRootId: { not: null } },
+      orderBy: { purgeAt: "asc" },
+      take: Math.min(Math.max(input.take ?? 50, 1), 200)
+    });
+    const roots = candidates.filter((node) => node.id === node.trashRootId && node.trashBatchId);
+    let nodeCount = 0;
+    let threadCount = 0;
+    let storageObjectCount = 0;
+    for (const root of roots) {
+      const batchId = root.trashBatchId!;
+      const [versions, threads, nodes] = await Promise.all([
+        this.db.workspaceFileVersion.findMany({
+          where: { file: { workspaceId: root.workspaceId, trashBatchId: batchId } },
+          select: { storageKey: true, sizeBytes: true }
+        }),
+        this.db.thread.findMany({
+          where: { userWorkspaceId: root.workspaceId, workspaceTrashBatchId: batchId },
+          select: { id: true, workspace: true }
+        }),
+        this.db.workspaceNode.count({ where: { workspaceId: root.workspaceId, trashBatchId: batchId } })
+      ]);
+      const threadIds = threads.map((thread) => thread.id);
+      const removedBytes = versions.reduce((sum, version) => sum + version.sizeBytes, BigInt(0));
+      await this.db.$transaction(async (tx) => {
+        if (threadIds.length > 0) {
+          await tx.runtimeSession.deleteMany({ where: { threadId: { in: threadIds } } });
+          await tx.thread.deleteMany({ where: { id: { in: threadIds } } });
+        }
+        await tx.workspaceNode.deleteMany({
+          where: { workspaceId: root.workspaceId, trashBatchId: batchId }
+        });
+        if (removedBytes > BigInt(0)) {
+          const workspace = await tx.userWorkspace.findUnique({
+            where: { id: root.workspaceId },
+            select: { usedBytes: true }
+          });
+          const nextUsedBytes = workspace && workspace.usedBytes > removedBytes
+            ? workspace.usedBytes - removedBytes
+            : BigInt(0);
+          await tx.userWorkspace.update({
+            where: { id: root.workspaceId },
+            data: { usedBytes: nextUsedBytes }
+          });
+        }
+      });
+      for (const version of versions) {
+        await this.storage.remove(version.storageKey).catch(() => undefined);
+      }
+      if (this.cleanupThreadData) {
+        for (const thread of threads) {
+          await this.cleanupThreadData({ id: thread.id, workspace: thread.workspace ?? undefined }).catch(() => undefined);
+        }
+      }
+      nodeCount += nodes;
+      threadCount += threadIds.length;
+      storageObjectCount += versions.length;
+    }
+    return { batches: roots.length, nodes: nodeCount, threads: threadCount, storageObjects: storageObjectCount };
   }
 
   async recordAppliedChange(input: {
@@ -1565,6 +1805,42 @@ export class PortalWorkspaceService {
       select: { id: true }
     });
     if (!folder) throw new Error("Workspace folder does not exist");
+  }
+
+  private async collectNodeTreeIds(workspaceId: string, rootNodeId: string): Promise<string[]> {
+    const ids = [rootNodeId];
+    let frontier = [rootNodeId];
+    for (let depth = 0; depth < 100 && frontier.length > 0; depth += 1) {
+      const children = await this.db.workspaceNode.findMany({
+        where: { workspaceId, parentId: { in: frontier }, state: "active" },
+        select: { id: true }
+      });
+      frontier = children.map((child) => child.id);
+      ids.push(...frontier);
+    }
+    return Array.from(new Set(ids));
+  }
+
+  private async countTrashContents(workspaceId: string, nodeIds: string[]): Promise<WorkspaceTrashSummary> {
+    const [folders, files, threads] = await Promise.all([
+      this.db.workspaceNode.count({ where: { workspaceId, id: { in: nodeIds }, kind: "folder", state: "active" } }),
+      this.db.workspaceNode.count({ where: { workspaceId, id: { in: nodeIds }, kind: "file", state: "active" } }),
+      this.db.thread.count({
+        where: { userWorkspaceId: workspaceId, workspaceFolderId: { in: nodeIds }, workspaceTrashBatchId: null }
+      })
+    ]);
+    return { folderCount: folders, fileCount: files, threadCount: threads };
+  }
+
+  private async countRunningTrashThreads(workspaceId: string, nodeIds: string[]): Promise<number> {
+    return this.db.thread.count({
+      where: {
+        userWorkspaceId: workspaceId,
+        workspaceFolderId: { in: nodeIds },
+        workspaceTrashBatchId: null,
+        runtimeSessions: { some: { status: "active" } }
+      }
+    });
   }
 
   private async requireNode(workspaceId: string, nodeId: string): Promise<WorkspaceNodeRecord> {

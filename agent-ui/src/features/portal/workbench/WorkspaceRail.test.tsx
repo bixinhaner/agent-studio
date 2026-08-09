@@ -152,4 +152,26 @@ describe("WorkspaceRail", () => {
     expect(screen.queryByText("+ 文件夹")).toBeNull();
     expect(screen.queryByText("回收站")).toBeNull();
   });
+
+  it("shows a horizontal More menu only for editable custom folders", () => {
+    const systemFolder = { ...folder("history-1", "History"), system_key: "history_unfiled" };
+    render(
+      <PortalI18nProvider>
+        <WorkspaceRail
+          workspace={null}
+          rootNodes={[folder("root-1", "项目"), systemFolder]}
+          selectedFolderId=""
+          searchValue=""
+          onSearchChange={vi.fn()}
+          onSelectFolder={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNewTask={vi.fn()}
+          onViewAllTasks={vi.fn()}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByRole("button", { name: "“项目”的更多操作" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "“History”的更多操作" })).toBeNull();
+  });
 });

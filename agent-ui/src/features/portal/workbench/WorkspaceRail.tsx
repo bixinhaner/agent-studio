@@ -24,6 +24,7 @@ import {
   type PortalWorkspaceNode,
   type PortalWorkspaceSummary
 } from "../workspace";
+import { WorkspaceFolderMoreMenu } from "./WorkspaceFolderMoreMenu";
 
 export const RECENT_WORKSPACE_VIEW = "__recent__";
 export const AGENT_OUTPUTS_WORKSPACE_VIEW = "__agent_outputs__";
@@ -49,6 +50,7 @@ export function WorkspaceRail(props: {
   onCreateFolder(): void;
   onNewTask(): void;
   onViewAllTasks(): void;
+  onFolderChanged?(action: "rename" | "move" | "trash", folder: PortalWorkspaceNode): void;
   dataSource?: PortalWorkspaceDataSource;
   readOnly?: boolean;
   title?: string;
@@ -182,6 +184,15 @@ export function WorkspaceRail(props: {
               <span>{t("workspace.newTask")}</span>
             </button>
           ) : null}
+          {!props.readOnly && !folder.system_key ? (
+            <WorkspaceFolderMoreMenu
+              folder={folder}
+              onChanged={(action, updatedFolder) => {
+                setChildrenByFolderId({});
+                props.onFolderChanged?.(action, updatedFolder);
+              }}
+            />
+          ) : null}
         </div>
         {selected ? (
           <div className="workspace-folder-task-preview">
@@ -210,6 +221,7 @@ export function WorkspaceRail(props: {
     props.onNewTask,
     props.onSelectFolder,
     props.onViewAllTasks,
+    props.onFolderChanged,
     props.readOnly,
     props.selectedFolderId,
     props.taskCount,

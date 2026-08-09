@@ -46,6 +46,14 @@ function nodeOut(node: WorkspaceNodeSummary) {
     state: node.state,
     created_by_type: node.createdByType,
     source_thread_id: node.sourceThreadId ?? null,
+    delete_at: node.deleteAt ?? null,
+    trash_summary: node.trashSummary
+      ? {
+          folder_count: node.trashSummary.folderCount,
+          file_count: node.trashSummary.fileCount,
+          conversation_count: node.trashSummary.threadCount
+        }
+      : null,
     created_at: node.createdAt,
     updated_at: node.updatedAt
   };
@@ -143,7 +151,7 @@ export function createPortalWorkspaceRouter(input: {
         actor,
         parentId: parentId || undefined,
         state,
-        allParents: state === "trashed" && queryBoolean(req.query.all),
+        allParents: queryBoolean(req.query.all),
         includeMigrated: queryBoolean(req.query.include_migrated)
       });
       res.json({ nodes: nodes.map(nodeOut) });
@@ -243,6 +251,29 @@ export function createPortalWorkspaceRouter(input: {
       res.json({ node: nodeOut(node) });
     } catch (error) {
       sendWorkspaceError(res, error, "Failed to update workspace item");
+    }
+  });
+
+  router.get("/nodes/:nodeId/trash-preview", async (req, res) => {
+    try {
+      const actor = await input.resolveActor(req);
+      const preview = await input.service.previewTrashNode({
+        actor,
+        nodeId: String(req.params.nodeId || "").trim()
+      });
+      res.json({
+        preview: {
+          node_id: preview.nodeId,
+          name: preview.name,
+          folder_count: preview.folderCount,
+          file_count: preview.fileCount,
+          conversation_count: preview.threadCount,
+          running_conversation_count: preview.runningThreadCount,
+          delete_at: preview.deleteAt
+        }
+      });
+    } catch (error) {
+      sendWorkspaceError(res, error, "Failed to preview workspace trash operation");
     }
   });
 

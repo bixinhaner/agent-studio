@@ -10250,6 +10250,15 @@ export function PortalShell(props: {
           setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }));
         }
       }}
+      onFolderChanged={(action, folder) => {
+        if (action === "trash" && selectedWorkspaceFolderPath.some((item) => item.id === folder.id)) {
+          setSelectedWorkspaceFolderId(RECENT_WORKSPACE_VIEW);
+          setSelectedWorkspaceFolderPath([]);
+          setWorkspaceMainView("folder");
+          writePortalWorkspaceLocation({ folderId: RECENT_WORKSPACE_VIEW }, "replace");
+        }
+        setWorkspaceRefreshToken((value) => value + 1);
+      }}
     />
   );
 

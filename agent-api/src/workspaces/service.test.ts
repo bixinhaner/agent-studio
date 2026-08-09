@@ -145,6 +145,137 @@ describe("PortalWorkspaceService history compatibility", () => {
   });
 });
 
+describe("PortalWorkspaceService trash retention", () => {
+  it("previews recursive folders, conversations, files, and running conversations", async () => {
+    const now = new Date("2026-08-09T00:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({ id: "workspace-1", status: "active" })
+      },
+      workspaceNode: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "folder-root",
+          workspaceId: "workspace-1",
+          parentId: null,
+          kind: "folder",
+          name: "项目",
+          normalizedName: "项目",
+          systemKey: null,
+          state: "active"
+        }),
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: "folder-child" }, { id: "file-root" }])
+          .mockResolvedValueOnce([{ id: "file-child" }])
+          .mockResolvedValueOnce([]),
+        count: vi.fn()
+          .mockResolvedValueOnce(2)
+          .mockResolvedValueOnce(2)
+      },
+      thread: {
+        count: vi.fn()
+          .mockResolvedValueOnce(5)
+          .mockResolvedValueOnce(1)
+      }
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    await expect(service.previewTrashNode({ actor, nodeId: "folder-root" })).resolves.toEqual({
+      nodeId: "folder-root",
+      name: "项目",
+      folderCount: 2,
+      fileCount: 2,
+      threadCount: 5,
+      runningThreadCount: 1,
+      deleteAt: "2026-09-08T00:00:00.000Z"
+    });
+    expect(db.thread.count).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        workspaceTrashBatchId: null,
+        runtimeSessions: { some: { status: "active" } }
+      })
+    });
+    vi.useRealTimers();
+  });
+
+  it("moves a complete folder tree and every contained conversation into one batch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T00:00:00.000Z"));
+    const root = {
+      id: "folder-root",
+      workspaceId: "workspace-1",
+      parentId: "folder-parent",
+      kind: "folder",
+      name: "项目",
+      normalizedName: "项目",
+      systemKey: null,
+      storageKey: null,
+      mimeType: null,
+      sizeBytes: null,
+      checksum: null,
+      state: "active",
+      trashedAt: null,
+      originalParentId: null,
+      trashBatchId: null,
+      trashRootId: null,
+      purgeAt: null,
+      createdByType: "user",
+      createdByUserId: "user-1",
+      sourceThreadId: null,
+      metadata: null,
+      createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-01T00:00:00.000Z")
+    };
+    const tx = {
+      workspaceNode: {
+        updateMany: vi.fn().mockResolvedValue({ count: 4 }),
+        update: vi.fn().mockResolvedValue(root),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          ...root,
+          state: "trashed",
+          trashedAt: new Date("2026-08-09T00:00:00.000Z"),
+          trashBatchId: "batch-1",
+          trashRootId: "folder-root",
+          purgeAt: new Date("2026-09-08T00:00:00.000Z")
+        })
+      },
+      thread: { updateMany: vi.fn().mockResolvedValue({ count: 4 }) }
+    };
+    const db = {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({ id: "workspace-1", status: "active" })
+      },
+      workspaceNode: {
+        findFirst: vi.fn().mockResolvedValue(root),
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: "folder-child" }, { id: "file-root" }])
+          .mockResolvedValueOnce([{ id: "file-child" }])
+          .mockResolvedValueOnce([]),
+        count: vi.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(2)
+      },
+      thread: {
+        count: vi.fn().mockResolvedValueOnce(4).mockResolvedValueOnce(0)
+      },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx))
+    };
+    const service = new PortalWorkspaceService(db as never, {} as never);
+
+    const result = await service.trashNode({ actor, nodeId: "folder-root" });
+
+    expect(result.trashSummary).toEqual({ folderCount: 2, fileCount: 2, threadCount: 4 });
+    expect(result.deleteAt).toBe("2026-09-08T00:00:00.000Z");
+    expect(tx.workspaceNode.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: { in: ["folder-root", "folder-child", "file-root", "file-child"] } }),
+      data: expect.objectContaining({ state: "trashed", purgeAt: new Date("2026-09-08T00:00:00.000Z") })
+    }));
+    expect(tx.thread.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workspaceFolderId: { in: ["folder-root", "folder-child", "file-root", "file-child"] } })
+    }));
+    vi.useRealTimers();
+  });
+});
+
 describe("PortalWorkspaceService.materializeTaskWorkspace", () => {
   it("materializes the selected folder hierarchy and reports a safe byte truncation", async () => {
     const now = new Date("2026-07-27T00:00:00.000Z");

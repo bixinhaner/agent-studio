@@ -713,6 +713,7 @@ model Thread {
   securityDomainId String?           @map("security_domain_id")
   userWorkspaceId String?            @map("user_workspace_id")
   workspaceFolderId String?          @map("workspace_folder_id")
+  workspaceTrashBatchId String?      @map("workspace_trash_batch_id")
   channel         String?
   title           String?
   status          ThreadStatus      @default(active)
@@ -754,6 +755,7 @@ model Thread {
   @@index([securityDomainId, createdAt])
   @@index([userWorkspaceId, workspaceFolderId, updatedAt])
   @@index([workspaceFolderId, status, updatedAt])
+  @@index([workspaceTrashBatchId])
   @@index([channel, createdAt])
   @@index([userId])
   @@map("threads")
@@ -871,6 +873,9 @@ model WorkspaceNode {
   state            String    @default("active")
   trashedAt        DateTime? @map("trashed_at")
   originalParentId String?   @map("original_parent_id")
+  trashBatchId     String?   @map("trash_batch_id")
+  trashRootId      String?   @map("trash_root_id")
+  purgeAt          DateTime? @map("purge_at")
   createdByType    String    @default("user") @map("created_by_type")
   createdByUserId  String?   @map("created_by_user_id")
   sourceThreadId   String?   @map("source_thread_id")
@@ -896,6 +901,8 @@ model WorkspaceNode {
   @@index([workspaceId, parentId, state, name])
   @@index([workspaceId, kind, updatedAt])
   @@index([sourceThreadId])
+  @@index([workspaceId, trashBatchId])
+  @@index([state, purgeAt])
   @@map("workspace_nodes")
 }
 

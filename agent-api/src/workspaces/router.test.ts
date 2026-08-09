@@ -61,6 +61,15 @@ function createTestApp(serviceOverrides: Record<string, unknown> = {}) {
     saveFile: vi.fn().mockResolvedValue({ file: node(), version: version() }),
     renameOrMoveNode: vi.fn().mockResolvedValue(node({ name: "renamed.md" })),
     trashNode: vi.fn().mockResolvedValue(node({ state: "trashed" })),
+    previewTrashNode: vi.fn().mockResolvedValue({
+      nodeId: "folder-1",
+      name: "项目",
+      folderCount: 3,
+      fileCount: 7,
+      threadCount: 4,
+      runningThreadCount: 0,
+      deleteAt: "2026-08-08T00:00:00.000Z"
+    }),
     restoreNode: vi.fn().mockResolvedValue(node()),
     getFile: vi.fn().mockResolvedValue({ file: node(), version: version(), content: Buffer.from("# hello") }),
     listVersions: vi.fn().mockResolvedValue([version()]),
@@ -127,6 +136,18 @@ describe("createPortalWorkspaceRouter", () => {
     });
   });
 
+  it("loads all active folders for a safe move-target picker", async () => {
+    const { app, service } = createTestApp();
+    await request(app).get("/api/portal/workspace/nodes?all=1").expect(200);
+    expect(service.listNodes).toHaveBeenCalledWith({
+      actor,
+      parentId: undefined,
+      state: "active",
+      allParents: true,
+      includeMigrated: false
+    });
+  });
+
   it("reveals migrated historical files only when the caller explicitly asks for them", async () => {
     const { app, service } = createTestApp();
     await request(app)
@@ -146,6 +167,23 @@ describe("createPortalWorkspaceRouter", () => {
     const response = await request(app).get("/api/portal/workspace/nodes/folder-1").expect(200);
     expect(response.body.node.name).toBe("Nested");
     expect(service.getNode).toHaveBeenCalledWith({ actor, nodeId: "folder-1" });
+  });
+
+  it("previews every conversation and file affected by recursive folder trash", async () => {
+    const { app, service } = createTestApp();
+    const response = await request(app)
+      .get("/api/portal/workspace/nodes/folder-1/trash-preview")
+      .expect(200);
+    expect(response.body.preview).toEqual({
+      node_id: "folder-1",
+      name: "项目",
+      folder_count: 3,
+      file_count: 7,
+      conversation_count: 4,
+      running_conversation_count: 0,
+      delete_at: "2026-08-08T00:00:00.000Z"
+    });
+    expect(service.previewTrashNode).toHaveBeenCalledWith({ actor, nodeId: "folder-1" });
   });
 
   it("returns folder ancestor paths for collapsed tree state indicators", async () => {
