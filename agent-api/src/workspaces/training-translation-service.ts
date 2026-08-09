@@ -25,13 +25,17 @@ type TextSlot = {
 
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/u;
 const TRAINING_TRANSLATION_VERSION = "v2";
+const MESSAGE_TRANSLATION_VERSION = "v3";
 const FILE_CONTENT_TYPES = new Set(["attachment", "file", "image", "image_file"]);
 const SKIPPED_CONTENT_TYPES = new Set(["source", "tool-call", "tool-result"]);
 const FILE_NAME_KEYS = new Set(["name", "filename", "fileName", "displayName", "title"]);
 
-function sourceHash(value: unknown): string {
+function sourceHash(value: unknown, sourceType: string): string {
+  const version = sourceType === "message_content"
+    ? MESSAGE_TRANSLATION_VERSION
+    : TRAINING_TRANSLATION_VERSION;
   return createHash("sha256")
-    .update(TRAINING_TRANSLATION_VERSION)
+    .update(version)
     .update("\0")
     .update(JSON.stringify(value))
     .digest("hex");
@@ -63,6 +67,12 @@ function collectMessageTextSlots(value: unknown, slots: TextSlot[]): void {
   if (!record) return;
   const contentType = typeof record.type === "string" ? record.type : "";
   if (SKIPPED_CONTENT_TYPES.has(contentType)) return;
+  if (contentType === "data" && record.name === "codex_commentary") {
+    const data = asRecord(record.data);
+    if (!data) return;
+    collectCommentaryTextSlots(data, slots);
+    return;
+  }
   if (contentType === "data" && record.name === "codex_file_change") {
     const data = asRecord(record.data);
     const changes = Array.isArray(data?.changes) ? data.changes : [];
@@ -112,6 +122,46 @@ function collectMessageTextSlots(value: unknown, slots: TextSlot[]): void {
     }
     if (key !== "args" && key !== "argsText" && key !== "result") {
       collectMessageTextSlots(child, slots);
+    }
+  }
+}
+
+function collectCommentaryTextSlots(value: unknown, slots: TextSlot[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (typeof item === "string" && CJK_RE.test(item)) {
+        slots.push({
+          value: item,
+          purpose: "content",
+          apply: (translated) => {
+            value[index] = translated;
+          }
+        });
+        return;
+      }
+      collectCommentaryTextSlots(item, slots);
+    });
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) return;
+  for (const [key, child] of Object.entries(record)) {
+    if (
+      typeof child === "string" &&
+      (key === "text" || key === "title" || key === "description") &&
+      CJK_RE.test(child)
+    ) {
+      slots.push({
+        value: child,
+        purpose: "content",
+        apply: (translated) => {
+          record[key] = translated;
+        }
+      });
+      continue;
+    }
+    if (key === "lines" || key === "entries") {
+      collectCommentaryTextSlots(child, slots);
     }
   }
 }
@@ -187,7 +237,7 @@ export class TrainingTranslationService {
     finish(value: TPrepared): TResult;
   }): Promise<Map<string, TResult>> {
     if (input.entries.length === 0) return new Map();
-    const hashes = new Map(input.entries.map((entry) => [entry.sourceId, sourceHash(entry.value)]));
+    const hashes = new Map(input.entries.map((entry) => [entry.sourceId, sourceHash(entry.value, entry.sourceType)]));
     const cached = await this.db.portalTrainingTranslation.findMany({
       where: {
         organizationId: input.organizationId,

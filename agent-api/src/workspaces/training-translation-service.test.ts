@@ -70,6 +70,16 @@ describe("TrainingTranslationService", () => {
       role: "assistant",
       content: [
         { type: "text", text: "已完成分析。" },
+        {
+          type: "data",
+          name: "codex_commentary",
+          data: {
+            text: "正在核对两张表。",
+            lines: ["正在核对两张表。"],
+            entries: [{ text: "汇总口径已确认。", lines: ["汇总口径已确认。"] }],
+            last_event_at: 1785433350538
+          }
+        },
         { type: "file", name: "切换抓包_现场.pcap", url: "/download/切换抓包_现场.pcap" },
         { type: "data", name: "codex_file_change", data: { changes: [{ path: "销售分析_v04.xlsx" }] } },
         { type: "tool-call", argsText: "rg -n 中文参数", result: { text: "原始日志" } }
@@ -86,6 +96,16 @@ describe("TrainingTranslationService", () => {
       ...source,
       content: [
         { type: "text", text: "EN:已完成分析。" },
+        {
+          type: "data",
+          name: "codex_commentary",
+          data: {
+            text: "EN:正在核对两张表。",
+            lines: ["EN:正在核对两张表。"],
+            entries: [{ text: "EN:汇总口径已确认。", lines: ["EN:汇总口径已确认。"] }],
+            last_event_at: 1785433350538
+          }
+        },
         { type: "file", name: "EN:切换抓包_现场.pcap", url: "/download/切换抓包_现场.pcap" },
         { type: "data", name: "codex_file_change", data: { changes: [{ path: "销售分析_v04.xlsx", display_path: "EN:销售分析_v04.xlsx" }] } },
         { type: "tool-call", argsText: "rg -n 中文参数", result: { text: "原始日志" } }
