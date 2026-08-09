@@ -22,6 +22,21 @@ export type SkillCatalogDraft = {
   translations: Record<string, SkillCatalogLocalizedContent>;
 };
 
+export type SkillCatalogScope = "private" | "agent_mode" | "team" | "org" | "platform" | "unknown";
+
+export type SkillCatalogActor = {
+  userId: string;
+  displayName?: string;
+  email?: string;
+};
+
+export type SkillCatalogAudience = {
+  type: "user" | "agent_mode" | "team" | "organization" | "platform";
+  id?: string;
+  name: string;
+  secondaryLabel?: string;
+};
+
 export type SkillCatalogEntry = {
   id: string;
   catalogKey: string;
@@ -41,8 +56,16 @@ export type SkillCatalogEntry = {
   draft?: SkillCatalogDraft & { updatedAt: string; updatedByUserId?: string };
   description?: string;
   sourceLabel: string;
-  scope: "private" | "team" | "platform";
+  scope: SkillCatalogScope;
+  rawScope?: string;
   ownerUserId?: string;
+  owner?: SkillCatalogActor;
+  createdBy?: SkillCatalogActor;
+  organization?: {
+    id: string;
+    name?: string;
+  };
+  audiences: SkillCatalogAudience[];
   system: boolean;
   plugin?: {
     pluginRef: string;

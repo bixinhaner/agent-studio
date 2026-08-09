@@ -616,7 +616,10 @@ const skillCatalog = new SkillCatalogService(
   {
     nativeSkills: nativeCodexSkills,
     managedSkills: codexSkills,
-    plugins: installedPlugins
+    plugins: installedPlugins,
+    users,
+    skillPackages,
+    agentModes
   }
 );
 const codexProviders = new ManagedCodexProviderResolver({

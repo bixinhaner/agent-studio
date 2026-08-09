@@ -1,5 +1,20 @@
 export type SkillCatalogSourceType = "native" | "managed" | "plugin";
 
+export type SkillCatalogScope = "private" | "agent_mode" | "team" | "org" | "platform" | "unknown";
+
+export type SkillCatalogActor = {
+  userId: string;
+  displayName?: string;
+  email?: string;
+};
+
+export type SkillCatalogAudience = {
+  type: "user" | "agent_mode" | "team" | "organization" | "platform";
+  id?: string;
+  name: string;
+  secondaryLabel?: string;
+};
+
 export type SkillCatalogBaseConfig = {
   defaultLocale: string;
   iconKey: string;
@@ -47,8 +62,16 @@ export type SkillCatalogSourceSnapshot = {
   canonicalName: string;
   description?: string;
   sourceLabel: string;
-  scope: "private" | "team" | "platform";
+  scope: SkillCatalogScope;
+  rawScope?: string;
   ownerUserId?: string;
+  owner?: SkillCatalogActor;
+  createdBy?: SkillCatalogActor;
+  organization?: {
+    id: string;
+    name?: string;
+  };
+  audiences: SkillCatalogAudience[];
   system: boolean;
   plugin?: {
     pluginRef: string;

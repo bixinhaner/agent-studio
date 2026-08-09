@@ -32,7 +32,10 @@ export function createSkillCatalogAdminRouter(service: SkillCatalogService): Rou
 
   router.get("/skill-catalog", async (req: Request, res: Response) => {
     try {
-      res.json({ entries: await service.syncAndList({ organizationId: req.currentOrganization?.id }) });
+      res.json({ entries: await service.syncAndList({
+        organizationId: req.currentOrganization?.id,
+        organizationName: req.currentOrganization?.name
+      }) });
     } catch (error) {
       res.status(500).json({ detail: detail(error) });
     }
@@ -40,7 +43,11 @@ export function createSkillCatalogAdminRouter(service: SkillCatalogService): Rou
 
   router.get("/skill-catalog/:id", async (req: Request, res: Response) => {
     try {
-      const entry = await service.getAdminRecord({ id: req.params.id, organizationId: req.currentOrganization?.id });
+      const entry = await service.getAdminRecord({
+        id: req.params.id,
+        organizationId: req.currentOrganization?.id,
+        organizationName: req.currentOrganization?.name
+      });
       if (!entry) {
         res.status(404).json({ detail: "Skill 展示配置不存在" });
         return;
@@ -61,6 +68,7 @@ export function createSkillCatalogAdminRouter(service: SkillCatalogService): Rou
       const entry = await service.saveDraft({
         id: req.params.id,
         organizationId: req.currentOrganization?.id,
+        organizationName: req.currentOrganization?.name,
         actorUserId: req.currentUser?.id,
         draft: parsed.data
       });
@@ -74,7 +82,8 @@ export function createSkillCatalogAdminRouter(service: SkillCatalogService): Rou
     try {
       const entry = await service.publish({
         id: req.params.id,
-        organizationId: req.currentOrganization?.id
+        organizationId: req.currentOrganization?.id,
+        organizationName: req.currentOrganization?.name
       });
       res.json({ entry });
     } catch (error) {

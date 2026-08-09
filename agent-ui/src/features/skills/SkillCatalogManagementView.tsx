@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   BadgeCheck,
   BarChart3,
+  Bot,
+  Building2,
   Check,
   ChevronDown,
   CircleAlert,
@@ -40,6 +42,7 @@ import {
   saveSkillCatalogDraft,
   type SkillCatalogDraft,
   type SkillCatalogEntry,
+  type SkillCatalogActor,
   type SkillCatalogLocalizedContent
 } from "./skill-catalog-api";
 import "./skill-catalog-management.css";
@@ -74,7 +77,12 @@ const EMPTY_LOCALE: SkillCatalogLocalizedContent = {
 };
 
 function scopeLabel(scope: SkillCatalogEntry["scope"]): string {
-  return scope === "private" ? "我的私有" : scope === "team" ? "团队共享" : "平台内置";
+  if (scope === "private") return "用户私有";
+  if (scope === "agent_mode") return "智能体专属";
+  if (scope === "team") return "团队共享";
+  if (scope === "org") return "组织共享";
+  if (scope === "platform") return "平台内置";
+  return "未知范围";
 }
 
 function entryScopeLabel(entry: SkillCatalogEntry): string {
@@ -83,8 +91,59 @@ function entryScopeLabel(entry: SkillCatalogEntry): string {
 
 function ScopeIcon({ scope }: { scope: SkillCatalogEntry["scope"] }) {
   if (scope === "private") return <UserRound size={15} aria-hidden="true" />;
+  if (scope === "agent_mode") return <Bot size={15} aria-hidden="true" />;
   if (scope === "team") return <Users size={15} aria-hidden="true" />;
+  if (scope === "org") return <Building2 size={15} aria-hidden="true" />;
   return <Package size={15} aria-hidden="true" />;
+}
+
+function actorName(actor?: SkillCatalogActor): string {
+  return actor?.displayName || actor?.email || actor?.userId || "未记录";
+}
+
+function actorSecondary(actor?: SkillCatalogActor): string | undefined {
+  if (!actor) return undefined;
+  if (actor.displayName && actor.email) return actor.email;
+  if ((actor.displayName || actor.email) && actor.userId) return actor.userId;
+  return undefined;
+}
+
+function attribution(entry: SkillCatalogEntry): { title: string; secondary?: string; icon: ReactNode } {
+  if (entry.scope === "private") {
+    return { title: actorName(entry.owner), secondary: actorSecondary(entry.owner), icon: <UserRound size={15} /> };
+  }
+  if (entry.scope === "agent_mode") {
+    const first = entry.audiences[0];
+    const remaining = Math.max(0, entry.audiences.length - 1);
+    return {
+      title: first?.name || "未绑定智能体",
+      secondary: first ? `${first.secondaryLabel || "智能体"}${remaining ? ` · 另 ${remaining} 个` : ""}` : "需要检查 Skill Package 绑定",
+      icon: <Bot size={15} />
+    };
+  }
+  if (entry.scope === "team" || entry.scope === "org") {
+    const audience = entry.audiences[0];
+    return {
+      title: audience?.name || entry.organization?.name || (entry.scope === "team" ? "当前团队" : "当前组织"),
+      secondary: audience?.secondaryLabel || entry.organization?.id,
+      icon: entry.scope === "team" ? <Users size={15} /> : <Building2 size={15} />
+    };
+  }
+  return {
+    title: entry.sourceType === "plugin" ? "系统自动能力" : "平台",
+    secondary: entry.sourceLabel,
+    icon: entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <Package size={15} />
+  };
+}
+
+function visibilityText(entry: SkillCatalogEntry): string {
+  if (entry.scope === "private") return entry.owner ? `仅 ${actorName(entry.owner)}` : "仅所有者";
+  if (entry.scope === "agent_mode") return entry.audiences.length
+    ? entry.audiences.map((item) => item.name).join("、")
+    : "尚未检测到智能体绑定";
+  if (entry.scope === "team") return entry.audiences[0]?.name || "当前团队";
+  if (entry.scope === "org") return entry.audiences[0]?.name || entry.organization?.name || "当前组织";
+  return "所有可访问 Portal 的用户";
 }
 
 function IconGlyph({ iconKey, size = 20 }: { iconKey: string; size?: number }) {
@@ -130,12 +189,23 @@ function localDate(value?: string): string {
   }).format(new Date(value));
 }
 
+function localDateShort(value?: string): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(value));
+}
+
+type ScopeFilter = "all" | "private" | "shared" | "platform" | "plugin";
+
 export function SkillCatalogManagementView() {
   const [entries, setEntries] = useState<SkillCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<"all" | SkillCatalogEntry["scope"] | "plugin">("all");
+  const [scope, setScope] = useState<ScopeFilter>("all");
   const [language, setLanguage] = useState<"all" | "complete" | "missing">("all");
   const [status, setStatus] = useState<"all" | "published" | "draft">("all");
   const [selectedId, setSelectedId] = useState("");
@@ -164,12 +234,24 @@ export function SkillCatalogManagementView() {
     return entries.filter((entry) => {
       const content = displayContent(entry);
       if (scope === "plugin" && entry.sourceType !== "plugin") return false;
-      if (scope !== "all" && scope !== "plugin" && (entry.sourceType === "plugin" || entry.scope !== scope)) return false;
+      if (scope === "private" && (entry.sourceType === "plugin" || entry.scope !== "private")) return false;
+      if (scope === "shared" && (entry.sourceType === "plugin" || !["agent_mode", "team", "org"].includes(entry.scope))) return false;
+      if (scope === "platform" && (entry.sourceType === "plugin" || entry.scope !== "platform")) return false;
       if (language === "complete" && entry.languageStatus.configured !== entry.languageStatus.total) return false;
       if (language === "missing" && entry.languageStatus.configured === entry.languageStatus.total) return false;
       if (status === "published" && !entry.publishedAt) return false;
       if (status === "draft" && !entry.draft) return false;
-      return !normalized || [entry.canonicalName, content.displayName, content.summary].filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized);
+      const searchable = [
+        entry.canonicalName,
+        content.displayName,
+        content.summary,
+        entry.owner?.displayName,
+        entry.owner?.email,
+        entry.createdBy?.displayName,
+        entry.createdBy?.email,
+        ...entry.audiences.flatMap((audience) => [audience.name, audience.secondaryLabel])
+      ];
+      return !normalized || searchable.filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized);
     });
   }, [entries, language, query, scope, status]);
   const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered[0];
@@ -203,10 +285,14 @@ export function SkillCatalogManagementView() {
 
       {error ? <div className="skill-admin-error" role="alert">{error}</div> : null}
       <div className="skill-admin-filters">
-        <Input value={query} onChange={(event) => setQuery(event.target.value)} prefix={<Search size={16} />} placeholder="搜索原名、用途名" allowClear />
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} prefix={<Search size={16} />} placeholder="搜索 Skill、所有者或邮箱" allowClear />
         <div className="skill-admin-scope-tabs">
           {([
-            ["all", "全部"], ["private", "我的"], ["team", "团队"], ["platform", "平台"], ["plugin", "自动能力"]
+            ["all", "全部"],
+            ["private", "用户私有"],
+            ["shared", "共享 Skill"],
+            ["platform", "平台内置"],
+            ["plugin", "自动能力"]
           ] as const).map(([value, label]) => (
             <button key={value} type="button" className={scope === value ? "is-selected" : ""} onClick={() => setScope(value)}>{label}</button>
           ))}
@@ -227,20 +313,19 @@ export function SkillCatalogManagementView() {
         <section className="skill-admin-table-wrap" aria-label="Skill 目录">
           {loading ? <div className="skill-admin-loading"><Spin /></div> : (
             <table className="skill-admin-table">
-              <thead><tr><th>Skill 原名</th><th>用途名</th><th>范围</th><th>来源</th><th>语言</th><th>状态</th><th>更新于</th><th>操作</th></tr></thead>
+              <thead><tr><th>Skill</th><th>范围</th><th>所有者 / 归属</th><th className="skill-admin-col-status">状态</th><th className="skill-admin-col-updated">更新于</th><th>操作</th></tr></thead>
               <tbody>
                 {filtered.map((entry) => {
                   const content = displayContent(entry);
+                  const ownerOrScope = attribution(entry);
                   const isSelected = selected?.id === entry.id;
                   return (
                     <tr key={entry.id} className={isSelected ? "is-selected" : ""} onClick={() => setSelectedId(entry.id)}>
-                      <td><code>{entry.canonicalName}</code></td>
-                      <td>{content.displayName || "—"}</td>
+                      <td><div className="skill-admin-skill-cell"><code title={entry.canonicalName}>{entry.canonicalName}</code><span title={content.displayName}>{content.displayName || "未配置用途名"}</span></div></td>
                       <td><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span></td>
-                      <td>{entry.sourceLabel}</td>
-                      <td>{entry.languageStatus.configured}/{entry.languageStatus.total} {entry.languageStatus.missingLocales.length ? `缺少 ${entry.languageStatus.missingLocales.join(", ")}` : "完整"}</td>
-                      <td>{entry.draft ? <span className="skill-admin-status is-draft">草稿</span> : entry.publishedAt ? <span className="skill-admin-status is-published">已发布</span> : <span className="skill-admin-status">未发布</span>}</td>
-                      <td>{localDate(entry.draft?.updatedAt ?? entry.publishedAt ?? entry.updatedAt)}</td>
+                      <td><div className="skill-admin-attribution-cell"><span className="skill-admin-attribution-icon" aria-hidden="true">{ownerOrScope.icon}</span><span><strong title={ownerOrScope.title}>{ownerOrScope.title}</strong>{ownerOrScope.secondary ? <small title={ownerOrScope.secondary}>{ownerOrScope.secondary}</small> : null}</span></div></td>
+                      <td className="skill-admin-col-status"><div className="skill-admin-state-cell">{entry.draft ? <span className="skill-admin-table-status is-draft"><i aria-hidden="true" />有草稿</span> : entry.publishedAt ? <span className="skill-admin-table-status is-published"><i aria-hidden="true" />已发布</span> : <span className="skill-admin-table-status"><i aria-hidden="true" />未发布</span>}</div></td>
+                      <td className="skill-admin-col-updated" title={localDate(entry.draft?.updatedAt ?? entry.publishedAt ?? entry.updatedAt)}>{localDateShort(entry.draft?.updatedAt ?? entry.publishedAt ?? entry.updatedAt)}</td>
                       <td>
                         <button type="button" className="skill-admin-link" onClick={(event) => { event.stopPropagation(); setEditingId(entry.id); }}>编辑</button>
                         <button type="button" className="skill-admin-more" aria-label="更多操作"><MoreVertical size={16} /></button>
@@ -268,19 +353,41 @@ function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; on
   return (
     <aside className="skill-admin-side-panel">
       <div className="skill-admin-side-heading"><strong>Skill 详情</strong><button type="button" aria-label="折叠详情"><ChevronDown size={17} /></button></div>
-      <dl>
-        <div><dt>原名（规范名）</dt><dd><code>{entry.canonicalName}</code><Copy size={14} /></dd></div>
-        <div><dt>用途名（默认语言 {entry.defaultLocale}）</dt><dd>{content.displayName || "未配置"}<button type="button" onClick={onEdit}>编辑</button></dd></div>
-        <div><dt>默认语言</dt><dd>{entry.defaultLocale}</dd></div>
-        <div><dt>来源</dt><dd>{entry.sourceLabel}（{entryScopeLabel(entry)}）</dd></div>
-        {entry.plugin ? <><div><dt>运行版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>运行状态</dt><dd><span className={`skill-admin-status ${entry.plugin.readiness !== "unavailable" ? "is-published" : ""}`}>{runtimeLabel}</span></dd></div><div><dt>Portal 展示</dt><dd>{entry.plugin.visibleToUsers ? "显示" : "隐藏"}</dd></div><div><dt>能力状态</dt><dd>{entry.plugin.capabilityHealth.map((capability) => `${capability.label}：${capability.status === "ready" ? "可用" : capability.detail || "不可用"}`).join("；") || "—"}</dd></div><div><dt>包含 Skill</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></> : null}
-        <div><dt>当前发布</dt><dd>{localDate(entry.publishedAt)}</dd></div>
-        <div><dt>状态</dt><dd><span className={`skill-admin-status ${entry.publishedAt ? "is-published" : ""}`}>{entry.publishedAt ? "已发布" : "未发布"}</span></dd></div>
-      </dl>
+      <section className="skill-admin-detail-section">
+        <h3>归属与可见范围</h3>
+        <dl>
+          <div><dt>所有者</dt><dd><ActorDetail actor={entry.owner} emptyLabel={entry.scope === "private" ? "未记录所有者" : "不适用"} /></dd></div>
+          <div><dt>创建人</dt><dd><ActorDetail actor={entry.createdBy} emptyLabel={entry.system ? "系统" : "未记录创建人"} /></dd></div>
+          <div><dt>原始范围</dt><dd><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span><code>{entry.rawScope || entry.scope}</code></dd></div>
+          <div><dt>可见对象</dt><dd className="skill-admin-audience-list">{visibilityText(entry)}</dd></div>
+        </dl>
+      </section>
+      <section className="skill-admin-detail-section">
+        <h3>基础信息</h3>
+        <dl>
+          <div><dt>原名（规范名）</dt><dd><code>{entry.canonicalName}</code><Copy size={14} aria-hidden="true" /></dd></div>
+          <div><dt>用途名</dt><dd>{content.displayName || "未配置"}<button type="button" onClick={onEdit}>编辑</button></dd></div>
+          <div><dt>来源</dt><dd>{entry.sourceLabel}</dd></div>
+          <div><dt>默认语言</dt><dd>{entry.defaultLocale}</dd></div>
+          <div><dt>语言内容</dt><dd>{entry.languageStatus.configured}/{entry.languageStatus.total} {entry.languageStatus.configured === entry.languageStatus.total ? "完整" : "已配置"}</dd></div>
+          <div><dt>当前发布</dt><dd>{localDate(entry.publishedAt)}</dd></div>
+        </dl>
+      </section>
+      {entry.plugin ? <section className="skill-admin-detail-section"><h3>运行信息</h3><dl><div><dt>运行版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>运行状态</dt><dd><span className={`skill-admin-status ${entry.plugin.readiness !== "unavailable" ? "is-published" : ""}`}>{runtimeLabel}</span></dd></div><div><dt>Portal 展示</dt><dd>{entry.plugin.visibleToUsers ? "显示" : "隐藏"}</dd></div><div><dt>能力状态</dt><dd>{entry.plugin.capabilityHealth.map((capability) => `${capability.label}：${capability.status === "ready" ? "可用" : capability.detail || "不可用"}`).join("；") || "—"}</dd></div><div><dt>包含 Skill</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></dl></section> : null}
       <h3>在 Portal 中的预览</h3>
       <PortalCardPreview entry={entry} content={content} />
       <Button block onClick={onEdit}>编辑展示内容</Button>
     </aside>
+  );
+}
+
+function ActorDetail({ actor, emptyLabel }: { actor?: SkillCatalogActor; emptyLabel: string }) {
+  if (!actor) return <span className="skill-admin-empty-value">{emptyLabel}</span>;
+  return (
+    <span className="skill-admin-actor-detail">
+      <span className="skill-admin-attribution-icon" aria-hidden="true"><UserRound size={15} /></span>
+      <span><strong>{actorName(actor)}</strong>{actorSecondary(actor) ? <small>{actorSecondary(actor)}</small> : null}</span>
+    </span>
   );
 }
 

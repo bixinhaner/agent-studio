@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { resolveSkillCatalogPresentation, selectCatalogEntry } from "./service.js";
+import { SkillCatalogService, resolveSkillCatalogPresentation, selectCatalogEntry } from "./service.js";
 import type { SkillCatalogEntryRecord } from "./types.js";
 
 const entry: SkillCatalogEntryRecord = {
@@ -57,5 +57,91 @@ describe("resolveSkillCatalogPresentation", () => {
   it("prefers organization entries over global entries", () => {
     const organizationEntry = { ...entry, id: "org-entry", organizationId: "org-1" };
     expect(selectCatalogEntry({ entries: [entry, organizationEntry], organizationId: "org-1", sourceType: "native", sourceRef: "skill-creator" })?.id).toBe("org-entry");
+  });
+});
+
+describe("SkillCatalogService.syncAndList", () => {
+  it("preserves the managed scope and exposes owner, creator, and bound agent audiences", async () => {
+    const managedEntry: SkillCatalogEntryRecord = {
+      ...entry,
+      id: "catalog-managed-1",
+      catalogKey: "org:org-1:managed:managed-1",
+      organizationId: "org-1",
+      sourceType: "managed",
+      sourceRef: "managed-1",
+      canonicalName: "managed-report"
+    };
+    const repository = {
+      ensureEntry: vi.fn().mockResolvedValue(managedEntry),
+      list: vi.fn().mockResolvedValue([managedEntry])
+    };
+    const service = new SkillCatalogService(repository as never, {
+      nativeSkills: { list: vi.fn().mockResolvedValue([]) },
+      managedSkills: {
+        listManagedSkills: vi.fn().mockResolvedValue([{
+          id: "managed-1",
+          organizationId: "org-1",
+          ownerUserId: "user-1",
+          scope: "agent_mode",
+          skillName: "managed-report",
+          slug: "managed-report",
+          displayName: "Managed report",
+          status: "active",
+          version: "1.0.0",
+          publishedPath: "/skills/managed-report",
+          createdByUserId: "user-1",
+          createdByDisplayName: "Old display name",
+          createdByEmail: "old@example.com",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z"
+        }])
+      },
+      users: {
+        getById: vi.fn().mockResolvedValue({ id: "user-1", displayName: "Current name", email: "current@example.com" })
+      },
+      skillPackages: {
+        list: vi.fn().mockResolvedValue([{
+          id: "package-1",
+          items: [{ runtimeBindings: [{
+            runtimeType: "codex",
+            bindingType: "codex_skill",
+            bindingPayload: { managedSkillId: "managed-1", skillName: "managed-report" }
+          }] }]
+        }, {
+          id: "package-other-owner",
+          items: [{ runtimeBindings: [{
+            runtimeType: "codex",
+            bindingType: "codex_skill",
+            bindingPayload: { managedSkillId: "managed-other", skillName: "managed-report" }
+          }] }]
+        }])
+      },
+      agentModes: {
+        list: vi.fn().mockResolvedValue([{
+          id: "mode-1",
+          organizationId: "org-1",
+          name: "Finance assistant",
+          slug: "finance-assistant",
+          skillPackages: [{ skillPackageId: "package-1" }]
+        }, {
+          id: "mode-other",
+          organizationId: "org-1",
+          name: "Other owner's assistant",
+          slug: "other-owner-assistant",
+          skillPackages: [{ skillPackageId: "package-other-owner" }]
+        }])
+      }
+    });
+
+    const [record] = await service.syncAndList({ organizationId: "org-1", organizationName: "Internal Organization" });
+
+    expect(record).toMatchObject({
+      scope: "agent_mode",
+      rawScope: "agent_mode",
+      owner: { userId: "user-1", displayName: "Current name", email: "current@example.com" },
+      createdBy: { userId: "user-1", displayName: "Current name", email: "current@example.com" },
+      organization: { id: "org-1", name: "Internal Organization" },
+      audiences: [{ type: "agent_mode", id: "mode-1", name: "Finance assistant", secondaryLabel: "finance-assistant" }]
+    });
   });
 });
