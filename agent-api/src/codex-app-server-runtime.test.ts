@@ -38,6 +38,7 @@ const threads = new Set();
 const pendingServerRequests = new Map();
 const overloadRecoveryModeByThread = new Map();
 const configByThread = new Map();
+const activeTurnByThread = new Map();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -189,6 +190,35 @@ rl.on("line", (line) => {
     });
     return;
   }
+  if (message.method === "turn/steer") {
+    const activeTurnId = activeTurnByThread.get(params.threadId);
+    if (!activeTurnId || params.expectedTurnId !== activeTurnId) {
+      write({ id, error: { message: "expected turn does not match active turn" } });
+      return;
+    }
+    const steerText = Array.isArray(params.input) && params.input[0] && typeof params.input[0].text === "string"
+      ? params.input[0].text
+      : "";
+    respond(id, { turnId: activeTurnId });
+    notify("item/agentMessage/delta", {
+      threadId: params.threadId,
+      turnId: activeTurnId,
+      itemId: "steered-msg",
+      delta: "Steered: " + steerText
+    });
+    notify("item/completed", {
+      threadId: params.threadId,
+      turnId: activeTurnId,
+      item: { id: "steered-msg", type: "agentMessage", text: "Steered: " + steerText },
+      completedAtMs: Date.now()
+    });
+    notify("turn/completed", {
+      threadId: params.threadId,
+      turn: { id: activeTurnId, last_agent_message: "Steered: " + steerText }
+    });
+    activeTurnByThread.delete(params.threadId);
+    return;
+  }
   if (message.method === "turn/start") {
     const threadId = params.threadId;
     if (!threads.has(threadId)) {
@@ -196,6 +226,7 @@ rl.on("line", (line) => {
       return;
     }
     const turnId = "turn-" + nextTurnId++;
+    activeTurnByThread.set(threadId, turnId);
     const inputText = Array.isArray(params.input) && params.input[0] && typeof params.input[0].text === "string" ? params.input[0].text : "";
     const markdownWhitespaceText = "Intro\\n\\n![Example](</tmp/image one.png>)\\n\\n| A | B |\\n|---|---|\\n| 1 | 2 |\\n";
     if (inputText === "stale-before-start") {
@@ -287,6 +318,9 @@ rl.on("line", (line) => {
         return;
       }
       if (inputText === "hang") {
+        return;
+      }
+      if (inputText === "wait-for-steer") {
         return;
       }
       if (inputText === "runtime-error") {
@@ -479,6 +513,35 @@ describe("Codex app-server runtime", () => {
         return event.type === "raw_response_item.completed" && raw?.item?.type === "image_generation_call" && raw.item.name === "image_generation";
       })
     ).toBe(true);
+  });
+
+  it("steers the active in-flight turn without starting a new turn", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-steer")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir
+    });
+    const events: CodexStreamEvent[] = [];
+    const runningTurn = (async () => {
+      for await (const event of runtime.runStreamed(thread, "wait-for-steer")) {
+        events.push(event);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const acceptedTurnId = await runtime.steerActiveTurn(thread, "focus on the failing tests");
+    await runningTurn;
+
+    expect(acceptedTurnId).toBe("turn-1");
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Steered: focus on the failing tests");
+    expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    await expect(runtime.steerActiveTurn(thread, "too late")).rejects.toThrow("No active turn");
   });
 
   it("sends skills and runtime settings as turn-level overrides on the existing thread", async () => {

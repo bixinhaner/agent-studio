@@ -1063,6 +1063,10 @@ class CodexAppServerManager {
   private readonly processes = new Map<string, CodexAppServerProcess>();
   private readonly lockedThreads = new Set<string>();
   private readonly threadWaiters = new Map<string, Array<() => void>>();
+  private readonly activeTurnsByThread = new Map<
+    string,
+    { process: CodexAppServerProcess; scopeKey: string; turnId: string }
+  >();
 
   async listModels(options: CodexRuntimeOptions): Promise<CodexModelCapability[]> {
     const process = await this.getProcess(runtimeScope(options));
@@ -1135,6 +1139,7 @@ class CodexAppServerManager {
       codexRunConfig: options.codexRunConfig ?? thread.options.codexRunConfig
     };
     const process = await this.getProcess(scope);
+    const activeTurnKey = `${thread.scopeKey}\u0000${thread.id}`;
     const releaseThread = await this.acquireThreadLock(thread.id);
     const releaseTurn = await process.acquireTurnSlot();
     const queue = new AsyncEventQueue<CodexStreamEvent>();
@@ -1295,6 +1300,14 @@ class CodexAppServerManager {
         abortPromise
       ]);
       turnId = turnIdFromResult(result);
+      if (!turnId) {
+        throw makeTurnError("Codex app-server did not return a turn id");
+      }
+      this.activeTurnsByThread.set(activeTurnKey, {
+        process,
+        scopeKey: thread.scopeKey,
+        turnId
+      });
       abortReject = undefined;
       acceptBufferedEventsForTurn();
 
@@ -1313,9 +1326,32 @@ class CodexAppServerManager {
       if (idleTimer) clearTimeout(idleTimer);
       if (maxTimer) clearTimeout(maxTimer);
       unsubscribe();
+      const activeTurn = this.activeTurnsByThread.get(activeTurnKey);
+      if (activeTurn && activeTurn.turnId === turnId && activeTurn.scopeKey === thread.scopeKey) {
+        this.activeTurnsByThread.delete(activeTurnKey);
+      }
       releaseTurn();
       releaseThread();
     }
+  }
+
+  async steerTurn(thread: CodexAppServerThread, message: string): Promise<string> {
+    const text = trimOrUndefined(message);
+    if (!text) throw new Error("Steering input cannot be empty");
+    const activeTurn = this.activeTurnsByThread.get(`${thread.scopeKey}\u0000${thread.id}`);
+    if (!activeTurn || activeTurn.scopeKey !== thread.scopeKey) {
+      throw new Error("No active turn is available for steering");
+    }
+    const result = await activeTurn.process.request("turn/steer", {
+      threadId: thread.id,
+      input: [{ type: "text", text }],
+      expectedTurnId: activeTurn.turnId
+    });
+    const acceptedTurnId = trimOrUndefined(asRecord(result)?.turnId) ?? activeTurn.turnId;
+    if (acceptedTurnId !== activeTurn.turnId) {
+      throw new Error("Codex app-server steered a different active turn");
+    }
+    return acceptedTurnId;
   }
 
   private async getProcess(scope: RuntimeScope): Promise<CodexAppServerProcess> {
@@ -1353,6 +1389,7 @@ class CodexAppServerManager {
       process.stop(reason);
     }
     this.processes.clear();
+    this.activeTurnsByThread.clear();
   }
 
   private async acquireThreadLock(threadId: string): Promise<() => void> {
@@ -1432,6 +1469,10 @@ export class CodexAppServerRuntime {
         turnMessage = TRANSIENT_OVERLOAD_RECOVERY_MESSAGE;
       }
     }
+  }
+
+  async steerActiveTurn(thread: CodexAppServerThread, message: string): Promise<string> {
+    return await appServerManager.steerTurn(thread, message);
   }
 
   async validateProvider(options: { model: string; reasoningEffort: ReasoningEffort }): Promise<void> {

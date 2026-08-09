@@ -197,6 +197,13 @@ export class CodexRuntime {
     }
   }
 
+  async steerActiveTurn(thread: any, message: string): Promise<string> {
+    if (!this.appServerRuntime) {
+      throw new Error("Steering an active turn requires the Codex app-server runtime");
+    }
+    return await this.appServerRuntime.steerActiveTurn(thread, message);
+  }
+
   async validateProvider(options: {
     model: string;
     reasoningEffort: ReasoningEffort;

@@ -140,6 +140,14 @@ import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n, type PortalLocale } from "./i18n";
 import {
+  PortalComposerWorkflowProvider,
+  PortalQueueTray,
+  usePortalComposerDraftPersistence,
+  usePortalComposerWorkflow,
+  usePortalComposerWorkflowController,
+  usePortalQueueDispatcher
+} from "./composer-workflow";
+import {
   createPortalSkillDraftNewVersion,
   fetchPortalManagedSkills,
   fetchPortalSkillDraft,
@@ -2413,6 +2421,7 @@ const SelectedSkillContextBar: FC = () => {
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const { t } = usePortalI18n();
+  const workflow = usePortalComposerWorkflow();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
@@ -2442,19 +2451,19 @@ const UploadAwareComposer: FC = () => {
   const sendBlockedByUpload = uploadBlockReason !== "";
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
   const sendDisabled =
-    threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked;
-  const sendTitle =
-    accessBlock.blocked
-      ? accessBlock.notice
-      : uploadBlockReason === "uploading"
+    !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked;
+  const sendTitle = accessBlock.blocked
+    ? accessBlock.notice
+    : uploadBlockReason === "uploading"
       ? t("thread.waitUploads")
       : uploadBlockReason === "failed"
         ? t("thread.fixUploads")
         : sendBlockedByLargeText
           ? LARGE_DIRECT_MESSAGE_NOTICE
-        : t("thread.send");
+          : t("thread.send");
   const [composerSending, setComposerSending] = useState(false);
   const [largeTextNotice, setLargeTextNotice] = useState("");
+  const [workflowNotice, setWorkflowNotice] = useState("");
   const composerSendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerWrapRef = useComposerMultilineRef(composerText);
   useLargeTextPasteAttachmentGuard({
@@ -2467,9 +2476,7 @@ const UploadAwareComposer: FC = () => {
 
   useEffect(() => {
     return () => {
-      if (composerSendingTimerRef.current !== null) {
-        clearTimeout(composerSendingTimerRef.current);
-      }
+      if (composerSendingTimerRef.current !== null) clearTimeout(composerSendingTimerRef.current);
     };
   }, []);
 
@@ -2494,13 +2501,93 @@ const UploadAwareComposer: FC = () => {
     });
   }, []);
 
+  const getComposerText = useCallback(() => aui.composer().getState().text, [aui]);
+  const setComposerText = useCallback((text: string) => aui.composer().setText(text), [aui]);
+  const sendComposer = useCallback(() => aui.composer().send(), [aui]);
+  const { clearStoredDraft } = usePortalComposerDraftPersistence({
+    text: composerText,
+    threadId: workflow.threadId,
+    readDraft: workflow.readDraft,
+    writeDraft: workflow.writeDraft,
+    restoreText: setComposerText
+  });
+  const hasAttachments = composerAttachments.length > 0;
+
+  usePortalQueueDispatcher({
+    workflow,
+    threadRunning,
+    blocked: accessBlock.blocked || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments,
+    getComposerText,
+    setComposerText,
+    send: sendComposer
+  });
+
+  const showWorkflowNotice = useCallback((notice: string) => {
+    setWorkflowNotice(notice);
+    window.setTimeout(() => setWorkflowNotice((current) => (current === notice ? "" : current)), 7000);
+  }, []);
+
+  const enqueueCurrent = useCallback(() => {
+    const text = getComposerText().trim();
+    if (!text || accessBlock.blocked || sendBlockedByLargeText) return;
+    if (hasAttachments) {
+      showWorkflowNotice(t("thread.queueTextOnly"));
+      return;
+    }
+    try {
+      workflow.enqueue(text);
+      setComposerText("");
+      clearStoredDraft();
+      setWorkflowNotice("");
+    } catch {
+      showWorkflowNotice(t("thread.queueLimit"));
+    }
+  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, setComposerText, showWorkflowNotice, t, workflow]);
+
+  const steerCurrent = useCallback(async () => {
+    const text = getComposerText().trim();
+    if (!text || accessBlock.blocked || sendBlockedByLargeText) return;
+    if (hasAttachments) {
+      showWorkflowNotice(t("thread.queueTextOnly"));
+      return;
+    }
+    try {
+      await workflow.steer(text);
+      setComposerText("");
+      clearStoredDraft();
+      setWorkflowNotice("");
+    } catch {
+      // Keep the draft intact; the tray exposes the localized retryable error.
+    }
+  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, setComposerText, showWorkflowNotice, t, workflow]);
+
+  const continueAnswer = useCallback(() => {
+    if (accessBlock.blocked || threadRunning) return;
+    const preservedDraft = getComposerText();
+    workflow.clearPause();
+    setComposerText(t("thread.resumePrompt"));
+    triggerComposerSendAnimation();
+    sendComposer();
+    window.setTimeout(() => setComposerText(preservedDraft), 0);
+  }, [accessBlock.blocked, getComposerText, sendComposer, setComposerText, t, threadRunning, triggerComposerSendAnimation, workflow]);
+
+  const continueQueue = useCallback(() => workflow.resumeQueue(), [workflow]);
+
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    if (threadRunning) {
+      event.preventDefault();
+      event.stopPropagation();
+      enqueueCurrent();
+      return;
+    }
     if (sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked) {
       event.preventDefault();
       event.stopPropagation();
       return;
     }
     if (!sendDisabled) {
+      workflow.clearPause();
+      clearStoredDraft();
       triggerComposerSendAnimation();
     }
   };
@@ -2508,16 +2595,16 @@ const UploadAwareComposer: FC = () => {
   const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (sendDisabled) return;
+    workflow.clearPause();
+    clearStoredDraft();
     triggerComposerSendAnimation();
     aui.composer().send();
-  };
-  const stopCurrentRun = () => {
-    requestPortalRunCancel();
   };
 
   return (
     <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
       <Composer.Root onSubmit={preventBlockedSubmit}>
+        <PortalQueueTray threadRunning={threadRunning} onContinueAnswer={continueAnswer} onContinueQueue={continueQueue} />
         <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
         {accessBlock.blocked ? (
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
@@ -2547,11 +2634,16 @@ const UploadAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint" role="status">
             {largeTextNotice}
           </p>
+        ) : workflowNotice ? (
+          <p className="portal-upload-composer-hint" role="status">
+            {workflowNotice}
+          </p>
         ) : null}
         <SelectedSkillContextBar />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
+            cancelOnEscape={false}
             unstable_focusOnRunStart={!isMobileWorkbench}
             unstable_focusOnScrollToBottom={!isMobileWorkbench}
             unstable_focusOnThreadSwitched={!isMobileWorkbench}
@@ -2563,9 +2655,33 @@ const UploadAwareComposer: FC = () => {
             <SkillComposerControls />
           </div>
           {threadRunning ? (
-            <Composer.Cancel className="portal-stop-btn" onClick={stopCurrentRun}>
-              <SquareIcon size={13} />
-            </Composer.Cancel>
+            <div className="portal-running-composer-actions">
+              {!composerEmpty ? (
+                <>
+                  <button
+                    type="button"
+                    className="portal-running-action"
+                    disabled={sendDisabled || hasAttachments || workflow.isSteering}
+                    title={hasAttachments ? t("thread.queueTextOnly") : t("thread.steerHelp")}
+                    onClick={() => void steerCurrent()}
+                  >
+                    {t("thread.steerNow")}
+                  </button>
+                  <button
+                    type="button"
+                    className="portal-running-action is-primary"
+                    disabled={sendDisabled || hasAttachments}
+                    title={hasAttachments ? t("thread.queueTextOnly") : t("thread.addQueue")}
+                    onClick={enqueueCurrent}
+                  >
+                    {t("thread.addQueue")}
+                  </button>
+                </>
+              ) : null}
+              <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
+                <SquareIcon size={13} />
+              </Composer.Cancel>
+            </div>
           ) : (
             <button
               type="submit"
@@ -2587,6 +2703,7 @@ const UploadAwareComposer: FC = () => {
 const MobileAwareComposer: FC = () => {
   const aui = useAui();
   const { t } = usePortalI18n();
+  const workflow = usePortalComposerWorkflow();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
@@ -2595,29 +2712,97 @@ const MobileAwareComposer: FC = () => {
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
-  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked;
+  const sendDisabled = !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked;
   const sendTitle = accessBlock.blocked ? accessBlock.notice : sendBlockedByLargeText ? LARGE_DIRECT_MESSAGE_NOTICE : t("thread.send");
   const composerWrapRef = useComposerMultilineRef(composerText);
+  const [workflowNotice, setWorkflowNotice] = useState("");
+  const getComposerText = useCallback(() => aui.composer().getState().text, [aui]);
+  const setComposerText = useCallback((text: string) => aui.composer().setText(text), [aui]);
+  const sendComposer = useCallback(() => aui.composer().send(), [aui]);
+  const { clearStoredDraft } = usePortalComposerDraftPersistence({
+    text: composerText,
+    threadId: workflow.threadId,
+    readDraft: workflow.readDraft,
+    writeDraft: workflow.writeDraft,
+    restoreText: setComposerText
+  });
+
+  usePortalQueueDispatcher({
+    workflow,
+    threadRunning,
+    blocked: accessBlock.blocked || sendBlockedByLargeText,
+    getComposerText,
+    setComposerText,
+    send: sendComposer
+  });
+
+  const enqueueCurrent = useCallback(() => {
+    const text = getComposerText().trim();
+    if (!text || sendDisabled) return;
+    try {
+      workflow.enqueue(text);
+      setComposerText("");
+      clearStoredDraft();
+      setWorkflowNotice("");
+    } catch {
+      setWorkflowNotice(t("thread.queueLimit"));
+    }
+  }, [clearStoredDraft, getComposerText, sendDisabled, setComposerText, t, workflow]);
+
+  const steerCurrent = useCallback(async () => {
+    const text = getComposerText().trim();
+    if (!text || sendDisabled) return;
+    try {
+      await workflow.steer(text);
+      setComposerText("");
+      clearStoredDraft();
+      setWorkflowNotice("");
+    } catch {
+      // Keep the draft intact; the tray exposes the localized retryable error.
+    }
+  }, [clearStoredDraft, getComposerText, sendDisabled, setComposerText, workflow]);
+
+  const continueAnswer = useCallback(() => {
+    if (accessBlock.blocked || threadRunning) return;
+    const preservedDraft = getComposerText();
+    workflow.clearPause();
+    setComposerText(t("thread.resumePrompt"));
+    sendComposer();
+    window.setTimeout(() => setComposerText(preservedDraft), 0);
+  }, [accessBlock.blocked, getComposerText, sendComposer, setComposerText, t, threadRunning, workflow]);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    if (threadRunning) {
+      event.preventDefault();
+      event.stopPropagation();
+      enqueueCurrent();
+      return;
+    }
     if (accessBlock.blocked || sendBlockedByLargeText) {
       event.preventDefault();
       event.stopPropagation();
+      return;
     }
+    workflow.clearPause();
+    clearStoredDraft();
   };
 
   const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (sendDisabled) return;
+    workflow.clearPause();
+    clearStoredDraft();
     aui.composer().send();
-  };
-  const stopCurrentRun = () => {
-    requestPortalRunCancel();
   };
 
   return (
     <div ref={composerWrapRef} className="portal-composer-wrap">
       <Composer.Root onSubmit={preventBlockedSubmit}>
+        <PortalQueueTray
+          threadRunning={threadRunning}
+          onContinueAnswer={continueAnswer}
+          onContinueQueue={workflow.resumeQueue}
+        />
         {accessBlock.blocked ? (
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
             {accessBlock.notice}
@@ -2626,11 +2811,14 @@ const MobileAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint" role="alert">
             {largeDirectMessageNotice(composerText.length)}
           </p>
+        ) : workflowNotice ? (
+          <p className="portal-upload-composer-hint" role="status">{workflowNotice}</p>
         ) : null}
         <SelectedSkillContextBar />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
+            cancelOnEscape={false}
             unstable_focusOnRunStart={!isMobileWorkbench}
             unstable_focusOnScrollToBottom={!isMobileWorkbench}
             unstable_focusOnThreadSwitched={!isMobileWorkbench}
@@ -2641,9 +2829,32 @@ const MobileAwareComposer: FC = () => {
             <SkillComposerControls />
           </div>
           {threadRunning ? (
-            <Composer.Cancel className="portal-stop-btn" onClick={stopCurrentRun}>
-              <SquareIcon size={13} />
-            </Composer.Cancel>
+            <div className="portal-running-composer-actions">
+              {!composerEmpty ? (
+                <>
+                  <button
+                    type="button"
+                    className="portal-running-action"
+                    disabled={sendDisabled || workflow.isSteering}
+                    title={t("thread.steerHelp")}
+                    onClick={() => void steerCurrent()}
+                  >
+                    {t("thread.steerNow")}
+                  </button>
+                  <button
+                    type="button"
+                    className="portal-running-action is-primary"
+                    disabled={sendDisabled}
+                    onClick={enqueueCurrent}
+                  >
+                    {t("thread.addQueue")}
+                  </button>
+                </>
+              ) : null}
+              <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
+                <SquareIcon size={13} />
+              </Composer.Cancel>
+            </div>
           ) : (
             <button
               type="submit"
@@ -6714,6 +6925,25 @@ export function PortalShell(props: {
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
   const activePortalRunRef = useRef<PortalActiveRun | null>(null);
+  const requestPortalRunSteer = useCallback(async (message: string) => {
+    const run = activePortalRunRef.current;
+    if (!run?.sessionId || !run.threadId) {
+      throw new Error("The current response is no longer running");
+    }
+    await api<{ accepted: boolean; turn_id: string }>("/api/chat/steer", {
+      method: "POST",
+      json: {
+        session_id: run.sessionId,
+        thread_id: run.threadId,
+        message
+      }
+    });
+  }, []);
+  const composerWorkflowController = usePortalComposerWorkflowController({
+    userId: String(portalPreferenceUser?.id || "").trim(),
+    activeThreadId: String(activeThreadIdentity.remoteId || "__new_task__").trim(),
+    onSteer: requestPortalRunSteer
+  });
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
   const runningStageSecondaryTextRef = useRef(runningStageSecondaryText);
@@ -8152,6 +8382,7 @@ export function PortalShell(props: {
   const requestPortalRunCancel = useCallback(() => {
     const run = activePortalRunRef.current;
     if (!run?.sessionId) return;
+    composerWorkflowController.markInterrupted(run.threadId);
     void api<{ cancelled: boolean }>("/api/chat/cancel", {
       method: "POST",
       json: {
@@ -8164,7 +8395,7 @@ export function PortalShell(props: {
     }).catch((error) => {
       console.warn("portal chat cancel failed", error);
     });
-  }, []);
+  }, [composerWorkflowController.markInterrupted]);
 
   const handleThreadLinkClickCapture = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
@@ -8313,6 +8544,8 @@ export function PortalShell(props: {
 
         let hasTextUpdate = false;
         let doneAnswer = "";
+        let portalRunCompleted = false;
+        let portalRunFailed = false;
         const orderedParts: any[] = [];
         let activeTextPart: { type: "text"; text: string } | null = null;
         let activeCommentaryPart:
@@ -8807,6 +9040,7 @@ export function PortalShell(props: {
             const payload = asRecord(data);
 
             if (event === "error") {
+              portalRunFailed = true;
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
               const errorCode =
@@ -8911,6 +9145,7 @@ export function PortalShell(props: {
             }
 
             if (event === "done") {
+              portalRunCompleted = true;
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
@@ -9429,6 +9664,11 @@ export function PortalShell(props: {
             };
           }
         } finally {
+          if (portalRunCompleted) {
+            composerWorkflowController.markRunCompleted(threadId);
+          } else if (portalRunFailed) {
+            composerWorkflowController.markRunFailed(threadId);
+          }
           const currentActiveRun = activePortalRunRef.current;
           if (
             currentActiveRun?.sessionId === activeRun.sessionId &&
@@ -9457,7 +9697,12 @@ export function PortalShell(props: {
         }
       }
     }),
-    [markPortalThreadRead, trainingReadOnly]
+    [
+      composerWorkflowController.markRunCompleted,
+      composerWorkflowController.markRunFailed,
+      markPortalThreadRead,
+      trainingReadOnly
+    ]
   );
 
   const runtime = useRemoteThreadListRuntime({
@@ -9985,6 +10230,7 @@ export function PortalShell(props: {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalRunCancelContext.Provider value={requestPortalRunCancel}>
       <PortalSubscriptionAccessContext.Provider value={subscriptionAccessContextValue}>
       <SkillComposerContext.Provider value={skillComposerContext}>
@@ -10532,6 +10778,7 @@ export function PortalShell(props: {
       </SkillComposerContext.Provider>
       </PortalSubscriptionAccessContext.Provider>
       </PortalRunCancelContext.Provider>
+      </PortalComposerWorkflowProvider>
     </AssistantRuntimeProvider>
   );
 }

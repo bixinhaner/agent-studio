@@ -2404,6 +2404,12 @@ const portalChatCancelSchema = z.object({
   client_cancel_source: z.string().trim().min(1).optional()
 });
 
+const portalChatSteerSchema = z.object({
+  session_id: z.string().trim().min(1),
+  thread_id: z.string().trim().min(1),
+  message: z.string().trim().min(1)
+});
+
 const DIRECT_CHAT_MESSAGE_MAX_CHARS = 20_000;
 const DIRECT_CHAT_MESSAGE_TOO_LARGE_DETAIL =
   "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
@@ -12326,6 +12332,62 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
     res.json({ cancelled: result.cancelled });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to cancel chat run";
+    res.status(400).json({ detail });
+  }
+});
+
+app.post("/api/chat/steer", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const input = portalChatSteerSchema.parse(req.body || {});
+    assertDirectChatMessageWithinLimit(input.message);
+    gcPortalActiveChatRuns();
+
+    const activeRun = portalActiveChatRuns.get(input.session_id);
+    if (!activeRun || activeRun.controller.signal.aborted) {
+      res.status(409).json({ detail: "The current response is no longer running. Add this instruction to the queue instead." });
+      return;
+    }
+    if (activeRun.userId !== currentUser.id || activeRun.organizationId !== currentUser.organizationId) {
+      res.status(403).json({ detail: "The active response does not belong to the current user." });
+      return;
+    }
+
+    const session =
+      activeRun.session ??
+      (await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId));
+    if (!session) {
+      res.status(404).json({ detail: "Session does not exist or has expired" });
+      return;
+    }
+    const boundThreadId = trimOrUndefined(session.threadId) ?? trimOrUndefined(activeRun.threadId);
+    if (!boundThreadId || boundThreadId !== input.thread_id) {
+      res.status(409).json({ detail: "Session does not match the requested thread. Refresh and try again." });
+      return;
+    }
+    if (!(await getPortalOwnedThread(boundThreadId, currentUser))) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    const liveThread = liveRuntimeThreads.get(session.sessionId);
+    if (!liveThread) {
+      res.status(409).json({ detail: "The current response is no longer available for steering. Add this instruction to the queue instead." });
+      return;
+    }
+
+    const turnId = await runtime.steerActiveTurn(liveThread, input.message);
+    logPortalStreamLifecycle("active_turn_steered", {
+      trace_id: activeRun.traceId,
+      session_id: session.sessionId,
+      thread_id: boundThreadId,
+      turn_id: turnId,
+      user_id: currentUser.id,
+      organization_id: currentUser.organizationId,
+      input_length: input.message.length
+    });
+    res.json({ accepted: true, turn_id: turnId });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to steer the active response";
     res.status(400).json({ detail });
   }
 });
