@@ -14,6 +14,7 @@ function LocaleProbe() {
     <div>
       <span>{locale}</span>
       <span>{t("sessions.new")}</span>
+      <span>{t("thread.steerCouldNotApply")}</span>
       <button type="button" onClick={toggleLocale}>
         {t("language.switchTo")}
       </button>
@@ -46,6 +47,7 @@ describe("portal i18n", () => {
     );
 
     expect(await screen.findByText("New session")).toBeTruthy();
+    expect(screen.getByText("Couldn’t apply this direction")).toBeTruthy();
     await waitFor(() => expect(window.location.search).toBe("?lang=en"));
   });
 
@@ -66,6 +68,7 @@ describe("portal i18n", () => {
     fireEvent.click(screen.getByRole("button", { name: "Switch to Chinese" }));
 
     expect(await screen.findByText("新建会话")).toBeTruthy();
+    expect(screen.getByText("未能应用这条引导")).toBeTruthy();
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
       expect(window.localStorage.getItem("agent-studio.portal.locale.v1")).toBe("zh-CN");

@@ -13,7 +13,9 @@ import {
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
+  CircleXIcon,
   GripVerticalIcon,
+  Loader2Icon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -40,14 +42,29 @@ type RemovedQueueItem = {
   index: number;
 };
 
+export type PortalSteerEventStatus = "pending" | "accepted" | "failed";
+
+export type PortalSteerEvent = {
+  id: string;
+  threadId: string;
+  sessionId?: string;
+  sourceUserMessageId?: string;
+  turnId?: string;
+  message: string;
+  status: PortalSteerEventStatus;
+  errorCode?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PortalComposerWorkflowContextValue = {
   userId: string;
   threadId: string;
   queue: PortalQueueItem[];
   pausedReason: PortalQueuePauseReason;
   isSteering: boolean;
-  steerNotice: string;
-  steerError: string;
+  steerEvents: PortalSteerEvent[];
   enqueue(text: string): PortalQueueItem;
   updateItem(itemId: string, text: string): void;
   removeItem(itemId: string): RemovedQueueItem | null;
@@ -57,7 +74,8 @@ export type PortalComposerWorkflowContextValue = {
   retryItem(itemId: string): void;
   beginDispatch(itemId: string): void;
   markOrphanedDispatch(itemId: string): void;
-  steer(text: string, queuedItemId?: string): Promise<void>;
+  steer(text: string, queuedItemId?: string): Promise<PortalSteerEvent>;
+  retrySteer(eventId: string): Promise<PortalSteerEvent>;
   resumeQueue(): void;
   clearPause(): void;
   readDraft(): string;
@@ -70,8 +88,7 @@ const EMPTY_CONTEXT: PortalComposerWorkflowContextValue = {
   queue: [],
   pausedReason: null,
   isSteering: false,
-  steerNotice: "",
-  steerError: "",
+  steerEvents: [],
   enqueue: (text) => createPortalQueueItem(text),
   updateItem: () => undefined,
   removeItem: () => null,
@@ -81,7 +98,12 @@ const EMPTY_CONTEXT: PortalComposerWorkflowContextValue = {
   retryItem: () => undefined,
   beginDispatch: () => undefined,
   markOrphanedDispatch: () => undefined,
-  steer: async () => undefined,
+  steer: async () => {
+    throw new Error("missing_thread");
+  },
+  retrySteer: async () => {
+    throw new Error("missing_steer_event");
+  },
   resumeQueue: () => undefined,
   clearPause: () => undefined,
   readDraft: () => "",
@@ -106,18 +128,45 @@ function queueStateFromStored(state: PortalComposerStoredState): QueueState {
   };
 }
 
+function createSteerEventId(): string {
+  const suffix = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `portal-steer-${suffix}`;
+}
+
+function mergeSteerEvents(
+  current: PortalSteerEvent[],
+  incoming: PortalSteerEvent[]
+): PortalSteerEvent[] {
+  const byId = new Map(current.map((event) => [event.id, event]));
+  for (const event of incoming) {
+    const existing = byId.get(event.id);
+    if (!existing || event.updatedAt >= existing.updatedAt || existing.status === "pending") {
+      byId.set(event.id, event);
+    }
+  }
+  return [...byId.values()].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+  );
+}
+
 export function usePortalComposerWorkflowController(input: {
   userId: string;
   activeThreadId: string;
-  onSteer(text: string): Promise<void>;
+  onSteer(text: string, clientSteerId: string): Promise<PortalSteerEvent>;
+  loadSteerEvents?(threadId: string): Promise<PortalSteerEvent[]>;
+  getSteerSourceUserMessageId?(): string | undefined;
 }) {
-  const { userId, activeThreadId, onSteer } = input;
+  const { userId, activeThreadId, onSteer, loadSteerEvents, getSteerSourceUserMessageId } = input;
   const [states, setStates] = useState<Record<string, QueueState>>({});
   const statesRef = useRef(states);
   const [steeringThreadId, setSteeringThreadId] = useState("");
-  const [steerNoticeByThread, setSteerNoticeByThread] = useState<Record<string, string>>({});
-  const [steerErrorByThread, setSteerErrorByThread] = useState<Record<string, string>>({});
+  const [steerEventsByThread, setSteerEventsByThread] = useState<Record<string, PortalSteerEvent[]>>({});
+  const steerEventsRef = useRef(steerEventsByThread);
+  const steerRequestsRef = useRef(new Map<string, Promise<PortalSteerEvent>>());
   statesRef.current = states;
+  steerEventsRef.current = steerEventsByThread;
 
   const readStored = useCallback(
     (threadId: string, recoverSending = true) =>
@@ -153,8 +202,9 @@ export function usePortalComposerWorkflowController(input: {
     statesRef.current = {};
     setStates({});
     setSteeringThreadId("");
-    setSteerNoticeByThread({});
-    setSteerErrorByThread({});
+    steerEventsRef.current = {};
+    steerRequestsRef.current.clear();
+    setSteerEventsByThread({});
   }, [userId]);
 
   useEffect(() => {
@@ -163,6 +213,29 @@ export function usePortalComposerWorkflowController(input: {
     statesRef.current = { ...statesRef.current, [activeThreadId]: next };
     setStates(statesRef.current);
   }, [activeThreadId, readStored]);
+
+  useEffect(() => {
+    if (!loadSteerEvents || !userId.trim() || !activeThreadId || activeThreadId === "__new_task__") {
+      return undefined;
+    }
+    let cancelled = false;
+    void loadSteerEvents(activeThreadId)
+      .then((events) => {
+        if (cancelled) return;
+        setSteerEventsByThread((current) => {
+          const next = {
+            ...current,
+            [activeThreadId]: mergeSteerEvents(current[activeThreadId] ?? [], events)
+          };
+          steerEventsRef.current = next;
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThreadId, loadSteerEvents, userId]);
 
   const activeState = useMemo(
     () => states[activeThreadId] ?? queueStateFromStored(readStored(activeThreadId)),
@@ -195,14 +268,14 @@ export function usePortalComposerWorkflowController(input: {
     [activeThreadId, updateThread]
   );
 
-  const removeItem = useCallback(
-    (itemId: string): RemovedQueueItem | null => {
-      const state = statesRef.current[activeThreadId] ?? queueStateFromStored(readStored(activeThreadId));
+  const removeItemFromThread = useCallback(
+    (threadId: string, itemId: string): RemovedQueueItem | null => {
+      const state = statesRef.current[threadId] ?? queueStateFromStored(readStored(threadId));
       const index = state.queue.findIndex((item) => item.id === itemId);
       if (index < 0) return null;
       const item = state.queue[index];
       const queue = state.queue.filter((candidate) => candidate.id !== itemId);
-      commit(activeThreadId, {
+      commit(threadId, {
         ...state,
         queue,
         pausedReason:
@@ -212,7 +285,12 @@ export function usePortalComposerWorkflowController(input: {
       });
       return { item, index };
     },
-    [activeThreadId, commit, readStored]
+    [commit, readStored]
+  );
+
+  const removeItem = useCallback(
+    (itemId: string): RemovedQueueItem | null => removeItemFromThread(activeThreadId, itemId),
+    [activeThreadId, removeItemFromThread]
   );
 
   const restoreItem = useCallback(
@@ -287,32 +365,88 @@ export function usePortalComposerWorkflowController(input: {
     [activeThreadId, updateThread]
   );
 
-  const steer = useCallback(
-    async (text: string, queuedItemId?: string) => {
-      if (!activeThreadId) throw new Error("missing_thread");
-      setSteeringThreadId(activeThreadId);
-      setSteerErrorByThread((current) => ({ ...current, [activeThreadId]: "" }));
-      try {
-        await onSteer(text);
-        if (queuedItemId) removeItem(queuedItemId);
-        setSteerNoticeByThread((current) => ({ ...current, [activeThreadId]: text.trim() }));
-        window.setTimeout(() => {
-          setSteerNoticeByThread((current) => {
-            if (current[activeThreadId] !== text.trim()) return current;
-            return { ...current, [activeThreadId]: "" };
-          });
-        }, 6000);
-      } catch (error) {
-        setSteerErrorByThread((current) => ({
-          ...current,
-          [activeThreadId]: error instanceof Error ? error.message : "steer_failed"
-        }));
-        throw error;
-      } finally {
-        setSteeringThreadId((current) => (current === activeThreadId ? "" : current));
-      }
+  const commitSteerEvent = useCallback((threadId: string, event: PortalSteerEvent) => {
+    setSteerEventsByThread((current) => {
+      const next = {
+        ...current,
+        [threadId]: mergeSteerEvents(
+          (current[threadId] ?? []).filter((candidate) => candidate.id !== event.id),
+          [event]
+        )
+      };
+      steerEventsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const sendSteerEvent = useCallback(
+    (event: PortalSteerEvent, queuedItemId?: string): Promise<PortalSteerEvent> => {
+      const existingRequest = steerRequestsRef.current.get(event.id);
+      if (existingRequest) return existingRequest;
+      const threadId = event.threadId;
+      const pending: PortalSteerEvent = {
+        ...event,
+        status: "pending",
+        errorCode: undefined,
+        resolvedAt: undefined,
+        updatedAt: new Date().toISOString()
+      };
+      commitSteerEvent(threadId, pending);
+      setSteeringThreadId(threadId);
+      const request = (async () => {
+        try {
+          const accepted = await onSteer(pending.message, pending.id);
+          commitSteerEvent(threadId, accepted);
+          if (queuedItemId) removeItemFromThread(threadId, queuedItemId);
+          return accepted;
+        } catch (error) {
+          const now = new Date().toISOString();
+          const failed: PortalSteerEvent = {
+            ...pending,
+            status: "failed",
+            errorCode: error instanceof Error ? error.message : "steer_failed",
+            resolvedAt: now,
+            updatedAt: now
+          };
+          commitSteerEvent(threadId, failed);
+          throw error;
+        } finally {
+          steerRequestsRef.current.delete(event.id);
+          setSteeringThreadId((current) => (current === threadId ? "" : current));
+        }
+      })();
+      steerRequestsRef.current.set(event.id, request);
+      return request;
     },
-    [activeThreadId, onSteer, removeItem]
+    [commitSteerEvent, onSteer, removeItemFromThread]
+  );
+
+  const steer = useCallback(
+    async (text: string, queuedItemId?: string): Promise<PortalSteerEvent> => {
+      const message = text.trim();
+      if (!activeThreadId || activeThreadId === "__new_task__") throw new Error("missing_thread");
+      if (!message) throw new Error("missing_steer_message");
+      const now = new Date().toISOString();
+      return sendSteerEvent({
+        id: createSteerEventId(),
+        threadId: activeThreadId,
+        sourceUserMessageId: getSteerSourceUserMessageId?.(),
+        message,
+        status: "pending",
+        createdAt: now,
+        updatedAt: now
+      }, queuedItemId);
+    },
+    [activeThreadId, getSteerSourceUserMessageId, sendSteerEvent]
+  );
+
+  const retrySteer = useCallback(
+    async (eventId: string): Promise<PortalSteerEvent> => {
+      const event = (steerEventsRef.current[activeThreadId] ?? []).find((candidate) => candidate.id === eventId);
+      if (!event) throw new Error("missing_steer_event");
+      return sendSteerEvent(event);
+    },
+    [activeThreadId, sendSteerEvent]
   );
 
   const resumeQueue = useCallback(() => {
@@ -382,8 +516,7 @@ export function usePortalComposerWorkflowController(input: {
       queue: activeState.queue,
       pausedReason: activeState.pausedReason,
       isSteering: steeringThreadId === activeThreadId,
-      steerNotice: steerNoticeByThread[activeThreadId] ?? "",
-      steerError: steerErrorByThread[activeThreadId] ?? "",
+      steerEvents: steerEventsByThread[activeThreadId] ?? [],
       enqueue,
       updateItem,
       removeItem,
@@ -394,6 +527,7 @@ export function usePortalComposerWorkflowController(input: {
       beginDispatch,
       markOrphanedDispatch,
       steer,
+      retrySteer,
       resumeQueue,
       clearPause,
       readDraft,
@@ -414,9 +548,9 @@ export function usePortalComposerWorkflowController(input: {
       restoreItem,
       resumeQueue,
       retryItem,
+      retrySteer,
       steer,
-      steerErrorByThread,
-      steerNoticeByThread,
+      steerEventsByThread,
       steeringThreadId,
       updateItem,
       userId,
@@ -566,6 +700,86 @@ export function usePortalQueueDispatcher(input: {
   }, []);
 }
 
+export function PortalSteerEventList(props: {
+  events?: PortalSteerEvent[];
+  threadRunning: boolean;
+  onEdit(message: string): void;
+  onQueue(message: string): void;
+}) {
+  const { t } = usePortalI18n();
+  const workflow = usePortalComposerWorkflow();
+  const events = props.events ?? workflow.steerEvents;
+  if (events.length === 0) return null;
+
+  return (
+    <div className="portal-steer-event-list" aria-label={t("thread.steerEventsLabel")} aria-live="polite">
+      {events.map((event) => {
+        const pending = event.status === "pending";
+        const accepted = event.status === "accepted";
+        return (
+          <article
+            key={event.id}
+            className={`portal-steer-event is-${event.status}`}
+            role={event.status === "failed" ? "alert" : "status"}
+          >
+            <div className="portal-steer-event-label">{t("thread.steerLabel")}</div>
+            <p className="portal-steer-event-message">{event.message}</p>
+            <div className="portal-steer-event-footer">
+              <div className="portal-steer-event-status">
+                {pending ? (
+                  <Loader2Icon className="portal-steer-event-spinner" size={15} aria-hidden="true" />
+                ) : accepted ? (
+                  <CheckCircle2Icon size={15} aria-hidden="true" />
+                ) : (
+                  <CircleXIcon size={15} aria-hidden="true" />
+                )}
+                <span>
+                  {pending
+                    ? t("thread.steerApplying")
+                    : accepted
+                      ? t("thread.steerApplied")
+                      : t("thread.steerCouldNotApply")}
+                </span>
+              </div>
+              {event.status === "failed" ? (
+                <div className="portal-steer-event-actions">
+                  {props.threadRunning ? (
+                    <button
+                      type="button"
+                      className="portal-steer-event-action is-primary"
+                      disabled={workflow.isSteering}
+                      onClick={() => void workflow.retrySteer(event.id).catch(() => undefined)}
+                    >
+                      <RotateCcwIcon size={14} aria-hidden="true" />
+                      {t("thread.steerRetry")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="portal-steer-event-action is-primary"
+                      onClick={() => props.onQueue(event.message)}
+                    >
+                      {t("thread.steerQueueInstead")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="portal-steer-event-action"
+                    onClick={() => props.onEdit(event.message)}
+                  >
+                    <PencilIcon size={14} aria-hidden="true" />
+                    {props.threadRunning ? t("thread.steerEditRetry") : t("thread.steerEdit")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PortalQueueTray(props: {
   threadRunning: boolean;
   onContinueAnswer(): void;
@@ -605,8 +819,6 @@ export function PortalQueueTray(props: {
   if (
     workflow.queue.length === 0 &&
     !workflow.pausedReason &&
-    !workflow.steerNotice &&
-    !workflow.steerError &&
     !removed
   ) {
     return null;
@@ -646,19 +858,6 @@ export function PortalQueueTray(props: {
         <div className="portal-composer-queue-alert" role="alert">
           <AlertCircleIcon size={15} aria-hidden="true" />
           <span>{t("thread.queuePausedAfterFailure")}</span>
-        </div>
-      ) : null}
-
-      {workflow.steerNotice ? (
-        <div className="portal-composer-steer-notice" role="status">
-          <CheckCircle2Icon size={15} aria-hidden="true" />
-          <span>{t("thread.steerAccepted")}</span>
-        </div>
-      ) : null}
-      {workflow.steerError ? (
-        <div className="portal-composer-queue-alert" role="alert">
-          <AlertCircleIcon size={15} aria-hidden="true" />
-          <span>{t("thread.steerFailed")}</span>
         </div>
       ) : null}
 

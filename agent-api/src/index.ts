@@ -188,6 +188,11 @@ import {
   type ThreadReadStateRepositoryDb
 } from "./persistence/thread-read-state-repository.js";
 import {
+  PortalSteerEventRepository,
+  type PortalSteerEventRecord,
+  type PortalSteerEventRepositoryDb
+} from "./persistence/portal-steer-event-repository.js";
+import {
   ExternalConversationBindingRepository,
   type ExternalConversationBindingRecord,
   type ExternalConversationBindingRepositoryDb
@@ -535,6 +540,7 @@ const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const threadReadStates = new ThreadReadStateRepository(db as unknown as ThreadReadStateRepositoryDb);
+const portalSteerEvents = new PortalSteerEventRepository(db as unknown as PortalSteerEventRepositoryDb);
 const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
 const organizationMemberships = new OrganizationMembershipRepository(db as unknown as OrganizationMembershipRepositoryDb);
 const authIdentities = new AuthIdentityRepository(db as unknown as AuthIdentityRepositoryDb);
@@ -2410,6 +2416,7 @@ const portalChatCancelSchema = z.object({
 const portalChatSteerSchema = z.object({
   session_id: z.string().trim().min(1),
   thread_id: z.string().trim().min(1),
+  client_steer_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/),
   message: z.string().trim().min(1)
 });
 
@@ -2945,6 +2952,22 @@ function feedbackOut(feedback: ThreadFeedback) {
     user_id: feedback.userId ?? null,
     created_at: feedback.createdAt,
     updated_at: feedback.updatedAt ?? null
+  };
+}
+
+function portalSteerEventOut(event: PortalSteerEventRecord) {
+  return {
+    id: event.id,
+    thread_id: event.threadId,
+    session_id: event.sessionId,
+    source_user_message_id: event.sourceUserMessageId ?? null,
+    turn_id: event.turnId ?? null,
+    message: event.message,
+    status: event.status,
+    error_code: event.errorCode ?? null,
+    resolved_at: event.resolvedAt ?? null,
+    created_at: event.createdAt,
+    updated_at: event.updatedAt
   };
 }
 
@@ -12075,6 +12098,23 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
   }
 });
 
+app.get("/api/threads/:threadId/steer-events", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const thread = await getPortalOwnedThread(threadId, currentUser);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    const events = await portalSteerEvents.listForThread(threadId);
+    res.json({ steer_events: events.map(portalSteerEventOut) });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read steering history";
+    res.status(400).json({ detail });
+  }
+});
+
 app.get("/api/threads/:threadId/public-share", requireInternalOrganizationMember, async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
@@ -12340,19 +12380,81 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
 });
 
 app.post("/api/chat/steer", async (req: Request, res: Response) => {
+  let pendingEventId = "";
   try {
     const currentUser = currentActorFromRequest(req);
     const input = portalChatSteerSchema.parse(req.body || {});
     assertDirectChatMessageWithinLimit(input.message);
+
+    const existingEvent = await portalSteerEvents.get(input.client_steer_id);
+    if (existingEvent) {
+      if (
+        existingEvent.threadId !== input.thread_id ||
+        existingEvent.organizationId !== currentUser.organizationId ||
+        existingEvent.userId !== currentUser.id ||
+        existingEvent.message !== input.message
+      ) {
+        res.status(409).json({ detail: "The steering event does not match this request." });
+        return;
+      }
+      if (existingEvent.status === "accepted") {
+        res.json({
+          accepted: true,
+          turn_id: existingEvent.turnId,
+          steer_event: portalSteerEventOut(existingEvent)
+        });
+        return;
+      }
+    }
+
+    if (!(await getPortalOwnedThread(input.thread_id, currentUser))) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    const initialPending = await portalSteerEvents.begin({
+      id: input.client_steer_id,
+      threadId: input.thread_id,
+      organizationId: currentUser.organizationId,
+      userId: currentUser.id,
+      sessionId: input.session_id,
+      message: input.message
+    });
+    pendingEventId = initialPending.event.id;
+    if (initialPending.alreadyAccepted) {
+      pendingEventId = "";
+      res.json({
+        accepted: true,
+        turn_id: initialPending.event.turnId,
+        steer_event: portalSteerEventOut(initialPending.event)
+      });
+      return;
+    }
+    const rejectSteer = async (status: number, detail: string, errorCode: string) => {
+      let failedEvent: PortalSteerEventRecord | undefined;
+      try {
+        failedEvent = await portalSteerEvents.markFailed(initialPending.event.id, errorCode);
+      } catch (persistError) {
+        console.warn("failed to persist rejected portal steer event", {
+          steerEventId: initialPending.event.id,
+          detail: persistError instanceof Error ? persistError.message : String(persistError)
+        });
+      }
+      pendingEventId = "";
+      res.status(status).json({
+        detail,
+        ...(failedEvent ? { steer_event: portalSteerEventOut(failedEvent) } : {})
+      });
+    };
+
     gcPortalActiveChatRuns();
 
     const activeRun = portalActiveChatRuns.get(input.session_id);
     if (!activeRun || activeRun.controller.signal.aborted) {
-      res.status(409).json({ detail: "The current response is no longer running. Add this instruction to the queue instead." });
+      await rejectSteer(409, "The current response is no longer running. Add this instruction to the queue instead.", "response_not_running");
       return;
     }
     if (activeRun.userId !== currentUser.id || activeRun.organizationId !== currentUser.organizationId) {
-      res.status(403).json({ detail: "The active response does not belong to the current user." });
+      await rejectSteer(403, "The active response does not belong to the current user.", "response_owner_mismatch");
       return;
     }
 
@@ -12360,25 +12462,65 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       activeRun.session ??
       (await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId));
     if (!session) {
-      res.status(404).json({ detail: "Session does not exist or has expired" });
+      await rejectSteer(404, "Session does not exist or has expired", "session_missing");
       return;
     }
     const boundThreadId = trimOrUndefined(session.threadId) ?? trimOrUndefined(activeRun.threadId);
     if (!boundThreadId || boundThreadId !== input.thread_id) {
-      res.status(409).json({ detail: "Session does not match the requested thread. Refresh and try again." });
-      return;
-    }
-    if (!(await getPortalOwnedThread(boundThreadId, currentUser))) {
-      res.status(404).json({ detail: "Thread does not exist" });
+      await rejectSteer(409, "Session does not match the requested thread. Refresh and try again.", "thread_mismatch");
       return;
     }
     const liveThread = liveRuntimeThreads.get(session.sessionId);
     if (!liveThread) {
-      res.status(409).json({ detail: "The current response is no longer available for steering. Add this instruction to the queue instead." });
+      await rejectSteer(
+        409,
+        "The current response is no longer available for steering. Add this instruction to the queue instead.",
+        "runtime_thread_missing"
+      );
+      return;
+    }
+
+    const pending = await portalSteerEvents.begin({
+      id: input.client_steer_id,
+      threadId: boundThreadId,
+      organizationId: currentUser.organizationId,
+      userId: currentUser.id,
+      sessionId: session.sessionId,
+      sourceUserMessageId: activeRun.userMessageId,
+      message: input.message
+    });
+    pendingEventId = pending.event.id;
+    if (pending.alreadyAccepted) {
+      res.json({
+        accepted: true,
+        turn_id: pending.event.turnId,
+        steer_event: portalSteerEventOut(pending.event)
+      });
       return;
     }
 
     const turnId = await runtime.steerActiveTurn(liveThread, input.message);
+    let acceptedEvent: PortalSteerEventRecord;
+    try {
+      acceptedEvent = await portalSteerEvents.markAccepted(pending.event.id, turnId);
+    } catch (error) {
+      console.error("failed to persist accepted portal steer event", {
+        steerEventId: pending.event.id,
+        threadId: boundThreadId,
+        turnId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      const now = new Date().toISOString();
+      acceptedEvent = {
+        ...pending.event,
+        turnId,
+        status: "accepted",
+        errorCode: undefined,
+        resolvedAt: now,
+        updatedAt: now
+      };
+    }
+    pendingEventId = "";
     logPortalStreamLifecycle("active_turn_steered", {
       trace_id: activeRun.traceId,
       session_id: session.sessionId,
@@ -12388,9 +12530,23 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       organization_id: currentUser.organizationId,
       input_length: input.message.length
     });
-    res.json({ accepted: true, turn_id: turnId });
+    res.json({
+      accepted: true,
+      turn_id: turnId,
+      steer_event: portalSteerEventOut(acceptedEvent)
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to steer the active response";
+    if (pendingEventId) {
+      try {
+        await portalSteerEvents.markFailed(pendingEventId);
+      } catch (persistError) {
+        console.warn("failed to persist rejected portal steer event", {
+          steerEventId: pendingEventId,
+          detail: persistError instanceof Error ? persistError.message : String(persistError)
+        });
+      }
+    }
     res.status(400).json({ detail });
   }
 });

@@ -142,10 +142,12 @@ import { usePortalI18n, type PortalLocale } from "./i18n";
 import {
   PortalComposerWorkflowProvider,
   PortalQueueTray,
+  PortalSteerEventList,
   usePortalComposerDraftPersistence,
   usePortalComposerWorkflow,
   usePortalComposerWorkflowController,
-  usePortalQueueDispatcher
+  usePortalQueueDispatcher,
+  type PortalSteerEvent
 } from "./composer-workflow";
 import {
   createPortalSkillDraftNewVersion,
@@ -264,6 +266,40 @@ type ThreadMessagesOut = {
   }>;
   feedback?: ThreadFeedbackOut[];
 };
+
+type PortalSteerEventOut = {
+  id: string;
+  thread_id: string;
+  session_id?: string | null;
+  source_user_message_id?: string | null;
+  turn_id?: string | null;
+  message: string;
+  status: "pending" | "accepted" | "failed";
+  error_code?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PortalSteerEventListOut = {
+  steer_events: PortalSteerEventOut[];
+};
+
+function portalSteerEventFromOut(event: PortalSteerEventOut): PortalSteerEvent {
+  return {
+    id: event.id,
+    threadId: event.thread_id,
+    sessionId: event.session_id || undefined,
+    sourceUserMessageId: event.source_user_message_id || undefined,
+    turnId: event.turn_id || undefined,
+    message: event.message,
+    status: event.status,
+    errorCode: event.error_code || undefined,
+    resolvedAt: event.resolved_at || undefined,
+    createdAt: event.created_at,
+    updatedAt: event.updated_at
+  };
+}
 
 type ThreadFeedbackOut = {
   id: string;
@@ -2551,13 +2587,13 @@ const UploadAwareComposer: FC = () => {
       showWorkflowNotice(t("thread.queueTextOnly"));
       return;
     }
+    setComposerText("");
+    clearStoredDraft();
+    setWorkflowNotice("");
     try {
       await workflow.steer(text);
-      setComposerText("");
-      clearStoredDraft();
-      setWorkflowNotice("");
     } catch {
-      // Keep the draft intact; the tray exposes the localized retryable error.
+      // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
   }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, setComposerText, showWorkflowNotice, t, workflow]);
 
@@ -2752,13 +2788,13 @@ const MobileAwareComposer: FC = () => {
   const steerCurrent = useCallback(async () => {
     const text = getComposerText().trim();
     if (!text || sendDisabled) return;
+    setComposerText("");
+    clearStoredDraft();
+    setWorkflowNotice("");
     try {
       await workflow.steer(text);
-      setComposerText("");
-      clearStoredDraft();
-      setWorkflowNotice("");
     } catch {
-      // Keep the draft intact; the tray exposes the localized retryable error.
+      // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
   }, [clearStoredDraft, getComposerText, sendDisabled, setComposerText, workflow]);
 
@@ -5406,6 +5442,44 @@ const AgentAssistantActionBar: FC = () => {
   );
 };
 
+const PortalSteerEventsView: FC<{ events: PortalSteerEvent[] }> = ({ events }) => {
+  const aui = useAui();
+  const workflow = usePortalComposerWorkflow();
+  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const editMessage = useCallback((message: string) => {
+    aui.composer().setText(message);
+  }, [aui]);
+  const queueMessage = useCallback((message: string) => {
+    try {
+      workflow.enqueue(message);
+    } catch {
+      aui.composer().setText(message);
+    }
+  }, [aui, workflow]);
+
+  return (
+    <PortalSteerEventList
+      events={events}
+      threadRunning={threadRunning}
+      onEdit={editMessage}
+      onQueue={queueMessage}
+    />
+  );
+};
+
+const PortalSteerEventsForAssistantMessage: FC = () => {
+  const workflow = usePortalComposerWorkflow();
+  const sourceUserMessageId = useAuiState((state) => {
+    const previous = state.thread.messages.at(state.message.index - 1);
+    return previous?.role === "user" ? previous.id : "";
+  });
+  const events = useMemo(
+    () => workflow.steerEvents.filter((event) => event.sourceUserMessageId === sourceUserMessageId),
+    [sourceUserMessageId, workflow.steerEvents]
+  );
+  return <PortalSteerEventsView events={events} />;
+};
+
 const AgentAssistantMessage: FC = () => {
   return (
     <ThreadPublicShareMessageShell tone="assistant">
@@ -5424,8 +5498,18 @@ const AgentAssistantMessage: FC = () => {
         <AgentAssistantAnswerFeedback />
         <AgentAssistantActionBar />
       </AssistantMessage.Root>
+      <PortalSteerEventsForAssistantMessage />
     </ThreadPublicShareMessageShell>
   );
+};
+
+const PortalSteerEventsFooter: FC = () => {
+  const workflow = usePortalComposerWorkflow();
+  const unanchoredEvents = useMemo(
+    () => workflow.steerEvents.filter((event) => !event.sourceUserMessageId),
+    [workflow.steerEvents]
+  );
+  return <PortalSteerEventsView events={unanchoredEvents} />;
 };
 
 const ReadOnlyComposer: FC = () => null;
@@ -6925,24 +7009,38 @@ export function PortalShell(props: {
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
   const activePortalRunRef = useRef<PortalActiveRun | null>(null);
-  const requestPortalRunSteer = useCallback(async (message: string) => {
+  const getSteerSourceUserMessageId = useCallback(
+    () => activePortalRunRef.current?.userMessageId,
+    []
+  );
+  const requestPortalRunSteer = useCallback(async (message: string, clientSteerId: string) => {
     const run = activePortalRunRef.current;
     if (!run?.sessionId || !run.threadId) {
       throw new Error("The current response is no longer running");
     }
-    await api<{ accepted: boolean; turn_id: string }>("/api/chat/steer", {
+    const out = await api<{ accepted: boolean; turn_id: string; steer_event: PortalSteerEventOut }>("/api/chat/steer", {
       method: "POST",
       json: {
         session_id: run.sessionId,
         thread_id: run.threadId,
+        client_steer_id: clientSteerId,
         message
       }
     });
+    return portalSteerEventFromOut(out.steer_event);
+  }, []);
+  const loadPortalSteerEvents = useCallback(async (threadId: string) => {
+    const out = await api<PortalSteerEventListOut>(
+      `/api/threads/${encodeURIComponent(threadId)}/steer-events`
+    );
+    return (out.steer_events ?? []).map(portalSteerEventFromOut);
   }, []);
   const composerWorkflowController = usePortalComposerWorkflowController({
     userId: String(portalPreferenceUser?.id || "").trim(),
     activeThreadId: String(activeThreadIdentity.remoteId || "__new_task__").trim(),
-    onSteer: requestPortalRunSteer
+    onSteer: requestPortalRunSteer,
+    loadSteerEvents: loadPortalSteerEvents,
+    getSteerSourceUserMessageId
   });
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
@@ -10034,6 +10132,7 @@ export function PortalShell(props: {
                 Composer: trainingReadOnly ? ReadOnlyComposer : canUpload ? UploadAwareComposer : MobileAwareComposer,
                 UserMessage: AgentUserMessage,
                 AssistantMessage: AgentAssistantMessage,
+                MessagesFooter: PortalSteerEventsFooter,
                 ThreadWelcome: DraftOnlyThreadWelcome
               }}
               assistantMessage={{

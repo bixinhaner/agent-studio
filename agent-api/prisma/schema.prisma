@@ -729,6 +729,7 @@ model Thread {
   user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   securityDomain  SecurityDomain?   @relation(fields: [securityDomainId], references: [id], onDelete: SetNull)
   messages        Message[]
+  steerEvents     PortalSteerEvent[]
   artifacts       ThreadArtifact[]
   runtimeSessions RuntimeSession[]
   shares          ThreadShare[]
@@ -756,6 +757,27 @@ model Thread {
   @@index([channel, createdAt])
   @@index([userId])
   @@map("threads")
+}
+
+model PortalSteerEvent {
+  id                  String                 @id
+  threadId            String                 @map("thread_id")
+  organizationId      String                 @map("organization_id")
+  userId              String                 @map("user_id")
+  sessionId           String                 @map("session_id")
+  sourceUserMessageId String?                @map("source_user_message_id")
+  turnId              String?                @map("turn_id")
+  message             String                 @db.Text
+  status              PortalSteerEventStatus @default(pending)
+  errorCode           String?                @map("error_code")
+  resolvedAt          DateTime?              @map("resolved_at")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  thread              Thread                 @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([userId, createdAt])
+  @@map("portal_steer_events")
 }
 
 model ThreadReadState {
@@ -2385,6 +2407,12 @@ enum MessageRole {
   assistant
   system
   tool
+}
+
+enum PortalSteerEventStatus {
+  pending
+  accepted
+  failed
 }
 
 enum SessionStatus {
