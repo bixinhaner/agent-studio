@@ -1,0 +1,4 @@
+交付验证
+1. 后端定向测试 49/49、前端定向测试 8/8 通过。
+2. API 与 UI 生产构建通过，Chrome 多状态视觉与交互验收为 passed。
+3. 生产部署需使用 scripts/deploy-agent-studio.sh，并在部署后验证本机与公网 healthz。
