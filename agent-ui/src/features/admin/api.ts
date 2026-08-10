@@ -23,6 +23,8 @@ import type {
   AdminProductFeedbackDetailResponse,
   AdminProductFeedbackListInput,
   AdminProductFeedbackListResponse,
+  AdminProductFeedbackReplyLanguage,
+  AdminProductFeedbackReplyResult,
   AdminProductFeedbackStatus,
   AdminSecurityDomain,
   AdminSecurityDomainAccessStatus,
@@ -438,6 +440,48 @@ export async function updateAdminProductFeedbackStatus(
   return api<AdminProductFeedbackDetailResponse>(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}`, {
     method: "PATCH",
     json: { status }
+  });
+}
+
+export type AdminProductFeedbackReplyInput = {
+  subject: string;
+  bodyText: string;
+  templateLanguage: AdminProductFeedbackReplyLanguage;
+  selectedImageIds: string[];
+  images: File[];
+  clientRequestId?: string;
+};
+
+function buildProductFeedbackReplyFormData(input: AdminProductFeedbackReplyInput): FormData {
+  const formData = new FormData();
+  formData.set("payload", JSON.stringify({
+    subject: input.subject,
+    bodyText: input.bodyText,
+    templateLanguage: input.templateLanguage,
+    selectedImageIds: input.selectedImageIds,
+    clientRequestId: input.clientRequestId
+  }));
+  input.images.forEach((image) => formData.append("images", image, image.name));
+  return formData;
+}
+
+export async function previewAdminProductFeedbackReply(
+  feedbackId: string,
+  input: AdminProductFeedbackReplyInput
+): Promise<{ html: string; imageCount: number }> {
+  return api(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}/reply-preview`, {
+    method: "POST",
+    body: buildProductFeedbackReplyFormData(input)
+  });
+}
+
+export async function sendAdminProductFeedbackReplyAndResolve(
+  feedbackId: string,
+  input: AdminProductFeedbackReplyInput & { clientRequestId: string }
+): Promise<AdminProductFeedbackReplyResult> {
+  return api(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}/reply-and-resolve`, {
+    method: "POST",
+    body: buildProductFeedbackReplyFormData(input)
   });
 }
 

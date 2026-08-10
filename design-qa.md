@@ -1,62 +1,85 @@
-# Harmonized steer event design QA
+# Product Feedback Reply Design QA
 
-final result: passed
+## Comparison Target
 
-## Comparison target
-
-- ImageGen visual truth generated from the current Bailey Portal and queue workflow:
-  - `temp/product-design/steer-event-harmonized/01-pending.png`
-  - `temp/product-design/steer-event-harmonized/02-accepted.png`
-  - `temp/product-design/steer-event-harmonized/03-failed.png`
-- Browser-rendered implementation using the production React components and styles:
-  - `temp/audits/steer-event-harmonized-20260809/implementation/01-pending-zh.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/02-accepted-zh.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/03-failed-zh.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/04-failed-en.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/05-mobile-zh-failed.png`
-- Full-view combined comparison: `temp/audits/steer-event-harmonized-20260809/implementation/full-failed-comparison.png`
-- Focused combined comparisons, with the ImageGen target on the left and implementation on the right:
-  - `temp/audits/steer-event-harmonized-20260809/implementation/01-pending-comparison.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/02-accepted-comparison.png`
-  - `temp/audits/steer-event-harmonized-20260809/implementation/03-failed-comparison.png`
-
-## Viewport and normalization
-
-- Desktop implementation was exercised in the user's Chrome at `1440 x 657` CSS pixels with device pixel ratio `2`.
-- Mobile implementation was exercised at `390 x 844` CSS pixels and the temporary viewport override was reset after the test.
-- Source and implementation were normalized to the same `1440 x 657` comparison canvas before the focused same-state crops were combined.
-- The harness uses the production `PortalSteerEventList`, `PortalQueueTray`, localization provider, Portal stylesheet, desktop message-width tokens, and mobile breakpoint. Only the surrounding assistant answer and composer shell are simplified.
-
-## States and interactions tested
-
-- Pending direction appears immediately under its source answer with an animated progress icon and localized `正在应用到当前回答…` / `Applying to current response…` copy.
-- Accepted direction resolves to the localized success state and green semantic surface.
-- Failed direction retains the original text and exposes `重试` / `编辑后重试` while the response is running.
-- Retry was clicked in Chrome and transitioned visibly from failed to pending and then accepted.
-- After the response ends, the failed event changes recovery to `加入队列` / `编辑`; `加入队列` was clicked and produced the expected feedback.
-- Chinese and English states both rendered from localization keys rather than component literals.
-- Browser logs contained only Vite debug messages and the React development notice; no warning or error entries were present.
-
-## Required fidelity surfaces
-
-- Placement: persisted and optimistic events are attached to their source user turn and rendered immediately after the corresponding assistant answer. A narrow footer fallback remains only for legacy or temporarily unanchored events, preventing historical directions from accumulating above the composer.
-- Width and hierarchy: at the desktop test viewport, the failed event measured `256 x 99.7px`, the message column `832px`, the composer `713.9px`, and the queue content `693.7px`. The event is therefore content-sized and right-aligned instead of competing with the queue as a second full-width tray.
-- Shape and elevation: the card reuses the user-message lower-right corner language (`16px 16px 4px 16px`), a one-pixel semantic border, and low `0 2px 10px` elevation.
-- Colors and actions: pending uses the Portal warm accent surface, accepted uses green, and failure uses red. Primary recovery follows the queue's filled orange action style; secondary recovery stays neutral. No unrelated blue link treatment remains.
-- Mobile: the event measured `280px` wide inside a `308px` composer column, the document had no horizontal overflow, and both recovery actions measured `44px` high.
-- Accessibility: status/alert semantics, labelled history region, focus-visible treatment, keyboard-reachable controls, reduced-motion handling, and mobile touch targets were retained.
-
-## Comparison history
-
-1. The new ImageGen target established the final visual relationship: a right-aligned, content-sized direction bubble above the existing full-width queue tray, with Portal orange actions and semantic state surfaces.
-2. The first Chrome pass exposed a QA-harness mismatch: the production message-width custom properties normally supplied by `.aui-thread-root` were absent, so the answer and composer collapsed to intrinsic width. The harness was corrected to use the production desktop and mobile variables; product source did not need a workaround.
-3. Same-state combined comparisons then confirmed the event/queue hierarchy, corner language, state colors, low shadow, and action priority. The implementation is slightly more compact than the ImageGen rendering because it preserves the real Portal density and existing queue component rather than copying generated geometry.
-4. Final pass found no actionable P0, P1, or P2 differences.
+- Source visual truth:
+  - `temp/design/product-feedback-reply/06-image-selection.png`
+  - `temp/design/product-feedback-reply/07-preview-with-image.png`
+- Browser-rendered implementation:
+  - `temp/design/product-feedback-reply/implementation-02-edit.png`
+  - `temp/design/product-feedback-reply/implementation-03-preview.png`
+  - `temp/design/product-feedback-reply/implementation-04-success.png`
+  - `temp/design/product-feedback-reply/implementation-05-failure.png`
+- Combined comparison evidence:
+  - `temp/design/product-feedback-reply/design-comparison-focused.png`
+- Local implementation URL: `http://127.0.0.1:5191/`
+- Browser: Chrome, existing user browser session
+- CSS viewport: 1680 × 1058, device density 1
+- Source pixels: 1672 × 941
+- Implementation pixels: 1680 × 1058
+- Normalization: implementation captures were center-cropped to 1672 × 941 for equal-pixel full-view comparison; focused comparisons use centered 900 × 900 crops from both source and normalized implementation.
+- States: initial feedback detail, reply editor, original-image selection, HTML email preview with inline image, successful send/resolved, failed send/pending.
 
 ## Findings
 
-- No actionable P0, P1, or P2 findings remain.
+No actionable P0, P1, or P2 findings remain.
 
-## Residual test gap
+- Fonts and typography: the implementation uses the existing Admin Console PingFang/SF/Helvetica stack and Ant Design control typography. Heading, label, helper, and body hierarchy remain readable at the target viewport. The HTML email uses the existing experience-follow-up Arial/Helvetica mail-safe stack.
+- Spacing and layout rhythm: the final modal is 720 px wide, matching the existing Experience Follow-up email modal. Form sections follow the existing 12–14 px vertical rhythm. Persistent actions remain visible while the body scrolls on shorter viewports.
+- Colors and visual tokens: the implementation intentionally uses the existing Admin Console blue primary token instead of the ImageGen mock's orange action color. Orange remains inside the recipient-facing Bailey email template. This preserves current Admin Console action semantics and keeps the email visually consistent with Experience Follow-up.
+- Image quality and asset fidelity: feedback screenshots render from the original uploaded image, not a placeholder or redrawn asset. Email preview images keep aspect ratio, border, radius, and caption; SMTP delivery uses the same selected bytes as CID attachments.
+- Copy and content: the editor explains HTML styling and plaintext fallback, image limits are explicit, and the status rule states that only confirmed email delivery resolves the feedback. Chinese and English templates are both available.
 
-- The full local Portal cannot reuse the production login cookie on localhost. The complete page was therefore validated through production component integration and builds, while visual and interaction QA used the authenticated Chrome session with a local production-component harness.
+## Intentional Differences From ImageGen
+
+- Admin actions use the existing blue Admin Console primary token; the mock used Bailey orange.
+- The modal is 720 px rather than the mock's narrower approximation because it reuses the current Experience Follow-up modal width and must support a readable HTML preview.
+- Original feedback images start unselected. This avoids silently including potentially sensitive screenshots; the mock illustrated a post-selection state.
+- The recipient is read-only and comes from the feedback submitter, preventing the feature from becoming an arbitrary outbound-email relay.
+
+## Comparison History
+
+1. Initial edit implementation
+   - Finding: [P2] The first implementation used a 760 px modal, drifting from the existing 720 px Experience Follow-up email modal.
+   - Fix: changed `ProductFeedbackReplyModal` width to 720 px.
+   - Post-fix evidence: `implementation-02-edit.png` and the focused edit comparison in `design-comparison-focused.png`.
+2. Initial vertical layout
+   - Finding: [P2] A content-heavy editor could push persistent actions below the viewport on shorter screens.
+   - Fix: capped modal body height at `calc(100vh - 190px)` with body scrolling, leaving the action footer persistent.
+   - Post-fix evidence: final edit and failure captures show the action footer visible while content remains scrollable.
+3. Final comparison
+   - Result: no remaining P0/P1/P2 visual or interaction findings.
+
+## Primary Interactions Tested
+
+- Open Reply and Resolve from the feedback detail header.
+- Switch between Chinese and English template controls.
+- Select an eligible original feedback screenshot.
+- Open the real file chooser, add a supplemental PNG, and confirm the combined counter reaches 2/3.
+- Generate and inspect the styled HTML email preview with one inline image.
+- Send successfully, close the modal, show success feedback, record the reply, and update status to Resolved.
+- Simulate SMTP failure, keep the modal content intact, show an actionable error, and keep feedback status Pending.
+- Confirm recipient, subject, body, image count, language, and delivery status appear in reply history.
+
+## Console Check
+
+- No application console errors were observed during the tested flow.
+- Chrome reported one unrelated Immersive Translate extension version-mismatch error; it is outside the application and did not affect the flow.
+
+## Implementation Checklist
+
+- [x] Reuse Experience Follow-up HTML email style.
+- [x] Provide Chinese and English email templates.
+- [x] Support original feedback images and supplemental uploads.
+- [x] Enforce 3-image, 2 MB, PNG/JPG/GIF limits in UI and API.
+- [x] Send CID inline images with plaintext fallback.
+- [x] Record reply metadata without duplicating image bytes.
+- [x] Resolve only after confirmed SMTP delivery.
+- [x] Preserve pending status and editor contents on failure.
+- [x] Verify success, failure, and preview states in Chrome.
+
+## Follow-up Polish
+
+- [P3] If Admin Console gains a global locale switch later, move the modal's administrative labels into that shared i18n layer. The recipient-facing email content is already bilingual.
+
+final result: passed

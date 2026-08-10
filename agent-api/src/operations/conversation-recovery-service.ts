@@ -220,7 +220,7 @@ type ConversationRecoveryCaseBase = Omit<
   ConversationRecoveryCaseRecord,
   "user" | "organization" | "suggestedEmail" | "compensation"
 >;
-type RecoveryEmailIssueKind = "response_failure" | "experience_report";
+type RecoveryEmailIssueKind = "response_failure" | "experience_report" | "product_feedback_reply";
 
 export class ConversationRecoveryService {
   constructor(
@@ -901,7 +901,7 @@ function recoveryEmailIssueKind(row: { source: string; reasonCode: string }): Re
   return "response_failure";
 }
 
-function recoveryEmailHtml(input: {
+export function recoveryEmailHtml(input: {
   brandName: string;
   subject: string;
   bodyText: string;
@@ -912,6 +912,10 @@ function recoveryEmailHtml(input: {
   compensationDays?: number;
   portalUrl: string;
   issueKind: RecoveryEmailIssueKind;
+  inlineImages?: Array<{
+    cid: string;
+    name: string;
+  }>;
 }): string {
   const copy = recoveryEmailCopy(input.brandName, input.templateLanguage, input.issueKind);
   const occurredAt = formatRecoveryEmailTime(input.lastOccurredAt, input.templateLanguage);
@@ -925,6 +929,7 @@ function recoveryEmailHtml(input: {
   const compensationBlock = compensationNotice
     ? recoveryCompensationBlock(copy.compensation, compensationNotice)
     : "";
+  const inlineImagesBlock = recoveryInlineImagesBlock(input.inlineImages, input.templateLanguage);
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#fafafa;">
@@ -975,6 +980,7 @@ function recoveryEmailHtml(input: {
               </td>
             </tr>
             ${compensationBlock}
+            ${inlineImagesBlock}
             <tr>
               <td align="center" style="padding:0 34px 30px;font-family:Arial,Helvetica,sans-serif;">
                 <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#FF4614;color:#ffffff;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:15px;line-height:20px;font-weight:bold;">${escapeHtml(copy.cta)}</a>
@@ -993,8 +999,46 @@ function recoveryEmailHtml(input: {
 </html>`;
 }
 
+function recoveryInlineImagesBlock(
+  images: Array<{ cid: string; name: string }> | undefined,
+  language: "zh" | "en"
+): string {
+  if (!images?.length) return "";
+  const title = language === "en" ? "Illustration" : "操作示意";
+  const figures = images
+    .map((image, index) => {
+      const caption = language === "en"
+        ? `Figure ${index + 1}: ${image.name}`
+        : `图 ${index + 1}：${image.name}`;
+      return `<tr>
+                    <td style="padding:${index === 0 ? "0" : "16px"} 0 0;">
+                      <img src="cid:${escapeHtml(image.cid)}" alt="${escapeHtml(image.name)}" width="552" style="display:block;width:100%;max-width:552px;height:auto;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;" />
+                      <p style="margin:7px 0 0;font-size:12px;line-height:18px;color:#6b7280;">${escapeHtml(caption)}</p>
+                    </td>
+                  </tr>`;
+    })
+    .join("");
+  return `<tr>
+              <td style="padding:0 34px 24px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <p style="margin:0 0 10px;font-size:13px;line-height:20px;font-weight:bold;color:#C83A12;">${escapeHtml(title)}</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  ${figures}
+                </table>
+              </td>
+            </tr>`;
+}
+
 function recoveryEmailTextCopy(brandName: string, language: "zh" | "en", issueKind: RecoveryEmailIssueKind) {
   if (language === "en") {
+    if (issueKind === "product_feedback_reply") {
+      return {
+        subject: `${brandName} has an update on your feedback`,
+        lead: "We reviewed the feedback you submitted and completed the related follow-up.",
+        ready: "Ready to continue",
+        explanation: "Resolution details",
+        footer: `This email follows up on feedback you submitted to ${brandName}.`
+      };
+    }
     if (issueKind === "experience_report") {
       return {
         subject: `${brandName} has addressed a recent experience report`,
@@ -1010,6 +1054,15 @@ function recoveryEmailTextCopy(brandName: string, language: "zh" | "en", issueKi
       ready: "Ready to continue",
       explanation: "What we addressed",
       footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+    };
+  }
+  if (issueKind === "product_feedback_reply") {
+    return {
+      subject: `${brandName} 已更新您的反馈处理结果`,
+      lead: "我们已完成您所提交反馈的排查和跟进。",
+      ready: "可以继续使用",
+      explanation: "处理说明",
+      footer: `这封邮件用于跟进您向 ${brandName} 提交的反馈。`
     };
   }
   if (issueKind === "experience_report") {
@@ -1032,9 +1085,15 @@ function recoveryEmailTextCopy(brandName: string, language: "zh" | "en", issueKi
 
 function defaultRecoveryResolution(language: "zh" | "en", brandName: string, issueKind: RecoveryEmailIssueKind): string {
   if (language === "en") {
+    if (issueKind === "product_feedback_reply") {
+      return `We have reviewed and addressed the feedback you submitted. You can return to ${brandName} and continue using it. If the issue appears again, reply to this email and we will follow up.`;
+    }
     return issueKind === "experience_report"
       ? `We have reviewed and addressed the related service experience signal. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`
       : `We have reviewed and addressed the service-side issue. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`;
+  }
+  if (issueKind === "product_feedback_reply") {
+    return `我们已完成您所提交反馈的排查和处理。您可以重新进入 ${brandName} 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。`;
   }
   return issueKind === "experience_report"
     ? `我们已完成相关服务体验信号的排查和处理。您可以重新进入 ${brandName} 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。`
@@ -1043,6 +1102,21 @@ function defaultRecoveryResolution(language: "zh" | "en", brandName: string, iss
 
 function recoveryEmailCopy(brandName: string, language: "zh" | "en", issueKind: RecoveryEmailIssueKind) {
   if (language === "en") {
+    if (issueKind === "product_feedback_reply") {
+      return {
+        status: "Feedback addressed",
+        h1: "We have an update on your feedback",
+        lead: `Thank you for your feedback. The related follow-up is complete, and you can continue using ${brandName}.`,
+        relatedTime: "Feedback Time",
+        organization: "Organization",
+        currentStatus: "Current Status",
+        ready: "Ready to continue",
+        explanation: "Resolution details",
+        compensation: "Access credit",
+        cta: `Continue using ${brandName}`,
+        footer: `This email follows up on feedback you submitted to ${brandName}. Selected images are included only when needed to explain the resolution.`
+      };
+    }
     if (issueKind === "experience_report") {
       return {
         status: "Experience report addressed",
@@ -1070,6 +1144,21 @@ function recoveryEmailCopy(brandName: string, language: "zh" | "en", issueKind: 
       compensation: "Access credit",
       cta: `Continue using ${brandName}`,
       footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+    };
+  }
+  if (issueKind === "product_feedback_reply") {
+    return {
+      status: "问题已处理",
+      h1: "您的反馈已有处理结果",
+      lead: `感谢您的反馈。相关问题已经完成处理，您可以继续使用 ${brandName}。`,
+      relatedTime: "反馈时间",
+      organization: "关联组织",
+      currentStatus: "当前状态",
+      ready: "可以继续使用",
+      explanation: "处理说明",
+      compensation: "权益补偿",
+      cta: `继续使用 ${brandName}`,
+      footer: `这封邮件用于跟进您向 ${brandName} 提交的反馈；仅在解释处理结果所需时包含您选择的图片。`
     };
   }
   if (issueKind === "experience_report") {

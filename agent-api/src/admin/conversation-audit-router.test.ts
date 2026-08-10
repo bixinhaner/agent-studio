@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import express from "express";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   agentModeIdFromRunConfig,
@@ -11,7 +13,8 @@ import {
   projectConversationTurnStatus,
   resolveConversationAudience,
   resolveThreadFileAbsolutePath,
-  threadWorkspaceUploadDirs
+  threadWorkspaceUploadDirs,
+  createConversationAuditRouter
 } from "./conversation-audit-router.js";
 
 describe("resolveConversationAudience", () => {
@@ -20,6 +23,73 @@ describe("resolveConversationAudience", () => {
     expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
     expect(resolveConversationAudience(null)).toBe("unknown");
     expect(resolveConversationAudience(null, { type: "zendesk" } as never)).toBe("external");
+  });
+});
+
+describe("product feedback reply routes", () => {
+  it("parses multipart reply content and forwards the current admin", async () => {
+    const preview = vi.fn(async () => ({ html: "<html>preview</html>", imageCount: 1 }));
+    const sendAndResolve = vi.fn(async () => ({
+      feedback: { id: "feedback-1", status: "resolved" },
+      reply: { draft: {}, history: [] },
+      notificationId: "notification-1",
+      delivered: true,
+      mode: "smtp",
+      duplicate: false
+    }));
+    const app = express();
+    app.use((req, _res, next) => {
+      req.currentUser = { id: "admin-1" } as never;
+      next();
+    });
+    app.use(createConversationAuditRouter({
+      db: {} as never,
+      productFeedbackReply: { preview, sendAndResolve } as never
+    }));
+    const payload = {
+      subject: "问题已处理",
+      bodyText: "请参考操作示意。",
+      templateLanguage: "zh",
+      selectedImageIds: ["source-image-1"],
+      clientRequestId: "request-1"
+    };
+
+    const response = await request(app)
+      .post("/product-feedback/feedback-1/reply-and-resolve")
+      .field("payload", JSON.stringify(payload))
+      .attach("images", Buffer.from("image"), { filename: "demo.png", contentType: "image/png" });
+
+    expect(response.status).toBe(201);
+    expect(sendAndResolve).toHaveBeenCalledWith(expect.objectContaining({
+      feedbackId: "feedback-1",
+      subject: "问题已处理",
+      selectedImageIds: ["source-image-1"],
+      clientRequestId: "request-1",
+      actorUserId: "admin-1",
+      uploads: [expect.objectContaining({ originalname: "demo.png", mimetype: "image/png", size: 5 })]
+    }));
+  });
+
+  it("rejects an oversized inline image before the reply service is called", async () => {
+    const sendAndResolve = vi.fn();
+    const app = express();
+    app.use(createConversationAuditRouter({
+      db: {} as never,
+      productFeedbackReply: { preview: vi.fn(), sendAndResolve } as never
+    }));
+
+    const response = await request(app)
+      .post("/product-feedback/feedback-1/reply-and-resolve")
+      .field("payload", JSON.stringify({
+        subject: "问题已处理",
+        bodyText: "已完成处理。",
+        clientRequestId: "request-large"
+      }))
+      .attach("images", Buffer.alloc(2 * 1024 * 1024 + 1), { filename: "too-large.png", contentType: "image/png" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("2 MB");
+    expect(sendAndResolve).not.toHaveBeenCalled();
   });
 });
 

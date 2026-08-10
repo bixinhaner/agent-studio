@@ -32,6 +32,12 @@ export type AuthEmailSender = {
     subject: string;
     text: string;
     html?: string;
+    attachments?: Array<{
+      filename: string;
+      content: Buffer;
+      contentType: string;
+      cid?: string;
+    }>;
     debugLabel?: string;
   }): Promise<{ delivered: boolean; mode: "smtp" | "debug" }>;
 };
@@ -67,7 +73,13 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
           cc,
           replyTo,
           subject: input.subject,
-          text: input.text
+          text: input.text,
+          attachments: input.attachments?.map((attachment) => ({
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            size: attachment.content.length,
+            cid: attachment.cid
+          }))
         });
         return { delivered: false, mode: "debug" };
       }
@@ -79,7 +91,8 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
         replyTo,
         subject: input.subject,
         text: input.text,
-        html: input.html
+        html: input.html,
+        attachments: input.attachments
       });
       return { delivered: true, mode: "smtp" };
     }

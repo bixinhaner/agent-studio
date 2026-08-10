@@ -29,6 +29,7 @@ import { createSecurityDomainAdminRouter } from "../security-domains/admin-route
 import type { SecurityDomainService } from "../security-domains/service.js";
 import type { SecurityDomainAccessControl } from "../security-domains/access-control.js";
 import type { SystemSettingsConversationSecurityReview } from "../system-settings/types.js";
+import type { ProductFeedbackReplyService } from "../operations/product-feedback-reply-service.js";
 
 type AdminDb =
   UserRepositoryDb &
@@ -81,6 +82,7 @@ type AdminRouterOptions = {
   broadcastRouter?: Router;
   trainingCatalogRouter?: Router;
   recoveryRouter?: Router;
+  productFeedbackReply?: ProductFeedbackReplyService;
   securityDomains?: SecurityDomainService;
   securityDomainAccess?: SecurityDomainAccessControl;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
@@ -839,7 +841,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
   router.use(
     createConversationAuditRouter({
       getDb: () => getDbInstance() as never,
-      isThreadActive: options.isThreadActive
+      isThreadActive: options.isThreadActive,
+      productFeedbackReply: options.productFeedbackReply
     })
   );
 

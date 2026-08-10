@@ -49,7 +49,9 @@ export function authHeaders(): Record<string, string> {
 
 export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   const headers = new Headers(init?.headers || {});
-  headers.set("Content-Type", "application/json");
+  if (init?.json !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   for (const [k, v] of Object.entries(authHeaders())) {
     headers.set(k, v);
   }

@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import multer, { MulterError } from "multer";
 
 import { getDbClient } from "../db/client.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
@@ -36,8 +37,30 @@ import { UsageEventRepository, type UsageEventRecord, type UsageEventRepositoryD
 import { ConversationRecordService } from "../operations/conversation-record-service.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
+import {
+  PRODUCT_FEEDBACK_REPLY_IMAGE_MIME_TYPES,
+  PRODUCT_FEEDBACK_REPLY_MAX_IMAGE_BYTES,
+  PRODUCT_FEEDBACK_REPLY_MAX_IMAGES,
+  ProductFeedbackReplyError,
+  type ProductFeedbackReplyService
+} from "../operations/product-feedback-reply-service.js";
 
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
+
+const productFeedbackReplyImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: PRODUCT_FEEDBACK_REPLY_MAX_IMAGES,
+    fileSize: PRODUCT_FEEDBACK_REPLY_MAX_IMAGE_BYTES
+  },
+  fileFilter(_req, file, callback) {
+    if (PRODUCT_FEEDBACK_REPLY_IMAGE_MIME_TYPES.has(file.mimetype)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("仅支持 PNG、JPG 或 GIF 图片。"));
+  }
+});
 
 type ConversationAuditUserRow = {
   id: string;
@@ -1802,6 +1825,7 @@ export function createConversationAuditRouter(options: {
   db?: ConversationAuditDb;
   getDb?: () => ConversationAuditDb;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
+  productFeedbackReply?: ProductFeedbackReplyService;
 } = {}): Router {
   const router = Router();
   let cachedDb: ConversationAuditDb | null = options.db ?? null;
@@ -1930,12 +1954,118 @@ export function createConversationAuditRouter(options: {
         return;
       }
 
-      res.json({ feedback });
+      const reply = options.productFeedbackReply
+        ? await options.productFeedbackReply.getState(feedback)
+        : undefined;
+      res.json({ feedback, reply });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "加载系统反馈详情失败";
       res.status(500).json({ detail });
     }
   });
+
+  const parseProductFeedbackReplyRequest = (req: Request) => {
+    const rawPayload = typeof req.body?.payload === "string" ? req.body.payload : "";
+    let payload: Record<string, unknown>;
+    try {
+      const parsed = rawPayload ? JSON.parse(rawPayload) : {};
+      payload = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      throw new ProductFeedbackReplyError("回复内容格式不合法", 400, "invalid_reply_payload");
+    }
+    const selectedImageIds = Array.isArray(payload.selectedImageIds)
+      ? payload.selectedImageIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const uploads = (Array.isArray(req.files) ? req.files : []).map((file) => ({
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      buffer: file.buffer
+    }));
+    return {
+      subject: String(payload.subject ?? ""),
+      bodyText: String(payload.bodyText ?? ""),
+      templateLanguage: typeof payload.templateLanguage === "string" ? payload.templateLanguage : undefined,
+      selectedImageIds,
+      uploads,
+      clientRequestId: typeof payload.clientRequestId === "string" ? payload.clientRequestId : ""
+    };
+  };
+
+  const replyUploadMiddleware = (req: Request, res: Response, next: NextFunction) => {
+    productFeedbackReplyImageUpload.array("images", PRODUCT_FEEDBACK_REPLY_MAX_IMAGES)(req, res, (error) => {
+      if (!error) {
+        next();
+        return;
+      }
+      if (error instanceof MulterError) {
+        const detail = error.code === "LIMIT_FILE_SIZE"
+          ? "每张图片必须小于等于 2 MB。"
+          : error.code === "LIMIT_FILE_COUNT"
+            ? `邮件最多可插入 ${PRODUCT_FEEDBACK_REPLY_MAX_IMAGES} 张图片。`
+            : "图片上传超过限制。";
+        res.status(400).json({ detail, code: error.code });
+        return;
+      }
+      res.status(400).json({
+        detail: error instanceof Error ? error.message : "图片上传失败",
+        code: "image_upload_failed"
+      });
+    });
+  };
+
+  router.post(
+    "/product-feedback/:feedbackId/reply-preview",
+    replyUploadMiddleware,
+    async (req: Request, res: Response) => {
+      if (!options.productFeedbackReply) {
+        res.status(503).json({ detail: "系统反馈邮件回复服务不可用" });
+        return;
+      }
+      try {
+        const input = parseProductFeedbackReplyRequest(req);
+        const result = await options.productFeedbackReply.preview({
+          feedbackId: req.params.feedbackId,
+          ...input
+        });
+        res.json(result);
+      } catch (error) {
+        const status = error instanceof ProductFeedbackReplyError ? error.statusCode : 500;
+        res.status(status).json({
+          detail: error instanceof Error ? error.message : "生成邮件预览失败",
+          code: error instanceof ProductFeedbackReplyError ? error.code : undefined
+        });
+      }
+    }
+  );
+
+  router.post(
+    "/product-feedback/:feedbackId/reply-and-resolve",
+    replyUploadMiddleware,
+    async (req: Request, res: Response) => {
+      if (!options.productFeedbackReply) {
+        res.status(503).json({ detail: "系统反馈邮件回复服务不可用" });
+        return;
+      }
+      try {
+        const input = parseProductFeedbackReplyRequest(req);
+        const result = await options.productFeedbackReply.sendAndResolve({
+          feedbackId: req.params.feedbackId,
+          ...input,
+          actorUserId: req.currentUser?.id ?? null
+        });
+        res.status(201).json(result);
+      } catch (error) {
+        const status = error instanceof ProductFeedbackReplyError ? error.statusCode : 500;
+        res.status(status).json({
+          detail: error instanceof Error ? error.message : "发送反馈回复失败",
+          code: error instanceof ProductFeedbackReplyError ? error.code : undefined
+        });
+      }
+    }
+  );
 
   router.patch("/product-feedback/:feedbackId", async (req: Request, res: Response) => {
     try {

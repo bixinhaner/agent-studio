@@ -307,6 +307,7 @@ import {
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { ConversationRecoveryService } from "./operations/conversation-recovery-service.js";
+import { ProductFeedbackReplyService } from "./operations/product-feedback-reply-service.js";
 import { CustomerExperienceIssueReporter } from "./operations/customer-experience-issue-reporter.js";
 import {
   VisibleConversationFailureReporter,
@@ -850,6 +851,13 @@ const conversationRecovery = new ConversationRecoveryService({
   emailSender: authEmailSender,
   notifications: notificationRecords,
   billing: billingService,
+  resolveBrandName: () => resolvePublicPlatformName(systemSettings),
+  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
+});
+const productFeedbackReply = new ProductFeedbackReplyService({
+  feedback: productFeedback,
+  notifications: notificationRecords,
+  emailSender: authEmailSender,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings),
   resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
 });
@@ -10714,6 +10722,7 @@ registerCommonApiRoutes(app, {
       requirePermission
     }),
     recoveryRouter: createConversationRecoveryRouter(conversationRecovery),
+    productFeedbackReply,
     securityDomains,
     securityDomainAccess,
     conversationSecurityReviewTest: (input) => conversationSecurityReview.testReview(input)

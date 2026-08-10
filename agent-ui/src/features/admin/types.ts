@@ -617,6 +617,65 @@ export type AdminProductFeedbackListResponse = {
 
 export type AdminProductFeedbackDetailResponse = {
   feedback: AdminProductFeedbackRecord;
+  reply?: AdminProductFeedbackReplyState;
+};
+
+export type AdminProductFeedbackReplyLanguage = "zh" | "en";
+
+export type AdminProductFeedbackReplyTemplate = {
+  language: AdminProductFeedbackReplyLanguage;
+  subject: string;
+  bodyText: string;
+};
+
+export type AdminProductFeedbackReplyDraft = {
+  recipientEmail?: string;
+  defaultLanguage: AdminProductFeedbackReplyLanguage;
+  templates: Record<AdminProductFeedbackReplyLanguage, AdminProductFeedbackReplyTemplate>;
+  originalImages: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    emailEligible: boolean;
+    ineligibleReason?: string;
+  }>;
+  limits: {
+    maxImages: number;
+    maxImageBytes: number;
+    mimeTypes: string[];
+  };
+};
+
+export type AdminProductFeedbackReplyHistoryItem = {
+  id: string;
+  status: "pending" | "sent" | "failed";
+  recipientEmail?: string;
+  subject?: string;
+  bodyText?: string;
+  templateLanguage: AdminProductFeedbackReplyLanguage;
+  imageCount: number;
+  imageNames: string[];
+  actorUserId?: string;
+  delivered?: boolean;
+  deliveryMode?: "smtp" | "debug";
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminProductFeedbackReplyState = {
+  draft: AdminProductFeedbackReplyDraft;
+  history: AdminProductFeedbackReplyHistoryItem[];
+};
+
+export type AdminProductFeedbackReplyResult = {
+  feedback: AdminProductFeedbackRecord;
+  reply: AdminProductFeedbackReplyState;
+  notificationId: string;
+  delivered: true;
+  mode: "smtp";
+  duplicate: boolean;
 };
 
 export type AdminConversationRecoveryPlan = {

@@ -84,12 +84,14 @@ import type {
   AdminProductFeedbackDetailResponse,
   AdminProductFeedbackListResponse,
   AdminProductFeedbackRecord,
+  AdminProductFeedbackReplyResult,
   AdminProductFeedbackSort,
   AdminProductFeedbackStatus,
   AdminProductFeedbackStatusFilter,
   AdminProductFeedbackType,
   AdminProductFeedbackTypeFilter
 } from "./types";
+import { ProductFeedbackReplyModal } from "./ProductFeedbackReplyModal";
 
 type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
@@ -2856,7 +2858,7 @@ function ProductFeedbackWorkspace() {
             setDetailLoading(true);
             updateAdminProductFeedbackStatus(feedbackId, nextStatus)
               .then((next) => {
-                setDetailData(next);
+                setDetailData((previous) => ({ ...next, reply: previous?.reply }));
                 setListData((prev) => prev
                   ? {
                       ...prev,
@@ -2868,21 +2870,34 @@ function ProductFeedbackWorkspace() {
               .catch((error) => setErrorText(error instanceof Error ? error.message : "更新系统反馈失败"))
               .finally(() => setDetailLoading(false));
           }}
+          onReplyResolved={(result) => {
+            setDetailData({ feedback: result.feedback, reply: result.reply });
+            setListData((prev) => prev
+              ? {
+                  ...prev,
+                  feedback: prev.feedback.map((item) => item.id === result.feedback.id ? result.feedback : item)
+                }
+              : prev
+            );
+          }}
         />
       </div>
     </div>
   );
 }
 
-function ProductFeedbackDetail(props: {
+export function ProductFeedbackDetail(props: {
   detail: AdminProductFeedbackDetailResponse | null;
   loading: boolean;
   onStatusChange(status: AdminProductFeedbackStatus): void;
+  onReplyResolved(result: AdminProductFeedbackReplyResult): void;
 }) {
   const [previewImage, setPreviewImage] = useState<ProductFeedbackImageAttachment | null>(null);
+  const [replyOpen, setReplyOpen] = useState(false);
 
   useEffect(() => {
     setPreviewImage(null);
+    setReplyOpen(false);
   }, [props.detail?.feedback.id]);
 
   if (props.loading && !props.detail) {
@@ -2912,7 +2927,18 @@ function ProductFeedbackDetail(props: {
               {displayUserLabel(feedback.user)} • {formatLocalDateTime(feedback.createdAt)}
             </div>
           </div>
-          <Space>
+          <Space wrap>
+            {props.detail.reply ? (
+              <Button
+                type="primary"
+                size="small"
+                icon={<Mail size={14} />}
+                onClick={() => setReplyOpen(true)}
+                disabled={props.loading || !props.detail.reply.draft.recipientEmail}
+              >
+                {props.detail.reply.history.some((item) => item.status === "sent") ? "再次回复" : "回复并解决"}
+              </Button>
+            ) : null}
             <Select
               size="small"
               value={feedback.status}
@@ -2947,12 +2973,60 @@ function ProductFeedbackDetail(props: {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px', background: '#f9fafb' }}>
+        {feedback.status === "resolved" && props.detail.reply?.history.some((item) => item.status === "sent") ? (
+          <Alert
+            type="success"
+            showIcon
+            message="已向反馈人发送处理结果，反馈状态已更新为已解决。"
+            style={{ marginBottom: 20 }}
+          />
+        ) : null}
         <div style={{ marginBottom: 24 }}>
           <Typography.Title level={5} style={{ fontSize: 14 }}>反馈内容</Typography.Title>
           <div style={{ background: '#fff', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid var(--admin-color-border)', fontSize: 14 }}>
             {feedback.description}
           </div>
         </div>
+
+        {props.detail.reply ? (
+          <div style={{ marginBottom: 24 }}>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>回复记录</Typography.Title>
+            {props.detail.reply.history.length > 0 ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                {props.detail.reply.history.map((reply) => (
+                  <div
+                    key={reply.id}
+                    style={{ background: "#fff", padding: 14, borderRadius: 8, border: "1px solid var(--admin-color-border)", display: "grid", gap: 8 }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <Mail size={14} />
+                        <Typography.Text strong ellipsis>{reply.subject || "反馈处理结果"}</Typography.Text>
+                      </div>
+                      <Tag color={reply.status === "sent" ? "success" : reply.status === "failed" ? "error" : "processing"} style={{ marginInlineEnd: 0 }}>
+                        {reply.status === "sent" ? "已发送" : reply.status === "failed" ? "发送失败" : "发送中"}
+                      </Tag>
+                    </div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {reply.recipientEmail || "未记录收件人"} · {formatLocalDateTime(reply.updatedAt)} · {reply.templateLanguage === "en" ? "English" : "中文"}
+                      {reply.imageCount > 0 ? ` · ${reply.imageCount} 张内嵌图片` : ""}
+                    </Typography.Text>
+                    {reply.bodyText ? (
+                      <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 13, lineHeight: 1.6, color: "#4b5563" }}>
+                        {reply.bodyText}
+                      </div>
+                    ) : null}
+                    {reply.errorMessage ? <Alert type="error" showIcon message={reply.errorMessage} /> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ background: "#fff", padding: 16, borderRadius: 8, border: "1px dashed var(--admin-color-border)", color: "var(--admin-color-subtle)", fontSize: 13 }}>
+                尚未回复反馈人。发送成功后，邮件主题、正文、语言和图片数量会记录在这里。
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {imageAttachments.length > 0 ? (
           <div style={{ marginBottom: 24 }}>
@@ -3019,6 +3093,15 @@ function ProductFeedbackDetail(props: {
         />
       ) : null}
     </Modal>
+    {props.detail.reply ? (
+      <ProductFeedbackReplyModal
+        open={replyOpen}
+        detail={props.detail}
+        sourceImages={imageAttachments}
+        onClose={() => setReplyOpen(false)}
+        onResolved={props.onReplyResolved}
+      />
+    ) : null}
     </>
   );
 }
