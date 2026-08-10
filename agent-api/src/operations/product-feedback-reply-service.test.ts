@@ -120,6 +120,7 @@ describe("ProductFeedbackReplyService", () => {
     expect(state.draft.defaultLanguage).toBe("zh");
     expect(state.draft.recipientEmail).toBe("user@example.com");
     expect(state.draft.templates.zh.subject).toContain("处理结果");
+    expect(state.draft.templates.zh.subject).not.toContain("““");
     expect(state.draft.templates.zh.bodyText).toContain("如果问题仍然出现");
     expect(state.draft.templates.en.subject).toContain("Update on your feedback");
     expect(state.draft.templates.en.bodyText).toContain("If the issue appears again");

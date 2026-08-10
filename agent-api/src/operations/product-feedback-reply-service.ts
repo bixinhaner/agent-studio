@@ -298,13 +298,13 @@ export class ProductFeedbackReplyService {
       templates: {
         zh: {
           language: "zh",
-          subject: `关于“${summary}”的处理结果`,
-          bodyText: `您好，\n\n感谢您向我们反馈“${summary}”。我们已完成排查并处理相关问题，您现在可以继续使用 ${brandName}。\n\n如果问题仍然出现，请直接回复这封邮件，我们会继续跟进。\n\n— ${brandName} 团队`
+          subject: `关于以下反馈的处理结果：${summary}`,
+          bodyText: `您好，\n\n感谢您提交反馈：${summary}\n\n我们已完成排查并处理相关问题，您现在可以继续使用 ${brandName}。\n\n如果问题仍然出现，请直接回复这封邮件，我们会继续跟进。\n\n— ${brandName} 团队`
         },
         en: {
           language: "en",
-          subject: `Update on your feedback: “${summary}”`,
-          bodyText: `Hello,\n\nThank you for reporting “${summary}”. We have completed our review and addressed the related issue. You can continue using ${brandName}.\n\nIf the issue appears again, reply to this email and we will follow up.\n\n— The ${brandName} team`
+          subject: `Update on your feedback: ${summary}`,
+          bodyText: `Hello,\n\nThank you for reporting the following feedback: ${summary}\n\nWe have completed our review and addressed the related issue. You can continue using ${brandName}.\n\nIf the issue appears again, reply to this email and we will follow up.\n\n— The ${brandName} team`
         }
       },
       originalImages: originalImagesFromContext(feedback.context).map((image) => ({
