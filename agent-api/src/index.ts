@@ -165,6 +165,7 @@ import {
   isDeploymentDrainError
 } from "./portal/deployment-drain.js";
 import { startWithMissingCodexRolloutRecovery } from "./portal/codex-thread-recovery.js";
+import { guardPortalThreadModeChange } from "./portal/thread-mode-guard.js";
 import {
   assertPortalAssistantHasUserParent,
   assertPortalMessageRepositoryIntegrity
@@ -2588,7 +2589,8 @@ const ensureThreadSessionSchema = z.object({
   reasoning_effort: reasoningEffortSchema.optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
   selected_skill_ids: z.array(z.string().trim().min(1)).max(20).optional(),
-  codex_run_config: z.record(z.unknown()).optional()
+  codex_run_config: z.record(z.unknown()).optional(),
+  allow_mode_change: z.boolean().optional()
 });
 
 const appendMessageSchema = z.object({
@@ -2978,6 +2980,7 @@ function threadOut(
     external_id: thread.externalId,
     model: thread.model,
     reasoning_effort: thread.reasoningEffort,
+    mode_id: modeIdFromRunConfig(thread.codexRunConfig) ?? null,
     workspace_id: thread.userWorkspaceId ?? null,
     folder_id: thread.workspaceFolderId ?? null,
     enabled_skills: enabledSkillSelectionsFromRunConfig(thread.codexRunConfig).map((skill) => ({
@@ -6696,6 +6699,7 @@ async function ensureThreadSession(
     knowledge_set_ids?: string[];
     selected_skill_ids?: string[];
     codex_run_config?: Record<string, unknown>;
+    allow_mode_change?: boolean;
     force_run_profile_controls?: boolean;
     resume_codex_thread_id?: string;
   },
@@ -6732,9 +6736,14 @@ async function ensureThreadSession(
     time("ensure_thread_session.load_system_settings", () => codexProviders.getPublishedSystemSettings())
   ]);
 
+  const guardedIncomingCodexRunConfig = guardPortalThreadModeChange({
+    persistedConfig: thread.codexRunConfig,
+    incomingConfig: patch?.codex_run_config,
+    allowModeChange: patch?.allow_mode_change
+  });
   const sourceCodexRunConfig = mergeRunConfigPreservingThreadSkills(
     thread.codexRunConfig,
-    patch?.codex_run_config
+    guardedIncomingCodexRunConfig
   );
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
   const modeSelection = await time("ensure_thread_session.resolve_mode_selection", () =>
@@ -6809,8 +6818,10 @@ async function ensureThreadSession(
   const defaults = resolveManagedCodexDefaults({
     systemSettings: publishedSystemSettings,
     providerSnapshot,
-    model: patch?.model || thread.model,
-    reasoningEffort: patch?.reasoning_effort || thread.reasoningEffort
+    model: patch?.allow_mode_change ? patch.model || thread.model : thread.model,
+    reasoningEffort: patch?.allow_mode_change
+      ? patch.reasoning_effort || thread.reasoningEffort
+      : thread.reasoningEffort
   });
   const desiredBaseCodexRunConfig = await time("ensure_thread_session.resolve_knowledge_sets", () =>
     resolveKnowledgeSetRunConfig({

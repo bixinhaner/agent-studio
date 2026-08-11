@@ -109,6 +109,7 @@ import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import type { PortalResourcesResponse } from "../resources/types";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
+import { reconcileAuthoritativeFinalAnswer } from "./stream-final-answer";
 import { pendingPortalUserMessageAppend } from "./pending-user-message";
 import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
@@ -224,6 +225,7 @@ type ThreadOut = {
   external_id?: string;
   model: string;
   reasoning_effort: ReasoningEffort;
+  mode_id?: string | null;
   workspace_id?: string | null;
   folder_id?: string | null;
   enabled_skills?: Array<{
@@ -612,6 +614,17 @@ const PortalSubscriptionAccessContext = createContext<{
   status: null,
   loading: false,
   errorText: ""
+});
+type RuntimeReadinessStatus = "loading" | "ready" | "error" | "unavailable";
+type RuntimeReadinessContextValue = {
+  status: RuntimeReadinessStatus;
+  notice: string;
+  retry: () => Promise<PortalRuntimeOptions | null>;
+};
+const RuntimeReadinessContext = createContext<RuntimeReadinessContextValue>({
+  status: "ready",
+  notice: "",
+  retry: async () => null
 });
 type FeedbackCommentDraftStore = {
   commentsByMessageId: Map<string, string>;
@@ -2474,6 +2487,7 @@ const UploadAwareComposer: FC = () => {
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
+  const runtimeReadiness = useContext(RuntimeReadinessContext);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
@@ -2499,10 +2513,13 @@ const UploadAwareComposer: FC = () => {
   );
   const sendBlockedByUpload = uploadBlockReason !== "";
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
+  const sendBlockedByRuntime = runtimeReadiness.status !== "ready";
   const sendDisabled =
-    !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked;
+    !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime;
   const sendTitle = accessBlock.blocked
     ? accessBlock.notice
+    : sendBlockedByRuntime
+      ? runtimeReadiness.notice
     : uploadBlockReason === "uploading"
       ? t("thread.waitUploads")
       : uploadBlockReason === "failed"
@@ -2565,7 +2582,7 @@ const UploadAwareComposer: FC = () => {
   usePortalQueueDispatcher({
     workflow,
     threadRunning,
-    blocked: accessBlock.blocked || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments,
+    blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments,
     getComposerText,
     setComposerText,
     send: sendComposer
@@ -2578,7 +2595,7 @@ const UploadAwareComposer: FC = () => {
 
   const enqueueCurrent = useCallback(() => {
     const text = getComposerText().trim();
-    if (!text || accessBlock.blocked || sendBlockedByLargeText) return;
+    if (!text || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
     if (hasAttachments) {
       showWorkflowNotice(t("thread.queueTextOnly"));
       return;
@@ -2591,11 +2608,11 @@ const UploadAwareComposer: FC = () => {
     } catch {
       showWorkflowNotice(t("thread.queueLimit"));
     }
-  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const steerCurrent = useCallback(async () => {
     const text = getComposerText().trim();
-    if (!text || accessBlock.blocked || sendBlockedByLargeText) return;
+    if (!text || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
     if (hasAttachments) {
       showWorkflowNotice(t("thread.queueTextOnly"));
       return;
@@ -2608,17 +2625,17 @@ const UploadAwareComposer: FC = () => {
     } catch {
       // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
-  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const continueAnswer = useCallback(() => {
-    if (accessBlock.blocked || threadRunning) return;
+    if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
     const preservedDraft = getComposerText();
     workflow.clearPause();
     setComposerText(t("thread.resumePrompt"));
     triggerComposerSendAnimation();
     sendComposer();
     window.setTimeout(() => setComposerText(preservedDraft), 0);
-  }, [accessBlock.blocked, getComposerText, sendComposer, setComposerText, t, threadRunning, triggerComposerSendAnimation, workflow]);
+  }, [accessBlock.blocked, getComposerText, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, triggerComposerSendAnimation, workflow]);
 
   const continueQueue = useCallback(() => workflow.resumeQueue(), [workflow]);
 
@@ -2629,7 +2646,7 @@ const UploadAwareComposer: FC = () => {
       enqueueCurrent();
       return;
     }
-    if (sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked) {
+    if (sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2659,6 +2676,15 @@ const UploadAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
             {accessBlock.notice}
           </p>
+        ) : sendBlockedByRuntime ? (
+          <div className="portal-upload-composer-hint portal-runtime-readiness-hint" role={runtimeReadiness.status === "loading" ? "status" : "alert"}>
+            <span>{runtimeReadiness.notice}</span>
+            {runtimeReadiness.status === "error" ? (
+              <button type="button" onClick={() => void runtimeReadiness.retry()}>
+                {t("runtime.retry")}
+              </button>
+            ) : null}
+          </div>
         ) : sendBlockedByUpload ? (
           <div className="portal-upload-composer-hint" role="status">
             {uploadBlockReason === "uploading" ? (
@@ -2756,13 +2782,21 @@ const MobileAwareComposer: FC = () => {
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
+  const runtimeReadiness = useContext(RuntimeReadinessContext);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
-  const sendDisabled = !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked;
-  const sendTitle = accessBlock.blocked ? accessBlock.notice : sendBlockedByLargeText ? LARGE_DIRECT_MESSAGE_NOTICE : t("thread.send");
+  const sendBlockedByRuntime = runtimeReadiness.status !== "ready";
+  const sendDisabled = !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime;
+  const sendTitle = accessBlock.blocked
+    ? accessBlock.notice
+    : sendBlockedByRuntime
+      ? runtimeReadiness.notice
+      : sendBlockedByLargeText
+        ? LARGE_DIRECT_MESSAGE_NOTICE
+        : t("thread.send");
   const composerWrapRef = useComposerMultilineRef(composerText);
   const [workflowNotice, setWorkflowNotice] = useState("");
   const getComposerText = useCallback(() => aui.composer().getState().text, [aui]);
@@ -2779,7 +2813,7 @@ const MobileAwareComposer: FC = () => {
   usePortalQueueDispatcher({
     workflow,
     threadRunning,
-    blocked: accessBlock.blocked || sendBlockedByLargeText,
+    blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText,
     getComposerText,
     setComposerText,
     send: sendComposer
@@ -2812,13 +2846,13 @@ const MobileAwareComposer: FC = () => {
   }, [clearStoredDraft, getComposerText, sendDisabled, setComposerText, workflow]);
 
   const continueAnswer = useCallback(() => {
-    if (accessBlock.blocked || threadRunning) return;
+    if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
     const preservedDraft = getComposerText();
     workflow.clearPause();
     setComposerText(t("thread.resumePrompt"));
     sendComposer();
     window.setTimeout(() => setComposerText(preservedDraft), 0);
-  }, [accessBlock.blocked, getComposerText, sendComposer, setComposerText, t, threadRunning, workflow]);
+  }, [accessBlock.blocked, getComposerText, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, workflow]);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
     if (threadRunning) {
@@ -2827,7 +2861,7 @@ const MobileAwareComposer: FC = () => {
       enqueueCurrent();
       return;
     }
-    if (accessBlock.blocked || sendBlockedByLargeText) {
+    if (accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2856,6 +2890,15 @@ const MobileAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
             {accessBlock.notice}
           </p>
+        ) : sendBlockedByRuntime ? (
+          <div className="portal-upload-composer-hint portal-runtime-readiness-hint" role={runtimeReadiness.status === "loading" ? "status" : "alert"}>
+            <span>{runtimeReadiness.notice}</span>
+            {runtimeReadiness.status === "error" ? (
+              <button type="button" onClick={() => void runtimeReadiness.retry()}>
+                {t("runtime.retry")}
+              </button>
+            ) : null}
+          </div>
         ) : sendBlockedByLargeText ? (
           <p className="portal-upload-composer-hint" role="alert">
             {largeDirectMessageNotice(composerText.length)}
@@ -6795,11 +6838,12 @@ export function PortalShell(props: {
     additionalDirectoriesRaw: ""
   });
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
+  const [runtimeOptionsStatus, setRuntimeOptionsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<PortalSubscriptionStatus | null>(null);
   const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(false);
   const [subscriptionStatusError, setSubscriptionStatusError] = useState("");
-  const [runtimeMode, setRuntimeMode] = useState("standard");
+  const [runtimeMode, setRuntimeMode] = useState("");
   const [layoutState, setLayoutState] = useState(() => {
     const initial = createInitialLayoutState();
     if (!isNarrowScreen(768)) return initial;
@@ -7027,6 +7071,7 @@ export function PortalShell(props: {
   const collapseFinalTraceOnDoneRef = useRef(collapseFinalTraceOnDone);
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
+  const runtimeModeOverrideRef = useRef<{ threadId: string; modeId: string } | null>(null);
   const activePortalRunRef = useRef<PortalActiveRun | null>(null);
   const getSteerSourceUserMessageId = useCallback(
     () => activePortalRunRef.current?.userMessageId,
@@ -7106,6 +7151,9 @@ export function PortalShell(props: {
   const syncActiveThreadIdentity = useCallback((identity: ThreadIdentity) => {
     const normalizedRemoteId = String(identity.remoteId || "").trim();
     const normalizedLocalId = String(identity.localId || "").trim();
+    if (activeRemoteThreadIdRef.current !== normalizedRemoteId) {
+      runtimeModeOverrideRef.current = null;
+    }
 
     activeRemoteThreadIdRef.current = normalizedRemoteId;
     activeLocalThreadIdRef.current = normalizedLocalId;
@@ -7288,37 +7336,25 @@ export function PortalShell(props: {
   );
 
   const refreshRuntimeOptionsNow = useCallback(async (): Promise<PortalRuntimeOptions | null> => {
+    setRuntimeOptionsStatus("loading");
     try {
       const next = await api<PortalRuntimeOptions>("/api/portal/runtime-options", {
         headers: { "Accept-Language": intlLocale }
       });
       setRuntimeOptions(next);
-      setRuntimeMode((prev) =>
-        next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || ""
-      );
-      setAppliedConfig((prev) => {
-        const nextMode = findRuntimeMode(next, next.defaults.mode || next.modes[0]?.id || "");
-        const runtimeProfile = nextMode?.runtimeProfile;
-        return {
-          ...prev,
-          model: runtimeProfile?.defaultModel || prev.model,
-          reasoningEffort: normalizeReasoningEffortForModel(
-            runtimeProfile?.defaultModel || prev.model,
-            (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort,
-            modelOptionsFromCatalog(next.modelCatalog)
-          ),
-          sandboxMode: (runtimeProfile?.sandboxMode as SandboxMode | undefined) || prev.sandboxMode,
-          approvalPolicy: (runtimeProfile?.approvalPolicy as ApprovalPolicy | undefined) || prev.approvalPolicy,
-          networkAccessEnabled: runtimeProfile?.networkAccessEnabled ?? prev.networkAccessEnabled,
-          webSearchMode: (runtimeProfile?.webSearchMode as WebSearchMode | undefined) || prev.webSearchMode
-        };
+      setRuntimeMode((prev) => {
+        if (next.modes.some((item) => item.id === prev)) return prev;
+        if (activeRemoteThreadIdRef.current && prev) return prev;
+        return next.defaults.mode || next.modes[0]?.id || "";
       });
+      setRuntimeOptionsStatus("ready");
       return next;
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to load runtime policies");
+      setRuntimeOptionsStatus("error");
+      setErrorText(error instanceof Error ? error.message : t("runtime.loadFailed"));
       return null;
     }
-  }, [intlLocale]);
+  }, [intlLocale, t]);
 
   useEffect(() => {
     let active = true;
@@ -7435,15 +7471,36 @@ export function PortalShell(props: {
   }, [canUseCustomerBilling, refreshPortalSubscriptionStatus]);
 
   useEffect(() => {
-    const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+    const activeRemoteId = String(activeThreadIdentity.remoteId || "").trim();
+    const activeThread = workspaceThreads.find(
+      (thread) => thread.id === activeRemoteId || thread.external_id === activeRemoteId
+    );
+    const persistedModeId = String(activeThread?.mode_id || "").trim();
+    const hasUserOverride = Boolean(
+      runtimeModeOverrideRef.current &&
+      runtimeModeOverrideRef.current.threadId === activeRemoteId &&
+      runtimeModeOverrideRef.current.modeId === runtimeMode
+    );
+    if (persistedModeId && persistedModeId !== runtimeMode && !hasUserOverride) {
+      setRuntimeMode(persistedModeId);
+      return;
+    }
+    const selectedMode = findRuntimeMode(runtimeOptions, hasUserOverride ? runtimeMode : persistedModeId || runtimeMode);
     if (!selectedMode) return;
     setAppliedConfig((prev) => {
+      const persistedModel = activeThread?.model?.trim() || "";
+      const model = !hasUserOverride && persistedModeId && persistedModeId === selectedMode.id && persistedModel
+        ? persistedModel
+        : selectedMode.runtimeProfile.defaultModel;
+      const reasoningEffort = !hasUserOverride && persistedModeId && persistedModeId === selectedMode.id && activeThread?.reasoning_effort
+        ? activeThread.reasoning_effort
+        : selectedMode.runtimeProfile.defaultReasoningEffort as ReasoningEffort;
       return {
         ...prev,
-        model: selectedMode.runtimeProfile.defaultModel,
+        model,
         reasoningEffort: normalizeReasoningEffortForModel(
-          selectedMode.runtimeProfile.defaultModel,
-          selectedMode.runtimeProfile.defaultReasoningEffort as ReasoningEffort,
+          model,
+          reasoningEffort,
           modelOptionsFromCatalog(runtimeOptions?.modelCatalog)
         ),
         sandboxMode: selectedMode.runtimeProfile.sandboxMode as SandboxMode,
@@ -7452,7 +7509,7 @@ export function PortalShell(props: {
         webSearchMode: selectedMode.runtimeProfile.webSearchMode as WebSearchMode
       };
     });
-  }, [runtimeMode, runtimeOptions]);
+  }, [activeThreadIdentity.remoteId, runtimeMode, runtimeOptions, workspaceThreads]);
 
   useEffect(() => {
     if (isExternalPortalUser) {
@@ -7461,7 +7518,17 @@ export function PortalShell(props: {
       setEnabledSkillIds([]);
       return;
     }
-    const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+    const activeRemoteId = String(activeThreadIdentity.remoteId || "").trim();
+    const activeThread = workspaceThreads.find(
+      (thread) => thread.id === activeRemoteId || thread.external_id === activeRemoteId
+    );
+    const persistedModeId = String(activeThread?.mode_id || "").trim();
+    const hasUserOverride = Boolean(
+      runtimeModeOverrideRef.current &&
+      runtimeModeOverrideRef.current.threadId === activeRemoteId &&
+      runtimeModeOverrideRef.current.modeId === runtimeMode
+    );
+    const selectedMode = findRuntimeMode(runtimeOptions, hasUserOverride ? runtimeMode : persistedModeId || runtimeMode);
     if (!selectedMode) return;
     const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.id));
     setEnabledSkillIds((current) => {
@@ -7469,7 +7536,7 @@ export function PortalShell(props: {
       enabledSkillIdsRef.current = next;
       return next;
     });
-  }, [isExternalPortalUser, runtimeMode, runtimeOptions]);
+  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions, workspaceThreads]);
 
   useEffect(() => {
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
@@ -7486,7 +7553,20 @@ export function PortalShell(props: {
     const hydrationPromise = api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`)
       .then((response) => {
         if (!active) return;
-        const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+        setWorkspaceThreads((current) => [
+          response.thread,
+          ...current.filter((thread) => thread.id !== response.thread.id)
+        ]);
+        const persistedModeId = String(response.thread.mode_id || "").trim();
+        const hasUserOverride = Boolean(
+          runtimeModeOverrideRef.current &&
+          runtimeModeOverrideRef.current.threadId === threadId &&
+          runtimeModeOverrideRef.current.modeId === runtimeMode
+        );
+        if (persistedModeId && !hasUserOverride) {
+          setRuntimeMode(persistedModeId);
+        }
+        const selectedMode = findRuntimeMode(runtimeOptions, hasUserOverride ? runtimeMode : persistedModeId || runtimeMode);
         const availableSkills = selectedMode?.availableSkills ?? [];
         const availableById = new Set(availableSkills.map((skill) => skill.id));
         const ids = Array.isArray(response.thread.enabled_skills)
@@ -7800,6 +7880,9 @@ export function PortalShell(props: {
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
+        if (!selectedMode) {
+          throw new Error(t("runtime.sendBlocked"));
+        }
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
         const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
         let created: ThreadCreateOut;
@@ -7948,13 +8031,25 @@ export function PortalShell(props: {
         </AgentRuntimeAdapterProvider>
       )
     }),
-    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity, trainingReadOnly]
+    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity, t, trainingReadOnly]
   );
 
   const canUpload = !trainingReadOnly && (runtimeOptions?.canUpload ?? false);
-  const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
-  const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
-  const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
+  const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
+  const activeRuntimeThread = workspaceThreads.find(
+    (thread) => thread.id === activeRemoteThreadId || thread.external_id === activeRemoteThreadId
+  );
+  const persistedRuntimeMode = String(activeRuntimeThread?.mode_id || "").trim();
+  const hasRuntimeModeOverride = Boolean(
+    runtimeModeOverrideRef.current &&
+    runtimeModeOverrideRef.current.threadId === activeRemoteThreadId &&
+    runtimeModeOverrideRef.current.modeId === runtimeMode
+  );
+  const effectiveRuntimeMode = hasRuntimeModeOverride ? runtimeMode : persistedRuntimeMode || runtimeMode;
+  runtimeModeRef.current = effectiveRuntimeMode;
+  const selectedMode = findRuntimeMode(runtimeOptions, effectiveRuntimeMode);
+  const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], effectiveRuntimeMode);
+  const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], effectiveRuntimeMode);
   const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
   const automaticModeSkills = isExternalPortalUser ? [] : (selectedMode?.automaticSkills ?? []);
   const setEnabledSkills = useCallback(async (skillIds: string[]) => {
@@ -7972,7 +8067,7 @@ export function PortalShell(props: {
       await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}/skills`, {
         method: "PUT",
         json: {
-          mode_id: runtimeMode,
+          mode_id: effectiveRuntimeMode,
           skill_ids: normalizedIds
         }
       });
@@ -7983,7 +8078,7 @@ export function PortalShell(props: {
       setErrorText(message);
       throw new Error(message);
     }
-  }, [activeThreadIdentity.remoteId, availableModeSkills, isExternalPortalUser, runtimeMode]);
+  }, [activeThreadIdentity.remoteId, availableModeSkills, effectiveRuntimeMode, isExternalPortalUser]);
   const skillComposerContext = useMemo(
     () => ({
       availableSkills: availableModeSkills,
@@ -7999,7 +8094,6 @@ export function PortalShell(props: {
     knowledgeSetSelectionInitializedRef.current = true;
     setSelectedKnowledgeSetIds(ids);
   }, []);
-  const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
   useEffect(() => {
     if (!activeRemoteThreadId || workspaceMainView !== "task") return;
     const activeThread = workspaceThreads.find(
@@ -8203,8 +8297,34 @@ export function PortalShell(props: {
     }),
     [assistantDisplayName, branding.assistantAvatarUrl]
   );
-  const runtimeSummaryText = `${appliedConfig.model} · ${selectedModeLabel}`;
-  const topbarRuntimeSummaryText = isMobile ? selectedModeLabel : runtimeSummaryText;
+  const runtimeReadinessStatus: RuntimeReadinessStatus = runtimeOptionsStatus === "loading"
+    ? "loading"
+    : runtimeOptionsStatus === "error"
+      ? "error"
+      : selectedMode
+        ? "ready"
+        : "unavailable";
+  const runtimeReadinessNotice = runtimeReadinessStatus === "loading"
+    ? t("runtime.loading")
+    : runtimeReadinessStatus === "error"
+      ? t("runtime.loadFailed")
+      : runtimeReadinessStatus === "unavailable"
+        ? t("runtime.modeUnavailable")
+        : "";
+  const runtimeReadinessContextValue = useMemo<RuntimeReadinessContextValue>(
+    () => ({
+      status: runtimeReadinessStatus,
+      notice: runtimeReadinessNotice,
+      retry: refreshRuntimeOptionsNow
+    }),
+    [refreshRuntimeOptionsNow, runtimeReadinessNotice, runtimeReadinessStatus]
+  );
+  const runtimeSummaryText = runtimeReadinessStatus === "ready"
+    ? `${appliedConfig.model} · ${selectedModeLabel}`
+    : runtimeReadinessNotice;
+  const topbarRuntimeSummaryText = runtimeReadinessStatus === "ready" && isMobile
+    ? selectedModeLabel
+    : runtimeSummaryText;
   const composerPlaceholder = canUpload
     ? isMobile
       ? t("thread.placeholderMobile")
@@ -8283,7 +8403,7 @@ export function PortalShell(props: {
       },
       runtime: {
         summary: runtimeSummaryText,
-        modeId: runtimeMode,
+        modeId: effectiveRuntimeMode,
         modeLabel: selectedModeLabel,
         model: appliedConfig.model,
         reasoningEffort: appliedConfig.reasoningEffort,
@@ -8320,7 +8440,7 @@ export function PortalShell(props: {
     contextUsage,
     layoutState,
     props.currentUser,
-    runtimeMode,
+    effectiveRuntimeMode,
     runtimeSummaryText,
     enabledSkillIds,
     selectedKnowledgeSetIdsNormalized,
@@ -8562,6 +8682,9 @@ export function PortalShell(props: {
         if (trainingReadOnly) {
           throw new Error("Training catalog is read-only.");
         }
+        if (!findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current)) {
+          throw new Error(t("runtime.sendBlocked"));
+        }
         const prompt = extractLatestPrompt(options.messages);
         if (!prompt) {
           throw new Error("No user input text detected");
@@ -8650,6 +8773,12 @@ export function PortalShell(props: {
           hydratedSkillThreadIdRef.current === threadId
             ? [...enabledSkillIdsRef.current]
             : undefined;
+        const runtimeModeOverride = runtimeModeOverrideRef.current;
+        const allowModeChange = Boolean(
+          runtimeModeOverride &&
+          runtimeModeOverride.threadId === threadId &&
+          runtimeModeOverride.modeId === runtimeModeRef.current
+        );
         let ensured: ThreadSessionOut;
         try {
           ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
@@ -8659,9 +8788,23 @@ export function PortalShell(props: {
               reasoning_effort: cfg.reasoningEffort,
               knowledge_set_ids: knowledgeSetIds,
               selected_skill_ids: turnSelectedSkillIds,
-              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
+              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
+              allow_mode_change: allowModeChange
             }
           });
+          if (allowModeChange) {
+            runtimeModeOverrideRef.current = null;
+            setWorkspaceThreads((current) => current.map((thread) =>
+              thread.id === threadId
+                ? {
+                    ...thread,
+                    mode_id: runtimeModeRef.current,
+                    model: ensured.session.model,
+                    reasoning_effort: ensured.session.reasoning_effort
+                  }
+                : thread
+            ));
+          }
         } catch (error) {
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session");
           setErrorText(notice);
@@ -8698,7 +8841,6 @@ export function PortalShell(props: {
         let traceRowSeq = 0;
         let seq = 0;
         let firstRuntimeEventSeen = false;
-        let finalAnswerItemSeen = false;
         let finalAnswerStreamStarted = false;
         let activeTraceBatchPart: TraceBatchPart | null = null;
         const agentMessagePhaseById = new Map<string, string>();
@@ -9304,16 +9446,32 @@ export function PortalShell(props: {
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage(RUNNING_STAGE_RESULT_TEXT, { fallback: false, kind: "text" });
-              if (hasStreamedFinalAnswerText()) {
+              if (doneAnswer.trim()) {
+                const reconciliation = reconcileAuthoritativeFinalAnswer(
+                  orderedParts,
+                  doneAnswer,
+                  activeFinalAnswerPart
+                );
+                activeFinalAnswerPart = reconciliation.part;
+                activeTextPart = reconciliation.part;
+                finalAnswerTextById.clear();
+                if (reconciliation.part) {
+                  finalAnswerTextById.set("done", reconciliation.part.text);
+                }
+                hasTextUpdate = true;
+                textChanged = textChanged || reconciliation.changed;
+                if (reconciliation.corrected) {
+                  console.warn("[portal-stream] corrected incomplete final answer from done payload", {
+                    threadId,
+                    answerLength: doneAnswer.length
+                  });
+                }
+              } else if (hasStreamedFinalAnswerText()) {
                 textChanged = true;
-              } else if (finalAnswerItemSeen && doneAnswer.trim()) {
-                textChanged = appendTextPart(doneAnswer);
               } else {
                 const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
                 if (promotedLatestCommentary) {
                   textChanged = true;
-                } else if (!hasTextUpdate && doneAnswer.trim()) {
-                  textChanged = appendTextPart(doneAnswer);
                 }
               }
               const commentaryCollapsed = collapseCommentaryParts();
@@ -9400,9 +9558,6 @@ export function PortalShell(props: {
             const agentMessagePhase =
               itemType === "agent_message" ? agentMessagePhaseFromItem || agentMessagePhaseById.get(itemId) || "" : "";
             const isFinalAnswerAgentMessage = itemType === "agent_message" && agentMessagePhase === "final_answer";
-            if (isFinalAnswerAgentMessage) {
-              finalAnswerItemSeen = true;
-            }
 
             if (!firstRuntimeEventSeen) {
               firstRuntimeEventSeen = true;
@@ -9855,6 +10010,7 @@ export function PortalShell(props: {
       composerWorkflowController.markRunCompleted,
       composerWorkflowController.markRunFailed,
       markPortalThreadRead,
+      t,
       trainingReadOnly
     ]
   );
@@ -10433,6 +10589,7 @@ export function PortalShell(props: {
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalRunCancelContext.Provider value={requestPortalRunCancel}>
       <PortalSubscriptionAccessContext.Provider value={subscriptionAccessContextValue}>
+      <RuntimeReadinessContext.Provider value={runtimeReadinessContextValue}>
       <SkillComposerContext.Provider value={skillComposerContext}>
       <SkillDraftActionContext.Provider value={skillDraftActionContext}>
         <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
@@ -10835,7 +10992,13 @@ export function PortalShell(props: {
                     <select
                       className="field-input"
                       value={runtimeMode}
-                      onChange={(e) => setRuntimeMode(e.target.value)}
+                      onChange={(e) => {
+                        runtimeModeOverrideRef.current = {
+                          threadId: String(activeRemoteThreadIdRef.current || "").trim(),
+                          modeId: e.target.value
+                        };
+                        setRuntimeMode(e.target.value);
+                      }}
                       disabled={!runtimeOptions}
                     >
                       {modeOptions.map((mode) => (
@@ -10976,6 +11139,7 @@ export function PortalShell(props: {
         </RunningStageTextContext.Provider>
       </SkillDraftActionContext.Provider>
       </SkillComposerContext.Provider>
+      </RuntimeReadinessContext.Provider>
       </PortalSubscriptionAccessContext.Provider>
       </PortalRunCancelContext.Provider>
       </PortalComposerWorkflowProvider>

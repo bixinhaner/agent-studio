@@ -9,21 +9,15 @@ type WorkspaceOption = {
   isDefault: boolean;
 };
 
-function fallbackModeLabel(modeId: string): string {
-  if (modeId === "review") return "Review Assistant";
-  if (modeId === "standard") return "General Assistant";
-  return "Controlled Assistant";
-}
-
-export function resolveModeOptions(options: ModeOption[], currentMode: string): ModeOption[] {
+export function resolveModeOptions(options: ModeOption[], _currentMode: string): ModeOption[] {
   if (options.length > 0) return options;
-  return [{ id: currentMode, label: fallbackModeLabel(currentMode) }];
+  return [];
 }
 
 export function resolveModeLabel(options: ModeOption[], currentMode: string): string {
   const selected = options.find((option) => option.id === currentMode);
   if (selected?.label) return selected.label;
-  return resolveModeOptions(options, currentMode)[0]?.label || fallbackModeLabel(currentMode);
+  return "";
 }
 
 export function resolveWorkspaceOptions(options: WorkspaceOption[], currentWorkspace: string): WorkspaceOption[] {

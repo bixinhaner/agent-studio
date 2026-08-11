@@ -2076,6 +2076,35 @@ body.access-request-route #root {
   font-weight: 600;
 }
 
+.portal-runtime-readiness-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portal-runtime-readiness-hint button {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-runtime-readiness-hint button:hover {
+  background: rgba(154, 52, 18, 0.08);
+}
+
+.portal-runtime-readiness-hint button:focus-visible {
+  outline: 2px solid var(--workbench-accent-strong, #2563eb);
+  outline-offset: 2px;
+}
+
 /* Disabled send */
 .portal-upload-send:disabled {
   cursor: not-allowed;
