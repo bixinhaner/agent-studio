@@ -267,6 +267,68 @@ state_read_bool() {
   esac
 }
 
+normalize_caddy_portal_domains() {
+  local primary_domain="$1"
+  local raw_domains="${2:-}"
+  python3 - "$primary_domain" "$raw_domains" <<'PY'
+import re
+import sys
+
+primary = sys.argv[1].strip()
+raw = sys.argv[2].strip()
+parts = re.split(r"[\s,]+", raw) if raw else []
+if primary:
+    parts.insert(0, primary)
+
+domains = []
+seen = set()
+for value in parts:
+    domain = value.strip()
+    if not domain:
+        continue
+    if any(token in domain for token in ("://", "/", "{", "}", '"', "'")):
+        raise SystemExit(f"invalid Portal domain: {domain}")
+    key = domain.lower()
+    if key in seen:
+        continue
+    seen.add(key)
+    domains.append(domain)
+
+if not domains:
+    raise SystemExit("at least one Portal domain is required")
+
+print(",".join(domains))
+PY
+}
+
+caddy_site_addresses_from_portal_domains() {
+  local normalized_domains="$1"
+  printf '%s\n' "$normalized_domains" | sed 's/,/, /g'
+}
+
+resolve_caddy_portal_domain_config() {
+  local primary_domain="$1"
+  local explicit_domains="$2"
+  local requested_domains="${3:-}"
+  local stored_domains=""
+
+  if [[ -f "$INSTALL_STATE_FILE" ]]; then
+    stored_domains="$(state_read caddy_portal_domains "")"
+  fi
+  if [[ "$explicit_domains" == "1" ]]; then
+    CADDY_PORTAL_DOMAINS_MANAGED=1
+  elif [[ -n "$stored_domains" ]]; then
+    requested_domains="$stored_domains"
+    CADDY_PORTAL_DOMAINS_MANAGED=1
+  else
+    requested_domains="$primary_domain"
+    CADDY_PORTAL_DOMAINS_MANAGED=0
+  fi
+
+  CADDY_PORTAL_DOMAINS="$(normalize_caddy_portal_domains "$primary_domain" "$requested_domains")"
+  CADDY_SITE_ADDRESSES="$(caddy_site_addresses_from_portal_domains "$CADDY_PORTAL_DOMAINS")"
+}
+
 redact_secret() {
   local value="${1:-}"
   if [[ -z "$value" ]]; then

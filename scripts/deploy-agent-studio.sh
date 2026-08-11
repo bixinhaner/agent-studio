@@ -22,6 +22,11 @@ CADDY_ADMIN_UPSTREAM_PORT="${CADDY_ADMIN_UPSTREAM_PORT:-}"
 CADDY_CHAT_UPSTREAM_HOST="${CADDY_CHAT_UPSTREAM_HOST:-}"
 CADDY_CHAT_UPSTREAM_PORT="${CADDY_CHAT_UPSTREAM_PORT:-}"
 CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
+CADDY_PORTAL_DOMAINS="${CADDY_PORTAL_DOMAINS:-}"
+CADDY_PORTAL_DOMAINS_EXPLICIT="$([[ -n "$CADDY_PORTAL_DOMAINS" ]] && printf '1' || printf '0')"
+CADDY_LEGACY_PORTAL_SNIPPET_FILE="${CADDY_LEGACY_PORTAL_SNIPPET_FILE:-}"
+CADDY_PORTAL_DOMAINS_MANAGED=0
+CADDY_SITE_ADDRESSES=""
 ASSET_RETENTION_DAYS="${AGENT_STUDIO_ASSET_RETENTION_DAYS:-}"
 FRONTEND_BUILD_NODE_OPTIONS="${FRONTEND_BUILD_NODE_OPTIONS:---max-old-space-size=3072}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
@@ -31,6 +36,8 @@ SKIP_AGENT_DRAIN="${SKIP_AGENT_DRAIN:-0}"
 AGENT_DRAIN_TIMEOUT_SECONDS="${AGENT_DRAIN_TIMEOUT_SECONDS:-900}"
 AGENT_DRAIN_POLL_SECONDS="${AGENT_DRAIN_POLL_SECONDS:-5}"
 AGENT_DRAIN_STATUS_URL="${AGENT_DRAIN_STATUS_URL:-}"
+AGENT_ADMIN_DRAIN_STATUS_URL="${AGENT_ADMIN_DRAIN_STATUS_URL:-}"
+AGENT_CHAT_DRAIN_STATUS_URL="${AGENT_CHAT_DRAIN_STATUS_URL:-}"
 DEPLOY_DRAIN_FILE="${AGENT_STUDIO_DEPLOY_DRAIN_FILE:-}"
 
 usage() {
@@ -65,6 +72,8 @@ Options:
                          Chat upstream host used by Caddy reverse proxy [default: --caddy-upstream-host value]
   --caddy-chat-upstream-port <port>
                          Chat upstream port used by Caddy reverse proxy [default: --chat-api-port value]
+  --portal-domains <list>
+                         Comma/space-separated Portal domains sharing one split API route
   --asset-retention-days <days>
                          Days to keep old frontend assets; 0 disables pruning [default: ${ASSET_RETENTION_DAYS:-30}]
   --frontend-node-options <value>
@@ -153,6 +162,11 @@ while [[ $# -gt 0 ]]; do
       CADDY_CHAT_UPSTREAM_PORT="$2"
       shift 2
       ;;
+    --portal-domains)
+      CADDY_PORTAL_DOMAINS="$2"
+      CADDY_PORTAL_DOMAINS_EXPLICIT=1
+      shift 2
+      ;;
     --asset-retention-days)
       ASSET_RETENTION_DAYS="$2"
       shift 2
@@ -193,6 +207,9 @@ done
 
 REPO_DIR="$APP_REPO_DIR"
 refresh_app_paths
+if [[ -z "$CADDY_LEGACY_PORTAL_SNIPPET_FILE" ]]; then
+  CADDY_LEGACY_PORTAL_SNIPPET_FILE="$CADDY_EXTRA_SNIPPET_DIR/agent-studio-bailey.caddy"
+fi
 if [[ -z "$DEPLOY_DRAIN_FILE" ]]; then
   DEPLOY_DRAIN_FILE="$APP_API_DIR/temp/deploy-drain.json"
 elif [[ "$DEPLOY_DRAIN_FILE" != /* ]]; then
@@ -367,12 +384,16 @@ PY
 
 append_extra_caddy_snippets() {
   local destination="$1"
+  local skipped_snippet="${2:-}"
 
   [[ -d "$CADDY_EXTRA_SNIPPET_DIR" ]] || return 0
 
   local snippet
   local appended=0
   while IFS= read -r -d '' snippet; do
+    if [[ -n "$skipped_snippet" && "$snippet" == "$skipped_snippet" ]]; then
+      continue
+    fi
     appended=1
     printf '\n# Extra Caddy snippet: %s\n' "$snippet" >> "$destination"
     cat "$snippet" >> "$destination"
@@ -408,13 +429,23 @@ reload_caddy() {
   run_as_root caddy reload --config "$CADDY_CONFIG_FILE" --force
 }
 
-resolve_caddy_domain() {
-  if [[ -n "$DOMAIN" ]]; then
-    return 0
-  fi
-  if [[ -f "$INSTALL_STATE_FILE" ]]; then
+resolve_caddy_domains() {
+  if [[ -z "$DOMAIN" && -f "$INSTALL_STATE_FILE" ]]; then
     DOMAIN="$(state_read domain "")"
   fi
+  [[ -n "$DOMAIN" ]] || return 0
+  resolve_caddy_portal_domain_config "$DOMAIN" "$CADDY_PORTAL_DOMAINS_EXPLICIT" "$CADDY_PORTAL_DOMAINS"
+}
+
+persist_caddy_portal_domains() {
+  if is_root; then
+    state_write caddy_portal_domains "$CADDY_PORTAL_DOMAINS"
+    return 0
+  fi
+  run_as_root env INSTALL_STATE_FILE="$INSTALL_STATE_FILE" bash -c '
+    source "$1"
+    state_write "$2" "$3"
+  ' _ "$script_dir/lib/common.sh" caddy_portal_domains "$CADDY_PORTAL_DOMAINS"
 }
 
 refresh_caddy_config() {
@@ -423,7 +454,7 @@ refresh_caddy_config() {
     return 0
   fi
 
-  resolve_caddy_domain
+  resolve_caddy_domains
   if [[ -z "$DOMAIN" ]]; then
     log_warn "Skipping Caddy config refresh because no domain was provided and no install state domain was found"
     return 0
@@ -436,13 +467,17 @@ refresh_caddy_config() {
   render_caddy_config \
     "$caddy_template_path" \
     "$rendered_config" \
-    "$DOMAIN" \
+    "$CADDY_SITE_ADDRESSES" \
     "$APP_UI_DIR/dist" \
     "$CADDY_ADMIN_UPSTREAM_HOST" \
     "$CADDY_ADMIN_UPSTREAM_PORT" \
     "$CADDY_CHAT_UPSTREAM_HOST" \
     "$CADDY_CHAT_UPSTREAM_PORT"
-  append_extra_caddy_snippets "$rendered_config"
+  if [[ "$CADDY_PORTAL_DOMAINS_MANAGED" == "1" ]]; then
+    append_extra_caddy_snippets "$rendered_config" "$CADDY_LEGACY_PORTAL_SNIPPET_FILE"
+  else
+    append_extra_caddy_snippets "$rendered_config"
+  fi
 
   if command_exists caddy; then
     log_step "Validating Caddy config"
@@ -456,6 +491,9 @@ refresh_caddy_config() {
   run_as_root install -m 644 "$rendered_config" "$CADDY_CONFIG_FILE"
 
   reload_caddy
+  if [[ "$CADDY_PORTAL_DOMAINS_EXPLICIT" == "1" ]]; then
+    persist_caddy_portal_domains
+  fi
 
   rm -f "$rendered_config"
 }
@@ -532,20 +570,9 @@ pm2_app_pid() {
   run_as_app_user_shell "pm2 pid '$app_name' 2>/dev/null | tail -n 1" | tr -dc '0-9'
 }
 
-drain_pm2_app_name() {
-  if pm2_app_exists "$PM2_CHAT_APP_NAME"; then
-    printf '%s\n' "$PM2_CHAT_APP_NAME"
-  else
-    printf '%s\n' "$PM2_ADMIN_APP_NAME"
-  fi
-}
-
-drain_status_url() {
+drain_status_url_for_port() {
+  local status_port="$1"
   local status_host="$API_HOST"
-  local status_port="$CHAT_API_PORT"
-  if ! pm2_app_exists "$PM2_CHAT_APP_NAME"; then
-    status_port="$ADMIN_API_PORT"
-  fi
   if [[ "$status_host" == "0.0.0.0" || "$status_host" == "::" ]]; then
     status_host="127.0.0.1"
   fi
@@ -588,7 +615,10 @@ PY
       return 0
     fi
   fi
-  ps -eo ppid=,args= | awk -v api_pid="$api_pid" '$1 == api_pid && index($0, "codex exec") > 0 { count++ } END { print count + 0 }'
+  ps -eo ppid=,args= | awk -v api_pid="$api_pid" '
+    $1 == api_pid && (index($0, "codex exec") > 0 || index($0, "codex app-server") > 0) { count++ }
+    END { print count + 0 }
+  '
 }
 
 wait_for_agent_drain() {
@@ -597,25 +627,55 @@ wait_for_agent_drain() {
     return 0
   fi
 
-  local api_pid
-  local drain_app_name
-  drain_app_name="$(drain_pm2_app_name)"
-  api_pid="$(pm2_app_pid "$drain_app_name" || true)"
-  if [[ -z "$api_pid" || "$api_pid" == "0" ]]; then
-    log_info "PM2 app $drain_app_name is not running; no active agent runs to drain"
+  local admin_pid=""
+  local chat_pid=""
+  if deploy_restarts_admin && pm2_app_exists "$PM2_ADMIN_APP_NAME"; then
+    admin_pid="$(pm2_app_pid "$PM2_ADMIN_APP_NAME" || true)"
+  fi
+  if deploy_restarts_chat && pm2_app_exists "$PM2_CHAT_APP_NAME"; then
+    chat_pid="$(pm2_app_pid "$PM2_CHAT_APP_NAME" || true)"
+  fi
+  if [[ -z "$admin_pid" || "$admin_pid" == "0" ]]; then
+    admin_pid=""
+  fi
+  if [[ -z "$chat_pid" || "$chat_pid" == "0" ]]; then
+    chat_pid=""
+  fi
+  if [[ -z "$admin_pid" && -z "$chat_pid" ]]; then
+    log_info "Neither PM2 API app is running; no active agent runs to drain"
     return 0
   fi
 
   log_step "Waiting for active agent runs to finish"
-  local status_url
-  status_url="${AGENT_DRAIN_STATUS_URL:-$(drain_status_url)}"
-  log_info "Drain PM2 app: $drain_app_name"
-  log_info "Drain status endpoint: $status_url"
+  local admin_status_url
+  local chat_status_url
+  admin_status_url="${AGENT_ADMIN_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$ADMIN_API_PORT")}"
+  chat_status_url="${AGENT_CHAT_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$CHAT_API_PORT")}"
+  if [[ -n "$AGENT_DRAIN_STATUS_URL" ]]; then
+    if [[ -n "$chat_pid" ]]; then
+      chat_status_url="$AGENT_DRAIN_STATUS_URL"
+    else
+      admin_status_url="$AGENT_DRAIN_STATUS_URL"
+    fi
+  fi
+  if [[ -n "$admin_pid" ]]; then
+    log_info "Admin drain target: $PM2_ADMIN_APP_NAME ($admin_status_url)"
+  fi
+  if [[ -n "$chat_pid" ]]; then
+    log_info "Chat drain target: $PM2_CHAT_APP_NAME ($chat_status_url)"
+  fi
   local started
   started="$(date +%s)"
   while true; do
-    local active_count
-    active_count="$(active_agent_run_count "$api_pid" "$status_url")"
+    local admin_active_count="0"
+    local chat_active_count="0"
+    if [[ -n "$admin_pid" ]]; then
+      admin_active_count="$(active_agent_run_count "$admin_pid" "$admin_status_url")"
+    fi
+    if [[ -n "$chat_pid" ]]; then
+      chat_active_count="$(active_agent_run_count "$chat_pid" "$chat_status_url")"
+    fi
+    local active_count=$((admin_active_count + chat_active_count))
     if [[ "$active_count" == "0" ]]; then
       log_info "No active agent runs remain"
       return 0
@@ -624,11 +684,11 @@ wait_for_agent_drain() {
     local elapsed
     elapsed=$(( $(date +%s) - started ))
     if (( elapsed >= AGENT_DRAIN_TIMEOUT_SECONDS )); then
-      log_warn "Timed out waiting for $active_count active agent run(s); restarting anyway"
-      return 0
+      log_warn "Timed out waiting for $active_count active agent run(s) (admin=$admin_active_count, chat=$chat_active_count); deployment stopped before restart"
+      return 1
     fi
 
-    log_info "Waiting for $active_count active agent run(s) before restart (${elapsed}s elapsed)"
+    log_info "Waiting for $active_count active agent run(s) before restart (admin=$admin_active_count, chat=$chat_active_count, ${elapsed}s elapsed)"
     sleep "$AGENT_DRAIN_POLL_SECONDS"
   done
 }
@@ -966,7 +1026,7 @@ main() {
   if deploy_builds_frontend; then
     build_frontend
   fi
-  if deploy_restarts_chat; then
+  if deploy_restarts_admin || deploy_restarts_chat; then
     enable_deploy_drain
     trap disable_deploy_drain EXIT
     wait_for_agent_drain
@@ -979,7 +1039,7 @@ main() {
   else
     log_info "Skipping Caddy config refresh for deploy scope: $DEPLOY_SCOPE"
   fi
-  if deploy_restarts_chat; then
+  if deploy_restarts_admin || deploy_restarts_chat; then
     disable_deploy_drain
     trap - EXIT
   fi
@@ -994,4 +1054,6 @@ main() {
   log_info "Public domain: ${DOMAIN:-<unset>}"
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi

@@ -201,6 +201,8 @@ Deployment scopes:
 - `scripts/deploy-agent-studio.sh --chat-only`: rebuilds the backend, enables deployment drain, waits for active chat/runtime turns, and restarts only `agent-studio-chat-api`.
 - `scripts/deploy-agent-studio.sh --all`: full deploy; this remains the default for production updates that touch shared backend, chat, Caddy, or frontend assets.
 
+Full backend deployments inspect both the admin API and chat API drain endpoints before restarting; scoped deployments inspect the process they restart. If a target process still owns a runtime turn when the drain timeout expires, deployment stops without restarting; `--skip-agent-drain` remains the explicit emergency override. Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.
+
 Artifact plugins use one shared runtime instead of copying dependencies into every conversation workspace. Build the Linux runtime archive from a Codex workspace dependency bundle, then place it at the deployment script's default path:
 
 ```bash

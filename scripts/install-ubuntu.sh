@@ -24,6 +24,7 @@ if [[ -n "${DEPLOY_KEY_PATH+x}" ]]; then DEPLOY_KEY_PATH_EXPLICIT=1; fi
 source "$script_dir/lib/common.sh"
 
 DOMAIN="${DOMAIN:-}"
+CADDY_PORTAL_DOMAINS="${CADDY_PORTAL_DOMAINS:-}"
 REPO_URL="${REPO_URL:-}"
 REPO_DIR="${REPO_DIR:-}"
 DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$APP_HOME/.ssh/id_ed25519_agent_studio_deploy}"
@@ -62,6 +63,7 @@ Default behavior:
 
 Options:
   --domain <name>           Public domain to configure for Caddy
+  --portal-domains <list>   Comma/space-separated Portal domains sharing one split API route
   --repo-url <url>          Git repository clone URL (used when clone is needed)
   --repo-dir <path>         Repository directory override
   --deploy-key-path <path>  SSH deploy key path [default: $APP_HOME/.ssh/id_ed25519_agent_studio_deploy]
@@ -150,6 +152,9 @@ load_existing_state() {
 
   if [[ -z "$DOMAIN" ]]; then
     DOMAIN="$(state_read domain "")"
+  fi
+  if [[ -z "$CADDY_PORTAL_DOMAINS" ]]; then
+    CADDY_PORTAL_DOMAINS="$(state_read caddy_portal_domains "")"
   fi
   if [[ -z "$REPO_URL" ]]; then
     REPO_URL="$(state_read repo_url "")"
@@ -274,6 +279,10 @@ parse_args() {
         DOMAIN="$2"
         shift 2
         ;;
+      --portal-domains)
+        CADDY_PORTAL_DOMAINS="$2"
+        shift 2
+        ;;
       --repo-url)
         REPO_URL="$2"
         shift 2
@@ -333,6 +342,8 @@ prompt_for_missing_values() {
   fi
 
   record_install_state domain "$DOMAIN"
+  CADDY_PORTAL_DOMAINS="$(normalize_caddy_portal_domains "$DOMAIN" "${CADDY_PORTAL_DOMAINS:-$DOMAIN}")"
+  record_install_state caddy_portal_domains "$CADDY_PORTAL_DOMAINS"
   record_install_state repo_url "$REPO_URL"
 }
 
@@ -885,7 +896,9 @@ ensure_caddy_config() {
     return 0
   fi
 
-  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787" "127.0.0.1" "8791"
+  local caddy_site_addresses
+  caddy_site_addresses="$(caddy_site_addresses_from_portal_domains "${CADDY_PORTAL_DOMAINS:-$DOMAIN}")"
+  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$caddy_site_addresses" "$APP_UI_DIR/dist" "127.0.0.1" "8787" "127.0.0.1" "8791"
   ensure_secure_file_mode "$CADDY_CONFIG_FILE" 644
   if command_exists caddy; then
     caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null 2>&1 || true
@@ -919,7 +932,10 @@ run_first_deploy() {
     return 0
   fi
 
-  bash "$script_dir/deploy-agent-studio.sh" --repo-dir "$REPO_DIR" --skip-git-pull
+  bash "$script_dir/deploy-agent-studio.sh" \
+    --repo-dir "$REPO_DIR" \
+    --portal-domains "${CADDY_PORTAL_DOMAINS:-$DOMAIN}" \
+    --skip-git-pull
 
   if [[ -f "$APP_API_DIR/dist/index.js" && -f "$APP_UI_DIR/dist/index.html" ]]; then
     record_step_status first_deploy complete "initial deploy completed"

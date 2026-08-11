@@ -17,6 +17,11 @@ CADDY_CHAT_UPSTREAM_HOST="${CADDY_CHAT_UPSTREAM_HOST:-}"
 CADDY_CHAT_UPSTREAM_PORT="${CADDY_CHAT_UPSTREAM_PORT:-8791}"
 CADDY_TEMPLATE_FILE="${CADDY_TEMPLATE_FILE:-$script_dir/../templates/Caddyfile.template}"
 CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
+CADDY_PORTAL_DOMAINS="${CADDY_PORTAL_DOMAINS:-}"
+CADDY_PORTAL_DOMAINS_EXPLICIT="$([[ -n "$CADDY_PORTAL_DOMAINS" ]] && printf '1' || printf '0')"
+CADDY_LEGACY_PORTAL_SNIPPET_FILE="${CADDY_LEGACY_PORTAL_SNIPPET_FILE:-}"
+CADDY_PORTAL_DOMAINS_MANAGED=0
+CADDY_SITE_ADDRESSES=""
 
 usage() {
   cat <<USAGE
@@ -39,6 +44,7 @@ Options:
                                Chat upstream port [default: $CADDY_CHAT_UPSTREAM_PORT]
   --caddy-config-file <path>    Output Caddy config path [default: $CADDY_CONFIG_FILE]
   --extra-snippet-dir <path>    Directory with extra *.caddy snippets [default: $CADDY_EXTRA_SNIPPET_DIR]
+  --portal-domains <list>       Comma/space-separated Portal domains sharing one split API route
   -h, --help                    Show this help text
 USAGE
 }
@@ -87,6 +93,11 @@ while [[ $# -gt 0 ]]; do
       CADDY_EXTRA_SNIPPET_DIR="$2"
       shift 2
       ;;
+    --portal-domains)
+      CADDY_PORTAL_DOMAINS="$2"
+      CADDY_PORTAL_DOMAINS_EXPLICIT=1
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -98,6 +109,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 refresh_app_paths
+if [[ -z "$CADDY_LEGACY_PORTAL_SNIPPET_FILE" ]]; then
+  CADDY_LEGACY_PORTAL_SNIPPET_FILE="$CADDY_EXTRA_SNIPPET_DIR/agent-studio-bailey.caddy"
+fi
 
 if [[ -z "$CADDY_ADMIN_UPSTREAM_HOST" ]]; then
   CADDY_ADMIN_UPSTREAM_HOST="$CADDY_UPSTREAM_HOST"
@@ -148,12 +162,16 @@ PY
 
 append_extra_caddy_snippets() {
   local destination="$1"
+  local skipped_snippet="${2:-}"
 
   [[ -d "$CADDY_EXTRA_SNIPPET_DIR" ]] || return 0
 
   local snippet
   local appended=0
   while IFS= read -r -d '' snippet; do
+    if [[ -n "$skipped_snippet" && "$snippet" == "$skipped_snippet" ]]; then
+      continue
+    fi
     appended=1
     printf '\n# Extra Caddy snippet: %s\n' "$snippet" >> "$destination"
     cat "$snippet" >> "$destination"
@@ -165,13 +183,12 @@ append_extra_caddy_snippets() {
   fi
 }
 
-resolve_caddy_domain() {
-  if [[ -n "$DOMAIN" ]]; then
-    return 0
-  fi
-  if [[ -f "$INSTALL_STATE_FILE" ]]; then
+resolve_caddy_domains() {
+  if [[ -z "$DOMAIN" && -f "$INSTALL_STATE_FILE" ]]; then
     DOMAIN="$(state_read domain "")"
   fi
+  [[ -n "$DOMAIN" ]] || return 0
+  resolve_caddy_portal_domain_config "$DOMAIN" "$CADDY_PORTAL_DOMAINS_EXPLICIT" "$CADDY_PORTAL_DOMAINS"
 }
 
 main() {
@@ -182,7 +199,7 @@ main() {
   [[ -f "$CADDY_TEMPLATE_FILE" ]] || die "missing Caddy template: $CADDY_TEMPLATE_FILE"
   [[ -d "$APP_UI_DIR/dist" ]] || die "missing frontend build output: $APP_UI_DIR/dist"
 
-  resolve_caddy_domain
+  resolve_caddy_domains
   [[ -n "$DOMAIN" ]] || die "domain is required to render Caddy config"
 
   local rendered_config
@@ -190,13 +207,17 @@ main() {
   render_caddy_config \
     "$CADDY_TEMPLATE_FILE" \
     "$rendered_config" \
-    "$DOMAIN" \
+    "$CADDY_SITE_ADDRESSES" \
     "$APP_UI_DIR/dist" \
     "$CADDY_ADMIN_UPSTREAM_HOST" \
     "$CADDY_ADMIN_UPSTREAM_PORT" \
     "$CADDY_CHAT_UPSTREAM_HOST" \
     "$CADDY_CHAT_UPSTREAM_PORT"
-  append_extra_caddy_snippets "$rendered_config"
+  if [[ "$CADDY_PORTAL_DOMAINS_MANAGED" == "1" ]]; then
+    append_extra_caddy_snippets "$rendered_config" "$CADDY_LEGACY_PORTAL_SNIPPET_FILE"
+  else
+    append_extra_caddy_snippets "$rendered_config"
+  fi
 
   log_step "Validating Caddy config"
   caddy validate --config "$rendered_config" --adapter caddyfile >/dev/null
@@ -208,9 +229,14 @@ main() {
 
   log_step "Reloading Caddy"
   systemctl reload caddy
+  if [[ "$CADDY_PORTAL_DOMAINS_EXPLICIT" == "1" ]]; then
+    state_write caddy_portal_domains "$CADDY_PORTAL_DOMAINS"
+  fi
 
   log_step "Caddy refresh complete"
   log_info "Caddy config: $CADDY_CONFIG_FILE"
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi
