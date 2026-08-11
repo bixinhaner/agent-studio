@@ -52,7 +52,6 @@ import {
   Loader2Icon,
   PencilIcon,
   PlusIcon,
-  RefreshCwIcon,
   SendHorizontalIcon,
   Share2Icon,
   SquareIcon,
@@ -5160,44 +5159,6 @@ const AgentUserMessage: FC = () => {
   );
 };
 
-const AgentAssistantReloadButton: FC = () => {
-  const aui = useAui();
-  const { t } = usePortalI18n();
-  const disabled = useAuiState((s) => s.thread.isRunning || s.thread.isDisabled || s.message.role !== "assistant");
-  const [open, setOpen] = useState(false);
-
-  const confirmReload = () => {
-    setOpen(false);
-    aui.message().reload();
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        className="aui-button aui-button-ghost aui-button-icon assistant-reload-button"
-        title={t("thread.refreshAnswer")}
-        aria-label={t("thread.refreshAnswer")}
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
-        <RefreshCwIcon size={16} strokeWidth={2} />
-      </button>
-      <Modal
-        title={t("thread.regenerateTitle")}
-        open={open}
-        okText={t("thread.regenerate")}
-        cancelText={t("common.cancel")}
-        onOk={confirmReload}
-        onCancel={() => setOpen(false)}
-        destroyOnHidden
-      >
-        <p className="assistant-feedback-modal-help">{t("thread.regenerateHelp")}</p>
-      </Modal>
-    </>
-  );
-};
-
 const AgentAssistantFeedbackNegativeButton: FC = () => {
   const aui = useAui();
   const { t } = usePortalI18n();
@@ -5435,7 +5396,6 @@ const AgentAssistantActionBar: FC = () => {
       <AssistantActionBar.Copy />
       {!mutationReadOnly ? (
         <>
-          <AgentAssistantReloadButton />
           <AssistantActionBar.FeedbackPositive />
           <AgentAssistantFeedbackNegativeButton />
         </>
@@ -10149,7 +10109,6 @@ export function PortalShell(props: {
                   removeAttachment: { tooltip: t("thread.removeAttachment") }
                 },
                 assistantMessage: {
-                  reload: { tooltip: t("thread.regenerate") },
                   copy: { tooltip: t("thread.copy") },
                   feedback: {
                     positive: { tooltip: t("thread.goodResponse") },
@@ -10175,7 +10134,7 @@ export function PortalShell(props: {
               }}
               assistantMessage={{
                 allowCopy: true,
-                allowReload: !threadReadOnly,
+                allowReload: false,
                 allowFeedbackPositive: !threadReadOnly,
                 allowFeedbackNegative: !threadReadOnly,
                 components: {
