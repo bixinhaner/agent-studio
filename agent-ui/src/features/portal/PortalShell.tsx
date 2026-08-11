@@ -15,7 +15,7 @@ import {
   type FormEvent as ReactFormEvent,
   type PropsWithChildren
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   AttachmentPrimitive,
   AssistantRuntimeProvider,
@@ -136,6 +136,7 @@ import {
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalThread } from "./PortalThread";
+import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n, type PortalLocale } from "./i18n";
@@ -168,6 +169,7 @@ import {
   WORKSPACE_RAIL_TASK_LIMIT
 } from "./workbench/WorkspaceRail";
 import { expandWorkspaceFolderIds } from "./workspace-folder-state";
+import { startWorkspaceTaskInFolder } from "./workspace-task-navigation";
 import { filterStaleRuntimeThreadIds } from "./thread-running-state";
 import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
 import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
@@ -9824,14 +9826,25 @@ export function PortalShell(props: {
   }, [runtime, selectedWorkspaceFolderId]);
 
   const startWorkspaceTask = useCallback(async () => {
-    setWorkspaceMainView("task");
-    setSelectedWorkspaceFile(null);
-    try {
-      await runtime.threads.switchToNewThread();
-    } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to create task");
-    }
-  }, [runtime]);
+    const folderId = selectedWorkspaceFolderIdRef.current;
+    setWorkspaceErrorText("");
+    return startWorkspaceTaskInFolder(folderId, {
+      prepareForSwitch: () => {
+        flushSync(() => {
+          syncActiveThreadIdentity({});
+          setSelectedWorkspaceFile(null);
+          setWorkspaceMainView("folder");
+        });
+      },
+      showTask: () => setWorkspaceMainView("task"),
+      showFolder: () => setWorkspaceMainView("folder"),
+      writeFolderLocation: (nextFolderId, mode) => {
+        writePortalWorkspaceLocation({ folderId: nextFolderId }, mode);
+      },
+      switchToNewThread: () => runtime.threads.switchToNewThread(),
+      reportError: () => setWorkspaceErrorText(t("workspace.createTaskFailed"))
+    });
+  }, [runtime, syncActiveThreadIdentity, t]);
 
   const openWorkspaceFile = useCallback((file: PortalWorkspaceNode) => {
     setSelectedWorkspaceFile(file);
@@ -9945,7 +9958,8 @@ export function PortalShell(props: {
           return;
         }
         setEnabledSkillIds([targetSkill.id]);
-        await runtime.threads.switchToNewThread();
+        const started = await startWorkspaceTask();
+        if (!started) return;
         setStatusText(`New chat ready with ${targetSkill.label || targetSkill.name}`);
       },
       async installSkillFromPath(input: { threadId: string; path: string; prompt?: string }) {
@@ -9970,7 +9984,7 @@ export function PortalShell(props: {
         return response.skill;
       }
     }),
-    [refreshRuntimeOptionsNow, runtime]
+    [refreshRuntimeOptionsNow, startWorkspaceTask]
   );
 
   const hasRunningSessions = Object.keys(runningThreadIds).length > 0;
@@ -10043,6 +10057,9 @@ export function PortalShell(props: {
     setSubscriptionReminderModalOpen(true);
   }, [canUseCustomerBilling, dismissedSubscriptionReminderKey, subscriptionReminderKey]);
 
+  const threadViewKey = `thread-view-${String(
+    activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty"
+  )}`;
   const threadContent = (
     <div
       className={threadReadOnly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
@@ -10092,8 +10109,29 @@ export function PortalShell(props: {
             value={attachmentWorkspaceFilesValue}
           >
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
+            <PortalThreadErrorBoundary
+              resetKey={threadViewKey}
+              fallback={(
+                <div className="thread-access-banner thread-access-banner-secondary" role="alert">
+                  <div className="thread-access-banner-head">
+                    <AlertCircleIcon size={18} aria-hidden="true" />
+                    <strong>{t("thread.renderFailed")}</strong>
+                  </div>
+                  <p>{t("thread.renderFailedHelp")}</p>
+                  <div className="thread-access-banner-actions">
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => selectWorkspaceFolder(selectedWorkspaceFolderId, selectedWorkspaceFolderName)}
+                    >
+                      {t("workspace.returnToFolder")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            >
             <PortalThread
-              key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
+              key={threadViewKey}
               strings={{
                 threadList: {
                   new: { label: t("sessions.new") },
@@ -10146,6 +10184,7 @@ export function PortalShell(props: {
               }}
               userMessage={{ allowEdit: !threadReadOnly }}
             />
+            </PortalThreadErrorBoundary>
           </PreviewRequestContext.Provider>
           </AttachmentWorkspaceFilesContext.Provider>
           </ThreadMutationReadOnlyContext.Provider>
