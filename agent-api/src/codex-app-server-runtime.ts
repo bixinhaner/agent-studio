@@ -75,6 +75,12 @@ type RuntimeScope = {
   turnMaxMs: number;
 };
 
+type TurnSkillRuntimeScope = {
+  scope: RuntimeScope;
+  skillRoots: string[];
+  skills: CodexTurnSkill[];
+};
+
 const DEFAULT_MAX_PROCESSES = 30;
 const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
@@ -404,6 +410,72 @@ function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
     turnIdleTimeoutMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS, DEFAULT_TURN_IDLE_TIMEOUT_MS),
     turnMaxMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_MAX_MS, DEFAULT_TURN_MAX_MS)
   };
+}
+
+function runtimeScopeForTurnSkills(baseScope: RuntimeScope, skills: CodexTurnSkill[]): TurnSkillRuntimeScope {
+  const normalizedSkills = skills
+    .map((skill) => ({
+      name: trimOrUndefined(skill.name),
+      path: trimOrUndefined(skill.path)
+    }))
+    .filter((skill): skill is CodexTurnSkill => Boolean(skill.name && skill.path))
+    .map((skill) => ({
+      name: skill.name,
+      path: path.resolve(skill.path)
+    }));
+  const byIdentity = new Map<string, CodexTurnSkill>();
+  for (const skill of normalizedSkills) {
+    byIdentity.set(`${skill.name}\u0000${skill.path}`, skill);
+  }
+  const uniqueSkills = [...byIdentity.values()].sort((left, right) =>
+    `${left.name}\u0000${left.path}`.localeCompare(`${right.name}\u0000${right.path}`)
+  );
+  if (uniqueSkills.length === 0) {
+    return { scope: baseScope, skillRoots: [], skills: [] };
+  }
+  const skillRoots = [...new Set(uniqueSkills.map((skill) => path.dirname(skill.path)))].sort();
+  return {
+    scope: {
+      ...baseScope,
+      key: sha256({
+        baseScopeKey: baseScope.key,
+        explicitSkillPaths: uniqueSkills
+      })
+    },
+    skillRoots,
+    skills: uniqueSkills
+  };
+}
+
+function assertTurnSkillsVisible(
+  result: unknown,
+  cwd: string,
+  requestedSkills: CodexTurnSkill[]
+): void {
+  if (requestedSkills.length === 0) return;
+  const response = asRecord(result);
+  const entries = Array.isArray(response?.data) ? response.data : [];
+  const requestedCwd = path.resolve(cwd);
+  const entry = entries
+    .map((value) => asRecord(value))
+    .find((value) => value && trimOrUndefined(value.cwd) && path.resolve(String(value.cwd)) === requestedCwd);
+  const visibleSkills = Array.isArray(entry?.skills)
+    ? entry.skills.map((value) => asRecord(value)).filter((value): value is JsonRecord => Boolean(value))
+    : [];
+  const missing = requestedSkills.filter((requested) =>
+    !visibleSkills.some((visible) =>
+      visible.enabled !== false &&
+      trimOrUndefined(visible.name) === requested.name &&
+      trimOrUndefined(visible.path) !== undefined &&
+      path.resolve(String(visible.path)) === path.resolve(requested.path)
+    )
+  );
+  if (missing.length > 0) {
+    throw new CodexRuntimeUserError(
+      CODEX_RUNTIME_ERROR_CODE.SKILL_LOAD_FAILED,
+      new Error(`Selected Skills were not discoverable in the isolated runtime: ${missing.map((skill) => skill.name).join(", ")}`)
+    );
+  }
 }
 
 function sandboxModeFromRunConfig(codexRunConfig?: Record<string, unknown>): string {
@@ -1062,6 +1134,7 @@ class CodexAppServerProcess {
 class CodexAppServerManager {
   private readonly processes = new Map<string, CodexAppServerProcess>();
   private readonly skillRefreshFingerprints = new Map<string, string>();
+  private readonly threadProcessScopes = new Map<string, string>();
   private readonly lockedThreads = new Set<string>();
   private readonly threadWaiters = new Map<string, Array<() => void>>();
   private readonly activeTurnsByThread = new Map<
@@ -1097,6 +1170,7 @@ class CodexAppServerManager {
     const threadId = threadIdFromResult(result);
     if (!threadId) throw new Error("Codex app-server did not return a thread id");
     process.loadedThreads.add(threadId);
+    this.threadProcessScopes.set(`${scope.key}\u0000${threadId}`, scope.key);
     return {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
@@ -1118,6 +1192,7 @@ class CodexAppServerManager {
       const resumedThreadId = threadIdFromResult(result) ?? threadId;
       process.loadedThreads.add(resumedThreadId);
     }
+    this.threadProcessScopes.set(`${scope.key}\u0000${threadId}`, scope.key);
     return {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
@@ -1149,7 +1224,8 @@ class CodexAppServerManager {
     message: string,
     options: CodexRunStreamOptions = {}
   ): AsyncGenerator<CodexStreamEvent> {
-    const scope = thread.scope;
+    const turnSkillScope = runtimeScopeForTurnSkills(thread.scope, options.skills ?? []);
+    const scope = turnSkillScope.scope;
     const turnOptions: AppServerThreadOptions = {
       model: options.model ?? thread.options.model,
       reasoningEffort: options.reasoningEffort ?? thread.options.reasoningEffort,
@@ -1289,10 +1365,27 @@ class CodexAppServerManager {
       maxTimer.unref();
       resetIdleTimer();
 
+      if (turnSkillScope.skillRoots.length > 0) {
+        await process.request("skills/extraRoots/set", {
+          extraRoots: turnSkillScope.skillRoots
+        });
+        const skillsResult = await process.request("skills/list", {
+          cwds: [turnOptions.workspace],
+          forceReload: true
+        });
+        assertTurnSkillsVisible(skillsResult, turnOptions.workspace, turnSkillScope.skills);
+      }
+
+      const threadProcessKey = `${thread.scopeKey}\u0000${thread.id}`;
+      const switchedProcess = this.threadProcessScopes.get(threadProcessKey) !== scope.key;
+      if (switchedProcess) {
+        process.loadedThreads.delete(thread.id);
+      }
       if (!process.loadedThreads.has(thread.id)) {
         await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
         process.loadedThreads.add(thread.id);
       }
+      this.threadProcessScopes.set(threadProcessKey, scope.key);
       unsubscribe = process.subscribe((notification) => {
         const params = asRecord(notification.params) ?? {};
         const eventThreadId = trimOrUndefined(params.threadId) ?? trimOrUndefined(asRecord(params.thread)?.id);
@@ -1415,6 +1508,7 @@ class CodexAppServerManager {
     this.processes.clear();
     this.activeTurnsByThread.clear();
     this.skillRefreshFingerprints.clear();
+    this.threadProcessScopes.clear();
   }
 
   private async acquireThreadLock(threadId: string): Promise<() => void> {

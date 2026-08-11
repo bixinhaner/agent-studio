@@ -39,6 +39,7 @@ const pendingServerRequests = new Map();
 const overloadRecoveryModeByThread = new Map();
 const configByThread = new Map();
 const activeTurnByThread = new Map();
+let extraSkillRoots = [];
 let skillsListCount = 0;
 
 function write(message) {
@@ -180,18 +181,35 @@ rl.on("line", (line) => {
     respond(id, {
       data: (Array.isArray(params.cwds) ? params.cwds : []).map((cwd) => ({
         cwd,
-        skills: [],
+        skills: [
+          {
+            name: "documents:documents",
+            description: "Automatic document capability",
+            path: "/plugins/documents/SKILL.md",
+            scope: "user",
+            enabled: true
+          },
+          ...extraSkillRoots.map((root) => ({
+            name: root.split("/").filter(Boolean).at(-1),
+            description: "Selected managed Skill",
+            path: root + "/SKILL.md",
+            scope: "user",
+            enabled: true
+          }))
+        ],
         errors: []
       })),
       forceReload: params.forceReload === true
     });
     return;
   }
+  if (message.method === "skills/extraRoots/set") {
+    extraSkillRoots = Array.isArray(params.extraRoots) ? [...params.extraRoots] : [];
+    respond(id, {});
+    return;
+  }
   if (message.method === "thread/resume") {
-    if (!threads.has(params.threadId)) {
-      write({ id, error: { message: "no rollout found for thread id " + params.threadId } });
-      return;
-    }
+    threads.add(params.threadId);
     respond(id, { thread: { id: params.threadId } });
     return;
   }
@@ -390,6 +408,22 @@ rl.on("line", (line) => {
           threadId,
           turnId,
           item: { id: "override-msg", type: "agentMessage", text },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
+      if (inputText === "runtime-skill-scope") {
+        const text = JSON.stringify({
+          extraSkillRoots,
+          visibleAutomaticSkill: "documents:documents",
+          turnSkills: Array.isArray(params.input) ? params.input.slice(1) : []
+        });
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "scope-msg", delta: text });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "scope-msg", type: "agentMessage", text },
           completedAtMs: Date.now()
         });
         notify("turn/completed", { threadId, turn: { id: turnId } });
@@ -610,6 +644,95 @@ describe("Codex app-server runtime", () => {
       }
     });
     expect(thread.id).toBe("thread-1");
+  });
+
+  it("isolates selected managed Skills while preserving automatic plugin discovery", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-skill-scope")
+      }
+    });
+    const firstThread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: path.join(testTempDir, "thread-first")
+    });
+    const secondThread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: path.join(testTempDir, "thread-second")
+    });
+
+    const runScope = async (
+      thread: typeof firstThread,
+      skills: Array<{ name: string; path: string }>
+    ) => {
+      let answer = "";
+      for await (const event of runtime.runStreamed(thread, "runtime-skill-scope", { skills })) {
+        if (event.delta) answer += event.delta;
+      }
+      return JSON.parse(answer) as {
+        extraSkillRoots: string[];
+        visibleAutomaticSkill: string;
+        turnSkills: Array<{ type: string; name: string; path: string }>;
+      };
+    };
+
+    const first = await runScope(firstThread, [{
+      name: "siteapp-surge-support",
+      path: "/private/like/siteapp-surge-support/SKILL.md"
+    }]);
+    const second = await runScope(secondThread, [{
+      name: "zendesk-data",
+      path: "/private/like/zendesk-data/SKILL.md"
+    }]);
+    const deselected = await runScope(firstThread, []);
+
+    expect(first).toMatchObject({
+      extraSkillRoots: ["/private/like/siteapp-surge-support"],
+      visibleAutomaticSkill: "documents:documents",
+      turnSkills: [{
+        type: "skill",
+        name: "siteapp-surge-support",
+        path: "/private/like/siteapp-surge-support/SKILL.md"
+      }]
+    });
+    expect(second).toMatchObject({
+      extraSkillRoots: ["/private/like/zendesk-data"],
+      visibleAutomaticSkill: "documents:documents"
+    });
+    expect(second.extraSkillRoots).not.toContain("/private/like/siteapp-surge-support");
+    expect(deselected).toMatchObject({
+      extraSkillRoots: [],
+      visibleAutomaticSkill: "documents:documents",
+      turnSkills: []
+    });
+  });
+
+  it("rejects a selected Skill when app-server discovery cannot match its name and path", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-skill-mismatch")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir
+    });
+
+    const run = async () => {
+      for await (const _event of runtime.runStreamed(thread, "runtime-skill-scope", {
+        skills: [{ name: "siteapp-surge-support", path: "/private/like/wrong-package/SKILL.md" }]
+      })) {
+        // Drain the stream so discovery errors surface to the caller.
+      }
+    };
+
+    await expect(run()).rejects.toMatchObject({
+      name: "CodexRuntimeUserError",
+      code: CODEX_RUNTIME_ERROR_CODE.SKILL_LOAD_FAILED
+    } satisfies Partial<CodexRuntimeUserError>);
   });
 
   it("force-refreshes visible Skills once per runtime fingerprint", async () => {
