@@ -159,6 +159,16 @@ import {
   createRuntimeStartupTimer,
   type RuntimeStartupTimer
 } from "./runtime-startup-timing.js";
+import {
+  DEPLOYMENT_DRAIN_ERROR_CODE,
+  assertDeploymentAllowsRuntimeStart,
+  isDeploymentDrainError
+} from "./portal/deployment-drain.js";
+import { startWithMissingCodexRolloutRecovery } from "./portal/codex-thread-recovery.js";
+import {
+  assertPortalAssistantHasUserParent,
+  assertPortalMessageRepositoryIntegrity
+} from "./portal/message-integrity.js";
 import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
 import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
@@ -2712,6 +2722,7 @@ type CurrentActor = {
 const QUOTA_ACCESS_DENIED_MESSAGE = "Current quota limit has been exceeded; cannot create a new session";
 
 function statusCodeForSessionAccessError(error: unknown): number {
+  if (isDeploymentDrainError(error)) return 503;
   if (isDirectChatMessageTooLargeError(error)) return 413;
   if (isChatAccessDeniedError(error)) return 403;
   const detail = error instanceof Error ? error.message : "";
@@ -2723,6 +2734,13 @@ function payloadForSessionAccessError(error: unknown, fallbackDetail: string, lo
   code?: string;
   reason_code?: string;
 } {
+  if (isDeploymentDrainError(error)) {
+    return {
+      detail: error.message,
+      code: DEPLOYMENT_DRAIN_ERROR_CODE,
+      reason_code: "deployment_drain"
+    };
+  }
   const runtimeError = presentCodexRuntimeError(error, locale);
   if (runtimeError) {
     return {
@@ -6994,26 +7012,61 @@ async function ensureThreadSession(
     historicalSessionCodexThreadId: patch?.resume_codex_thread_id
   });
 
+  if (enforcePortalSecurityDomain) {
+    await time("ensure_thread_session.recheck_deploy_drain", () =>
+      assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
+    );
+  }
+
   if (active?.sessionId) {
     await time("ensure_thread_session.remove_stale_session", () => sessions.remove(active.sessionId));
     liveRuntimeThreads.delete(active.sessionId);
   }
-  const session = await time("ensure_thread_session.create_session", () =>
-    createSession(
-      desired,
-      threadId,
-      timing,
-      resumeCodexThreadId
-    )
-  );
+  let sessionStartAttempt = 0;
+  const startedSession = await startWithMissingCodexRolloutRecovery<SessionRecord>({
+    resumeCodexThreadId,
+    start: async (requestedCodexThreadId) => {
+      sessionStartAttempt += 1;
+      return await time(
+        sessionStartAttempt === 1
+          ? "ensure_thread_session.create_session"
+          : "ensure_thread_session.create_replacement_session",
+        () => createSession(desired, threadId, timing, requestedCodexThreadId)
+      );
+    },
+    codexThreadId: (createdSession) => trimOrUndefined(createdSession.codexThreadId),
+    persistRecoveredCodexThreadId: async (replacementCodexThreadId) => {
+      await time("ensure_thread_session.persist_replacement_thread_binding", () =>
+        threads.update(threadId, { codexThreadId: replacementCodexThreadId })
+      );
+    },
+    rollbackRecovered: async (createdSession) => {
+      liveRuntimeThreads.delete(createdSession.sessionId);
+      await sessions.remove(createdSession.sessionId);
+    },
+    onRecover: ({ failedCodexThreadId, error }) => {
+      timing?.mark("ensure_thread_session.recover_missing_rollout", {
+        failedCodexThreadId,
+        error: runtimeErrorDetail(error)
+      });
+      console.warn("Portal session replacing missing Codex rollout", {
+        threadId,
+        failedCodexThreadId,
+        detail: runtimeErrorDetail(error)
+      });
+    }
+  });
+  const session = startedSession.value;
   const canonicalCodexThreadId = trimOrUndefined(thread.codexThreadId);
   const sessionCodexThreadId = trimOrUndefined(session.codexThreadId);
   assertCodexThreadContinuity({
-    expectedCodexThreadId: canonicalCodexThreadId ?? resumeCodexThreadId,
+    expectedCodexThreadId: startedSession.recovered
+      ? sessionCodexThreadId
+      : canonicalCodexThreadId ?? resumeCodexThreadId,
     observedCodexThreadId: sessionCodexThreadId,
     scope: "Agent thread"
   });
-  if (!canonicalCodexThreadId && sessionCodexThreadId) {
+  if (!startedSession.recovered && !canonicalCodexThreadId && sessionCodexThreadId) {
     await time("ensure_thread_session.persist_codex_thread_binding", () =>
       threads.update(threadId, { codexThreadId: sessionCodexThreadId })
     );
@@ -9015,10 +9068,18 @@ async function normalizePortalAssistantMessageAppend(input: {
 }): Promise<unknown> {
   if (storedMessageRole(input.message) !== "assistant") return input.message;
   const parentId = trimOrUndefined(input.parentId ?? undefined);
-  if (!parentId) return input.message;
   const channel = trimOrUndefined(input.runConfig?.channel as string | undefined);
   if (channel && channel !== "portal") return input.message;
   const repository = await conversationRecords.getMessageRepository(input.threadId);
+  assertPortalAssistantHasUserParent({
+    role: "assistant",
+    parentId,
+    existingMessages: repository.messages.map((item) => ({
+      id: storedMessageId(item.message),
+      role: storedMessageRole(item.message),
+      parentId: item.parentId
+    }))
+  });
   const existingAssistant = repository.messages.find((item) => {
     return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
   });
@@ -9257,7 +9318,8 @@ async function ensurePortalStreamUserMessage(input: {
             ...(existingUserMessage.runConfig ?? {}),
             channel: "portal",
             sessionId: input.sessionId,
-            serverPersisted: true
+            serverPersisted: true,
+            pendingUserMessage: false
           }
         });
         return userMessageId;
@@ -11863,6 +11925,12 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         featureType: "chat"
       })
     );
+    const shouldStartSession = input.start_session !== false;
+    if (shouldStartSession) {
+      await timing.time("create_thread.check_deploy_drain", () =>
+        assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
+      );
+    }
     const createdThread = await timing.time("create_thread.persist_thread", () =>
       threads.create({
         id: threadId,
@@ -11880,7 +11948,6 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         codexRunConfig: options.codexRunConfig
       })
     );
-    const shouldStartSession = input.start_session !== false;
     const session = shouldStartSession
       ? await timing.time("create_thread.create_session", () =>
           createSession(options, createdThread.id, timing)
@@ -12106,6 +12173,9 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const currentUser = currentActorFromRequest(req);
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = ensureThreadSessionSchema.parse(req.body || {});
+    await timing.time("ensure_thread_session.check_deploy_drain", () =>
+      assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
+    );
     const session = await ensureThreadSession(currentUser, threadId, input, timing, true);
     timing.updateContext({ sessionId: session.sessionId, model: session.model });
     res.json({ session: sessionOut(session) });
@@ -12304,6 +12374,11 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       return;
     }
     const input = replaceMessagesSchema.parse(req.body || {});
+    assertPortalMessageRepositoryIntegrity(input.messages.map((item) => ({
+      id: storedMessageId(item.message),
+      role: storedMessageRole(item.message),
+      parentId: item.parent_id
+    })));
     await conversationRecords.replaceMessages({
       threadId,
       headId: input.head_id ?? null,

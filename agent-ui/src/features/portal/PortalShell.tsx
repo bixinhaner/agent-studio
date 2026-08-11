@@ -108,6 +108,7 @@ import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import type { PortalResourcesResponse } from "../resources/types";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
+import { pendingPortalUserMessageAppend } from "./pending-user-message";
 import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
@@ -8563,6 +8564,25 @@ export function PortalShell(props: {
         setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
         updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
         startRunningStageWaitTimers();
+
+        try {
+          updateRunningStage("Saving your message", { kind: "text" });
+          await api(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
+            method: "POST",
+            json: pendingPortalUserMessageAppend({
+              messageId: latestUserMessageId,
+              parentId: latestUserMessage?.parentId ?? null,
+              message: latestUserMessageForPersistence
+            })
+          });
+        } catch (error) {
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message");
+          setErrorText(notice);
+          stopRunningStageWaitTimers();
+          updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
+          throw new Error(notice);
+        }
+        updateRunningStage("Preparing response", { kind: "text" });
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
