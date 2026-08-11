@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from "./model-config.js";
+import type { CodexTurnSkill } from "./codex-runtime.js";
 
 export type RuntimeUsageSnapshot = {
   inputTokens: number;
@@ -392,14 +393,16 @@ export async function startLiveRuntimeSession<TThread>(input: {
     startThreadWithOptions(options: {
       model: string;
       reasoningEffort: ReasoningEffort;
-      workspace: string;
-      codexRunConfig?: Record<string, unknown>;
-    }): Promise<TThread>;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+    skills?: CodexTurnSkill[];
+  }): Promise<TThread>;
   };
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  skills?: CodexTurnSkill[];
   threadId?: string;
   getThreadUploadDir?: (threadId: string) => string;
 }): Promise<{ liveThread: TThread; codexRunConfig?: Record<string, unknown>; codexThreadId?: string }> {
@@ -412,7 +415,8 @@ export async function startLiveRuntimeSession<TThread>(input: {
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     workspace: input.workspace,
-    codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig)
+    codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig),
+    skills: input.skills
   });
 
   const codexThreadId =
@@ -432,9 +436,10 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     startThreadWithOptions(options: {
       model: string;
       reasoningEffort: ReasoningEffort;
-      workspace: string;
-      codexRunConfig?: Record<string, unknown>;
-    }): Promise<TThread>;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+    skills?: CodexTurnSkill[];
+  }): Promise<TThread>;
   };
   liveRuntimeThreads: Map<string, TThread>;
   sessionId: string;
@@ -442,6 +447,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  skills?: CodexTurnSkill[];
   threadId?: string;
   getThreadUploadDir?: (threadId: string) => string;
   persist(payload: {
@@ -458,6 +464,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     reasoningEffort: input.reasoningEffort,
     workspace: input.workspace,
     codexRunConfig: input.codexRunConfig,
+    skills: input.skills,
     threadId: input.threadId,
     getThreadUploadDir: input.getThreadUploadDir
   });

@@ -709,6 +709,42 @@ describe("Codex app-server runtime", () => {
     });
   });
 
+  it("starts a new thread in its selected Skill scope so the first turn does not switch processes", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-new-selected-skill")
+      }
+    });
+    const selectedSkill = {
+      name: "power-outage-report",
+      path: "/shared/team/power-outage-report/SKILL.md"
+    };
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: path.join(testTempDir, "thread-new-selected-skill"),
+      skills: [selectedSkill]
+    });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "runtime-skill-scope", {
+      skills: [selectedSkill]
+    })) {
+      if (event.delta) answer += event.delta;
+    }
+
+    expect(JSON.parse(answer)).toMatchObject({
+      extraSkillRoots: ["/shared/team/power-outage-report"],
+      visibleAutomaticSkill: "documents:documents",
+      turnSkills: [{
+        type: "skill",
+        name: "power-outage-report",
+        path: "/shared/team/power-outage-report/SKILL.md"
+      }]
+    });
+    expect(thread.id).toBe("thread-1");
+  });
+
   it("rejects a selected Skill when app-server discovery cannot match its name and path", async () => {
     const runtime = new CodexRuntime({
       envOverrides: {

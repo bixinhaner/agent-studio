@@ -31,6 +31,7 @@ type AppServerThreadOptions = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  skills?: CodexTurnSkill[];
 };
 
 export type CodexAppServerThread = {
@@ -1164,18 +1165,27 @@ class CodexAppServerManager {
   }
 
   async startThread(options: CodexRuntimeOptions, threadOptions: AppServerThreadOptions): Promise<CodexAppServerThread> {
-    const scope = runtimeScope(options);
-    const process = await this.getProcess(scope);
-    const result = await process.request("thread/start", threadStartParams(threadOptions, scope.config));
+    const baseScope = runtimeScope(options);
+    const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
+    const process = await this.getProcess(turnSkillScope.scope);
+    if (turnSkillScope.skillRoots.length > 0) {
+      await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
+      const skillsResult = await process.request("skills/list", {
+        cwds: [threadOptions.workspace],
+        forceReload: true
+      });
+      assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
+    }
+    const result = await process.request("thread/start", threadStartParams(threadOptions, turnSkillScope.scope.config));
     const threadId = threadIdFromResult(result);
     if (!threadId) throw new Error("Codex app-server did not return a thread id");
     process.loadedThreads.add(threadId);
-    this.threadProcessScopes.set(`${scope.key}\u0000${threadId}`, scope.key);
+    this.threadProcessScopes.set(`${baseScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
     return {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
-      scopeKey: scope.key,
-      scope,
+      scopeKey: baseScope.key,
+      scope: baseScope,
       options: threadOptions
     };
   }
@@ -1185,19 +1195,28 @@ class CodexAppServerManager {
     threadId: string,
     threadOptions: AppServerThreadOptions
   ): Promise<CodexAppServerThread> {
-    const scope = runtimeScope(options);
-    const process = await this.getProcess(scope);
+    const baseScope = runtimeScope(options);
+    const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
+    const process = await this.getProcess(turnSkillScope.scope);
+    if (turnSkillScope.skillRoots.length > 0) {
+      await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
+      const skillsResult = await process.request("skills/list", {
+        cwds: [threadOptions.workspace],
+        forceReload: true
+      });
+      assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
+    }
     if (!process.loadedThreads.has(threadId)) {
-      const result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, scope.config));
+      const result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
       const resumedThreadId = threadIdFromResult(result) ?? threadId;
       process.loadedThreads.add(resumedThreadId);
     }
-    this.threadProcessScopes.set(`${scope.key}\u0000${threadId}`, scope.key);
+    this.threadProcessScopes.set(`${baseScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
     return {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
-      scopeKey: scope.key,
-      scope,
+      scopeKey: baseScope.key,
+      scope: baseScope,
       options: threadOptions
     };
   }

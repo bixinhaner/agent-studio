@@ -6304,6 +6304,9 @@ async function createSession(
       ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
       : options.codexRunConfig
   );
+  const initialTurnSkillInputs = await time("create_session.resolve_initial_skill_inputs", () =>
+    resolvePortalTurnSkillInputs(enabledSkillSelectionsFromRunConfig(sessionCodexRunConfig))
+  );
   const existingCodexHome = options.codexHome ?? codexHomeFromRunConfig(sessionCodexRunConfig);
   const materializedCodexHome =
     existingCodexHome
@@ -6354,7 +6357,8 @@ async function createSession(
           model: options.model,
           reasoningEffort: options.reasoningEffort,
           workspace: options.workspace,
-          codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+          codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
+          skills: initialTurnSkillInputs
         });
         const codexThreadId =
           typeof (liveThread as { id?: unknown })?.id === "string"
@@ -6372,7 +6376,8 @@ async function createSession(
           model: options.model,
           reasoningEffort: options.reasoningEffort,
           workspace: options.workspace,
-          codexRunConfig: runtimeLaunch.codexRunConfig
+          codexRunConfig: runtimeLaunch.codexRunConfig,
+          skills: initialTurnSkillInputs
         })
       );
   const codexRunConfig = started.codexRunConfig;

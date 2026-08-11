@@ -150,6 +150,7 @@ export class CodexRuntime {
     reasoningEffort: ReasoningEffort;
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
+    skills?: CodexTurnSkill[];
   }): Promise<any> {
     if (this.appServerRuntime) {
       return await this.appServerRuntime.startThreadWithOptions(options);
@@ -163,6 +164,7 @@ export class CodexRuntime {
     reasoningEffort: ReasoningEffort;
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
+    skills?: CodexTurnSkill[];
   }): Promise<any> {
     if (this.appServerRuntime) {
       return await this.appServerRuntime.resumeThreadWithOptions(options);
