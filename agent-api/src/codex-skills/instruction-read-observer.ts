@@ -30,6 +30,24 @@ function trimOrUndefined(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function serializedText(value: unknown): string | undefined {
+  if (typeof value === "string") return trimOrUndefined(value);
+  if (value === undefined || value === null) return undefined;
+  try {
+    return trimOrUndefined(JSON.stringify(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function hasNonEmptyOutput(value: unknown): boolean {
+  if (typeof value === "string") return Boolean(value.trim());
+  if (Array.isArray(value)) return value.some(hasNonEmptyOutput);
+  const record = asRecord(value);
+  if (!record) return false;
+  return [record.text, record.output, record.content, record.contentItems, record.result].some(hasNonEmptyOutput);
+}
+
 function normalizeComparablePath(value: string): string {
   return value
     .trim()
@@ -55,6 +73,19 @@ function collectSkillMdPaths(command: string): string[] {
   }
   for (const match of command.matchAll(/((?:\\.|[^\s'"`;|&<>])+\/SKILL\.md)/gi)) add(match[1]);
   return [...paths];
+}
+
+function collectRelativeSkillMdPath(command: string, argumentsValue: unknown): string | undefined {
+  if (!/(?:^|[\s'"`;|&<>])SKILL\.md(?:$|[\s'"`;|&<>])/i.test(command)) return undefined;
+  if (!/(?:^|[\s;'"&|])(?:cat|sed|head|tail|awk|perl|bat|less|more)\b[^\n]*\bSKILL\.md\b/i.test(command)) {
+    return undefined;
+  }
+  const argumentRecord = asRecord(argumentsValue);
+  const directWorkdir = trimOrUndefined(argumentRecord?.workdir);
+  const encodedWorkdir = command.match(/\bworkdir\s*:\s*["']([^"']+)["']/i)?.[1]
+    ?? command.match(/["']workdir["']\s*:\s*["']([^"']+)["']/i)?.[1];
+  const workdir = directWorkdir ?? encodedWorkdir;
+  return workdir ? `${normalizeComparablePath(workdir)}/SKILL.md` : undefined;
 }
 
 function skillNameFromPath(skillMdPath: string): string | undefined {
@@ -101,15 +132,34 @@ export class CodexInstructionReadObserver {
     const raw = asRecord(event.raw);
     const item = asRecord(raw?.item);
     const eventType = trimOrUndefined(event.type) ?? trimOrUndefined(raw?.type);
-    if (eventType !== "item.completed" || trimOrUndefined(item?.type) !== "command_execution") return [];
-    if (typeof item?.exit_code === "number" && item.exit_code !== 0) return [];
-    if (!trimOrUndefined(item?.aggregated_output)) return [];
+    if (eventType === "turn.started") {
+      return this.recordSelectedSkills();
+    }
+    if (eventType !== "item.completed") return [];
 
-    const command = trimOrUndefined(item?.command);
-    if (!command) return [];
+    const itemType = trimOrUndefined(item?.type);
+    let command: string | undefined;
+    let paths: string[] = [];
+    if (itemType === "command_execution") {
+      if (typeof item?.exit_code === "number" && item.exit_code !== 0) return [];
+      if (!trimOrUndefined(item?.aggregated_output)) return [];
+      command = trimOrUndefined(item?.command);
+      if (!command) return [];
+      paths = collectSkillMdPaths(command);
+    } else if (itemType === "mcp_tool_call") {
+      if (item?.success === false || trimOrUndefined(item?.status) === "failed" || item?.error) return [];
+      if (!hasNonEmptyOutput(item?.contentItems ?? item?.result)) return [];
+      command = serializedText(item?.arguments);
+      if (!command) return [];
+      paths = collectSkillMdPaths(command);
+      const relativePath = collectRelativeSkillMdPath(command, item?.arguments);
+      if (relativePath) paths.push(relativePath);
+    } else {
+      return [];
+    }
 
     const created: CodexInstructionRead[] = [];
-    for (const skillMdPath of collectSkillMdPaths(command)) {
+    for (const skillMdPath of new Set(paths)) {
       const name = skillNameFromPath(skillMdPath);
       if (!name) continue;
       const kind = instructionKindFromPath(skillMdPath);
@@ -132,6 +182,27 @@ export class CodexInstructionReadObserver {
     return created;
   }
 
+  private recordSelectedSkills(): CodexInstructionRead[] {
+    const created: CodexInstructionRead[] = [];
+    for (const skillPath of this.selectedSkillPaths) {
+      const name = skillNameFromPath(skillPath);
+      if (!name) continue;
+      const kind = instructionKindFromPath(skillPath);
+      const key = `${kind}:${name.toLowerCase()}`;
+      if (this.readsByKey.has(key)) continue;
+      const read: CodexInstructionRead = {
+        id: stableReadId(kind, name),
+        name,
+        kind,
+        trigger: "selected",
+        readAt: this.now().toISOString()
+      };
+      this.readsByKey.set(key, read);
+      created.push(read);
+    }
+    return created;
+  }
+
   reads(): CodexInstructionRead[] {
     return [...this.readsByKey.values()];
   }
@@ -146,4 +217,3 @@ export class CodexInstructionReadObserver {
     };
   }
 }
-
