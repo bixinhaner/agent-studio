@@ -187,6 +187,13 @@ type ConversationTranscriptMessage = {
     detail?: string;
     at?: string;
   }>;
+  instructionReads?: Array<{
+    id: string;
+    name: string;
+    kind: "skill" | "capability";
+    trigger: "selected" | "automatic";
+    readAt: string | null;
+  }>;
   turnStatus: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason: string | null;
   parentId: string | null;
@@ -836,6 +843,41 @@ export function extractMessageProcessRows(
   }).map((item) => item.row);
 }
 
+export function extractMessageInstructionReads(
+  message: unknown
+): NonNullable<ConversationTranscriptMessage["instructionReads"]> {
+  const obj = asRecord(message);
+  const parts = Array.isArray(obj?.content) ? obj.content : [];
+  const reads = new Map<string, NonNullable<ConversationTranscriptMessage["instructionReads"]>[number]>();
+
+  for (const entry of parts) {
+    const part = asRecord(entry);
+    if (!part || trimOrUndefined(part.type) !== "data" || trimOrUndefined(part.name) !== "codex_instruction_reads") {
+      continue;
+    }
+    const data = asRecord(part.data);
+    const entries = Array.isArray(data?.reads) ? data.reads : [];
+    for (const [index, rawEntry] of entries.entries()) {
+      const row = asRecord(rawEntry);
+      const name = trimOrUndefined(row?.name);
+      const kind = row?.kind === "capability" ? "capability" : row?.kind === "skill" ? "skill" : undefined;
+      const trigger = row?.trigger === "selected" ? "selected" : row?.trigger === "automatic" ? "automatic" : undefined;
+      if (!name || !kind || !trigger) continue;
+      const key = `${kind}:${name.toLowerCase()}`;
+      if (reads.has(key)) continue;
+      reads.set(key, {
+        id: trimOrUndefined(row?.id) ?? `instruction-read-${index + 1}`,
+        name: name.slice(0, 128),
+        kind,
+        trigger,
+        readAt: parseDateString(row?.readAt) ?? null
+      });
+    }
+  }
+
+  return [...reads.values()];
+}
+
 function summarizeText(value: string | null | undefined, limit = 180): string | null {
   const normalized = trimOrUndefined(value);
   if (!normalized) return null;
@@ -1339,6 +1381,7 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
   const id = extractMessageId(item.message, `message-${index + 1}`);
   const role = extractMessageRole(item.message);
   const processRows = role === "assistant" ? extractMessageProcessRows(item.message) : [];
+  const instructionReads = role === "assistant" ? extractMessageInstructionReads(item.message) : [];
   const turnStatus = projectConversationTurnStatus(item.message, role, { hasAssistantResponse: true });
   return {
     id,
@@ -1346,6 +1389,7 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
     text: extractMessageText(item.message),
     attachments: extractMessageAttachments(threadId, item.message, id),
     ...(processRows.length > 0 ? { processRows } : {}),
+    ...(instructionReads.length > 0 ? { instructionReads } : {}),
     ...turnStatus,
     parentId: item.parentId ?? null,
     createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(item.message),

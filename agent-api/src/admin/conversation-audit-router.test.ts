@@ -7,6 +7,7 @@ import {
   buildTranscriptMessages,
   enabledSkillNamesFromRunConfig,
   extractMessageAttachments,
+  extractMessageInstructionReads,
   extractMessageProcessRows,
   extractMessageText,
   matchesConversationSourceFilter,
@@ -717,5 +718,65 @@ describe("extractMessageProcessRows", () => {
         detail: "已定位问题根因"
       }
     ]);
+  });
+});
+
+describe("extractMessageInstructionReads", () => {
+  it("returns only sanitized structured instruction-read evidence", () => {
+    expect(extractMessageInstructionReads({
+      role: "assistant",
+      content: [
+        { type: "text", text: "已完成" },
+        {
+          type: "data",
+          name: "codex_instruction_reads",
+          data: {
+            reads: [
+              {
+                id: "skill-siteapp",
+                name: "siteapp-surge-support",
+                kind: "skill",
+                trigger: "selected",
+                readAt: "2026-08-12T02:03:04.000Z",
+                path: "/private/runtime/path"
+              },
+              {
+                id: "capability-pdf",
+                name: "pdf",
+                kind: "capability",
+                trigger: "automatic",
+                readAt: "2026-08-12T02:04:04.000Z"
+              },
+              { name: "discovered-only", kind: "unknown", trigger: "automatic" }
+            ]
+          }
+        }
+      ]
+    })).toEqual([
+      {
+        id: "skill-siteapp",
+        name: "siteapp-surge-support",
+        kind: "skill",
+        trigger: "selected",
+        readAt: "2026-08-12T02:03:04.000Z"
+      },
+      {
+        id: "capability-pdf",
+        name: "pdf",
+        kind: "capability",
+        trigger: "automatic",
+        readAt: "2026-08-12T02:04:04.000Z"
+      }
+    ]);
+  });
+
+  it("does not infer reads from selected Skill metadata or process rows", () => {
+    expect(extractMessageInstructionReads({
+      role: "assistant",
+      content: [
+        { type: "data", name: "codex_process", data: { title: "Skill selected" } },
+        { type: "data", name: "skills_list", data: { names: ["siteapp-surge-support"] } }
+      ]
+    })).toEqual([]);
   });
 });

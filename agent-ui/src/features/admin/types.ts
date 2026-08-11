@@ -450,6 +450,13 @@ export type AdminConversationTranscriptMessage = {
   text: string;
   attachments: AdminConversationTranscriptAttachment[];
   processRows?: AdminConversationTranscriptProcessRow[];
+  instructionReads?: Array<{
+    id: string;
+    name: string;
+    kind: "skill" | "capability";
+    trigger: "selected" | "automatic";
+    readAt: string | null;
+  }>;
   turnStatus?: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason?: string | null;
   parentId: string | null;

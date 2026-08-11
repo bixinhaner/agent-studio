@@ -61,6 +61,7 @@ import {
   DownloadIcon,
   MoreHorizontalIcon,
   PackageIcon,
+  SparklesIcon,
   ClipboardListIcon,
   BotIcon,
   ZapIcon,
@@ -363,6 +364,16 @@ type ProcessData = {
   event?: string;
   item_type?: string;
   status?: string;
+};
+
+type InstructionReadData = {
+  reads?: Array<{
+    id?: string;
+    name?: string;
+    kind?: "skill" | "capability";
+    trigger?: "selected" | "automatic";
+    readAt?: string;
+  }>;
 };
 
 type TurnUsage = {
@@ -4561,6 +4572,51 @@ const ProcessDataFallback: FC<any> = ({
   }, [activeThreadId, isExternalPortalUser, name]);
 
   if (name === "codex_process_audit") return null;
+
+  if (name === "codex_instruction_reads") {
+    const payload = (data && typeof data === "object" ? data : {}) as InstructionReadData;
+    const reads = Array.isArray(payload.reads)
+      ? payload.reads
+          .map((read, index) => {
+            const item = asRecord(read);
+            const readName = typeof item?.name === "string" ? item.name.trim() : "";
+            const kind = item?.kind === "capability" ? "capability" : item?.kind === "skill" ? "skill" : "";
+            if (!readName || !kind) return null;
+            return {
+              id: typeof item?.id === "string" && item.id.trim() ? item.id.trim() : `instruction-read-${index + 1}`,
+              name: readName,
+              kind
+            };
+          })
+          .filter(Boolean) as Array<{ id: string; name: string; kind: "skill" | "capability" }>
+      : [];
+    if (reads.length === 0) return null;
+    return (
+      <div className="assistant-instruction-reads" role="group" aria-label={t("instruction.usedInResponse")}>
+        <span className="assistant-instruction-reads-label">{t("instruction.usedInResponse")}</span>
+        <div className="assistant-instruction-read-list">
+          {reads.map((read) => {
+            const isCapability = read.kind === "capability";
+            const Icon = isCapability ? SparklesIcon : PackageIcon;
+            return (
+              <span
+                key={read.id}
+                className={`assistant-instruction-read-chip is-${read.kind}`}
+                title={`${t(isCapability ? "instruction.capability" : "instruction.skill")} · ${read.name}`}
+              >
+                <span className="assistant-instruction-read-icon" aria-hidden="true"><Icon size={14} /></span>
+                <span className="assistant-instruction-read-kind">
+                  {t(isCapability ? "instruction.capability" : "instruction.skill")}
+                </span>
+                <span className="assistant-instruction-read-separator" aria-hidden="true">·</span>
+                <span className="assistant-instruction-read-name">{read.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   if (name === "skill_draft_status") {
     return <SkillDraftStatusBlock data={data} />;
@@ -8988,7 +9044,7 @@ export function PortalShell(props: {
             const partObj = asRecord(part);
             if (!partObj || partObj.type !== "data") continue;
             const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
-            if (name !== "codex_file_change" && name !== "skill_draft_status") continue;
+            if (name !== "codex_file_change" && name !== "skill_draft_status" && name !== "codex_instruction_reads") continue;
             if (isExternalPortalUser && name === "codex_file_change") {
               const dataObj = asRecord(partObj.data);
               if (dataObj?.artifact_only !== true) {
@@ -9006,6 +9062,13 @@ export function PortalShell(props: {
             if (name === "codex_file_change") {
               const consolidated = consolidateCodexFileChangeParts([...orderedParts, displayPart]);
               orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
+            } else if (name === "codex_instruction_reads") {
+              const existingIndex = orderedParts.findIndex((item) => {
+                const existing = asRecord(item);
+                return existing?.type === "data" && existing.name === "codex_instruction_reads";
+              });
+              if (existingIndex >= 0) orderedParts.splice(existingIndex, 1, displayPart);
+              else orderedParts.push(displayPart);
             } else {
               orderedParts.push(displayPart);
             }
@@ -9220,6 +9283,17 @@ export function PortalShell(props: {
                 if (content.length > 0) {
                   yield { content };
                 }
+              }
+              continue;
+            }
+
+            if (event === "instruction_reads") {
+              const contentPart = asRecord(payload?.content_part ?? payload?.contentPart);
+              if (contentPart?.type !== "data" || contentPart.name !== "codex_instruction_reads") continue;
+              const changed = appendDisplayDataParts([contentPart]);
+              if (changed) {
+                const content = snapshotContent();
+                if (content.length > 0) yield { content };
               }
               continue;
             }

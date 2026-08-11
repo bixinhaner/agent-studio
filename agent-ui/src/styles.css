@@ -2489,6 +2489,105 @@ body.access-request-route #root {
   margin-top: 12px;
 }
 
+.assistant-instruction-reads {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.assistant-instruction-reads-label {
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.assistant-instruction-read-list {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.assistant-instruction-read-list::-webkit-scrollbar {
+  display: none;
+}
+
+.assistant-instruction-read-chip {
+  display: inline-flex;
+  height: 28px;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 6px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+}
+
+.assistant-instruction-read-chip.is-skill {
+  border-color: #cdd9ff;
+  background: linear-gradient(180deg, #f8faff 0%, #f1f5ff 100%);
+  color: #4767c9;
+}
+
+.assistant-instruction-read-chip.is-capability {
+  border-color: #bcecf0;
+  background: linear-gradient(180deg, #f5feff 0%, #ecfbfd 100%);
+  color: #168e9a;
+}
+
+.assistant-instruction-read-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+
+.assistant-instruction-read-kind {
+  font-weight: 650;
+}
+
+.assistant-instruction-read-separator {
+  opacity: 0.55;
+}
+
+.assistant-instruction-read-name {
+  max-width: 260px;
+  overflow: hidden;
+  color: #52616f;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .assistant-instruction-reads {
+    gap: 8px;
+  }
+
+  .assistant-instruction-read-name {
+    max-width: 168px;
+  }
+}
+
 .thread-wrap .aui-composer-input {
   font-size: 14px;
   line-height: 1.5;

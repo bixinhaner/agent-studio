@@ -12,6 +12,7 @@ import {
   Paperclip,
   RefreshCcw,
   Search,
+  Sparkles,
   Star,
   ThumbsDown,
   ThumbsUp,
@@ -1177,6 +1178,65 @@ function TranscriptProcessModal(props: {
   );
 }
 
+type TranscriptInstructionRead = NonNullable<AdminConversationTranscriptMessage["instructionReads"]>[number];
+
+function TranscriptInstructionReadChips(props: { reads: TranscriptInstructionRead[] }) {
+  return (
+    <div className="admin-instruction-read-list" aria-label="已读取的指令">
+      {props.reads.map((read) => {
+        const isCapability = read.kind === "capability";
+        const Icon = isCapability ? Sparkles : Package;
+        return (
+          <span key={read.id} className={`admin-instruction-read-chip is-${read.kind}`}>
+            <span className="admin-instruction-read-icon" aria-hidden="true"><Icon size={14} /></span>
+            <span className="admin-instruction-read-kind">{isCapability ? "能力" : "技能"}</span>
+            <span className="admin-instruction-read-separator" aria-hidden="true">·</span>
+            <span className="admin-instruction-read-name">{read.name}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function TranscriptInstructionReadModal(props: {
+  open: boolean;
+  onClose(): void;
+  reads: TranscriptInstructionRead[];
+}) {
+  return (
+    <Modal
+      open={props.open}
+      onCancel={props.onClose}
+      footer={null}
+      width={760}
+      title="指令读取详情"
+      destroyOnHidden
+    >
+      <div className="admin-instruction-read-modal-copy">
+        仅记录助手实际读取过的 Skill 指令；可发现或已安装但未读取的项目不会出现在这里。
+      </div>
+      <div className="admin-instruction-read-table-wrap">
+        <table className="admin-instruction-read-table">
+          <thead>
+            <tr><th>类型</th><th>名称</th><th>触发方式</th><th>读取时间</th></tr>
+          </thead>
+          <tbody>
+            {props.reads.map((read) => (
+              <tr key={read.id}>
+                <td><span className={`admin-instruction-read-type is-${read.kind}`}>{read.kind === "capability" ? "能力" : "技能"}</span></td>
+                <td><code>{read.name}</code></td>
+                <td>{read.trigger === "selected" ? "用户选择" : "系统自动"}</td>
+                <td>{formatLocalDateTime(read.readAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
+  );
+}
+
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
@@ -1185,16 +1245,18 @@ function TranscriptMessageBubble(props: {
   onMount(node: HTMLElement | null): void;
 }) {
   const [processModalOpen, setProcessModalOpen] = useState(false);
+  const [instructionReadModalOpen, setInstructionReadModalOpen] = useState(false);
   const isUser = props.message.role === "user";
   const isAssistant = props.message.role === "assistant";
   const attachmentCount = props.message.attachments.length;
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
+  const instructionReads = Array.isArray(props.message.instructionReads) ? props.message.instructionReads : [];
   const statusLabel = props.message.turnStatus === "completed"
     ? ""
     : turnStatusLabel(props.message.turnStatus, props.message.role);
   
   // Exclude system/tool for cleaner view unless needed
-  if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0) return null;
+  if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0 && instructionReads.length === 0) return null;
 
   return (
     <>
@@ -1230,16 +1292,32 @@ function TranscriptMessageBubble(props: {
             threadId={props.threadId}
             workspace={props.workspace}
           />
-          {isAssistant && processRows.length > 0 ? (
+          {isAssistant && (instructionReads.length > 0 || processRows.length > 0) ? (
             <div className="admin-chat-bubble-footer">
-              <Button
-                type="text"
-                size="small"
-                className="admin-conversation-trace-btn"
-                onClick={() => setProcessModalOpen(true)}
-              >
-                查看过程 · {processRows.length}
-              </Button>
+              {instructionReads.length > 0 ? (
+                <div className="admin-instruction-read-summary">
+                  <span className="admin-instruction-read-summary-label">指令已读取</span>
+                  <TranscriptInstructionReadChips reads={instructionReads} />
+                  <Button
+                    type="link"
+                    size="small"
+                    className="admin-instruction-read-detail-btn"
+                    onClick={() => setInstructionReadModalOpen(true)}
+                  >
+                    查看详情
+                  </Button>
+                </div>
+              ) : null}
+              {processRows.length > 0 ? (
+                <Button
+                  type="text"
+                  size="small"
+                  className="admin-conversation-trace-btn"
+                  onClick={() => setProcessModalOpen(true)}
+                >
+                  查看过程 · {processRows.length}
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1253,6 +1331,13 @@ function TranscriptMessageBubble(props: {
           processRows={processRows}
           threadId={props.threadId}
           workspace={props.workspace}
+        />
+      ) : null}
+      {isAssistant && instructionReads.length > 0 ? (
+        <TranscriptInstructionReadModal
+          open={instructionReadModalOpen}
+          onClose={() => setInstructionReadModalOpen(false)}
+          reads={instructionReads}
         />
       ) : null}
     </>

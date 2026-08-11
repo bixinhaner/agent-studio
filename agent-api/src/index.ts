@@ -293,6 +293,7 @@ import {
   resolvePortalTurnSkillInputs,
   withExplicitSkillMentions
 } from "./portal/skill-runtime.js";
+import { CodexInstructionReadObserver } from "./codex-skills/instruction-read-observer.js";
 import { createSkillCatalogAdminRouter } from "./skill-catalog/router.js";
 import { SkillCatalogRepository, type SkillCatalogRepositoryDb } from "./skill-catalog/repository.js";
 import { SkillCatalogService } from "./skill-catalog/service.js";
@@ -9093,15 +9094,22 @@ function portalAssistantMessage(input: {
   sessionId: string;
   contentParts?: Record<string, unknown>[];
 }) {
+  const leadingContentParts = (input.contentParts ?? []).filter((part) =>
+    part.type === "data" && part.name === "codex_instruction_reads"
+  );
+  const trailingContentParts = (input.contentParts ?? []).filter((part) =>
+    !(part.type === "data" && part.name === "codex_instruction_reads")
+  );
   return {
     id: input.id,
     role: "assistant",
     content: [
+      ...leadingContentParts,
       {
         type: "text",
         text: input.answerText
       },
-      ...(input.contentParts ?? [])
+      ...trailingContentParts
     ],
     status: {
       type: "complete",
@@ -12903,6 +12911,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const turnSkillInputs = await timing.time("chat_stream.resolve_turn_skill_inputs", () =>
       resolvePortalTurnSkillInputs(turnSkills)
     );
+    const instructionReadObserver = new CodexInstructionReadObserver({ selectedSkills: turnSkillInputs });
     const runtimeMessage = withExplicitSkillMentions(
       withSkillActivationPrompts(input.message, turnRunConfig),
       turnSkills
@@ -12966,6 +12975,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           });
         }
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+        const instructionReads = instructionReadObserver.push(event);
+        if (instructionReads.length > 0) {
+          sendTrackedSSE("instruction_reads", {
+            content_part: instructionReadObserver.contentPart()
+          });
+        }
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
@@ -13013,13 +13028,16 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
           }
           if (currentSession.threadId) {
+            const instructionReadContentPart = instructionReadObserver.contentPart();
+            const persistedContentParts = [instructionReadContentPart, artifactContentPart]
+              .filter((part): part is Record<string, unknown> => Boolean(part));
             serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
               persistPortalAssistantMessageWithRetry({
                 threadId: currentSession.threadId!,
                 userMessageId: persistedPortalUserMessageId,
                 sessionId: currentSession.sessionId,
                 answerText: payload.answer,
-                contentParts: artifactContentPart ? [artifactContentPart] : undefined
+                contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
               })
             );
             if (serverPersistedAssistant) {
