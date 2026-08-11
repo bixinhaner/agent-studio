@@ -1061,6 +1061,7 @@ class CodexAppServerProcess {
 
 class CodexAppServerManager {
   private readonly processes = new Map<string, CodexAppServerProcess>();
+  private readonly skillRefreshFingerprints = new Map<string, string>();
   private readonly lockedThreads = new Set<string>();
   private readonly threadWaiters = new Map<string, Array<() => void>>();
   private readonly activeTurnsByThread = new Map<
@@ -1124,6 +1125,23 @@ class CodexAppServerManager {
       scope,
       options: threadOptions
     };
+  }
+
+  async refreshSkills(
+    thread: CodexAppServerThread,
+    input: { cwds: string[]; fingerprint: string }
+  ): Promise<void> {
+    const cwds = [...new Set(input.cwds.map((cwd) => trimOrUndefined(cwd)).filter((cwd): cwd is string => Boolean(cwd)))];
+    const fingerprint = trimOrUndefined(input.fingerprint);
+    if (cwds.length === 0 || !fingerprint) return;
+    const refreshKey = `${thread.scopeKey}\u0000${cwds.slice().sort().join("\u0000")}`;
+    const process = await this.getProcess(thread.scope);
+    if (this.skillRefreshFingerprints.get(refreshKey) === fingerprint) return;
+    await process.request("skills/list", {
+      cwds,
+      forceReload: true
+    });
+    this.skillRefreshFingerprints.set(refreshKey, fingerprint);
   }
 
   async *runTurn(
@@ -1363,6 +1381,9 @@ class CodexAppServerManager {
     }
     if (existing?.closed) {
       this.processes.delete(scope.key);
+      for (const key of this.skillRefreshFingerprints.keys()) {
+        if (key.startsWith(`${scope.key}\u0000`)) this.skillRefreshFingerprints.delete(key);
+      }
     }
     await this.ensureCapacity();
     const process = new CodexAppServerProcess(scope);
@@ -1382,6 +1403,9 @@ class CodexAppServerManager {
     }
     idle.stop("evicted by LRU capacity policy");
     this.processes.delete(idle.scopeKey);
+    for (const key of this.skillRefreshFingerprints.keys()) {
+      if (key.startsWith(`${idle.scopeKey}\u0000`)) this.skillRefreshFingerprints.delete(key);
+    }
   }
 
   stopAll(reason = "stopped"): void {
@@ -1390,6 +1414,7 @@ class CodexAppServerManager {
     }
     this.processes.clear();
     this.activeTurnsByThread.clear();
+    this.skillRefreshFingerprints.clear();
   }
 
   private async acquireThreadLock(threadId: string): Promise<() => void> {
@@ -1433,6 +1458,13 @@ export class CodexAppServerRuntime {
 
   async resumeThreadWithOptions(options: AppServerThreadOptions & { threadId: string }): Promise<CodexAppServerThread> {
     return await appServerManager.resumeThread(this.options, options.threadId, options);
+  }
+
+  async refreshSkills(
+    thread: CodexAppServerThread,
+    input: { cwds: string[]; fingerprint: string }
+  ): Promise<void> {
+    await appServerManager.refreshSkills(thread, input);
   }
 
   async *runStreamed(

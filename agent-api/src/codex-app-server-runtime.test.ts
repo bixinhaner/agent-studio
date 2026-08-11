@@ -39,6 +39,7 @@ const pendingServerRequests = new Map();
 const overloadRecoveryModeByThread = new Map();
 const configByThread = new Map();
 const activeTurnByThread = new Map();
+let skillsListCount = 0;
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -171,6 +172,18 @@ rl.on("line", (line) => {
         isDefault: false
       }],
       nextCursor: null
+    });
+    return;
+  }
+  if (message.method === "skills/list") {
+    skillsListCount += 1;
+    respond(id, {
+      data: (Array.isArray(params.cwds) ? params.cwds : []).map((cwd) => ({
+        cwd,
+        skills: [],
+        errors: []
+      })),
+      forceReload: params.forceReload === true
     });
     return;
   }
@@ -382,6 +395,18 @@ rl.on("line", (line) => {
         notify("turn/completed", { threadId, turn: { id: turnId } });
         return;
       }
+      if (inputText === "skill-refresh-count") {
+        const text = String(skillsListCount);
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "refresh-msg", delta: text });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "refresh-msg", type: "agentMessage", text },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
       if (inputText === "runtime-app-policy") {
         const text = JSON.stringify({
           config: configByThread.get(threadId) || {},
@@ -569,7 +594,7 @@ describe("Codex app-server runtime", () => {
         approvalPolicy: "never",
         networkAccessEnabled: false
       },
-      skills: [{ name: "surge-vpn-manage", path: "/skills/surge-vpn-manage" }]
+      skills: [{ name: "surge-vpn-manage", path: "/skills/surge-vpn-manage/SKILL.md" }]
     })) {
       if (event.delta) answer += event.delta;
     }
@@ -581,10 +606,33 @@ describe("Codex app-server runtime", () => {
       skill: {
         type: "skill",
         name: "surge-vpn-manage",
-        path: "/skills/surge-vpn-manage"
+        path: "/skills/surge-vpn-manage/SKILL.md"
       }
     });
     expect(thread.id).toBe("thread-1");
+  });
+
+  it("force-refreshes visible Skills once per runtime fingerprint", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-skill-refresh")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir
+    });
+
+    await runtime.refreshSkills(thread, { cwds: [testTempDir], fingerprint: "plugins-v1" });
+    await runtime.refreshSkills(thread, { cwds: [testTempDir], fingerprint: "plugins-v1" });
+    await runtime.refreshSkills(thread, { cwds: [testTempDir], fingerprint: "plugins-v2" });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "skill-refresh-count")) {
+      if (event.delta) answer += event.delta;
+    }
+    expect(answer).toBe("2");
   });
 
   it("disables the Codex Apps MCP channel for Agent Studio threads", async () => {

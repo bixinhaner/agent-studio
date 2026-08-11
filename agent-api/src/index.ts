@@ -279,6 +279,10 @@ import {
 import { DingTalkBotErrorNotifier } from "./integrations/dingtalk/bot-error-notifier.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
+import {
+  resolvePortalTurnSkillInputs,
+  withExplicitSkillMentions
+} from "./portal/skill-runtime.js";
 import { createSkillCatalogAdminRouter } from "./skill-catalog/router.js";
 import { SkillCatalogRepository, type SkillCatalogRepositoryDb } from "./skill-catalog/repository.js";
 import { SkillCatalogService } from "./skill-catalog/service.js";
@@ -2185,6 +2189,17 @@ async function restoreLiveRuntimeThread(
             codexRunConfig: sourceCodexRunConfig
           })
         );
+    const automaticPluginReconciliation = await time(
+      "restore_runtime.reconcile_automatic_plugins",
+      () => nativeCodexSkills.reconcileSharedPluginCaches(materializedCodexHome.codexHome)
+    );
+    if (automaticPluginReconciliation.changed) {
+      console.info("automatic plugin caches reconciled", {
+        sessionId: session.sessionId,
+        expectedPluginCount: automaticPluginReconciliation.expectedPlugins.length,
+        mountedPluginCount: automaticPluginReconciliation.mountedPlugins.length
+      });
+    }
     if (existingCodexHome) {
       timing?.mark("restore_runtime.reuse_codex_home", { sessionId: session.sessionId });
     }
@@ -2216,6 +2231,12 @@ async function restoreLiveRuntimeThread(
         reasoningEffort: session.reasoningEffort,
         workspace: session.workspace,
         codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+      })
+    );
+    await time("restore_runtime.refresh_skills", () =>
+      sessionRuntime.refreshSkills(liveThread, {
+        cwds: [session.workspace],
+        fingerprint: automaticPluginReconciliation.fingerprint
       })
     );
     if (stableJson(session.codexRunConfig) !== stableJson(runtimeLaunch.codexRunConfig)) {
@@ -6813,6 +6834,10 @@ async function ensureThreadSession(
         }),
         { enabledSkillCount: enabledSkills.length }
       );
+  const automaticPluginReconciliation = await time(
+    "ensure_thread_session.reconcile_automatic_plugins",
+    () => nativeCodexSkills.reconcileSharedPluginCaches(materializedCodexHome.codexHome)
+  );
   const sessionCodexRunConfig = withRunConfigCodexHome(
     desiredCodexRunConfig,
     materializedCodexHome.codexHome
@@ -6861,6 +6886,12 @@ async function ensureThreadSession(
   if (active) {
     if (liveRuntimeThreads.has(active.sessionId)) {
       hasLiveRuntime = true;
+      await time("ensure_thread_session.refresh_automatic_skills", () =>
+        runtime.refreshSkills(liveRuntimeThreads.get(active.sessionId)!, {
+          cwds: [workspacePath],
+          fingerprint: automaticPluginReconciliation.fingerprint
+        })
+      );
       timing?.mark("ensure_thread_session.live_runtime_cache_hit", { sessionId: active.sessionId });
     } else {
       timing?.mark("ensure_thread_session.live_runtime_cache_miss", { sessionId: active.sessionId });
@@ -12794,11 +12825,19 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         )
       : [];
     const turnRunConfig = withRunConfigEnabledSkillSelection(currentSession.codexRunConfig, turnSkills);
-    const runtimeMessage = withSkillActivationPrompts(input.message, turnRunConfig);
+    const turnSkillInputs = await timing.time("chat_stream.resolve_turn_skill_inputs", () =>
+      resolvePortalTurnSkillInputs(turnSkills)
+    );
+    const runtimeMessage = withExplicitSkillMentions(
+      withSkillActivationPrompts(input.message, turnRunConfig),
+      turnSkills
+    );
     timing.mark("chat_stream.runtime_prompt_prepared", {
       inputLength: input.message.length,
       runtimePromptLength: runtimeMessage.length,
-      skillActivationPromptApplied: runtimeMessage !== input.message
+      skillActivationPromptApplied: runtimeMessage !== input.message,
+      selectedSkillCount: turnSkills.length,
+      explicitSkillInputCount: turnSkillInputs.length
     });
     const enterpriseRunContext = await timing.time("chat_stream.resolve_enterprise_context", () =>
       enterpriseContext.resolveForRun({
@@ -12825,9 +12864,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         reasoningEffort: currentSession.reasoningEffort,
         workspace: currentSession.workspace,
         codexRunConfig: stripInternalRunConfigMetadata(currentSession.codexRunConfig),
-        skills: turnSkills.flatMap((skill) =>
-          skill.sourcePath ? [{ name: skill.name, path: skill.sourcePath }] : []
-        )
+        skills: turnSkillInputs
       },
       memory: {
         channel: "portal",

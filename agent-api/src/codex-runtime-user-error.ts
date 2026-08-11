@@ -1,5 +1,6 @@
 export const CODEX_RUNTIME_ERROR_CODE = {
-  AI_SERVICE_BUSY: "AI_SERVICE_BUSY"
+  AI_SERVICE_BUSY: "AI_SERVICE_BUSY",
+  SKILL_LOAD_FAILED: "SKILL_LOAD_FAILED"
 } as const;
 
 export type CodexRuntimeErrorCode =
@@ -50,6 +51,14 @@ export function presentCodexRuntimeError(
         message: prefersChinese(locale)
           ? "AI 服务当前繁忙，请稍后再试。"
           : "The AI service is currently busy. Please try again later.",
+        retryable: error.retryable
+      };
+    case CODEX_RUNTIME_ERROR_CODE.SKILL_LOAD_FAILED:
+      return {
+        code: error.code,
+        message: prefersChinese(locale)
+          ? "所选 Skill 暂时未能加载，本次未开始执行。请重新选择后再试。"
+          : "The selected Skill could not be loaded, so this request was not started. Select it again and retry.",
         retryable: error.retryable
       };
   }

@@ -32,6 +32,20 @@ describe("Codex runtime user errors", () => {
     });
   });
 
+  it("explains selected Skill load failures without exposing filesystem details", () => {
+    const error = new CodexRuntimeUserError(
+      CODEX_RUNTIME_ERROR_CODE.SKILL_LOAD_FAILED,
+      new Error("/private/runtime/skills/siteapp-surge-support/SKILL.md missing")
+    );
+
+    expect(presentCodexRuntimeError(error, "zh-CN")).toEqual({
+      code: "SKILL_LOAD_FAILED",
+      message: "所选 Skill 暂时未能加载，本次未开始执行。请重新选择后再试。",
+      retryable: true
+    });
+    expect(presentCodexRuntimeError(error, "en-US")?.message).not.toContain("/private/runtime");
+  });
+
   it("does not rewrite unrelated errors", () => {
     expect(presentCodexRuntimeError(new Error("sandbox denied"), "zh-CN")).toBeUndefined();
   });

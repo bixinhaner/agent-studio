@@ -21,6 +21,13 @@ export type MaterializedCodexSkillInput = {
   system?: boolean;
 };
 
+export type SharedPluginReconciliation = {
+  changed: boolean;
+  fingerprint: string;
+  expectedPlugins: string[];
+  mountedPlugins: string[];
+};
+
 type NativeCodexSkillServiceOptions = {
   baseHome: string;
   sessionHomeRoot: string;
@@ -293,7 +300,7 @@ export class NativeCodexSkillService {
 
       await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
       await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
-      await this.ensureSharedPluginCaches(sessionHome);
+      await this.reconcileSharedPluginCachesUnlocked(sessionHome);
       if (stableJson(currentManifest) === stableJson(manifest) && (await pathExists(sessionSkillsRoot))) {
         await ensureRuntimeSkillDirectories(sessionSkillsRoot);
         return;
@@ -332,9 +339,20 @@ export class NativeCodexSkillService {
     return sessionHome;
   }
 
-  private async ensureSharedPluginCaches(sessionHome: string): Promise<void> {
+  async reconcileSharedPluginCaches(sessionHome: string): Promise<SharedPluginReconciliation> {
+    const normalizedHome = path.resolve(sessionHome);
+    await fs.mkdir(normalizedHome, { recursive: true });
+    return await withDirectoryLock(path.join(normalizedHome, ".materialize.lock"), () =>
+      this.reconcileSharedPluginCachesUnlocked(normalizedHome)
+    );
+  }
+
+  private async reconcileSharedPluginCachesUnlocked(sessionHome: string): Promise<SharedPluginReconciliation> {
     const basePluginCacheRoot = path.join(this.baseHome, "plugins", "cache");
     const sessionPluginCacheRoot = path.join(sessionHome, "plugins", "cache");
+    let changed = false;
+    const expectedPlugins: string[] = [];
+    const mountedPlugins: string[] = [];
     for (const marketplace of this.sharedPluginMarketplaces) {
       const sourcePath = path.join(basePluginCacheRoot, marketplace);
       if (!(await pathExists(sourcePath))) continue;
@@ -343,21 +361,25 @@ export class NativeCodexSkillService {
       const destinationStat = await fs.lstat(destinationPath).catch(() => undefined);
       if (destinationStat?.isSymbolicLink() || (destinationStat && !destinationStat.isDirectory())) {
         await fs.rm(destinationPath, { recursive: true, force: true });
+        changed = true;
       }
+      if (!destinationStat) changed = true;
       await fs.mkdir(destinationPath, { recursive: true });
 
+      const sourceEntries = (await fs.readdir(sourcePath, { withFileTypes: true }).catch(() => []))
+        .filter((entry) =>
+          (entry.isDirectory() || entry.isSymbolicLink()) &&
+          this.sharedPluginNames.has(entry.name.toLowerCase())
+        );
+      const expectedEntryNames = new Set(sourceEntries.map((entry) => entry.name));
       for (const entry of await fs.readdir(destinationPath, { withFileTypes: true }).catch(() => [])) {
-        if (!this.sharedPluginNames.has(entry.name.toLowerCase())) {
+        if (!expectedEntryNames.has(entry.name)) {
           await fs.rm(path.join(destinationPath, entry.name), { recursive: true, force: true });
+          changed = true;
         }
       }
-      for (const entry of await fs.readdir(sourcePath, { withFileTypes: true }).catch(() => [])) {
-        if (
-          (!entry.isDirectory() && !entry.isSymbolicLink()) ||
-          !this.sharedPluginNames.has(entry.name.toLowerCase())
-        ) {
-          continue;
-        }
+      for (const entry of sourceEntries) {
+        expectedPlugins.push(`${marketplace}/${entry.name}`);
         const pluginSourcePath = path.join(sourcePath, entry.name);
         const pluginDestinationPath = path.join(destinationPath, entry.name);
         const pluginDestinationStat = await fs.lstat(pluginDestinationPath).catch(() => undefined);
@@ -367,6 +389,7 @@ export class NativeCodexSkillService {
             target &&
             path.resolve(path.dirname(pluginDestinationPath), target) === pluginSourcePath
           ) {
+            mountedPlugins.push(`${marketplace}/${entry.name}`);
             continue;
           }
         }
@@ -374,8 +397,18 @@ export class NativeCodexSkillService {
           pluginSourcePath,
           pluginDestinationPath
         );
+        changed = true;
+        mountedPlugins.push(`${marketplace}/${entry.name}`);
       }
     }
+    expectedPlugins.sort((left, right) => left.localeCompare(right));
+    mountedPlugins.sort((left, right) => left.localeCompare(right));
+    return {
+      changed,
+      fingerprint: stableJson({ expectedPlugins, mountedPlugins }),
+      expectedPlugins,
+      mountedPlugins
+    };
   }
 
   private async collectSkills(currentPath: string, depth: number, records: NativeCodexSkillRecord[]): Promise<void> {

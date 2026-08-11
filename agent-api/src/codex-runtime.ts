@@ -204,6 +204,14 @@ export class CodexRuntime {
     return await this.appServerRuntime.steerActiveTurn(thread, message);
   }
 
+  async refreshSkills(
+    thread: any,
+    input: { cwds: string[]; fingerprint: string }
+  ): Promise<void> {
+    if (!this.appServerRuntime) return;
+    await this.appServerRuntime.refreshSkills(thread, input);
+  }
+
   async validateProvider(options: {
     model: string;
     reasoningEffort: ReasoningEffort;

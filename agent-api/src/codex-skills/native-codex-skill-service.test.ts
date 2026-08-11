@@ -107,8 +107,18 @@ describe("NativeCodexSkillService", () => {
       await expect(fs.access(path.join(firstMount, "product-design"))).rejects.toThrow();
 
       await fs.rm(path.join(firstMount, "documents"), { recursive: true, force: true });
-      await service.materializeSessionHome({ scopeId: "user-1", enabledSkills: [] });
+      const repaired = await service.reconcileSharedPluginCaches(firstHome);
+      expect(repaired).toMatchObject({
+        changed: true,
+        expectedPlugins: ["agentstudio-office/documents"],
+        mountedPlugins: ["agentstudio-office/documents"]
+      });
       await expect(fs.readFile(path.join(firstMount, "documents", "1.0.0", "marker.txt"), "utf8")).resolves.toBe("shared");
+      await expect(service.reconcileSharedPluginCaches(firstHome)).resolves.toMatchObject({
+        changed: false,
+        expectedPlugins: ["agentstudio-office/documents"],
+        mountedPlugins: ["agentstudio-office/documents"]
+      });
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
