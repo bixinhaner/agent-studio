@@ -104,6 +104,27 @@ describe("historical instruction read backfill", () => {
     expect(parseHistoricalInstructionReadRollout(input).turns).toEqual([]);
   });
 
+  it("does not treat an ordinary workspace SKILL.md as an installed Skill", () => {
+    const input = [
+      line("2026-08-11T10:00:01.000Z", "turn_context", {
+        turn_id: "turn-1",
+        cwd: "/var/lib/agent-studio/sessions/internal/user/agent/thread-thread-1"
+      }),
+      line("2026-08-11T10:00:02.000Z", "response_item", {
+        type: "custom_tool_call",
+        call_id: "call-1",
+        input: "const r = await tools.exec_command({cmd:\"sed -n '1,200p' SKILL.md\",workdir:\"/var/lib/agent-studio/sessions/internal/user/agent/thread-thread-1\"});"
+      }),
+      line("2026-08-11T10:00:02.200Z", "response_item", {
+        type: "custom_tool_call_output",
+        call_id: "call-1",
+        output: "Script completed\nname: local-project-instructions"
+      })
+    ].join("\n");
+
+    expect(parseHistoricalInstructionReadRollout(input).turns).toEqual([]);
+  });
+
   it("matches a completed Portal assistant message and prepends the persisted data part", () => {
     const turns = parseHistoricalInstructionReadRollout([
       line("2026-08-11T10:00:01.000Z", "turn_context", {

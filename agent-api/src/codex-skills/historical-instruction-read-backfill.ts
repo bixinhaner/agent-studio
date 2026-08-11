@@ -116,6 +116,11 @@ function instructionKindFromPath(skillMdPath: string): CodexInstructionReadKind 
     : "skill";
 }
 
+function isInstalledInstructionPath(skillMdPath: string): boolean {
+  const normalized = `/${normalizeComparablePath(skillMdPath).toLowerCase().replace(/^\/+/, "")}`;
+  return normalized.includes("/skills/") || normalized.includes("/.codex-plugin/");
+}
+
 function stableReadId(kind: CodexInstructionReadKind, name: string): string {
   const normalized = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return `instruction-read-${kind}-${normalized || "unknown"}`;
@@ -167,6 +172,7 @@ function outputIsSuccessful(payload: Record<string, unknown>): boolean {
 }
 
 function addRead(turn: MutableTurn, skillPath: string, trigger: CodexInstructionRead["trigger"], readAt: string): void {
+  if (trigger === "automatic" && !isInstalledInstructionPath(skillPath)) return;
   const name = skillNameFromPath(skillPath);
   if (!name) return;
   const kind = instructionKindFromPath(skillPath);
