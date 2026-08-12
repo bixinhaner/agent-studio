@@ -8,6 +8,7 @@
   --workbench-accent-strong: #E63B0F;
   --workbench-border: #f0f0f0;
   --workbench-surface: #ffffff;
+  --workbench-text: #111827;
   --workbench-muted-text: #6b7280;
   --workbench-success: #15803d;
   --workbench-danger: #b42318;
@@ -2725,6 +2726,137 @@ button.session-rail-new-btn:active,
   --aui-thread-max-width: 800px;
   height: 100%;
   flex: 1;
+}
+
+.portal-thread-position-shell {
+  --portal-thread-position-max-width: min(1120px, calc(100vw - 470px));
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.portal-thread-position-shell > .aui-thread-root {
+  min-width: 0;
+  min-height: 0;
+}
+
+.portal-thread-position-shell.is-positioning > .aui-thread-root {
+  visibility: hidden;
+}
+
+.portal-workbench-root .thread-wrap .portal-return-to-latest {
+  top: -44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--workbench-border);
+  border-radius: 999px;
+  color: var(--workbench-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--workbench-surface) 92%, transparent);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  transition:
+    border-color 150ms var(--workbench-motion-ease-standard),
+    box-shadow 150ms var(--workbench-motion-ease-standard),
+    transform 150ms var(--workbench-motion-ease-standard);
+}
+
+.portal-workbench-root .thread-wrap .portal-return-to-latest:hover {
+  border-color: color-mix(in srgb, var(--workbench-accent) 34%, var(--workbench-border));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  transform: translateY(-1px);
+}
+
+.portal-workbench-root .thread-wrap .portal-return-to-latest:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--workbench-accent) 72%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-workbench-root .thread-wrap .portal-return-to-latest {
+    transition: none;
+  }
+}
+
+.portal-thread-position-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  padding: 48px 24px 132px;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--workbench-bg);
+}
+
+.portal-thread-position-placeholder::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  width: min(calc(100% - 40px), var(--portal-thread-position-max-width));
+  height: 88px;
+  border: 1px solid var(--workbench-border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  transform: translateX(-50%);
+}
+
+.portal-thread-position-placeholder-content {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  width: min(100%, var(--portal-thread-position-max-width));
+}
+
+.portal-thread-position-placeholder-avatar,
+.portal-thread-position-placeholder-copy span {
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.portal-thread-position-placeholder-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+
+.portal-thread-position-placeholder-copy {
+  display: grid;
+  gap: 12px;
+  padding-top: 7px;
+}
+
+.portal-thread-position-placeholder-copy span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.portal-thread-position-placeholder-copy span:nth-child(1) {
+  width: 72%;
+}
+
+.portal-thread-position-placeholder-copy span:nth-child(2) {
+  width: 91%;
+}
+
+.portal-thread-position-placeholder-copy span:nth-child(3) {
+  width: 54%;
 }
 
 @media (min-width: 2560px) and (pointer: fine) {
@@ -5866,6 +5998,13 @@ button.session-rail-new-btn:active,
   }
   .aui-thread-viewport {
     padding: 10px 10px 0;
+  }
+  .portal-thread-position-placeholder {
+    padding: 32px 14px 116px;
+  }
+  .portal-thread-position-placeholder::after {
+    bottom: 10px;
+    width: calc(100% - 20px);
   }
   .mobile-workbench-layout {
     display: flex;

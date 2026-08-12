@@ -137,7 +137,7 @@ import {
 } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
-import { PortalThread } from "./PortalThread";
+import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
@@ -2482,6 +2482,7 @@ const SelectedSkillContextBar: FC = () => {
 
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
+  const notifyUserSendIntent = usePortalThreadUserSendIntent();
   const { t } = usePortalI18n();
   const workflow = usePortalComposerWorkflow();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
@@ -2620,12 +2621,13 @@ const UploadAwareComposer: FC = () => {
     setComposerText("");
     clearStoredDraft();
     setWorkflowNotice("");
+    notifyUserSendIntent();
     try {
       await workflow.steer(text);
     } catch {
       // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
-  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, notifyUserSendIntent, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const continueAnswer = useCallback(() => {
     if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
@@ -2633,9 +2635,10 @@ const UploadAwareComposer: FC = () => {
     workflow.clearPause();
     setComposerText(t("thread.resumePrompt"));
     triggerComposerSendAnimation();
+    notifyUserSendIntent();
     sendComposer();
     window.setTimeout(() => setComposerText(preservedDraft), 0);
-  }, [accessBlock.blocked, getComposerText, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, triggerComposerSendAnimation, workflow]);
+  }, [accessBlock.blocked, getComposerText, notifyUserSendIntent, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, triggerComposerSendAnimation, workflow]);
 
   const continueQueue = useCallback(() => workflow.resumeQueue(), [workflow]);
 
@@ -2655,6 +2658,7 @@ const UploadAwareComposer: FC = () => {
       workflow.clearPause();
       clearStoredDraft();
       triggerComposerSendAnimation();
+      notifyUserSendIntent();
     }
   };
 
@@ -2664,6 +2668,7 @@ const UploadAwareComposer: FC = () => {
     workflow.clearPause();
     clearStoredDraft();
     triggerComposerSendAnimation();
+    notifyUserSendIntent();
     aui.composer().send();
   };
 
@@ -2777,6 +2782,7 @@ const UploadAwareComposer: FC = () => {
 
 const MobileAwareComposer: FC = () => {
   const aui = useAui();
+  const notifyUserSendIntent = usePortalThreadUserSendIntent();
   const { t } = usePortalI18n();
   const workflow = usePortalComposerWorkflow();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
@@ -2838,21 +2844,23 @@ const MobileAwareComposer: FC = () => {
     setComposerText("");
     clearStoredDraft();
     setWorkflowNotice("");
+    notifyUserSendIntent();
     try {
       await workflow.steer(text);
     } catch {
       // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
-  }, [clearStoredDraft, getComposerText, sendDisabled, setComposerText, workflow]);
+  }, [clearStoredDraft, getComposerText, notifyUserSendIntent, sendDisabled, setComposerText, workflow]);
 
   const continueAnswer = useCallback(() => {
     if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
     const preservedDraft = getComposerText();
     workflow.clearPause();
     setComposerText(t("thread.resumePrompt"));
+    notifyUserSendIntent();
     sendComposer();
     window.setTimeout(() => setComposerText(preservedDraft), 0);
-  }, [accessBlock.blocked, getComposerText, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, workflow]);
+  }, [accessBlock.blocked, getComposerText, notifyUserSendIntent, sendBlockedByRuntime, sendComposer, setComposerText, t, threadRunning, workflow]);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
     if (threadRunning) {
@@ -2868,6 +2876,7 @@ const MobileAwareComposer: FC = () => {
     }
     workflow.clearPause();
     clearStoredDraft();
+    notifyUserSendIntent();
   };
 
   const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -2875,6 +2884,7 @@ const MobileAwareComposer: FC = () => {
     if (sendDisabled) return;
     workflow.clearPause();
     clearStoredDraft();
+    notifyUserSendIntent();
     aui.composer().send();
   };
 
@@ -10342,12 +10352,20 @@ export function PortalShell(props: {
             >
             <PortalThread
               key={threadViewKey}
+              readingPositionKey={`${portalPreferenceUser?.id || "anonymous"}:${String(
+                activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty"
+              )}`}
+              positioningLabel={t("thread.positioning")}
+              scrollToBottomLabel={t("thread.returnToLatest")}
               strings={{
                 threadList: {
                   new: { label: t("sessions.new") },
                   item: {
                     title: { fallback: t("sessions.newConversation") }
                   }
+                },
+                thread: {
+                  scrollToBottom: { tooltip: t("thread.returnToLatest") }
                 },
                 composer: {
                   input: {
