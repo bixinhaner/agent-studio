@@ -96,9 +96,6 @@ type CodexSkillServiceOptions = {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const SAFE_SKILL_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/;
-const MAX_SKILL_FILE_COUNT = 80;
-const MAX_SKILL_TOTAL_BYTES = 2 * 1024 * 1024;
-const MAX_SKILL_FILE_BYTES = 512 * 1024;
 const MAX_SKILL_MD_LINES = 500;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -1120,15 +1117,10 @@ export class CodexSkillService {
         if (!entry.isFile()) continue;
         fileCount += 1;
         totalBytes += stat.size;
-        if (stat.size > MAX_SKILL_FILE_BYTES) {
-          errors.push(`文件过大：${relative}`);
-        }
       }
     };
 
     await walk(normalizedRoot);
-    if (fileCount > MAX_SKILL_FILE_COUNT) errors.push(`文件数量过多：${fileCount}`);
-    if (totalBytes > MAX_SKILL_TOTAL_BYTES) errors.push(`skill 总大小过大：${totalBytes} bytes`);
 
     const skillMd = await fs.readFile(skillMdPath, "utf8");
     const lines = skillMd.split(/\r?\n/);

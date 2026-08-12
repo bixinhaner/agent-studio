@@ -101,14 +101,6 @@ export const CURATED_SKILL_PRESENTATIONS: Record<string, CuratedSkillPresentatio
     zh: content("Zendesk 工单数据", "查询、导出和分析 Zendesk 工单、用户、组织及支持运营趋势", ["查询和统计 Zendesk 工单", "分析客户问题与支持趋势", "生成工单运营报表"], ["说明时间、状态、组织或指标范围", "使用受控账号查询并校验数据", "返回统计、明细或报告文件"], ["统计最近 7 天未解决的高优先级工单。", "分析本月最常见的客户问题并生成报表。"], "内置受控账号有权访问的 Zendesk 工单、用户、组织和分组数据"),
     en: content("Zendesk Ticket Data", "Query, export, and analyze Zendesk tickets, users, organizations, and support trends", ["Find and count Zendesk tickets", "Analyze customer issues and support trends", "Create ticket-operations reports"], ["Define time, status, organization, or metric scope", "Query and validate data with the controlled account", "Return statistics, details, or report files"], ["Count high-priority tickets unresolved in the past seven days.", "Analyze this month's most common customer issues and create a report."], "Zendesk tickets, users, organizations, and groups accessible to the bundled controlled account")
   },
-  "gpt-image2-ppt": {
-    zh: content("AI 视觉演示文稿", "使用 gpt-image-2 生成 16:9 视觉化 PPT，支持十种风格和模板克隆", ["生成演示文稿或路演 PPT", "套用内置视觉风格", "参考用户模板生成同风格幻灯片"], ["提供主题、内容、页数和风格", "选择内置风格或上传 PPTX 模板", "生成图像、HTML 预览和 16:9 PPTX 并检查"], ["用科技蓝风格生成一份产品发布 PPT。", "参考这个模板做一份 16:9 投资人演示文稿。"], "用户提供的内容、图片和 PPTX 模板，以及本任务生成的图像、HTML 与 PPTX"),
-    en: content("AI Visual Presentation", "Generate a 16:9 visual deck with gpt-image-2 using ten curated styles or template cloning", ["Create a presentation or pitch deck", "Apply a curated visual style", "Match a user-provided PowerPoint template"], ["Provide topic, content, slide count, and style", "Choose a built-in style or upload a PPTX template", "Generate and inspect images, an HTML viewer, and the 16:9 PPTX"], ["Create a product-launch deck in the Tech Blue style.", "Use this template to create a 16:9 investor presentation."], "User-provided content, images, and PPTX templates plus generated images, HTML, and presentation files")
-  },
-  "openai-docs": {
-    zh: content("OpenAI 官方文档", "从 OpenAI 官方资料回答 API、模型、Codex 和产品使用问题，并提供引用", ["查询 OpenAI API 和模型文档", "选择或升级模型", "了解 Codex 配置、能力和使用方式"], ["说明产品、接口或决策问题", "优先查询对应官方文档和本地 Codex 手册", "给出当前结论、限制和官方链接"], ["Responses API 如何使用结构化输出？", "这个任务应该选择哪个最新 OpenAI 模型？"], "OpenAI 官方文档、官方站点及与问题相关的本地 Codex 产品配置；不使用非官方来源替代权威结论"),
-    en: content("OpenAI Official Documentation", "Answer questions about OpenAI APIs, models, Codex, and products from official sources with citations", ["Look up OpenAI API and model documentation", "Choose or upgrade a model", "Understand Codex setup, capabilities, and usage"], ["Describe the product, API, or decision question", "Consult the relevant official docs and local Codex manual first", "Return the current guidance, limitations, and official links"], ["How do I use structured outputs with the Responses API?", "Which current OpenAI model should I choose for this workload?"], "Official OpenAI documentation and sites plus relevant local Codex product configuration; authoritative claims do not rely on unofficial substitutes")
-  },
   "plugin-creator": {
     zh: content("插件创建助手", "创建或更新符合规范的 Codex 插件目录、manifest 和个人插件市场条目", ["创建新的个人插件", "补充插件中的 Skill 或可选目录", "更新插件市场排序和可用性信息"], ["说明插件名称和需要包含的能力", "生成目录与 .codex-plugin/plugin.json", "校验 manifest，并按需要更新市场与重装缓存"], ["创建一个包含两个 Skill 的个人插件。", "为这个插件补充 marketplace 条目并校验结构。"], "用户指定的本地插件目录和个人 marketplace 配置；创建或更新文件前遵循目标路径权限"),
     en: content("Plugin Creator", "Create or update valid Codex plugin directories, manifests, and personal marketplace entries", ["Create a personal plugin", "Add Skills or optional plugin folders", "Update marketplace ordering and availability metadata"], ["Specify the plugin name and included capabilities", "Generate the directory and .codex-plugin/plugin.json", "Validate the manifest and update marketplace or reinstall cache when needed"], ["Create a personal plugin containing two Skills.", "Add a marketplace entry for this plugin and validate its structure."], "User-specified local plugin directories and personal marketplace configuration, subject to target-path permissions")
@@ -120,8 +112,6 @@ export const CURATED_SKILL_PRESENTATIONS: Record<string, CuratedSkillPresentatio
 };
 
 export const NATIVE_PRESENTATION_BACKFILL_NAMES = [
-  "gpt-image2-ppt",
-  "openai-docs",
   "oxm-operations",
   "plugin-creator",
   "skill-installer"
