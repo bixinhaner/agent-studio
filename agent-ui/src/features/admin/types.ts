@@ -457,6 +457,7 @@ export type AdminConversationTranscriptMessage = {
     trigger: "selected" | "automatic";
     readAt: string | null;
   }>;
+  fileChangeData?: unknown[];
   turnStatus?: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason?: string | null;
   parentId: string | null;

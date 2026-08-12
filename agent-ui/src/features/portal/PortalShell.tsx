@@ -136,11 +136,18 @@ import {
   projectCodexFileCitations
 } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
+import { ArtifactFileList } from "../artifacts/ArtifactFileList";
+import {
+  artifactFileName,
+  collectCodexFileChanges,
+  type CodexFileChangeView
+} from "../artifacts/codex-file-changes";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
 import { resolvePortalChatRecoveryActive } from "./chat-recovery";
+import { completedAssistantContentForParent, isPortalTransportDisconnect } from "./background-run-recovery";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n, type PortalLocale } from "./i18n";
@@ -539,9 +546,17 @@ const SkillComposerContext = createContext<{
 });
 type PortalActiveRun = {
   sessionId: string;
+  runId: string;
   threadId: string;
   userMessageId?: string;
 };
+
+function createPortalRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `portal-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
 const PortalRunCancelContext = createContext<() => void>(() => undefined);
 const SkillDraftActionContext = createContext<{
   openNewSessionWithSkill: (input: { skillName: string; managedSkillId?: string }) => Promise<void> | void;
@@ -3495,63 +3510,6 @@ function fileNameFromPreviewPath(filePath: string): string {
   return parts[parts.length - 1] || normalized;
 }
 
-function fileChangeKindLabel(kind: string): string {
-  const normalized = kind.trim().toLowerCase();
-  if (normalized === "artifact" || normalized === "available" || normalized === "ready") return "Ready";
-  if (!normalized || normalized === "update" || normalized === "updated") return "Updated";
-  if (normalized === "create" || normalized === "created" || normalized === "add" || normalized === "added") return "Added";
-  if (normalized === "delete" || normalized === "deleted" || normalized === "remove" || normalized === "removed") return "Deleted";
-  if (normalized === "rename" || normalized === "renamed" || normalized === "move" || normalized === "moved") return "Renamed";
-  return kind.trim() || "Change";
-}
-
-function isReadyFileChange(kind: string): boolean {
-  return ["artifact", "available", "ready"].includes(kind.trim().toLowerCase());
-}
-
-type CodexFileChangeView = {
-  path: string;
-  displayPath: string;
-  kind: string;
-  canPreview?: boolean;
-  canDownload?: boolean;
-  artifactId?: string;
-  blockedReason?: string;
-};
-
-function collectCodexFileChanges(data: unknown): CodexFileChangeView[] {
-  const payload = asRecord(data);
-  if (!payload) return [];
-  const changes = Array.isArray(payload.changes) ? payload.changes : [];
-  const dedup = new Set<string>();
-  const out: CodexFileChangeView[] = [];
-
-  for (const item of changes) {
-    const obj = asRecord(item);
-    if (!obj) continue;
-    const path = normalizePreviewFilePath(asString(obj.path));
-    if (!path) continue;
-    const displayPath = normalizePreviewFilePath(asString(obj.display_path ?? obj.displayPath)) || path;
-    const kind = asString(obj.kind) || "update";
-    const previewStatus = asString(obj.preview_status ?? obj.previewStatus);
-    const downloadStatus = asString(obj.download_status ?? obj.downloadStatus);
-    const key = `${kind}::${path}`;
-    if (dedup.has(key)) continue;
-    dedup.add(key);
-    out.push({
-      path,
-      displayPath,
-      kind,
-      canPreview: obj.can_preview === true || obj.canPreview === true || previewStatus === "ready",
-      canDownload: obj.can_download === true || obj.canDownload === true || downloadStatus === "ready",
-      artifactId: asString(obj.artifact_id ?? obj.artifactId) || undefined,
-      blockedReason: asString(obj.blocked_reason ?? obj.blockedReason) || undefined
-    });
-  }
-
-  return out;
-}
-
 function collectSkillRootPathsFromChanges(changes: CodexFileChangeView[]): string[] {
   const roots = new Set<string>();
   for (const change of changes) {
@@ -4594,8 +4552,6 @@ const ProcessDataFallback: FC<any> = ({
   const [uninstallingSkillId, setUninstallingSkillId] = useState("");
   const [installedSkillsByPath, setInstalledSkillsByPath] = useState<Record<string, CodexManagedSkill>>({});
   const [skillInstallError, setSkillInstallError] = useState("");
-  const [downloadingArtifactPath, setDownloadingArtifactPath] = useState("");
-  const [artifactDownloadError, setArtifactDownloadError] = useState("");
 
   if (name === "codex_connection_recovery") {
     return <PortalChatRecoveryNotice state="recovering" />;
@@ -4613,39 +4569,6 @@ const ProcessDataFallback: FC<any> = ({
       />
     );
   }
-
-  const downloadArtifact = async (downloadHref: string, filePath: string, displayName: string) => {
-    if (!downloadHref || downloadingArtifactPath) return;
-    setDownloadingArtifactPath(filePath);
-    setArtifactDownloadError("");
-    try {
-      const response = await fetch(downloadHref, {
-        credentials: "include",
-        headers: authHeaders()
-      });
-      if (!response.ok) {
-        notifyAuthInvalidStatus(response.status);
-        const rawText = await response.text();
-        const body = parseUploadResponse(rawText);
-        const detail = typeof body.detail === "string" ? body.detail.trim() : "";
-        throw new Error(detail || `Download failed (${response.status}). Try again.`);
-      }
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = displayName;
-      anchor.style.display = "none";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    } catch (error) {
-      setArtifactDownloadError(error instanceof Error ? error.message : "Download failed. Try again.");
-    } finally {
-      setDownloadingArtifactPath("");
-    }
-  };
 
   useEffect(() => {
     if (name !== "codex_file_change") return;
@@ -4850,11 +4773,9 @@ const ProcessDataFallback: FC<any> = ({
 
   if (name === "codex_file_change") {
     const changes = collectCodexFileChanges(data);
-    const visibleChanges = isExternalPortalUser
-      ? changes.filter((item) => item.canPreview || item.canDownload)
-      : changes;
-    if (visibleChanges.length === 0) return null;
-    const skillRootPaths = isExternalPortalUser ? [] : collectSkillRootPathsFromChanges(visibleChanges);
+    const artifactChanges = changes.filter((item) => item.canPreview || item.canDownload);
+    const skillRootPaths = isExternalPortalUser ? [] : collectSkillRootPathsFromChanges(changes);
+    if (artifactChanges.length === 0 && skillRootPaths.length === 0) return null;
     const activeThreadRunning = Boolean(activeThreadId.trim() && runningThreadIds[activeThreadId.trim()]);
     const installSkillPath = async (skillPath: string) => {
       const threadId = activeThreadId.trim();
@@ -4880,98 +4801,33 @@ const ProcessDataFallback: FC<any> = ({
       }
     };
     return (
-      <section className="assistant-file-change-block" aria-label={t("files.generated")}>
-        <p className="assistant-file-change-title">{t("files.generated")}</p>
-        <ul className="assistant-file-change-list">
-          {visibleChanges.map((item) => {
-            const isReady = isReadyFileChange(item.kind);
-            const normalizedKind = item.kind.trim().toLowerCase();
-            const label = isReady
-              ? t("files.ready")
-              : ["rename", "renamed", "move", "moved"].includes(normalizedKind)
-                ? t("files.renamed")
-                : ["delete", "deleted", "remove", "removed"].includes(normalizedKind)
-                  ? t("files.deleted")
-                  : t("files.updated");
-            const canPreview = !isExternalPortalUser || item.canPreview;
-            const canDownload = item.canDownload && activeThreadId.trim();
-            const imageExtension = fileExtensionFromPreviewPath(item.path);
-            const imageName = fileNameFromPreviewPath(item.displayPath);
-            const workspacePreviewOptions = workspaceFilePreviewOptions(attachmentWorkspaceFiles, imageName);
-            const isImageArtifact = IMAGE_FILE_EXTENSIONS.has(imageExtension);
-            const inlineImageHref = canPreview && isImageArtifact
-              ? workspacePreviewOptions?.contentUrl || (activeThreadId.trim()
-                ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
-                    path: item.path,
-                    disposition: "inline"
-                  }).toString()}`
-                : "")
+      <>
+        <ArtifactFileList
+          changes={artifactChanges}
+          resolveActions={(item) => {
+            const displayName = artifactFileName(item.displayPath);
+            const workspacePreviewOptions = workspaceFilePreviewOptions(attachmentWorkspaceFiles, displayName);
+            const artifactUrl = activeThreadId.trim()
+              ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
+                  path: item.path
+                }).toString()}`
               : "";
-            const downloadHref = canDownload
-              ? workspacePreviewOptions?.downloadUrl || `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
-                path: item.path,
-                disposition: "attachment"
-              }).toString()}`
-              : "";
-            const previewArtifact = () => requestPreview(item.path, workspacePreviewOptions);
-            return (
-              <li
-                key={`${item.kind}-${item.path}`}
-                className={inlineImageHref ? "assistant-file-change-item assistant-file-change-item-with-image" : "assistant-file-change-item"}
-              >
-                {inlineImageHref ? (
-                  <button
-                    type="button"
-                    className="assistant-file-change-image-preview"
-                    onClick={previewArtifact}
-                    aria-label={t("files.previewNamed", { name: imageName })}
-                  >
-                    <img className="assistant-file-change-image" src={inlineImageHref} alt={imageName} loading="lazy" />
-                  </button>
-                ) : null}
-                <div className="assistant-file-change-meta">
-                  <span className="assistant-file-change-icon" aria-hidden="true">
-                    <FileIcon size={18} />
-                  </span>
-                  <span className="assistant-file-change-details">
-                    <span className="assistant-file-change-name">{imageName}</span>
-                    <span className={isReady ? "assistant-file-change-status is-ready" : "assistant-file-change-status"}>
-                      {isReady ? <CheckIcon size={14} aria-hidden="true" /> : null}
-                      {label}
-                    </span>
-                  </span>
-                </div>
-                <div className="assistant-file-change-actions">
-                  {canPreview ? (
-                    <button type="button" className="assistant-file-change-btn" onClick={previewArtifact}>
-                      {t("files.preview")}
-                    </button>
-                  ) : null}
-                  {downloadHref ? (
-                    <button
-                      type="button"
-                      className="assistant-file-change-btn assistant-file-change-btn-primary"
-                      disabled={Boolean(downloadingArtifactPath)}
-                      onClick={() => void downloadArtifact(downloadHref, item.path, imageName)}
-                    >
-                      {downloadingArtifactPath === item.path ? (
-                        <Loader2Icon size={14} aria-hidden="true" className="assistant-file-change-spinner" />
-                      ) : (
-                        <DownloadIcon size={14} aria-hidden="true" />
-                      )}
-                      {downloadingArtifactPath === item.path ? t("files.downloading") : t("files.download")}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        {artifactDownloadError ? (
-          <p className="assistant-file-change-error" role="alert">
-            {artifactDownloadError}
-          </p>
-        ) : null}
+            const isImageArtifact = IMAGE_FILE_EXTENSIONS.has(fileExtensionFromPreviewPath(item.path));
+            return {
+              previewUrl: item.canPreview ? workspacePreviewOptions?.contentUrl || artifactUrl : "",
+              downloadUrl: item.canDownload
+                ? workspacePreviewOptions?.downloadUrl || (artifactUrl ? `${artifactUrl}&disposition=attachment` : "")
+                : "",
+              inlineImageUrl: item.canPreview && isImageArtifact
+                ? workspacePreviewOptions?.contentUrl || (artifactUrl ? `${artifactUrl}&disposition=inline` : "")
+                : ""
+            };
+          }}
+          onPreview={(item) => {
+            const displayName = artifactFileName(item.displayPath);
+            requestPreview(item.path, workspaceFilePreviewOptions(attachmentWorkspaceFiles, displayName));
+          }}
+        />
         {skillRootPaths.length > 0 ? (
           <div className="assistant-file-change-skill-submit">
             <p>
@@ -5102,7 +4958,7 @@ const ProcessDataFallback: FC<any> = ({
             {skillInstallError ? <p className="skill-draft-error">{skillInstallError}</p> : null}
           </div>
         ) : null}
-      </section>
+      </>
     );
   }
 
@@ -6770,17 +6626,10 @@ const AgentRuntimeAdapterProvider: FC<
             });
           }
         }
-        if (messageRole === "user") {
-          return;
-        }
-        await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
-          method: "POST",
-          json: {
-            parent_id: item.parentId ?? null,
-            message: messageForPersistence,
-            run_config: item.runConfig
-          }
-        });
+        // User messages are persisted before the runtime starts. Assistant
+        // messages are live browser projections; the API persists the final
+        // authoritative snapshot so a late history callback cannot overwrite it.
+        return;
       }
     }),
     [aui, locale, trainingReadOnly]
@@ -7151,6 +7000,7 @@ export function PortalShell(props: {
       method: "POST",
       json: {
         session_id: run.sessionId,
+        client_run_id: run.runId,
         thread_id: run.threadId,
         client_steer_id: clientSteerId,
         message
@@ -8689,6 +8539,7 @@ export function PortalShell(props: {
       method: "POST",
       json: {
         session_id: run.sessionId,
+        client_run_id: run.runId,
         thread_id: run.threadId,
         user_message_id: run.userMessageId,
         client_cancel_clicked_at: new Date().toISOString(),
@@ -8880,8 +8731,10 @@ export function PortalShell(props: {
           throw new Error(notice);
         }
         const session = ensured.session;
+        const clientRunId = createPortalRunId();
         const activeRun: PortalActiveRun = {
           sessionId: session.session_id,
+          runId: clientRunId,
           threadId,
           userMessageId: latestUserMessageId
         };
@@ -9377,6 +9230,7 @@ export function PortalShell(props: {
         setRuntimeRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
         setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
         try {
+          try {
           for await (const { event, data } of iterateSSE(`${apiBase()}/api/chat/stream`, {
             method: "POST",
             headers: {
@@ -9385,6 +9239,8 @@ export function PortalShell(props: {
             },
             body: JSON.stringify({
               session_id: session.session_id,
+              client_run_id: clientRunId,
+              client_assistant_message_id: options.unstable_assistantMessageId,
               thread_id: threadId,
               user_message_id: latestUserMessageId,
               client_user_message_id: latestUserMessageId,
@@ -10097,6 +9953,65 @@ export function PortalShell(props: {
               }
             }
           }
+          if (!portalRunCompleted && !portalRunFailed && !options.abortSignal.aborted) {
+            throw new Error("connection closed before response completion");
+          }
+          } catch (error) {
+            if (options.abortSignal.aborted || portalRunFailed || !isPortalTransportDisconnect(error)) {
+              throw error;
+            }
+
+            setErrorText("");
+            setPortalChatRecoveryActive(true);
+            updateRunningStage(t("thread.connectionBackground"), { fallback: false, kind: "text" });
+            appendDisplayDataParts([{
+              type: "data",
+              name: "codex_connection_recovery",
+              data: { background: true }
+            }]);
+            yield { content: snapshotContent() };
+
+            const recoveryDeadline = Date.now() + 10 * 60_000;
+            while (!options.abortSignal.aborted && Date.now() < recoveryDeadline) {
+              try {
+                const history = await api<ThreadMessagesOut>(
+                  `/api/threads/${encodeURIComponent(threadId)}/messages`
+                );
+                const completedContent = completedAssistantContentForParent(
+                  history,
+                  latestUserMessageId,
+                  clientRunId
+                );
+                if (completedContent) {
+                  portalRunCompleted = true;
+                  hasTextUpdate = completedContent.some((part) => {
+                    const item = asRecord(part);
+                    return item?.type === "text" && typeof item.text === "string" && item.text.trim().length > 0;
+                  });
+                  setPortalChatRecoveryActive(false);
+                  setErrorText("");
+                  yield { content: completedContent as any[] };
+                  break;
+                }
+                const running = await api<RunningThreadsOut>("/api/threads/running");
+                if (!running.thread_ids.includes(threadId)) {
+                  throw new Error("portal_background_recovery_finished_without_answer");
+                }
+              } catch (pollError) {
+                if (
+                  pollError instanceof Error &&
+                  pollError.message === "portal_background_recovery_finished_without_answer"
+                ) {
+                  throw pollError;
+                }
+              }
+              await new Promise((resolve) => window.setTimeout(resolve, 2000));
+            }
+            if (!portalRunCompleted && !options.abortSignal.aborted) {
+              portalRunFailed = true;
+              throw new Error("portal_background_recovery_timeout");
+            }
+          }
 
           if (!hasTextUpdate && doneAnswer) {
             appendTextPart(doneAnswer);
@@ -10114,6 +10029,7 @@ export function PortalShell(props: {
           const currentActiveRun = activePortalRunRef.current;
           if (
             currentActiveRun?.sessionId === activeRun.sessionId &&
+            currentActiveRun.runId === activeRun.runId &&
             currentActiveRun.threadId === activeRun.threadId &&
             currentActiveRun.userMessageId === activeRun.userMessageId
           ) {

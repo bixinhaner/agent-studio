@@ -252,6 +252,17 @@ describe("createPortalWorkspaceRouter", () => {
     });
   });
 
+  it("supports resumable ranges for workspace downloads", async () => {
+    const { app } = createTestApp();
+    const response = await request(app)
+      .get("/api/portal/workspace/files/file-1/content?version_id=version-1&disposition=attachment")
+      .set("Range", "bytes=2-5")
+      .expect(206);
+    expect(response.headers["accept-ranges"]).toBe("bytes");
+    expect(response.headers["content-range"]).toBe("bytes 2-5/7");
+    expect(response.text).toBe("hell");
+  });
+
   it("serves bounded text preview pages without changing the original download path", async () => {
     const content = Buffer.from(Array.from({ length: 240 }, (_, index) => `line ${index + 1}`).join("\n"));
     const { app } = createTestApp({

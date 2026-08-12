@@ -124,6 +124,7 @@ export function createActionConnectorProvisionRouter(options: {
     conversationId: string;
     artifactId: string;
     disposition: "inline" | "attachment";
+    request: Request;
     response: Response;
   }) => Promise<void>;
 }) {
@@ -215,6 +216,7 @@ export function createActionConnectorProvisionRouter(options: {
         conversationId: req.params.conversationId,
         artifactId: req.params.artifactId,
         disposition: req.query.disposition === "attachment" ? "attachment" : "inline",
+        request: req,
         response: res
       });
     } catch (error) {

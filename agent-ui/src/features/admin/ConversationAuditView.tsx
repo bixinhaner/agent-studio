@@ -36,6 +36,8 @@ import {
 import { stripAssistantControlDirectives } from "../markdown/control-directives";
 import { parseCodexFileCitationHref, projectCodexFileCitations } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
+import { ArtifactFileList } from "../artifacts/ArtifactFileList";
+import { collectCodexFileChanges, type CodexFileChangeView } from "../artifacts/codex-file-changes";
 import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
@@ -1180,6 +1182,28 @@ function TranscriptProcessModal(props: {
 
 type TranscriptInstructionRead = NonNullable<AdminConversationTranscriptMessage["instructionReads"]>[number];
 
+function ConversationAuditArtifactFiles(props: {
+  changes: CodexFileChangeView[];
+  threadId: string;
+}) {
+  return (
+    <ArtifactFileList
+      changes={props.changes}
+      resolveActions={(change) => {
+        const contentUrl = adminThreadFileContentUrl(props.threadId, { filePath: change.path }) || "";
+        return {
+          previewUrl: change.canPreview && contentUrl
+            ? adminPaginatedPreviewUrl(contentUrl, change.path)
+            : "",
+          downloadUrl: change.canDownload && contentUrl
+            ? `${contentUrl}${contentUrl.includes("?") ? "&" : "?"}disposition=attachment`
+            : ""
+        };
+      }}
+    />
+  );
+}
+
 function TranscriptInstructionReadChips(props: { reads: TranscriptInstructionRead[] }) {
   return (
     <div className="admin-instruction-read-list" aria-label="已读取的指令">
@@ -1251,6 +1275,8 @@ function TranscriptMessageBubble(props: {
   const attachmentCount = props.message.attachments.length;
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
   const instructionReads = Array.isArray(props.message.instructionReads) ? props.message.instructionReads : [];
+  const fileChanges = collectCodexFileChanges(props.message.fileChangeData)
+    .filter((change) => change.canPreview || change.canDownload);
   const statusLabel = props.message.turnStatus === "completed"
     ? ""
     : turnStatusLabel(props.message.turnStatus, props.message.role);
@@ -1292,6 +1318,9 @@ function TranscriptMessageBubble(props: {
             threadId={props.threadId}
             workspace={props.workspace}
           />
+          {isAssistant && fileChanges.length > 0 ? (
+            <ConversationAuditArtifactFiles changes={fileChanges} threadId={props.threadId} />
+          ) : null}
           {isAssistant && (instructionReads.length > 0 || processRows.length > 0) ? (
             <div className="admin-chat-bubble-footer">
               {instructionReads.length > 0 ? (

@@ -73,6 +73,7 @@ import { createAdminBillingRouter, createPortalBillingRouter } from "./billing/r
 import { BillingService } from "./billing/service.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
+import { sendBufferContent, sendFileContent } from "./files/raw-content-response.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
 import {
@@ -167,17 +168,26 @@ import {
 import {
   portalAutoRecoveryFailureAssistantMessage,
   portalAutoRecoveryPrompt,
-  portalRuntimeEventHasUnsafeRetrySideEffect,
+  portalRuntimeEventHasAnySideEffect,
+  portalRuntimeEventHasNonResumableSideEffect,
   portalRuntimeEventIndicatesTurnStarted,
   portalRuntimeEventStartsFinalAnswer,
   shouldAutoRecoverPortalChat
 } from "./portal/chat-auto-recovery.js";
+import {
+  preserveCompletedPortalAssistantMessage,
+  repairPortalAssistantCompletionStatus
+} from "./portal/chat-message-precedence.js";
 import { startWithMissingCodexRolloutRecovery } from "./portal/codex-thread-recovery.js";
 import { guardPortalThreadModeChange } from "./portal/thread-mode-guard.js";
 import {
   assertPortalAssistantHasUserParent,
   assertPortalMessageRepositoryIntegrity
 } from "./portal/message-integrity.js";
+import {
+  mergePortalClientRepositoryReplacement,
+  shouldIgnorePortalClientMessageAppend
+} from "./portal/message-server-authority.js";
 import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
 import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
@@ -2143,7 +2153,7 @@ function runtimeEventHasTurnSideEffect(event: { delta?: string; text?: string; r
   return Boolean(
     event.delta ||
     itemType === "agent_message" ||
-    portalRuntimeEventHasUnsafeRetrySideEffect(event)
+    portalRuntimeEventHasAnySideEffect(event)
   );
 }
 
@@ -2449,6 +2459,8 @@ const createSessionSchema = z.object({
 const streamSchema = z.object({
   session_id: z.string().min(1),
   thread_id: z.string().min(1).optional(),
+  client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
+  client_assistant_message_id: z.string().trim().min(1).max(256).optional(),
   user_message_id: z.string().trim().min(1).optional(),
   client_user_message_id: z.string().trim().min(1).optional(),
   parent_id: z.string().trim().min(1).nullable().optional(),
@@ -2461,6 +2473,7 @@ const streamSchema = z.object({
 const portalChatCancelSchema = z.object({
   session_id: z.string().trim().min(1),
   thread_id: z.string().trim().min(1).optional(),
+  client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
   user_message_id: z.string().trim().min(1).optional(),
   client_cancel_clicked_at: z.string().trim().min(1).optional(),
   client_cancel_source: z.string().trim().min(1).optional()
@@ -2469,6 +2482,7 @@ const portalChatCancelSchema = z.object({
 const portalChatSteerSchema = z.object({
   session_id: z.string().trim().min(1),
   thread_id: z.string().trim().min(1),
+  client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
   client_steer_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/),
   message: z.string().trim().min(1)
 });
@@ -4176,21 +4190,43 @@ type PortalActiveChatRun = {
   organizationId: string;
   controller: AbortController;
   createdAt: number;
+  runId: string;
   traceId?: string;
   session?: SessionRecord;
   threadId?: string;
   userMessageId?: string;
+  assistantMessageId?: string;
   assistantMessageWritten?: boolean;
 };
 
 const portalActiveChatRuns = new Map<string, PortalActiveChatRun>();
+const portalLatestRunIds = new Map<string, { runId: string; createdAt: number }>();
+const portalLatestRunIdsByParent = new Map<string, { runId: string; createdAt: number }>();
 const PORTAL_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
+
+function portalRunParentKey(threadId?: string, userMessageId?: string): string | undefined {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  const normalizedUserMessageId = trimOrUndefined(userMessageId);
+  return normalizedThreadId && normalizedUserMessageId
+    ? `${normalizedThreadId}:${normalizedUserMessageId}`
+    : undefined;
+}
 
 function gcPortalActiveChatRuns(): void {
   const cutoff = Date.now() - PORTAL_ACTIVE_CHAT_RUN_TTL_MS;
   for (const [sessionId, entry] of portalActiveChatRuns.entries()) {
     if (entry.createdAt < cutoff) {
       portalActiveChatRuns.delete(sessionId);
+    }
+  }
+  for (const [sessionId, entry] of portalLatestRunIds.entries()) {
+    if (entry.createdAt < cutoff) {
+      portalLatestRunIds.delete(sessionId);
+    }
+  }
+  for (const [parentKey, entry] of portalLatestRunIdsByParent.entries()) {
+    if (entry.createdAt < cutoff) {
+      portalLatestRunIdsByParent.delete(parentKey);
     }
   }
 }
@@ -4272,11 +4308,13 @@ function logPortalStreamLifecycle(stage: string, details: Record<string, unknown
 
 function registerPortalActiveChatRun(input: {
   sessionId: string;
+  runId: string;
   userId: string;
   organizationId: string;
   controller: AbortController;
   threadId?: string;
   traceId?: string;
+  assistantMessageId?: string;
 }): () => void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return () => undefined;
@@ -4290,9 +4328,12 @@ function registerPortalActiveChatRun(input: {
     organizationId: input.organizationId,
     controller: input.controller,
     createdAt: Date.now(),
+    runId: input.runId,
     traceId: trimOrUndefined(input.traceId),
-    threadId: trimOrUndefined(input.threadId)
+    threadId: trimOrUndefined(input.threadId),
+    assistantMessageId: trimOrUndefined(input.assistantMessageId)
   });
+  portalLatestRunIds.set(sessionId, { runId: input.runId, createdAt: Date.now() });
   return () => {
     const current = portalActiveChatRuns.get(sessionId);
     if (current?.controller === input.controller) {
@@ -4307,6 +4348,7 @@ function attachPortalActiveChatRun(input: {
   session?: SessionRecord;
   threadId?: string;
   userMessageId?: string;
+  assistantMessageId?: string;
 }): void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return;
@@ -4315,6 +4357,11 @@ function attachPortalActiveChatRun(input: {
   entry.session = input.session ?? entry.session;
   entry.threadId = trimOrUndefined(input.threadId) ?? entry.threadId;
   entry.userMessageId = trimOrUndefined(input.userMessageId) ?? entry.userMessageId;
+  entry.assistantMessageId = trimOrUndefined(input.assistantMessageId) ?? entry.assistantMessageId;
+  const parentKey = portalRunParentKey(entry.threadId, entry.userMessageId);
+  if (parentKey) {
+    portalLatestRunIdsByParent.set(parentKey, { runId: entry.runId, createdAt: Date.now() });
+  }
 }
 
 function markPortalActiveChatRunAssistantWritten(input: {
@@ -4328,21 +4375,35 @@ function markPortalActiveChatRunAssistantWritten(input: {
   entry.assistantMessageWritten = true;
 }
 
+function portalRunMayPersist(input: {
+  sessionId: string;
+  runId: string;
+  threadId: string;
+  userMessageId: string;
+}): boolean {
+  if (portalLatestRunIds.get(input.sessionId)?.runId !== input.runId) return false;
+  const parentKey = portalRunParentKey(input.threadId, input.userMessageId);
+  return Boolean(parentKey && portalLatestRunIdsByParent.get(parentKey)?.runId === input.runId);
+}
+
 type PortalCancelActiveChatRunResult = {
   cancelled: boolean;
   matchReason: string;
   activeRunFound: boolean;
   runtimeAbortRequested: boolean;
   streamTraceId?: string;
+  runId?: string;
   sessionId?: string;
   threadId?: string;
   userMessageId?: string;
+  assistantMessageId?: string;
 };
 
 async function cancelPortalActiveChatRun(input: {
   sessionId: string;
   currentUser: CurrentActor;
   threadId?: string;
+  runId?: string;
   userMessageId?: string;
   cancelTraceId?: string;
 }): Promise<PortalCancelActiveChatRunResult> {
@@ -4357,6 +4418,21 @@ async function cancelPortalActiveChatRun(input: {
     };
   }
   const entry = portalActiveChatRuns.get(sessionId);
+  const requestedRunId = trimOrUndefined(input.runId);
+  if (entry && requestedRunId && entry.runId !== requestedRunId) {
+    return {
+      cancelled: false,
+      matchReason: "run_mismatch",
+      activeRunFound: true,
+      runtimeAbortRequested: false,
+      streamTraceId: entry.traceId,
+      runId: entry.runId,
+      sessionId,
+      threadId: entry.threadId,
+      userMessageId: entry.userMessageId,
+      assistantMessageId: entry.assistantMessageId
+    };
+  }
   if (entry && entry.userId !== input.currentUser.id) {
     return {
       cancelled: false,
@@ -4364,9 +4440,11 @@ async function cancelPortalActiveChatRun(input: {
       activeRunFound: true,
       runtimeAbortRequested: false,
       streamTraceId: entry.traceId,
+      runId: entry.runId,
       sessionId,
       threadId: entry.threadId,
-      userMessageId: entry.userMessageId
+      userMessageId: entry.userMessageId,
+      assistantMessageId: entry.assistantMessageId
     };
   }
   const session =
@@ -4379,9 +4457,11 @@ async function cancelPortalActiveChatRun(input: {
       activeRunFound: Boolean(entry),
       runtimeAbortRequested: false,
       streamTraceId: entry?.traceId,
+      runId: entry?.runId,
       sessionId,
       threadId: entry?.threadId,
-      userMessageId: entry?.userMessageId
+      userMessageId: entry?.userMessageId,
+      assistantMessageId: entry?.assistantMessageId
     };
   }
 
@@ -4394,9 +4474,11 @@ async function cancelPortalActiveChatRun(input: {
       activeRunFound: Boolean(entry),
       runtimeAbortRequested: false,
       streamTraceId: entry?.traceId,
+      runId: entry?.runId,
       sessionId,
       threadId,
-      userMessageId: trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId)
+      userMessageId: trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId),
+      assistantMessageId: entry?.assistantMessageId
     };
   }
   const userMessageId = trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId);
@@ -4416,11 +4498,13 @@ async function cancelPortalActiveChatRun(input: {
   }
   portalActiveChatRuns.delete(sessionId);
 
-  if (threadId && userMessageId && entry?.assistantMessageWritten !== true) {
+  if (entry && threadId && userMessageId && entry.assistantMessageWritten !== true) {
     await appendPortalStoppedAssistant({
       threadId,
       userMessageId,
       sessionId,
+      runId: entry.runId,
+      assistantMessageId: entry.assistantMessageId,
       reason: "explicit_cancel"
     }).catch((error) => {
       console.warn("portal chat failed to append stopped assistant", {
@@ -4442,9 +4526,11 @@ async function cancelPortalActiveChatRun(input: {
     activeRunFound: Boolean(entry),
     runtimeAbortRequested,
     streamTraceId: entry?.traceId,
+    runId: entry?.runId,
     sessionId,
     threadId,
-    userMessageId
+    userMessageId,
+    assistantMessageId: entry?.assistantMessageId
   };
 }
 
@@ -5217,6 +5303,7 @@ async function sendActionConnectorArtifact(input: {
   conversationId: string;
   artifactId: string;
   disposition: "inline" | "attachment";
+  request: Request;
   response: Response;
 }): Promise<void> {
   const { thread } = await resolveActionConnectorConversation(input);
@@ -5234,6 +5321,7 @@ async function sendActionConnectorArtifact(input: {
     artifactId: input.artifactId,
     disposition: input.disposition,
     authorizedThread: thread,
+    req: input.request,
     res: input.response
   });
 }
@@ -5693,6 +5781,7 @@ async function handleCrestArtifactContent(req: Request, res: Response): Promise<
       threadId: input.threadId,
       artifactId: input.artifactId,
       disposition: input.disposition ?? "attachment",
+      req,
       res
     });
   } catch (error) {
@@ -9075,6 +9164,15 @@ function storedMessageRole(message: unknown): string {
   return typeof obj?.role === "string" ? obj.role.trim() : "";
 }
 
+function storedPortalRunId(message: unknown, runConfig?: Record<string, unknown>): string | undefined {
+  const metadata = asRecord(asRecord(message)?.metadata);
+  const custom = asRecord(metadata?.custom);
+  return trimOrUndefined(runConfig?.runId as string | undefined) ??
+    trimOrUndefined(runConfig?.run_id as string | undefined) ??
+    trimOrUndefined(custom?.runId as string | undefined) ??
+    trimOrUndefined(custom?.run_id as string | undefined);
+}
+
 function withStoredMessageId(message: unknown, id: string): unknown {
   const obj = asRecord(message);
   if (!obj) return message;
@@ -9108,13 +9206,21 @@ async function normalizePortalAssistantMessageAppend(input: {
     return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
   });
   const existingId = existingAssistant ? storedMessageId(existingAssistant.message) : undefined;
-  return existingId ? withStoredMessageId(input.message, existingId) : input.message;
+  if (!existingId || !existingAssistant) return input.message;
+  const incomingRunId = storedPortalRunId(input.message, input.runConfig);
+  const existingRunId = storedPortalRunId(existingAssistant.message, existingAssistant.runConfig);
+  if (incomingRunId && incomingRunId !== existingRunId) return input.message;
+  return preserveCompletedPortalAssistantMessage({
+    existing: existingAssistant.message,
+    incoming: withStoredMessageId(input.message, existingId)
+  });
 }
 
 function portalAssistantMessage(input: {
   id: string;
   answerText: string;
   sessionId: string;
+  runId: string;
   contentParts?: Record<string, unknown>[];
 }) {
   const leadingContentParts = (input.contentParts ?? []).filter((part) =>
@@ -9147,6 +9253,7 @@ function portalAssistantMessage(input: {
       custom: {
         channel: "portal",
         sessionId: input.sessionId,
+        runId: input.runId,
         serverPersisted: true
       }
     }
@@ -9156,6 +9263,7 @@ function portalAssistantMessage(input: {
 function portalStoppedAssistantMessage(input: {
   id: string;
   sessionId: string;
+  runId: string;
   reason: string;
 }) {
   const now = new Date().toISOString();
@@ -9192,6 +9300,7 @@ function portalStoppedAssistantMessage(input: {
       custom: {
         channel: "portal",
         sessionId: input.sessionId,
+        runId: input.runId,
         serverPersisted: true,
         stopped: true,
         stopReason: input.reason
@@ -9259,10 +9368,15 @@ function portalUserMessage(input: {
 function portalFailedAssistantMessage(input: {
   id: string;
   sessionId: string;
+  runId: string;
   autoRecoveryAttempted?: boolean;
 }) {
   if (input.autoRecoveryAttempted) {
-    return portalAutoRecoveryFailureAssistantMessage({ id: input.id, sessionId: input.sessionId });
+    return portalAutoRecoveryFailureAssistantMessage({
+      id: input.id,
+      sessionId: input.sessionId,
+      runId: input.runId
+    });
   }
   const now = new Date().toISOString();
   return {
@@ -9287,6 +9401,7 @@ function portalFailedAssistantMessage(input: {
       custom: {
         channel: "portal",
         sessionId: input.sessionId,
+        runId: input.runId,
         serverPersisted: true,
         failed: true,
         autoRecoveryAttempted: false
@@ -9394,32 +9509,40 @@ async function appendPortalStoppedAssistant(input: {
   threadId: string;
   userMessageId: string;
   sessionId: string;
+  runId: string;
+  assistantMessageId?: string;
   reason: string;
 }): Promise<boolean> {
+  if (!portalRunMayPersist(input)) return false;
   const parentId = await requirePortalUserMessageParent({
     threadId: input.threadId,
     userMessageId: input.userMessageId
   });
   const repository = await conversationRecords.getMessageRepository(input.threadId);
   const existingAssistant = repository.messages.find((item) => {
-    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+    return item.parentId === parentId &&
+      storedMessageRole(item.message) === "assistant" &&
+      storedPortalRunId(item.message, item.runConfig) === input.runId;
   });
   if (existingAssistant) return false;
-  const assistantId = `portal-assistant-cancelled-${createHash("sha256")
-    .update(`${input.threadId}:${parentId}:${input.sessionId}`)
-    .digest("hex")
-    .slice(0, 24)}`;
+  const assistantId = trimOrUndefined(input.assistantMessageId) ??
+    `portal-assistant-cancelled-${createHash("sha256")
+      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .digest("hex")
+      .slice(0, 24)}`;
   await conversationRecords.appendMessage({
     threadId: input.threadId,
     parentId,
     message: portalStoppedAssistantMessage({
       id: assistantId,
       sessionId: input.sessionId,
+      runId: input.runId,
       reason: input.reason
     }),
     runConfig: {
       channel: "portal",
       sessionId: input.sessionId,
+      runId: input.runId,
       serverPersisted: true,
       stopped: true
     }
@@ -9431,32 +9554,40 @@ async function appendPortalFailedAssistant(input: {
   threadId: string;
   userMessageId: string;
   sessionId: string;
+  runId: string;
+  assistantMessageId?: string;
   autoRecoveryAttempted?: boolean;
 }): Promise<boolean> {
+  if (!portalRunMayPersist(input)) return false;
   const parentId = await requirePortalUserMessageParent({
     threadId: input.threadId,
     userMessageId: input.userMessageId
   });
   const repository = await conversationRecords.getMessageRepository(input.threadId);
   const existingAssistant = repository.messages.find((item) => {
-    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+    return item.parentId === parentId &&
+      storedMessageRole(item.message) === "assistant" &&
+      storedPortalRunId(item.message, item.runConfig) === input.runId;
   });
   if (existingAssistant) return false;
-  const assistantId = `portal-assistant-failed-${createHash("sha256")
-    .update(`${input.threadId}:${parentId}:${input.sessionId}`)
-    .digest("hex")
-    .slice(0, 24)}`;
+  const assistantId = trimOrUndefined(input.assistantMessageId) ??
+    `portal-assistant-failed-${createHash("sha256")
+      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .digest("hex")
+      .slice(0, 24)}`;
   await conversationRecords.appendMessage({
     threadId: input.threadId,
     parentId,
     message: portalFailedAssistantMessage({
       id: assistantId,
       sessionId: input.sessionId,
+      runId: input.runId,
       autoRecoveryAttempted: input.autoRecoveryAttempted
     }),
     runConfig: {
       channel: "portal",
       sessionId: input.sessionId,
+      runId: input.runId,
       serverPersisted: true,
       failed: true,
       autoRecoveryAttempted: input.autoRecoveryAttempted === true
@@ -9483,6 +9614,8 @@ async function persistPortalAssistantMessageWithRetry(input: {
   threadId: string;
   userMessageId: string;
   sessionId: string;
+  runId: string;
+  assistantMessageId?: string;
   answerText: string;
   contentParts?: Record<string, unknown>[];
 }): Promise<boolean> {
@@ -9490,31 +9623,41 @@ async function persistPortalAssistantMessageWithRetry(input: {
   if (!answerText) return false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
+      if (!portalRunMayPersist(input)) return false;
       const parentId = await requirePortalUserMessageParent({
         threadId: input.threadId,
         userMessageId: input.userMessageId
       });
-      const assistantId = `portal-assistant-${createHash("sha256")
-        .update(`${input.threadId}:${parentId}:${input.sessionId}`)
-        .digest("hex")
-        .slice(0, 24)}`;
+      if (!portalRunMayPersist(input)) return false;
+      const assistantId = trimOrUndefined(input.assistantMessageId) ??
+        `portal-assistant-${createHash("sha256")
+          .update(`${input.threadId}:${parentId}:${input.runId}`)
+          .digest("hex")
+          .slice(0, 24)}`;
       const message = portalAssistantMessage({
         id: assistantId,
         answerText,
         sessionId: input.sessionId,
+        runId: input.runId,
         contentParts: input.contentParts
       });
       const normalizedMessage = await normalizePortalAssistantMessageAppend({
         threadId: input.threadId,
         parentId,
         message,
-        runConfig: { channel: "portal", sessionId: input.sessionId }
+        runConfig: { channel: "portal", sessionId: input.sessionId, runId: input.runId, serverPersisted: true }
       });
+      if (!portalRunMayPersist(input)) return false;
       await conversationRecords.appendMessage({
         threadId: input.threadId,
         parentId,
         message: normalizedMessage,
-        runConfig: { channel: "portal", sessionId: input.sessionId, serverPersisted: true }
+        runConfig: {
+          channel: "portal",
+          sessionId: input.sessionId,
+          runId: input.runId,
+          serverPersisted: true
+        }
       });
       return true;
     } catch (error) {
@@ -10237,6 +10380,7 @@ async function sendThreadArtifactContent(input: {
   previewQuery?: Record<string, unknown>;
   enforcePortalSecurityDomain?: boolean;
   authorizedThread?: ThreadRecord;
+  req: Request;
   res: Response;
 }): Promise<void> {
   const threadId = trimOrUndefined(input.threadId);
@@ -10345,13 +10489,6 @@ async function sendThreadArtifactContent(input: {
         versionId: artifact.workspaceFileVersionId
       });
       const fileName = artifact.displayName || stableFile.file.name;
-      await recordAccess(artifact.id, "success", {
-        disposition: actionType,
-        stable_workspace_file: true,
-        workspace_file_id: stableFile.file.id,
-        workspace_file_version_id: stableFile.version.id,
-        checksum: stableFile.version.checksum
-      });
       if (
         actionType === "preview" &&
         await sendOfficePdfPreview(input.res, {
@@ -10361,6 +10498,13 @@ async function sendThreadArtifactContent(input: {
           fingerprint: stableFile.version.checksum
         })
       ) {
+        await recordAccess(artifact.id, "success", {
+          disposition: actionType,
+          stable_workspace_file: true,
+          workspace_file_id: stableFile.file.id,
+          workspace_file_version_id: stableFile.version.id,
+          checksum: stableFile.version.checksum
+        });
         return;
       }
       if (
@@ -10373,14 +10517,15 @@ async function sendThreadArtifactContent(input: {
           query: input.previewQuery
         })
       ) {
+        await recordAccess(artifact.id, "success", {
+          disposition: actionType,
+          stable_workspace_file: true,
+          workspace_file_id: stableFile.file.id,
+          workspace_file_version_id: stableFile.version.id,
+          checksum: stableFile.version.checksum
+        });
         return;
       }
-      input.res.setHeader("Cache-Control", "private, no-store");
-      input.res.setHeader("X-Content-Type-Options", "nosniff");
-      input.res.setHeader(
-        "Content-Disposition",
-        `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
-      );
       const registeredMimeType =
         stableFile.version.mimeType || stableFile.file.mimeType || artifact.mimeType || "";
       input.res.type(
@@ -10388,9 +10533,31 @@ async function sendThreadArtifactContent(input: {
           ? registeredMimeType
           : path.extname(fileName) || await detectedContentType({ fileName, content: stableFile.content })
       );
-      input.res.status(200).send(stableFile.content);
+      const delivery = await sendBufferContent({
+        req: input.req,
+        res: input.res,
+        content: stableFile.content,
+        contentType: String(input.res.getHeader("Content-Type") || "application/octet-stream"),
+        contentDisposition:
+          `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      });
+      await recordAccess(artifact.id, delivery.completed ? "success" : "incomplete", {
+        disposition: actionType,
+        stable_workspace_file: true,
+        workspace_file_id: stableFile.file.id,
+        workspace_file_version_id: stableFile.version.id,
+        checksum: stableFile.version.checksum,
+        partial: delivery.partial,
+        bytes_sent: delivery.bytesSent
+      });
       return;
     } catch (error) {
+      if (input.res.headersSent) {
+        console.warn(`[workspace] Stable artifact ${artifact.id} delivery did not complete cleanly:`, {
+          detail: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
       console.warn(`[workspace] Stable artifact ${artifact.id} is unavailable; trying the legacy path:`, {
         detail: error instanceof Error ? error.message : String(error)
       });
@@ -10482,11 +10649,6 @@ async function sendThreadArtifactContent(input: {
     return;
   }
   const fileName = artifact.displayName || path.basename(resolved.absolutePath);
-  await recordAccess(artifact.id, "success", {
-    disposition: actionType,
-    latest_version_revalidated: registrationNeedsRefresh,
-    checksum: currentChecksum
-  });
   if (
     actionType === "preview" &&
     await sendOfficePdfPreview(input.res, {
@@ -10496,6 +10658,11 @@ async function sendThreadArtifactContent(input: {
       fingerprint: currentChecksum
     })
   ) {
+    await recordAccess(artifact.id, "success", {
+      disposition: actionType,
+      latest_version_revalidated: registrationNeedsRefresh,
+      checksum: currentChecksum
+    });
     return;
   }
   if (
@@ -10508,21 +10675,34 @@ async function sendThreadArtifactContent(input: {
       query: input.previewQuery
     })
   ) {
+    await recordAccess(artifact.id, "success", {
+      disposition: actionType,
+      latest_version_revalidated: registrationNeedsRefresh,
+      checksum: currentChecksum
+    });
     return;
   }
-  input.res.setHeader("Cache-Control", "private, no-store");
-  input.res.setHeader("X-Content-Type-Options", "nosniff");
   if (inspection.modifiedAt) input.res.setHeader("X-Artifact-Updated-At", inspection.modifiedAt.toISOString());
-  input.res.setHeader(
-    "Content-Disposition",
-    `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
-  );
   input.res.type(
     artifact.mimeType && artifact.mimeType !== "application/octet-stream"
       ? artifact.mimeType
       : path.extname(fileName) || await detectedContentType({ fileName, content: inspection.fileBuffer })
   );
-  input.res.status(200).send(inspection.fileBuffer);
+  const delivery = await sendFileContent({
+    req: input.req,
+    res: input.res,
+    absolutePath: resolved.absolutePath,
+    contentType: String(input.res.getHeader("Content-Type") || "application/octet-stream"),
+    contentDisposition:
+      `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+  });
+  await recordAccess(artifact.id, delivery.completed ? "success" : "incomplete", {
+    disposition: actionType,
+    latest_version_revalidated: registrationNeedsRefresh,
+    checksum: currentChecksum,
+    partial: delivery.partial,
+    bytes_sent: delivery.bytesSent
+  });
 }
 
 function findWhitelistRoot(candidate: string): string | undefined {
@@ -11445,11 +11625,12 @@ app.get("/api/threads/:threadId/artifacts/content", async (req: Request, res: Re
       preview: query.preview,
       previewQuery: query,
       enforcePortalSecurityDomain: true,
+      req,
       res
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read artifact";
-    res.status(400).json({ detail });
+    if (!res.headersSent) res.status(400).json({ detail });
   }
 });
 
@@ -11540,11 +11721,12 @@ app.get("/api/threads/:threadId/artifacts/:artifactId/content", async (req: Requ
       artifactId,
       disposition: query.disposition,
       enforcePortalSecurityDomain: true,
+      req,
       res
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read artifact";
-    res.status(400).json({ detail });
+    if (!res.headersSent) res.status(400).json({ detail });
   }
 });
 
@@ -12239,7 +12421,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       head_id: repository.headId ?? null,
       messages: repository.messages.map((item) => ({
         parent_id: item.parentId,
-        message: item.message,
+        message: repairPortalAssistantCompletionStatus(item.message),
         run_config: item.runConfig,
         created_at: item.createdAt,
         updated_at: item.updatedAt
@@ -12382,16 +12564,21 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       return;
     }
     const input = appendMessageSchema.parse(req.body || {});
-    const message = await normalizePortalAssistantMessageAppend({
-      threadId,
-      parentId: input.parent_id ?? null,
-      message: input.message,
-      runConfig: input.run_config
-    });
+    if (shouldIgnorePortalClientMessageAppend(input.message)) {
+      const repository = await conversationRecords.getMessageRepository(threadId);
+      logPortalStreamLifecycle("client_assistant_append_ignored", {
+        thread_id: threadId,
+        user_id: currentUser.id,
+        organization_id: currentUser.organizationId,
+        message_id: storedMessageId(input.message)
+      });
+      res.json({ ok: true, ignored: true, head_id: repository.headId ?? null });
+      return;
+    }
     const updated = await conversationRecords.appendMessage({
       threadId,
       parentId: input.parent_id ?? null,
-      message,
+      message: input.message,
       runConfig: input.run_config,
       createdAt: input.created_at,
       updatedAt: input.updated_at
@@ -12413,23 +12600,37 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       return;
     }
     const input = replaceMessagesSchema.parse(req.body || {});
-    assertPortalMessageRepositoryIntegrity(input.messages.map((item) => ({
+    const current = await conversationRecords.getMessageRepository(threadId);
+    const merged = mergePortalClientRepositoryReplacement({
+      current,
+      incoming: {
+        headId: input.head_id ?? null,
+        messages: input.messages.map((item) => ({
+          parentId: item.parent_id ?? null,
+          message: item.message,
+          runConfig: item.run_config,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at
+        }))
+      }
+    });
+    assertPortalMessageRepositoryIntegrity(merged.messages.map((item) => ({
       id: storedMessageId(item.message),
       role: storedMessageRole(item.message),
-      parentId: item.parent_id
+      parentId: item.parentId
     })));
     await conversationRecords.replaceMessages({
       threadId,
-      headId: input.head_id ?? null,
-      messages: input.messages.map((item) => ({
-        parentId: item.parent_id ?? null,
+      headId: merged.headId ?? null,
+      messages: merged.messages.map((item) => ({
+        parentId: item.parentId ?? null,
         message: item.message,
-        runConfig: item.run_config,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at
+        runConfig: item.runConfig,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
       }))
     });
-    res.json({ ok: true });
+    res.json({ ok: true, assistant_messages_server_managed: true });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to replace message history";
     res.status(400).json({ detail });
@@ -12504,6 +12705,7 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
     logPortalStreamLifecycle("cancel_request_received", {
       cancel_trace_id: cancelTraceId,
       session_id: input.session_id,
+      run_id: input.client_run_id,
       thread_id: input.thread_id,
       user_message_id: input.user_message_id,
       user_id: currentUser.id,
@@ -12515,12 +12717,14 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
       sessionId: input.session_id,
       currentUser,
       threadId: input.thread_id,
+      runId: input.client_run_id,
       userMessageId: input.user_message_id,
       cancelTraceId
     });
     logPortalStreamLifecycle("cancel_matched_active_run", {
       cancel_trace_id: cancelTraceId,
       trace_id: result.streamTraceId,
+      run_id: result.runId ?? input.client_run_id,
       session_id: result.sessionId ?? input.session_id,
       thread_id: result.threadId ?? input.thread_id,
       user_message_id: result.userMessageId ?? input.user_message_id,
@@ -12610,6 +12814,10 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
     const activeRun = portalActiveChatRuns.get(input.session_id);
     if (!activeRun || activeRun.controller.signal.aborted) {
       await rejectSteer(409, "The current response is no longer running. Add this instruction to the queue instead.", "response_not_running");
+      return;
+    }
+    if (input.client_run_id && activeRun.runId !== input.client_run_id) {
+      await rejectSteer(409, "The current response has changed. Add this instruction to the queue instead.", "run_mismatch");
       return;
     }
     if (activeRun.userId !== currentUser.id || activeRun.organizationId !== currentUser.organizationId) {
@@ -12741,6 +12949,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let unregisterPortalRun: (() => void) | undefined;
   let portalRuntimeSession: SessionRecord | undefined;
   let portalRequestedSessionId: string | undefined;
+  let portalRunId: string = portalStreamTraceId;
+  let portalAssistantMessageId: string | undefined;
   let portalThreadId: string | undefined;
   let portalUserMessageId: string | undefined;
   let portalCurrentUserId: string | undefined;
@@ -12753,13 +12963,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalTurnFailure: string | undefined;
   let portalAutoRecoveryAttempted = false;
   let portalFinalAnswerStarted = false;
-  let portalUnsafeRetrySideEffectStarted = false;
+  let portalNonResumableSideEffectStarted = false;
   let portalFirstAttemptTurnStarted = false;
   let portalRecoveryCompletedEventSent = false;
   let portalLastRunAttempt: 1 | 2 = 1;
   const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
     logPortalStreamLifecycle(stage, {
       trace_id: portalStreamTraceId,
+      run_id: portalRunId,
       session_id: portalRuntimeSession?.sessionId ?? portalRequestedSessionId,
       thread_id: portalThreadId,
       user_message_id: portalUserMessageId,
@@ -12777,6 +12988,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = streamSchema.parse(req.body || {});
     portalRequestedSessionId = input.session_id;
+    portalRunId = input.client_run_id ?? portalStreamTraceId;
+    portalAssistantMessageId = input.client_assistant_message_id;
     portalThreadId = input.thread_id;
     portalQuestionPreview = input.display_message ?? input.message;
     logPortalStream("stream_opened", {
@@ -12845,17 +13058,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     portalThreadId = currentSession.threadId ?? requestedThreadId;
     unregisterPortalRun = registerPortalActiveChatRun({
       sessionId: currentSession.sessionId,
+      runId: portalRunId,
       userId: currentUser.id,
       organizationId: currentUser.organizationId,
       controller: explicitCancel,
       threadId: portalThreadId,
-      traceId: portalStreamTraceId
+      traceId: portalStreamTraceId,
+      assistantMessageId: portalAssistantMessageId
     });
     attachPortalActiveChatRun({
       sessionId: currentSession.sessionId,
       userId: currentUser.id,
       session: currentSession,
-      threadId: portalThreadId
+      threadId: portalThreadId,
+      assistantMessageId: portalAssistantMessageId
     });
 
     // Each streamed turn is a new costly action. Gate it before execution without
@@ -12913,6 +13129,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     sendTrackedSSE("meta", {
       session_id: currentSession.sessionId,
+      run_id: portalRunId,
       thread_id: currentSession.threadId,
       user_message_id: persistedPortalUserMessageId,
       model: currentSession.model,
@@ -12924,6 +13141,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
+    const portalRunProjection = new CodexRunProjection();
     let firstCodexEventSeen = false;
     const portalThread = await timing.time("chat_stream.load_bound_thread", () =>
       getPortalOwnedThread(currentSession.threadId!, currentUser)
@@ -13013,6 +13231,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           }
         },
         onEvent(event) {
+          portalRunProjection.push(event);
           if (attempt === 1 && portalRuntimeEventIndicatesTurnStarted(event)) {
             portalFirstAttemptTurnStarted = true;
           }
@@ -13027,8 +13246,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           if (portalRuntimeEventStartsFinalAnswer(event)) {
             portalFinalAnswerStarted = true;
           }
-          if (portalRuntimeEventHasUnsafeRetrySideEffect(event)) {
-            portalUnsafeRetrySideEffectStarted = true;
+          if (portalRuntimeEventHasNonResumableSideEffect(event)) {
+            portalNonResumableSideEffectStarted = true;
           }
           if (!firstCodexEventSeen) {
             firstCodexEventSeen = true;
@@ -13093,13 +13312,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             }
             if (currentSession.threadId) {
               const instructionReadContentPart = instructionReadObserver.contentPart();
-              const persistedContentParts = [instructionReadContentPart, artifactContentPart]
+              const finalizedProcess = portalRunProjection.finalize({ finalAnswer: payload.answer });
+              const persistedContentParts = [
+                instructionReadContentPart,
+                ...finalizedProcess.contentParts,
+                artifactContentPart
+              ]
                 .filter((part): part is Record<string, unknown> => Boolean(part));
               serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
                 persistPortalAssistantMessageWithRetry({
                   threadId: currentSession.threadId!,
                   userMessageId: persistedPortalUserMessageId,
                   sessionId: currentSession.sessionId,
+                  runId: portalRunId,
+                  assistantMessageId: portalAssistantMessageId,
                   answerText: payload.answer,
                   contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
                 })
@@ -13124,6 +13350,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           streamAbort.markSettled();
           sendTrackedSSE("done", {
             session_id: currentSession.sessionId,
+            run_id: portalRunId,
             answer: payload.answer,
             server_persisted: serverPersistedAssistant,
             completed_at: new Date().toISOString()
@@ -13171,12 +13398,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         error,
         attempted: portalAutoRecoveryAttempted,
         finalAnswerStarted: portalFinalAnswerStarted,
-        unsafeSideEffectStarted: portalUnsafeRetrySideEffectStarted,
+        nonResumableSideEffectStarted: portalNonResumableSideEffectStarted,
         aborted: explicitCancel.signal.aborted
       });
       if (!shouldRecover) throw error;
 
       portalAutoRecoveryAttempted = true;
+      portalRunProjection.reset();
+      runtimeFileChanges.length = 0;
       logPortalStream("auto_recovery_started", {
         attempt: 2,
         detail: runtimeErrorDetail(error).slice(0, 500),
@@ -13268,6 +13497,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         threadId: portalThreadId,
         userMessageId: portalUserMessageId,
         sessionId: portalRuntimeSessionId,
+        runId: portalRunId,
+        assistantMessageId: portalAssistantMessageId,
         reason: "explicit_cancel"
       }).catch((error) => {
         console.warn("portal chat failed to append stopped assistant", {
@@ -13283,6 +13514,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         threadId: portalThreadId,
         userMessageId: portalUserMessageId,
         sessionId: portalRuntimeSessionId,
+        runId: portalRunId,
+        assistantMessageId: portalAssistantMessageId,
         autoRecoveryAttempted: portalAutoRecoveryAttempted
       }).catch((error) => {
         console.warn("portal chat failed to append failed assistant", {

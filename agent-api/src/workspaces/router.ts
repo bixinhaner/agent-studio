@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
+import { sendBufferContent } from "../files/raw-content-response.js";
 import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import {
   PortalWorkspaceService,
@@ -339,13 +340,6 @@ export function createPortalWorkspaceRouter(input: {
       ) {
         return;
       }
-      res.setHeader("Cache-Control", "private, no-store");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Length", String(resolved.content.length));
-      res.setHeader(
-        "Content-Disposition",
-        `${disposition}; filename*=UTF-8''${encodeURIComponent(resolved.file.name)}`
-      );
       const registeredMimeType = resolved.version.mimeType || resolved.file.mimeType || "";
       res.type(
         registeredMimeType && registeredMimeType !== "application/octet-stream"
@@ -353,7 +347,13 @@ export function createPortalWorkspaceRouter(input: {
           : path.extname(resolved.file.name) ||
             await detectedContentType({ fileName: resolved.file.name, content: resolved.content })
       );
-      res.status(200).send(resolved.content);
+      await sendBufferContent({
+        req,
+        res,
+        content: resolved.content,
+        contentType: String(res.getHeader("Content-Type") || "application/octet-stream"),
+        contentDisposition: `${disposition}; filename*=UTF-8''${encodeURIComponent(resolved.file.name)}`
+      });
     } catch (error) {
       sendWorkspaceError(res, error, "Failed to read workspace file");
     }

@@ -1,0 +1,208 @@
+.artifact-file-list {
+  --artifact-file-accent: var(--workbench-accent-strong, var(--admin-color-accent, #2563eb));
+  --artifact-file-border: var(--admin-color-border, #dbe4f4);
+  --artifact-file-surface: var(--admin-color-surface-solid, #ffffff);
+  --artifact-file-surface-subtle: color-mix(in srgb, var(--artifact-file-accent) 4%, var(--artifact-file-surface));
+  --artifact-file-text: var(--admin-color-text, #0f172a);
+  --artifact-file-subtle: var(--admin-color-subtle, #64748b);
+  margin-top: 8px;
+  border: 1px solid var(--artifact-file-border);
+  border-radius: 10px;
+  background: var(--artifact-file-surface-subtle);
+  padding: 10px;
+}
+
+.artifact-file-list-title {
+  margin: 0 0 10px;
+  color: var(--artifact-file-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.artifact-file-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-file-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--artifact-file-border);
+  border-radius: 8px;
+  background: var(--artifact-file-surface);
+  padding: 8px 10px;
+}
+
+.artifact-file-list-item-with-image {
+  width: min(100%, 520px);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.artifact-file-list-image-preview {
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: var(--artifact-file-surface-subtle);
+  padding: 0;
+  cursor: pointer;
+}
+
+.artifact-file-list-image {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 560px);
+  object-fit: contain;
+}
+
+.artifact-file-list-main,
+.artifact-file-list-meta,
+.artifact-file-list-actions {
+  display: flex;
+  align-items: center;
+}
+
+.artifact-file-list-main {
+  min-width: 0;
+  flex: 1;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.artifact-file-list-meta {
+  min-width: 0;
+  gap: 10px;
+}
+
+.artifact-file-list-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--artifact-file-border);
+  border-radius: 8px;
+  background: var(--artifact-file-surface-subtle);
+  color: var(--artifact-file-subtle);
+}
+
+.artifact-file-list-details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.artifact-file-list-name {
+  color: var(--artifact-file-text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.artifact-file-list-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--artifact-file-subtle);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.artifact-file-list-status.is-ready {
+  color: #16a34a;
+}
+
+.artifact-file-list-actions {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.artifact-file-list-btn {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--artifact-file-border);
+  border-radius: 6px;
+  background: var(--artifact-file-surface);
+  color: var(--artifact-file-accent);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.artifact-file-list-btn:hover {
+  border-color: color-mix(in srgb, var(--artifact-file-accent) 38%, var(--artifact-file-border));
+  background: var(--artifact-file-surface-subtle);
+}
+
+.artifact-file-list-btn:focus-visible,
+.artifact-file-list-image-preview:focus-visible {
+  outline: 2px solid var(--artifact-file-accent);
+  outline-offset: 2px;
+}
+
+.artifact-file-list-btn-primary {
+  border-color: var(--artifact-file-accent);
+  background: var(--artifact-file-accent);
+  color: #ffffff;
+}
+
+.artifact-file-list-btn-primary:hover {
+  border-color: var(--artifact-file-accent);
+  background: color-mix(in srgb, var(--artifact-file-accent) 88%, #000000);
+  color: #ffffff;
+}
+
+.artifact-file-list-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.artifact-file-list-spinner {
+  animation: artifact-file-list-spin 0.9s linear infinite;
+}
+
+@keyframes artifact-file-list-spin {
+  to { transform: rotate(360deg); }
+}
+
+.artifact-file-list-error {
+  margin: 8px 0 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .artifact-file-list-main {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .artifact-file-list-actions {
+    width: 100%;
+  }
+
+  .artifact-file-list-btn {
+    min-height: 44px;
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-file-list-spinner { animation-duration: 1.8s; }
+}

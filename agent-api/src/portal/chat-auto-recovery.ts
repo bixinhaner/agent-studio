@@ -2,7 +2,7 @@ type PortalChatAutoRecoveryInput = {
   error: unknown;
   attempted: boolean;
   finalAnswerStarted: boolean;
-  unsafeSideEffectStarted: boolean;
+  nonResumableSideEffectStarted: boolean;
   aborted: boolean;
 };
 
@@ -57,7 +57,7 @@ export function isRetryablePortalNetworkError(error: unknown): boolean {
 }
 
 export function shouldAutoRecoverPortalChat(input: PortalChatAutoRecoveryInput): boolean {
-  if (input.attempted || input.finalAnswerStarted || input.unsafeSideEffectStarted || input.aborted) {
+  if (input.attempted || input.finalAnswerStarted || input.nonResumableSideEffectStarted || input.aborted) {
     return false;
   }
   return isRetryablePortalNetworkError(input.error);
@@ -78,12 +78,10 @@ export function portalRuntimeEventIndicatesTurnStarted(event: PortalRuntimeEvent
   return typeof eventType === "string" && (eventType.startsWith("turn.") || eventType.startsWith("item."));
 }
 
-export function portalRuntimeEventHasUnsafeRetrySideEffect(event: PortalRuntimeEvent): boolean {
+export function portalRuntimeEventHasNonResumableSideEffect(event: PortalRuntimeEvent): boolean {
   const itemType = asRecord(asRecord(event.raw)?.item)?.type;
   return (
     itemType === "mcp_tool_call" ||
-    itemType === "command_execution" ||
-    itemType === "file_change" ||
     itemType === "image_generation" ||
     itemType === "image_generation_call" ||
     itemType === "collab_agent_tool_call" ||
@@ -92,7 +90,16 @@ export function portalRuntimeEventHasUnsafeRetrySideEffect(event: PortalRuntimeE
   );
 }
 
-export function portalAutoRecoveryFailureAssistantMessage(input: { id: string; sessionId: string }) {
+export function portalRuntimeEventHasAnySideEffect(event: PortalRuntimeEvent): boolean {
+  const itemType = asRecord(asRecord(event.raw)?.item)?.type;
+  return (
+    portalRuntimeEventHasNonResumableSideEffect(event) ||
+    itemType === "command_execution" ||
+    itemType === "file_change"
+  );
+}
+
+export function portalAutoRecoveryFailureAssistantMessage(input: { id: string; sessionId: string; runId?: string }) {
   const now = new Date().toISOString();
   return {
     id: input.id,
@@ -118,6 +125,7 @@ export function portalAutoRecoveryFailureAssistantMessage(input: { id: string; s
       custom: {
         channel: "portal",
         sessionId: input.sessionId,
+        ...(input.runId ? { runId: input.runId } : {}),
         serverPersisted: true,
         failed: true,
         autoRecoveryAttempted: true

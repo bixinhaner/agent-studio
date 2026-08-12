@@ -4,7 +4,7 @@ import {
   isRetryablePortalNetworkError,
   portalAutoRecoveryFailureAssistantMessage,
   portalAutoRecoveryPrompt,
-  portalRuntimeEventHasUnsafeRetrySideEffect,
+  portalRuntimeEventHasNonResumableSideEffect,
   portalRuntimeEventIndicatesTurnStarted,
   portalRuntimeEventStartsFinalAnswer,
   shouldAutoRecoverPortalChat
@@ -32,13 +32,13 @@ describe("portal chat automatic recovery", () => {
       error: new Error("fetch failed"),
       attempted: false,
       finalAnswerStarted: false,
-      unsafeSideEffectStarted: false,
+      nonResumableSideEffectStarted: false,
       aborted: false
     };
     expect(shouldAutoRecoverPortalChat(base)).toBe(true);
     expect(shouldAutoRecoverPortalChat({ ...base, attempted: true })).toBe(false);
     expect(shouldAutoRecoverPortalChat({ ...base, finalAnswerStarted: true })).toBe(false);
-    expect(shouldAutoRecoverPortalChat({ ...base, unsafeSideEffectStarted: true })).toBe(false);
+    expect(shouldAutoRecoverPortalChat({ ...base, nonResumableSideEffectStarted: true })).toBe(false);
     expect(shouldAutoRecoverPortalChat({ ...base, aborted: true })).toBe(false);
   });
 
@@ -66,17 +66,22 @@ describe("portal chat automatic recovery", () => {
 
   it.each([
     "mcp_tool_call",
-    "command_execution",
-    "file_change",
     "image_generation_call",
     "collabAgentToolCall",
     "subAgentActivity"
   ])("blocks automatic replay after %s starts", (type) => {
-    expect(portalRuntimeEventHasUnsafeRetrySideEffect({ raw: { item: { type } } })).toBe(true);
+    expect(portalRuntimeEventHasNonResumableSideEffect({ raw: { item: { type } } })).toBe(true);
   });
 
+  it.each(["command_execution", "file_change"])(
+    "allows a continuation turn after local workspace event %s",
+    (type) => {
+      expect(portalRuntimeEventHasNonResumableSideEffect({ raw: { item: { type } } })).toBe(false);
+    }
+  );
+
   it("persists the actionable recovery failure state for task reloads", () => {
-    const message = portalAutoRecoveryFailureAssistantMessage({ id: "assistant-1", sessionId: "session-1" });
+    const message = portalAutoRecoveryFailureAssistantMessage({ id: "assistant-1", sessionId: "session-1", runId: "run-1" });
     expect(message.status).toEqual({
       type: "incomplete",
       reason: "error",
@@ -88,6 +93,7 @@ describe("portal chat automatic recovery", () => {
       data: { attempted: true }
     });
     expect(message.metadata.custom.autoRecoveryAttempted).toBe(true);
+    expect(message.metadata.custom.runId).toBe("run-1");
   });
 
 });

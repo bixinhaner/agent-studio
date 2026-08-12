@@ -3,11 +3,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  adminThreadFileContentDisposition,
   agentModeIdFromRunConfig,
   buildTranscriptMessages,
   enabledSkillNamesFromRunConfig,
   extractMessageAttachments,
   extractMessageInstructionReads,
+  extractMessageFileChangeData,
   extractMessageProcessRows,
   extractMessageText,
   matchesConversationSourceFilter,
@@ -17,6 +19,20 @@ import {
   threadWorkspaceUploadDirs,
   createConversationAuditRouter
 } from "./conversation-audit-router.js";
+
+describe("adminThreadFileContentDisposition", () => {
+  it("uses attachment for the shared download action", () => {
+    expect(adminThreadFileContentDisposition("英文汇报.pptx", "attachment")).toBe(
+      "attachment; filename*=UTF-8''%E8%8B%B1%E6%96%87%E6%B1%87%E6%8A%A5.pptx"
+    );
+  });
+
+  it("keeps previews inline by default", () => {
+    expect(adminThreadFileContentDisposition("report.pdf", undefined)).toBe(
+      "inline; filename*=UTF-8''report.pdf"
+    );
+  });
+});
 
 describe("resolveConversationAudience", () => {
   it("classifies internal and external conversation owners", () => {
@@ -293,6 +309,39 @@ describe("extractMessageText", () => {
   });
 });
 
+describe("extractMessageFileChangeData", () => {
+  it("keeps structured generated-file data for the admin transcript", () => {
+    const data = {
+      artifact_only: true,
+      changes: [
+        {
+          kind: "ready",
+          path: "outputs/thread-123/report.pptx",
+          can_preview: true,
+          can_download: true,
+          preview_status: "ready",
+          download_status: "ready"
+        }
+      ]
+    };
+
+    expect(extractMessageFileChangeData({
+      role: "assistant",
+      content: [
+        { type: "text", text: "[Download](sandbox:/outputs/thread-123/report.pptx)" },
+        { type: "data", name: "codex_file_change", data }
+      ]
+    })).toEqual([data]);
+  });
+
+  it("does not expose unrelated data parts as generated files", () => {
+    expect(extractMessageFileChangeData({
+      role: "assistant",
+      content: [{ type: "data", name: "codex_commentary", data: { text: "working" } }]
+    })).toEqual([]);
+  });
+});
+
 describe("projectConversationTurnStatus", () => {
   it("marks completed assistant messages as completed", () => {
     expect(projectConversationTurnStatus({ role: "assistant", status: { type: "completed" } }, "assistant")).toEqual({
@@ -402,6 +451,32 @@ describe("buildTranscriptMessages", () => {
 
     expect(messages[0]?.turnStatus).toBe("completed");
     expect(messages[1]?.turnStatus).toBe("completed");
+  });
+
+  it("projects ready artifacts independently from markdown links", () => {
+    const messages = buildTranscriptMessages("thread-123", [
+      {
+        parentId: null,
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          content: [
+            { type: "text", text: "下载文件" },
+            {
+              type: "data",
+              name: "codex_file_change",
+              data: {
+                changes: [{ kind: "ready", path: "outputs/thread-123/report.xlsx", can_download: true }]
+              }
+            }
+          ]
+        }
+      }
+    ]);
+
+    expect(messages[0]?.fileChangeData).toEqual([
+      { changes: [{ kind: "ready", path: "outputs/thread-123/report.xlsx", can_download: true }] }
+    ]);
   });
 });
 

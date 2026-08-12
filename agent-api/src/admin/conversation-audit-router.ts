@@ -6,6 +6,8 @@ import multer, { MulterError } from "multer";
 
 import { getDbClient } from "../db/client.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
+import { sendFileContent } from "../files/raw-content-response.js";
+import { repairPortalAssistantCompletionStatus } from "../portal/chat-message-precedence.js";
 import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import {
   ThreadRepository,
@@ -194,6 +196,7 @@ type ConversationTranscriptMessage = {
     trigger: "selected" | "automatic";
     readAt: string | null;
   }>;
+  fileChangeData?: unknown[];
   turnStatus: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason: string | null;
   parentId: string | null;
@@ -1170,6 +1173,19 @@ export function extractMessageText(message: unknown): string {
   return `${primaryText}\n\n${fallbackText}`;
 }
 
+export function extractMessageFileChangeData(message: unknown): unknown[] {
+  const obj = asRecord(message);
+  if (!obj || !Array.isArray(obj.content)) return [];
+  return obj.content.flatMap((item) => {
+    const part = asRecord(item);
+    if (trimOrUndefined(part?.type) !== "data" || trimOrUndefined(part?.name) !== "codex_file_change") {
+      return [];
+    }
+    const data = asRecord(part?.data);
+    return data ? [data] : [];
+  });
+}
+
 function attachmentKindFromValue(value: unknown): "image" | "document" | "file" {
   return value === "image" || value === "document" ? value : "file";
 }
@@ -1189,6 +1205,14 @@ function buildAdminThreadFileContentUrl(
     return null;
   }
   return `/api/admin/conversations/${encodeURIComponent(threadId)}/files/content?${query.toString()}`;
+}
+
+export function adminThreadFileContentDisposition(
+  fileName: string,
+  disposition: unknown
+): string {
+  const mode = disposition === "attachment" ? "attachment" : "inline";
+  return `${mode}; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
 function attachmentDisplayName(
@@ -1378,21 +1402,24 @@ export function projectConversationTurnStatus(
 }
 
 function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: number): ConversationTranscriptMessage {
-  const id = extractMessageId(item.message, `message-${index + 1}`);
-  const role = extractMessageRole(item.message);
-  const processRows = role === "assistant" ? extractMessageProcessRows(item.message) : [];
-  const instructionReads = role === "assistant" ? extractMessageInstructionReads(item.message) : [];
-  const turnStatus = projectConversationTurnStatus(item.message, role, { hasAssistantResponse: true });
+  const normalizedMessage = repairPortalAssistantCompletionStatus(item.message);
+  const id = extractMessageId(normalizedMessage, `message-${index + 1}`);
+  const role = extractMessageRole(normalizedMessage);
+  const processRows = role === "assistant" ? extractMessageProcessRows(normalizedMessage) : [];
+  const instructionReads = role === "assistant" ? extractMessageInstructionReads(normalizedMessage) : [];
+  const fileChangeData = role === "assistant" ? extractMessageFileChangeData(normalizedMessage) : [];
+  const turnStatus = projectConversationTurnStatus(normalizedMessage, role, { hasAssistantResponse: true });
   return {
     id,
     role,
-    text: extractMessageText(item.message),
-    attachments: extractMessageAttachments(threadId, item.message, id),
+    text: extractMessageText(normalizedMessage),
+    attachments: extractMessageAttachments(threadId, normalizedMessage, id),
     ...(processRows.length > 0 ? { processRows } : {}),
     ...(instructionReads.length > 0 ? { instructionReads } : {}),
+    ...(fileChangeData.length > 0 ? { fileChangeData } : {}),
     ...turnStatus,
     parentId: item.parentId ?? null,
-    createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(item.message),
+    createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(normalizedMessage),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
   };
 }
@@ -2337,9 +2364,10 @@ export function createConversationAuditRouter(options: {
       }
 
       const fileName = path.basename(absolutePath);
+      const downloadRequested = req.query.disposition === "attachment";
       if (
         await sendOfficePdfPreview(res, {
-          requested: req.query.preview === "pdf",
+          requested: !downloadRequested && req.query.preview === "pdf",
           fileName,
           sourcePath: absolutePath
         })
@@ -2349,7 +2377,7 @@ export function createConversationAuditRouter(options: {
       if (
         await sendStructuredPreview(res, {
           requested:
-            typeof req.query.preview === "string" && req.query.preview !== "pdf"
+            !downloadRequested && typeof req.query.preview === "string" && req.query.preview !== "pdf"
               ? req.query.preview as "auto" | "text" | "table" | "diagram"
               : undefined,
           fileName,
@@ -2360,16 +2388,18 @@ export function createConversationAuditRouter(options: {
         return;
       }
       const ext = path.extname(fileName);
-      const fileBuffer = await fs.readFile(absolutePath);
-
-      res.setHeader("Cache-Control", "private, max-age=60");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
       res.type(ext || await detectedContentType({ fileName, sourcePath: absolutePath }));
-      res.status(200).send(fileBuffer);
+      await sendFileContent({
+        req,
+        res,
+        absolutePath,
+        contentType: String(res.getHeader("Content-Type") || "application/octet-stream"),
+        contentDisposition: adminThreadFileContentDisposition(fileName, req.query.disposition),
+        cacheControl: "private, max-age=60"
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "读取会话附件失败";
-      res.status(400).json({ detail });
+      if (!res.headersSent) res.status(400).json({ detail });
     }
   });
 
