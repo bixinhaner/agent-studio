@@ -50,7 +50,8 @@ describe("UsageRecorder", () => {
       codexThreadId: "fallback-thread",
       resultStatus: "failed",
       metadata: {
-        source: "dingtalk_bot"
+        source: "dingtalk_bot",
+        autoRecoveryAttempt: 2
       },
       usage: {
         inputTokens: 1200,
@@ -85,6 +86,7 @@ describe("UsageRecorder", () => {
       resultStatus: "failed",
       metadata: {
         source: "dingtalk_bot",
+        autoRecoveryAttempt: 2,
         codexThreadId: "runtime-thread"
       }
     });

@@ -139,6 +139,8 @@ import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
+import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
+import { resolvePortalChatRecoveryActive } from "./chat-recovery";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n, type PortalLocale } from "./i18n";
@@ -4099,7 +4101,10 @@ function useSubscriptionAccessBlock() {
   };
 }
 
-const AssistantErrorNoticeCard: FC<{ notice: string; rawDetail?: string }> = ({ notice, rawDetail }) => {
+const AssistantErrorNoticeCard: FC<{
+  notice: string;
+  rawDetail?: string;
+}> = ({ notice, rawDetail }) => {
   const { t } = usePortalI18n();
   return (
     <div className="assistant-error-card" role="alert" aria-live="polite">
@@ -4177,6 +4182,12 @@ type PortalBillingReturnNotice = {
   title: string;
   detail: string;
 };
+
+type PortalChatRecoveryState = {
+  active: boolean;
+};
+
+const PortalChatRecoveryContext = createContext<PortalChatRecoveryState>({ active: false });
 
 const PortalBillingReturnBanner: FC<{
   notice: PortalBillingReturnNotice;
@@ -4294,9 +4305,29 @@ const BuildVersionRefreshActivityBridge: FC<{ hasRunningSessions: boolean }> = (
 };
 
 const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
+  const aui = useAui();
+  const notifyUserSendIntent = usePortalThreadUserSendIntent();
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
+  const recovery = useContext(PortalChatRecoveryContext);
+  if (props.status.type === "running" && recovery.active) {
+    return <PortalChatRecoveryNotice state="recovering" />;
+  }
   if (props.status.type === "incomplete" && (props.status.reason === "error" || props.status.error !== undefined)) {
     const detail = detailFromUnknown(props.status.error);
     const notice = formatAssistantErrorNotice(detail);
+    const autoRecoveryAttempted = /portal_auto_recovery_exhausted/i.test(detail);
+    if (autoRecoveryAttempted) {
+      return (
+        <PortalChatRecoveryNotice
+          state="failed"
+          canRerun={!mutationReadOnly}
+          onRerun={() => {
+            notifyUserSendIntent();
+            aui.message().reload();
+          }}
+        />
+      );
+    }
     return <AssistantErrorNoticeCard notice={notice} rawDetail={detail} />;
   }
   return <RunningMessagePlaceholder {...props} />;
@@ -4549,7 +4580,9 @@ const ProcessDataFallback: FC<any> = ({
   name?: string;
   data?: ProcessData | unknown;
 }) => {
+  const aui = useAui();
   const { t } = usePortalI18n();
+  const notifyUserSendIntent = usePortalThreadUserSendIntent();
   const requestPreview = useContext(PreviewRequestContext);
   const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
@@ -4563,6 +4596,23 @@ const ProcessDataFallback: FC<any> = ({
   const [skillInstallError, setSkillInstallError] = useState("");
   const [downloadingArtifactPath, setDownloadingArtifactPath] = useState("");
   const [artifactDownloadError, setArtifactDownloadError] = useState("");
+
+  if (name === "codex_connection_recovery") {
+    return <PortalChatRecoveryNotice state="recovering" />;
+  }
+
+  if (name === "codex_recovery_failure") {
+    return (
+      <PortalChatRecoveryNotice
+        state="failed"
+        canRerun={!mutationReadOnly}
+        onRerun={() => {
+          notifyUserSendIntent();
+          aui.message().reload();
+        }}
+      />
+    );
+  }
 
   const downloadArtifact = async (downloadHref: string, filePath: string, displayName: string) => {
     if (!downloadHref || downloadingArtifactPath) return;
@@ -7034,6 +7084,11 @@ export function PortalShell(props: {
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [runningStageSecondaryText, setRunningStageSecondaryText] = useState("");
   const [runningStageKind, setRunningStageKind] = useState<RunningStageKind>("text");
+  const [portalChatRecoveryActive, setPortalChatRecoveryActive] = useState(false);
+  const portalChatRecoveryContextValue = useMemo<PortalChatRecoveryState>(
+    () => ({ active: portalChatRecoveryActive }),
+    [portalChatRecoveryActive]
+  );
   const runningStageContextValue = useMemo<RunningStageContextValue>(
     () => ({
       text: runningStageText,
@@ -8750,6 +8805,7 @@ export function PortalShell(props: {
         }
 
         setErrorText("");
+        setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "run-start"));
         setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
         updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
         startRunningStageWaitTimers();
@@ -9196,7 +9252,13 @@ export function PortalShell(props: {
             const partObj = asRecord(part);
             if (!partObj || partObj.type !== "data") continue;
             const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
-            if (name !== "codex_file_change" && name !== "skill_draft_status" && name !== "codex_instruction_reads") continue;
+            if (
+              name !== "codex_file_change" &&
+              name !== "skill_draft_status" &&
+              name !== "codex_instruction_reads" &&
+              name !== "codex_connection_recovery" &&
+              name !== "codex_recovery_failure"
+            ) continue;
             if (isExternalPortalUser && name === "codex_file_change") {
               const dataObj = asRecord(partObj.data);
               if (dataObj?.artifact_only !== true) {
@@ -9214,10 +9276,14 @@ export function PortalShell(props: {
             if (name === "codex_file_change") {
               const consolidated = consolidateCodexFileChangeParts([...orderedParts, displayPart]);
               orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
-            } else if (name === "codex_instruction_reads") {
+            } else if (
+              name === "codex_instruction_reads" ||
+              name === "codex_connection_recovery" ||
+              name === "codex_recovery_failure"
+            ) {
               const existingIndex = orderedParts.findIndex((item) => {
                 const existing = asRecord(item);
-                return existing?.type === "data" && existing.name === "codex_instruction_reads";
+                return existing?.type === "data" && existing.name === name;
               });
               if (existingIndex >= 0) orderedParts.splice(existingIndex, 1, displayPart);
               else orderedParts.push(displayPart);
@@ -9341,12 +9407,31 @@ export function PortalShell(props: {
               const errorCode =
                 (payload && typeof payload.code === "string" ? payload.code : "") ||
                 (payload && typeof payload.reason_code === "string" ? payload.reason_code : "");
+              const autoRecoveryAttempted = payload?.auto_recovery_attempted === true;
               const assistantErrorNotice = formatAssistantErrorNotice(detail, errorCode);
               const processDetail = userSafeProcessDetail(detail);
-              setErrorText(assistantErrorNotice);
+              setErrorText(autoRecoveryAttempted ? "" : assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               stopRunningStageWaitTimers();
               updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
+              setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "run-failed"));
+              if (autoRecoveryAttempted) {
+                for (let index = orderedParts.length - 1; index >= 0; index -= 1) {
+                  const part = asRecord(orderedParts[index]);
+                  if (part?.type === "data" && part.name === "codex_connection_recovery") {
+                    orderedParts.splice(index, 1);
+                  }
+                }
+                const recoveryFailureChanged = appendDisplayDataParts([{
+                  type: "data",
+                  name: "codex_recovery_failure",
+                  data: { attempted: true }
+                }]);
+                if (recoveryFailureChanged) {
+                  yield { content: snapshotContent() };
+                }
+                throw new Error("portal_auto_recovery_exhausted");
+              }
               if (assistantErrorNotice) {
                 textChanged = appendTextPart(hasTextUpdate ? `\n\n${assistantErrorNotice}` : assistantErrorNotice) || textChanged;
               }
@@ -9385,6 +9470,35 @@ export function PortalShell(props: {
                 }
               }
               throw new Error(assistantErrorNotice);
+            }
+
+            if (event === "recovery") {
+              const recoveryStatus = typeof payload?.status === "string" ? payload.status : "retrying";
+              if (recoveryStatus === "recovered") {
+                setPortalChatRecoveryActive((current) =>
+                  resolvePortalChatRecoveryActive(current, "automatic-recovered")
+                );
+                for (let index = orderedParts.length - 1; index >= 0; index -= 1) {
+                  const part = asRecord(orderedParts[index]);
+                  if (part?.type === "data" && part.name === "codex_connection_recovery") {
+                    orderedParts.splice(index, 1);
+                  }
+                }
+                yield { content: snapshotContent() };
+                continue;
+              }
+              setErrorText("");
+              setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "automatic-retry"));
+              updateRunningStage(t("thread.connectionRecovering"), { fallback: false, kind: "text" });
+              const changed = appendDisplayDataParts([{
+                type: "data",
+                name: "codex_connection_recovery",
+                data: { attempt: 2, maxAttempts: 2 }
+              }]);
+              if (changed) {
+                yield { content: snapshotContent() };
+              }
+              continue;
             }
 
             if (event === "artifacts") {
@@ -9452,6 +9566,14 @@ export function PortalShell(props: {
 
             if (event === "done") {
               portalRunCompleted = true;
+              setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "run-complete"));
+              for (let index = orderedParts.length - 1; index >= 0; index -= 1) {
+                const part = asRecord(orderedParts[index]);
+                if (part?.type === "data" && part.name === "codex_connection_recovery") {
+                  orderedParts.splice(index, 1);
+                  textChanged = true;
+                }
+              }
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
@@ -9983,6 +10105,7 @@ export function PortalShell(props: {
             };
           }
         } finally {
+          setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "run-complete"));
           if (portalRunCompleted) {
             composerWorkflowController.markRunCompleted(threadId);
           } else if (portalRunFailed) {
@@ -10605,6 +10728,7 @@ export function PortalShell(props: {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
+      <PortalChatRecoveryContext.Provider value={portalChatRecoveryContextValue}>
       <PortalRunCancelContext.Provider value={requestPortalRunCancel}>
       <PortalSubscriptionAccessContext.Provider value={subscriptionAccessContextValue}>
       <RuntimeReadinessContext.Provider value={runtimeReadinessContextValue}>
@@ -11160,6 +11284,7 @@ export function PortalShell(props: {
       </RuntimeReadinessContext.Provider>
       </PortalSubscriptionAccessContext.Provider>
       </PortalRunCancelContext.Provider>
+      </PortalChatRecoveryContext.Provider>
       </PortalComposerWorkflowProvider>
     </AssistantRuntimeProvider>
   );

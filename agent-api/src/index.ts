@@ -164,6 +164,14 @@ import {
   assertDeploymentAllowsRuntimeStart,
   isDeploymentDrainError
 } from "./portal/deployment-drain.js";
+import {
+  portalAutoRecoveryFailureAssistantMessage,
+  portalAutoRecoveryPrompt,
+  portalRuntimeEventHasUnsafeRetrySideEffect,
+  portalRuntimeEventIndicatesTurnStarted,
+  portalRuntimeEventStartsFinalAnswer,
+  shouldAutoRecoverPortalChat
+} from "./portal/chat-auto-recovery.js";
 import { startWithMissingCodexRolloutRecovery } from "./portal/codex-thread-recovery.js";
 import { guardPortalThreadModeChange } from "./portal/thread-mode-guard.js";
 import {
@@ -2135,9 +2143,7 @@ function runtimeEventHasTurnSideEffect(event: { delta?: string; text?: string; r
   return Boolean(
     event.delta ||
     itemType === "agent_message" ||
-    itemType === "mcp_tool_call" ||
-    itemType === "command_execution" ||
-    itemType === "file_change"
+    portalRuntimeEventHasUnsafeRetrySideEffect(event)
   );
 }
 
@@ -9253,7 +9259,11 @@ function portalUserMessage(input: {
 function portalFailedAssistantMessage(input: {
   id: string;
   sessionId: string;
+  autoRecoveryAttempted?: boolean;
 }) {
+  if (input.autoRecoveryAttempted) {
+    return portalAutoRecoveryFailureAssistantMessage({ id: input.id, sessionId: input.sessionId });
+  }
   const now = new Date().toISOString();
   return {
     id: input.id,
@@ -9265,8 +9275,8 @@ function portalFailedAssistantMessage(input: {
       }
     ],
     status: {
-      type: "error",
-      reason: "runtime_error"
+      type: "incomplete",
+      reason: "error"
     },
     createdAt: now,
     metadata: {
@@ -9278,7 +9288,8 @@ function portalFailedAssistantMessage(input: {
         channel: "portal",
         sessionId: input.sessionId,
         serverPersisted: true,
-        failed: true
+        failed: true,
+        autoRecoveryAttempted: false
       }
     }
   };
@@ -9420,6 +9431,7 @@ async function appendPortalFailedAssistant(input: {
   threadId: string;
   userMessageId: string;
   sessionId: string;
+  autoRecoveryAttempted?: boolean;
 }): Promise<boolean> {
   const parentId = await requirePortalUserMessageParent({
     threadId: input.threadId,
@@ -9439,13 +9451,15 @@ async function appendPortalFailedAssistant(input: {
     parentId,
     message: portalFailedAssistantMessage({
       id: assistantId,
-      sessionId: input.sessionId
+      sessionId: input.sessionId,
+      autoRecoveryAttempted: input.autoRecoveryAttempted
     }),
     runConfig: {
       channel: "portal",
       sessionId: input.sessionId,
       serverPersisted: true,
-      failed: true
+      failed: true,
+      autoRecoveryAttempted: input.autoRecoveryAttempted === true
     }
   });
   return true;
@@ -12737,6 +12751,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalRuntimeStarted = false;
   let portalRuntimeFailure: string | undefined;
   let portalTurnFailure: string | undefined;
+  let portalAutoRecoveryAttempted = false;
+  let portalFinalAnswerStarted = false;
+  let portalUnsafeRetrySideEffectStarted = false;
+  let portalFirstAttemptTurnStarted = false;
+  let portalRecoveryCompletedEventSent = false;
+  let portalLastRunAttempt: 1 | 2 = 1;
   const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
     logPortalStreamLifecycle(stage, {
       trace_id: portalStreamTraceId,
@@ -12953,167 +12973,229 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       hasCodexThreadId: Boolean(currentSession.codexThreadId)
     });
     portalRuntimeStarted = true;
-    await codexExecution.streamFromRuntime({
-      runtime,
-      thread: ensuredLiveThread,
-      prompt: runtimeMessage,
-      workspace: currentSession.workspace,
-      enterpriseContext: enterpriseRunContext,
-      signal: runAbort.signal,
-      turnOptions: {
-        model: currentSession.model,
-        reasoningEffort: currentSession.reasoningEffort,
+    const runPortalRuntimeAttempt = async (attempt: 1 | 2): Promise<void> => {
+      portalLastRunAttempt = attempt;
+      const attemptThread = liveRuntimeThreads.get(currentSession.sessionId) ?? ensuredLiveThread;
+      const attemptPrompt = attempt === 2
+        ? portalAutoRecoveryPrompt({
+            originalPrompt: runtimeMessage,
+            firstAttemptRuntimeEventSeen: portalFirstAttemptTurnStarted
+          })
+        : runtimeMessage;
+      await codexExecution.streamFromRuntime({
+        runtime,
+        thread: attemptThread,
+        prompt: attemptPrompt,
         workspace: currentSession.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(currentSession.codexRunConfig),
-        skills: turnSkillInputs
-      },
-      memory: {
-        channel: "portal",
-        prompt: input.message,
-        codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
-        codexThreadId: currentSession.codexThreadId,
-        sessionId: currentSession.sessionId,
-        threadId: currentSession.threadId ?? undefined,
-        organizationId: currentUser.organizationId,
-        userId: currentUser.id,
-        model: currentSession.model,
-        hasExternalContext: codexRunConfigHasExternalContext(currentSession.codexRunConfig),
-        metadata: {
-          route: "chat_stream"
-        }
-      },
-      onEvent(event) {
-        if (!firstCodexEventSeen) {
-          firstCodexEventSeen = true;
-          timing.mark("chat_stream.first_codex_event", { eventType: event.type });
-          logPortalStream("first_codex_event", {
-            runtime_event_type: event.type,
-            lifecycle: streamAbort.snapshot()
-          });
-        }
-        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
-        const instructionReads = instructionReadObserver.push(event);
-        if (instructionReads.length > 0) {
-          sendTrackedSSE("instruction_reads", {
-            content_part: instructionReadObserver.contentPart()
-          });
-        }
-        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
-        if (codexThreadId) {
-          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
-            currentSession = updated;
-            portalRuntimeSession = updated;
-            attachPortalActiveChatRun({
-              sessionId: updated.sessionId,
-              userId: currentUser.id,
-              session: updated,
-              threadId: updated.threadId ?? currentSession.threadId,
-              userMessageId: persistedPortalUserMessageId
-            });
-          });
-        }
-        sendTrackedSSE("codex", event);
-      },
-      async onDone(payload) {
-        timing.mark("chat_stream.on_done_started");
-        if (streamAbort.disconnected) {
-          logPortalStream("task_completed_after_disconnect", {
-            answer_length: payload.answer.length,
-            runtime_file_change_count: runtimeFileChanges.length,
-            lifecycle: streamAbort.snapshot()
-          });
-        }
-        let serverPersistedAssistant = false;
-        try {
-          const artifacts = await timing.time("chat_stream.register_artifacts", () =>
-            registerGeneratedArtifactsForSession({
-              currentUser,
-              session: currentSession,
-              changes: runtimeFileChanges,
-              answerText: payload.answer,
-              changedAfter: artifactScanStartedAt
-            })
-          );
-          let artifactContentPart: Record<string, unknown> | undefined;
-          if (artifacts.length > 0) {
-            const policy = await resolveArtifactPolicyForActor(currentUser);
-            artifactContentPart = artifactContentPartForArtifacts(artifacts, policy);
-            sendTrackedSSE("artifacts", {
-              policy: artifactPolicyOut(policy),
-              artifacts: artifacts.map(artifactOut),
-              content_part: artifactContentPart
-            });
-          }
-          if (currentSession.threadId) {
-            const instructionReadContentPart = instructionReadObserver.contentPart();
-            const persistedContentParts = [instructionReadContentPart, artifactContentPart]
-              .filter((part): part is Record<string, unknown> => Boolean(part));
-            serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
-              persistPortalAssistantMessageWithRetry({
-                threadId: currentSession.threadId!,
-                userMessageId: persistedPortalUserMessageId,
-                sessionId: currentSession.sessionId,
-                answerText: payload.answer,
-                contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
-              })
-            );
-            if (serverPersistedAssistant) {
-              portalAssistantMessageWritten = true;
-              markPortalActiveChatRunAssistantWritten({
-                sessionId: currentSession.sessionId,
-                userId: currentUser.id
-              });
-            }
-          }
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          console.warn("artifact registration failed", {
-            sessionId: currentSession.sessionId,
-            threadId: currentSession.threadId,
-            detail
-          });
-          sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
-        }
-        streamAbort.markSettled();
-        sendTrackedSSE("done", {
-          session_id: currentSession.sessionId,
-          answer: payload.answer,
-          server_persisted: serverPersistedAssistant,
-          completed_at: new Date().toISOString()
-        });
-        timing.mark("chat_stream.done_sent");
-        finishTiming("success", { firstCodexEventSeen });
-      },
-      async recordUsage(usage, resultStatus = "success") {
-        const departmentIdSnapshot =
-          trimOrUndefined(currentUser.organizationType) === "internal"
-            ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
-            : undefined;
-        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-        await usageRecorder.recordCodexUsage({
+        enterpriseContext: enterpriseRunContext,
+        signal: runAbort.signal,
+        turnOptions: {
+          model: currentSession.model,
+          reasoningEffort: currentSession.reasoningEffort,
+          workspace: currentSession.workspace,
+          codexRunConfig: stripInternalRunConfigMetadata(currentSession.codexRunConfig),
+          skills: turnSkillInputs
+        },
+        memory: {
+          channel: "portal",
+          prompt: input.message,
+          codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
+          codexThreadId: currentSession.codexThreadId,
+          sessionId: currentSession.sessionId,
+          threadId: currentSession.threadId ?? undefined,
           organizationId: currentUser.organizationId,
           userId: currentUser.id,
-          departmentIdSnapshot,
-          threadId: currentSession.threadId ?? undefined,
-          sessionId: currentSession.sessionId,
           model: currentSession.model,
-          featureType: "chat",
-          usage,
-          codexThreadId,
-          resultStatus,
+          hasExternalContext: codexRunConfigHasExternalContext(currentSession.codexRunConfig),
           metadata: {
-            source: "chat_stream",
+            route: "chat_stream",
+            autoRecoveryAttempt: attempt
           }
-        });
-      },
-      onTelemetryError(error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        console.warn("usage telemetry ingestion failed", {
-          sessionId: currentSession.sessionId,
-          detail
-        });
-      }
-    });
+        },
+        onEvent(event) {
+          if (attempt === 1 && portalRuntimeEventIndicatesTurnStarted(event)) {
+            portalFirstAttemptTurnStarted = true;
+          }
+          if (attempt === 2 && !portalRecoveryCompletedEventSent) {
+            portalRecoveryCompletedEventSent = true;
+            sendTrackedSSE("recovery", {
+              status: "recovered",
+              attempt: 2,
+              max_attempts: 2
+            });
+          }
+          if (portalRuntimeEventStartsFinalAnswer(event)) {
+            portalFinalAnswerStarted = true;
+          }
+          if (portalRuntimeEventHasUnsafeRetrySideEffect(event)) {
+            portalUnsafeRetrySideEffectStarted = true;
+          }
+          if (!firstCodexEventSeen) {
+            firstCodexEventSeen = true;
+            timing.mark("chat_stream.first_codex_event", { eventType: event.type });
+            logPortalStream("first_codex_event", {
+              runtime_event_type: event.type,
+              lifecycle: streamAbort.snapshot()
+            });
+          }
+          runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+          const instructionReads = instructionReadObserver.push(event);
+          if (instructionReads.length > 0) {
+            sendTrackedSSE("instruction_reads", {
+              content_part: instructionReadObserver.contentPart()
+            });
+          }
+          const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+          if (codexThreadId) {
+            void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+              currentSession = updated;
+              portalRuntimeSession = updated;
+              attachPortalActiveChatRun({
+                sessionId: updated.sessionId,
+                userId: currentUser.id,
+                session: updated,
+                threadId: updated.threadId ?? currentSession.threadId,
+                userMessageId: persistedPortalUserMessageId
+              });
+            });
+          }
+          sendTrackedSSE("codex", event);
+        },
+        async onDone(payload) {
+          timing.mark("chat_stream.on_done_started");
+          if (streamAbort.disconnected) {
+            logPortalStream("task_completed_after_disconnect", {
+              answer_length: payload.answer.length,
+              runtime_file_change_count: runtimeFileChanges.length,
+              lifecycle: streamAbort.snapshot()
+            });
+          }
+          let serverPersistedAssistant = false;
+          try {
+            const artifacts = await timing.time("chat_stream.register_artifacts", () =>
+              registerGeneratedArtifactsForSession({
+                currentUser,
+                session: currentSession,
+                changes: runtimeFileChanges,
+                answerText: payload.answer,
+                changedAfter: artifactScanStartedAt
+              })
+            );
+            let artifactContentPart: Record<string, unknown> | undefined;
+            if (artifacts.length > 0) {
+              const policy = await resolveArtifactPolicyForActor(currentUser);
+              artifactContentPart = artifactContentPartForArtifacts(artifacts, policy);
+              sendTrackedSSE("artifacts", {
+                policy: artifactPolicyOut(policy),
+                artifacts: artifacts.map(artifactOut),
+                content_part: artifactContentPart
+              });
+            }
+            if (currentSession.threadId) {
+              const instructionReadContentPart = instructionReadObserver.contentPart();
+              const persistedContentParts = [instructionReadContentPart, artifactContentPart]
+                .filter((part): part is Record<string, unknown> => Boolean(part));
+              serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
+                persistPortalAssistantMessageWithRetry({
+                  threadId: currentSession.threadId!,
+                  userMessageId: persistedPortalUserMessageId,
+                  sessionId: currentSession.sessionId,
+                  answerText: payload.answer,
+                  contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
+                })
+              );
+              if (serverPersistedAssistant) {
+                portalAssistantMessageWritten = true;
+                markPortalActiveChatRunAssistantWritten({
+                  sessionId: currentSession.sessionId,
+                  userId: currentUser.id
+                });
+              }
+            }
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            console.warn("artifact registration failed", {
+              sessionId: currentSession.sessionId,
+              threadId: currentSession.threadId,
+              detail
+            });
+            sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
+          }
+          streamAbort.markSettled();
+          sendTrackedSSE("done", {
+            session_id: currentSession.sessionId,
+            answer: payload.answer,
+            server_persisted: serverPersistedAssistant,
+            completed_at: new Date().toISOString()
+          });
+          timing.mark("chat_stream.done_sent");
+          finishTiming("success", { firstCodexEventSeen });
+        },
+        async recordUsage(usage, resultStatus = "success") {
+          const departmentIdSnapshot =
+            trimOrUndefined(currentUser.organizationType) === "internal"
+              ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
+              : undefined;
+          const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
+          await usageRecorder.recordCodexUsage({
+            organizationId: currentUser.organizationId,
+            userId: currentUser.id,
+            departmentIdSnapshot,
+            threadId: currentSession.threadId ?? undefined,
+            sessionId: currentSession.sessionId,
+            model: currentSession.model,
+            featureType: "chat",
+            usage,
+            codexThreadId,
+            resultStatus,
+            metadata: {
+              source: "chat_stream",
+              autoRecoveryAttempt: attempt
+            }
+          });
+        },
+        onTelemetryError(error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.warn("usage telemetry ingestion failed", {
+            sessionId: currentSession.sessionId,
+            detail
+          });
+        }
+      });
+    };
+
+    try {
+      await runPortalRuntimeAttempt(1);
+    } catch (error) {
+      const shouldRecover = shouldAutoRecoverPortalChat({
+        error,
+        attempted: portalAutoRecoveryAttempted,
+        finalAnswerStarted: portalFinalAnswerStarted,
+        unsafeSideEffectStarted: portalUnsafeRetrySideEffectStarted,
+        aborted: explicitCancel.signal.aborted
+      });
+      if (!shouldRecover) throw error;
+
+      portalAutoRecoveryAttempted = true;
+      logPortalStream("auto_recovery_started", {
+        attempt: 2,
+        detail: runtimeErrorDetail(error).slice(0, 500),
+        lifecycle: streamAbort.snapshot()
+      });
+      sendTrackedSSE("recovery", {
+        status: "retrying",
+        attempt: 2,
+        max_attempts: 2
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await runPortalRuntimeAttempt(2);
+      portalRuntimeFailure = undefined;
+      portalTurnFailure = undefined;
+      logPortalStream("auto_recovery_completed", {
+        attempt: 2,
+        lifecycle: streamAbort.snapshot()
+      });
+    }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (portalUserMessageId && !explicitCancel.signal.aborted) {
@@ -13128,7 +13210,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       !res.writableEnded &&
       sendTrackedSSE(
         "error",
-        payloadForSessionAccessError(error, "Chat stream failed", req.header("accept-language"))
+        {
+          ...payloadForSessionAccessError(error, "Chat stream failed", req.header("accept-language")),
+          ...(portalAutoRecoveryAttempted ? { auto_recovery_attempted: true } : {})
+        }
       );
     if (errorSent && portalRuntimeFailure) {
       reportVisibleConversationFailure({
@@ -13149,6 +13234,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           traceId: portalStreamTraceId,
           requestedSessionId: portalRequestedSessionId,
           runtimeStarted: portalRuntimeStarted,
+          autoRecoveryAttempted: portalAutoRecoveryAttempted,
+          runAttempt: portalLastRunAttempt,
           assistantMessageWritten: portalAssistantMessageWritten,
           deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open"
         }
@@ -13168,6 +13255,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     finishTiming("error", {
       error: detail,
       inputLength: directInputLength,
+      autoRecoveryAttempted: portalAutoRecoveryAttempted,
+      runAttempt: portalLastRunAttempt,
       deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open",
       disconnectReason: streamAbort.reason
     });
@@ -13193,7 +13282,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       await appendPortalFailedAssistant({
         threadId: portalThreadId,
         userMessageId: portalUserMessageId,
-        sessionId: portalRuntimeSessionId
+        sessionId: portalRuntimeSessionId,
+        autoRecoveryAttempted: portalAutoRecoveryAttempted
       }).catch((error) => {
         console.warn("portal chat failed to append failed assistant", {
           threadId: portalThreadId,
@@ -13230,6 +13320,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       disconnect_reason: streamAbort.reason,
       runtime_started: portalRuntimeStarted,
       runtime_failure: portalRuntimeFailure ? portalRuntimeFailure.slice(0, 500) : undefined,
+      auto_recovery_attempted: portalAutoRecoveryAttempted,
+      run_attempt: portalLastRunAttempt,
       assistant_message_written: portalAssistantMessageWritten,
       last_sse_event_sent: streamAbort.lastEventName,
       last_sse_event_sent_at: streamAbort.lastEventAt?.toISOString(),

@@ -17,6 +17,8 @@ function LocaleProbe() {
       <span>{t("thread.steerCouldNotApply")}</span>
       <span>{t("workspace.trashFolderTitle")}</span>
       <span>{t("workspace.trashFolderPermanentWarning")}</span>
+      <span>{t("thread.connectionRecovering")}</span>
+      <span>{t("thread.rerun")}</span>
       <button type="button" onClick={toggleLocale}>
         {t("language.switchTo")}
       </button>
@@ -52,6 +54,8 @@ describe("portal i18n", () => {
     expect(screen.getByText("Couldn’t apply this direction")).toBeTruthy();
     expect(screen.getByText("Move folder to Trash?")).toBeTruthy();
     expect(screen.getByText(/conversation history, attachments, files, and version history/)).toBeTruthy();
+    expect(screen.getByText("Connection interrupted. Recovering automatically…")).toBeTruthy();
+    expect(screen.getByText("Run again")).toBeTruthy();
     await waitFor(() => expect(window.location.search).toBe("?lang=en"));
   });
 
@@ -75,6 +79,8 @@ describe("portal i18n", () => {
     expect(screen.getByText("未能应用这条引导")).toBeTruthy();
     expect(screen.getByText("将文件夹移到回收站？")).toBeTruthy();
     expect(screen.getByText(/相关会话记录、附件、文件及历史版本将自动永久删除/)).toBeTruthy();
+    expect(screen.getByText("连接出现波动，正在自动恢复…")).toBeTruthy();
+    expect(screen.getByText("重新执行")).toBeTruthy();
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
       expect(window.localStorage.getItem("agent-studio.portal.locale.v1")).toBe("zh-CN");
