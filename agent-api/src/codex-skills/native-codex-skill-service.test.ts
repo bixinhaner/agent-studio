@@ -8,6 +8,26 @@ import { describe, expect, it } from "vitest";
 import { NativeCodexSkillService } from "./native-codex-skill-service.js";
 
 describe("NativeCodexSkillService", () => {
+  it("does not expose repository-managed skills as native platform skills", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-managed-skill-catalog-"));
+    try {
+      const baseHome = path.join(tempRoot, "base-home");
+      const nativeSkillRoot = path.join(baseHome, "skills", "platform-skill");
+      const managedSkillRoot = path.join(baseHome, "skills", "managed", "org-1", "shared-skill");
+      await fs.mkdir(nativeSkillRoot, { recursive: true });
+      await fs.mkdir(managedSkillRoot, { recursive: true });
+      await fs.writeFile(path.join(nativeSkillRoot, "SKILL.md"), "---\nname: platform-skill\n---\n", "utf8");
+      await fs.writeFile(path.join(managedSkillRoot, "SKILL.md"), "---\nname: shared-skill\n---\n", "utf8");
+
+      const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot: path.join(tempRoot, "sessions") });
+      await expect(service.list()).resolves.toEqual([
+        expect.objectContaining({ name: "platform-skill", relativePath: "platform-skill" })
+      ]);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reads SKILL.md content by the catalog skill name", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-skill-content-"));
     try {

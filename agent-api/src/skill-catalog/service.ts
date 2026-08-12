@@ -163,7 +163,7 @@ function audiencesForManagedSkill(input: {
   if (input.scope === "agent_mode") {
     const packageIds = managedSkillPackageIds(input.skill, input.packages);
     return input.agentModes
-      .filter((mode) => (!input.skill.organizationId || mode.organizationId === input.skill.organizationId)
+      .filter((mode) => (!mode.organizationId || !input.skill.organizationId || mode.organizationId === input.skill.organizationId)
         && mode.skillPackages.some((binding) => packageIds.has(binding.skillPackageId)))
       .map((mode) => ({ type: "agent_mode" as const, id: mode.id, name: mode.name, secondaryLabel: mode.slug }));
   }

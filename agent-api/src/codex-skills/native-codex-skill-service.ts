@@ -440,7 +440,10 @@ export class NativeCodexSkillService {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      if (depth === 0 && entry.name === "user") continue;
+      // User-owned and managed skills are catalogued through CodexSkillRepository.
+      // Scanning either subtree as native would expose the same skill a second time
+      // and incorrectly label the managed copy as a platform skill.
+      if (depth === 0 && (entry.name === "user" || entry.name === "managed")) continue;
       await this.collectSkills(path.join(currentPath, entry.name), depth + 1, records);
     }
   }

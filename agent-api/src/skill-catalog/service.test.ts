@@ -119,7 +119,7 @@ describe("SkillCatalogService.syncAndList", () => {
       agentModes: {
         list: vi.fn().mockResolvedValue([{
           id: "mode-1",
-          organizationId: "org-1",
+          organizationId: undefined,
           name: "Finance assistant",
           slug: "finance-assistant",
           skillPackages: [{ skillPackageId: "package-1" }]
