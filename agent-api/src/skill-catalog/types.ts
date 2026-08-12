@@ -15,6 +15,19 @@ export type SkillCatalogAudience = {
   secondaryLabel?: string;
 };
 
+export type SkillCatalogAccessSubject = {
+  subjectType: "role" | "department" | "user";
+  subjectId: string;
+  effect: "allow" | "deny";
+  displayName?: string;
+  secondaryLabel?: string;
+};
+
+export type SkillCatalogAccess = {
+  packageIds: string[];
+  subjects: SkillCatalogAccessSubject[];
+};
+
 export type SkillCatalogBaseConfig = {
   defaultLocale: string;
   iconKey: string;
@@ -64,6 +77,7 @@ export type SkillCatalogSourceSnapshot = {
   sourceLabel: string;
   scope: SkillCatalogScope;
   rawScope?: string;
+  sourceStatus?: string;
   ownerUserId?: string;
   owner?: SkillCatalogActor;
   createdBy?: SkillCatalogActor;
@@ -72,6 +86,7 @@ export type SkillCatalogSourceSnapshot = {
     name?: string;
   };
   audiences: SkillCatalogAudience[];
+  access?: SkillCatalogAccess;
   system: boolean;
   plugin?: {
     pluginRef: string;

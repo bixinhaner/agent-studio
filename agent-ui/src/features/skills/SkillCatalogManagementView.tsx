@@ -108,6 +108,21 @@ function actorSecondary(actor?: SkillCatalogActor): string | undefined {
   return undefined;
 }
 
+function accessSummary(entry: SkillCatalogEntry): string {
+  if (entry.scope === "private") return "仅本人";
+  if (entry.scope === "agent_mode") {
+    const allowed = entry.access?.subjects.filter((subject) => subject.effect === "allow") ?? [];
+    const denied = entry.access?.subjects.filter((subject) => subject.effect === "deny") ?? [];
+    if (allowed.length === 0) return "尚未授权";
+    const userCount = allowed.filter((subject) => subject.subjectType === "user").length;
+    const base = userCount === allowed.length ? `指定用户 ${userCount} 人` : `${allowed.length} 条允许规则`;
+    return denied.length ? `${base} · ${denied.length} 条拒绝` : base;
+  }
+  if (entry.scope === "team") return "当前团队";
+  if (entry.scope === "org") return "当前组织";
+  return "平台用户";
+}
+
 function attribution(entry: SkillCatalogEntry): { title: string; secondary?: string; icon: ReactNode } {
   if (entry.scope === "private") {
     return { title: actorName(entry.owner), secondary: actorSecondary(entry.owner), icon: <UserRound size={15} /> };
@@ -117,7 +132,9 @@ function attribution(entry: SkillCatalogEntry): { title: string; secondary?: str
     const remaining = Math.max(0, entry.audiences.length - 1);
     return {
       title: first?.name || "未绑定智能体",
-      secondary: first ? `${first.secondaryLabel || "智能体"}${remaining ? ` · 另 ${remaining} 个` : ""}` : "需要检查 Skill Package 绑定",
+      secondary: first
+        ? `${remaining ? `${first.name}等 ${remaining + 1} 个智能体` : accessSummary(entry)}`
+        : "需要检查 Skill Package 绑定",
       icon: <Bot size={15} />
     };
   }
@@ -198,7 +215,7 @@ function localDateShort(value?: string): string {
   }).format(new Date(value));
 }
 
-type ScopeFilter = "all" | "private" | "shared" | "platform" | "plugin";
+type ScopeFilter = "all" | "private" | "shared" | "platform" | "plugin" | "archived";
 
 export function SkillCatalogManagementView() {
   const [entries, setEntries] = useState<SkillCatalogEntry[]>([]);
@@ -233,6 +250,8 @@ export function SkillCatalogManagementView() {
     const normalized = query.trim().toLocaleLowerCase();
     return entries.filter((entry) => {
       const content = displayContent(entry);
+      if (scope === "archived" && (entry.sourceType !== "managed" || entry.sourceStatus !== "archived")) return false;
+      if (scope !== "archived" && entry.sourceType === "managed" && entry.sourceStatus === "archived") return false;
       if (scope === "plugin" && entry.sourceType !== "plugin") return false;
       if (scope === "private" && (entry.sourceType === "plugin" || entry.scope !== "private")) return false;
       if (scope === "shared" && (entry.sourceType === "plugin" || !["agent_mode", "team", "org"].includes(entry.scope))) return false;
@@ -249,7 +268,8 @@ export function SkillCatalogManagementView() {
         entry.owner?.email,
         entry.createdBy?.displayName,
         entry.createdBy?.email,
-        ...entry.audiences.flatMap((audience) => [audience.name, audience.secondaryLabel])
+        ...entry.audiences.flatMap((audience) => [audience.name, audience.secondaryLabel]),
+        ...((entry.access?.subjects ?? []).flatMap((subject) => [subject.displayName, subject.secondaryLabel, subject.subjectId]))
       ];
       return !normalized || searchable.filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized);
     });
@@ -292,7 +312,8 @@ export function SkillCatalogManagementView() {
             ["private", "用户私有"],
             ["shared", "共享 Skill"],
             ["platform", "平台内置"],
-            ["plugin", "自动能力"]
+            ["plugin", "自动能力"],
+            ["archived", "已归档"]
           ] as const).map(([value, label]) => (
             <button key={value} type="button" className={scope === value ? "is-selected" : ""} onClick={() => setScope(value)}>{label}</button>
           ))}
@@ -313,7 +334,7 @@ export function SkillCatalogManagementView() {
         <section className="skill-admin-table-wrap" aria-label="Skill 目录">
           {loading ? <div className="skill-admin-loading"><Spin /></div> : (
             <table className="skill-admin-table">
-              <thead><tr><th>Skill</th><th>范围</th><th>所有者 / 归属</th><th className="skill-admin-col-status">状态</th><th className="skill-admin-col-updated">更新于</th><th>操作</th></tr></thead>
+              <thead><tr><th>Skill</th><th>范围</th><th>归属 / 授权</th><th className="skill-admin-col-status">状态</th><th className="skill-admin-col-updated">更新于</th><th>操作</th></tr></thead>
               <tbody>
                 {filtered.map((entry) => {
                   const content = displayContent(entry);
@@ -324,7 +345,7 @@ export function SkillCatalogManagementView() {
                       <td><div className="skill-admin-skill-cell"><code title={entry.canonicalName}>{entry.canonicalName}</code><span title={content.displayName}>{content.displayName || "未配置用途名"}</span></div></td>
                       <td><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span></td>
                       <td><div className="skill-admin-attribution-cell"><span className="skill-admin-attribution-icon" aria-hidden="true">{ownerOrScope.icon}</span><span><strong title={ownerOrScope.title}>{ownerOrScope.title}</strong>{ownerOrScope.secondary ? <small title={ownerOrScope.secondary}>{ownerOrScope.secondary}</small> : null}</span></div></td>
-                      <td className="skill-admin-col-status"><div className="skill-admin-state-cell">{entry.draft ? <span className="skill-admin-table-status is-draft"><i aria-hidden="true" />有草稿</span> : entry.publishedAt ? <span className="skill-admin-table-status is-published"><i aria-hidden="true" />已发布</span> : <span className="skill-admin-table-status"><i aria-hidden="true" />未发布</span>}</div></td>
+                      <td className="skill-admin-col-status"><div className="skill-admin-state-cell">{entry.sourceStatus === "archived" ? <span className="skill-admin-table-status is-archived"><i aria-hidden="true" />已归档</span> : entry.draft ? <span className="skill-admin-table-status is-draft"><i aria-hidden="true" />有草稿</span> : entry.publishedAt ? <span className="skill-admin-table-status is-published"><i aria-hidden="true" />已发布</span> : <span className="skill-admin-table-status"><i aria-hidden="true" />未发布</span>}</div></td>
                       <td className="skill-admin-col-updated" title={localDate(entry.draft?.updatedAt ?? entry.publishedAt ?? entry.updatedAt)}>{localDateShort(entry.draft?.updatedAt ?? entry.publishedAt ?? entry.updatedAt)}</td>
                       <td>
                         <button type="button" className="skill-admin-link" onClick={(event) => { event.stopPropagation(); setEditingId(entry.id); }}>编辑</button>
@@ -359,7 +380,8 @@ function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; on
           <div><dt>所有者</dt><dd><ActorDetail actor={entry.owner} emptyLabel={entry.scope === "private" ? "未记录所有者" : "不适用"} /></dd></div>
           <div><dt>创建人</dt><dd><ActorDetail actor={entry.createdBy} emptyLabel={entry.system ? "系统" : "未记录创建人"} /></dd></div>
           <div><dt>原始范围</dt><dd><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span><code>{entry.rawScope || entry.scope}</code></dd></div>
-          <div><dt>可见对象</dt><dd className="skill-admin-audience-list">{visibilityText(entry)}</dd></div>
+          <div><dt>{entry.scope === "agent_mode" ? "生效智能体" : "可见对象"}</dt><dd className="skill-admin-audience-list">{visibilityText(entry)}</dd></div>
+          {entry.scope === "agent_mode" ? <div><dt>授权范围</dt><dd className="skill-admin-access-detail"><strong>{accessSummary(entry)}</strong>{entry.access?.subjects.length ? <ul>{entry.access.subjects.map((subject) => <li key={`${subject.subjectType}:${subject.subjectId}:${subject.effect}`} className={subject.effect === "deny" ? "is-denied" : ""}><span>{subject.displayName || subject.subjectId}</span>{subject.secondaryLabel ? <small>{subject.secondaryLabel}</small> : null}<em>{subject.effect === "allow" ? "允许" : "拒绝"}</em></li>)}</ul> : <small>请在对应技能包中添加用户、部门或角色规则。</small>}</dd></div> : null}
         </dl>
       </section>
       <section className="skill-admin-detail-section">

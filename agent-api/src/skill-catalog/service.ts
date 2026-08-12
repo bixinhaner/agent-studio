@@ -6,6 +6,7 @@ import type {
   ResolvedSkillCatalogPresentation,
   SkillCatalogActor,
   SkillCatalogAdminRecord,
+  SkillCatalogAccess,
   SkillCatalogAudience,
   SkillCatalogDraftContent,
   SkillCatalogEntryRecord,
@@ -62,6 +63,14 @@ type CatalogSkillPackage = {
   }>;
 };
 
+type CatalogResourcePolicy = {
+  subjectType: "role" | "department" | "user";
+  subjectId: string;
+  resourceType: string;
+  resourceId: string;
+  effect: "allow" | "deny";
+};
+
 type CatalogAgentMode = {
   id: string;
   organizationId?: string;
@@ -105,6 +114,34 @@ function managedSkillPackageIds(skill: CodexManagedSkillRecord, packages: Catalo
     if (matches) packageIds.add(skillPackage.id);
   }
   return packageIds;
+}
+
+function accessForManagedSkill(input: {
+  skill: CodexManagedSkillRecord;
+  packages: CatalogSkillPackage[];
+  policies: CatalogResourcePolicy[];
+  userIdentities: Map<string, UserIdentity>;
+}): SkillCatalogAccess | undefined {
+  if (input.skill.scope !== "agent_mode") return undefined;
+  const packageIds = managedSkillPackageIds(input.skill, input.packages);
+  const subjects = input.policies
+    .filter((policy) => policy.resourceType === "skill_package" && packageIds.has(policy.resourceId))
+    .map((policy) => {
+      const identity = policy.subjectType === "user" ? input.userIdentities.get(policy.subjectId) : undefined;
+      return {
+        subjectType: policy.subjectType,
+        subjectId: policy.subjectId,
+        effect: policy.effect,
+        displayName: identity?.displayName,
+        secondaryLabel: identity?.email
+      };
+    })
+    .sort((left, right) =>
+      left.effect.localeCompare(right.effect) ||
+      left.subjectType.localeCompare(right.subjectType) ||
+      (left.displayName ?? left.subjectId).localeCompare(right.displayName ?? right.subjectId)
+    );
+  return { packageIds: [...packageIds], subjects };
 }
 
 function audiencesForManagedSkill(input: {
@@ -175,18 +212,31 @@ export class SkillCatalogService {
       users?: { getById(id: string): Promise<UserIdentity | undefined> };
       skillPackages?: { list(): Promise<CatalogSkillPackage[]> };
       agentModes?: { list(): Promise<CatalogAgentMode[]> };
+      resourcePolicies?: { listAll(): Promise<CatalogResourcePolicy[]> };
     }
   ) {}
 
   async syncAndList(input: { organizationId?: string; organizationName?: string }): Promise<SkillCatalogAdminRecord[]> {
-    const [nativeSkills, managedSkills, plugins, packages, agentModes] = await Promise.all([
+    const [nativeSkills, managedSkills, plugins, packages, agentModes, policies] = await Promise.all([
       this.sources.nativeSkills.list(),
       this.sources.managedSkills.listManagedSkills({ organizationId: input.organizationId }),
       this.sources.plugins?.list() ?? Promise.resolve([]),
       this.sources.skillPackages?.list() ?? Promise.resolve([]),
-      this.sources.agentModes?.list() ?? Promise.resolve([])
+      this.sources.agentModes?.list() ?? Promise.resolve([]),
+      this.sources.resourcePolicies?.listAll() ?? Promise.resolve([])
     ]);
-    const userIds = Array.from(new Set(managedSkills.flatMap((skill) => [skill.ownerUserId, skill.createdByUserId]).map(text).filter(Boolean))) as string[];
+    const managedPackageIds = new Set(managedSkills.flatMap((skill) => [...managedSkillPackageIds(skill, packages)]));
+    const policyUserIds = policies
+      .filter((policy) =>
+        policy.resourceType === "skill_package" &&
+        policy.subjectType === "user" &&
+        managedPackageIds.has(policy.resourceId)
+      )
+      .map((policy) => policy.subjectId);
+    const userIds = Array.from(new Set([
+      ...managedSkills.flatMap((skill) => [skill.ownerUserId, skill.createdByUserId]).map(text).filter(Boolean),
+      ...policyUserIds
+    ])) as string[];
     const userIdentities = new Map<string, UserIdentity>();
     await Promise.all(userIds.map(async (userId) => {
       const identity = await this.sources.users?.getById(userId);
@@ -237,6 +287,7 @@ export class SkillCatalogService {
         sourceLabel: "托管",
         scope,
         rawScope: text(skill.scope),
+        sourceStatus: text(skill.status),
         ownerUserId: text(skill.ownerUserId),
         owner,
         createdBy,
@@ -249,6 +300,7 @@ export class SkillCatalogService {
           packages,
           agentModes
         }),
+        access: accessForManagedSkill({ skill, packages, policies, userIdentities }),
         system: false
       });
       await this.repository.ensureEntry({

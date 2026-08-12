@@ -37,6 +37,14 @@ export type SkillCatalogAudience = {
   secondaryLabel?: string;
 };
 
+export type SkillCatalogAccessSubject = {
+  subjectType: "role" | "department" | "user";
+  subjectId: string;
+  effect: "allow" | "deny";
+  displayName?: string;
+  secondaryLabel?: string;
+};
+
 export type SkillCatalogEntry = {
   id: string;
   catalogKey: string;
@@ -58,6 +66,7 @@ export type SkillCatalogEntry = {
   sourceLabel: string;
   scope: SkillCatalogScope;
   rawScope?: string;
+  sourceStatus?: string;
   ownerUserId?: string;
   owner?: SkillCatalogActor;
   createdBy?: SkillCatalogActor;
@@ -66,6 +75,10 @@ export type SkillCatalogEntry = {
     name?: string;
   };
   audiences: SkillCatalogAudience[];
+  access?: {
+    packageIds: string[];
+    subjects: SkillCatalogAccessSubject[];
+  };
   system: boolean;
   plugin?: {
     pluginRef: string;

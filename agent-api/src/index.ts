@@ -647,7 +647,8 @@ const skillCatalog = new SkillCatalogService(
     plugins: installedPlugins,
     users,
     skillPackages,
-    agentModes
+    agentModes,
+    resourcePolicies
   }
 );
 const codexProviders = new ManagedCodexProviderResolver({

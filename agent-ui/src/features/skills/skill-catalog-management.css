@@ -298,6 +298,14 @@
   background: #d99a18;
 }
 
+.skill-admin-table-status.is-archived {
+  color: var(--skill-admin-muted);
+}
+
+.skill-admin-table-status.is-archived i {
+  background: #98a2b3;
+}
+
 .skill-admin-runtime-info {
   padding: 16px;
   border: 1px solid #d9e7e1;
@@ -453,6 +461,70 @@
 .skill-admin-audience-list {
   align-items: flex-start !important;
   white-space: normal;
+}
+
+.skill-admin-access-detail {
+  display: grid !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+}
+
+.skill-admin-access-detail > strong {
+  color: var(--skill-admin-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.skill-admin-access-detail > small {
+  color: var(--skill-admin-muted);
+  line-height: 1.5;
+}
+
+.skill-admin-access-detail ul {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.skill-admin-access-detail li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--skill-admin-border);
+  border-radius: 7px;
+  background: var(--admin-color-surface-solid, #fff);
+}
+
+.skill-admin-access-detail li span,
+.skill-admin-access-detail li small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-admin-access-detail li small {
+  color: var(--skill-admin-muted);
+  font-size: 10px;
+}
+
+.skill-admin-access-detail li em {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #287a43;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.skill-admin-access-detail li.is-denied em {
+  color: #b42318;
 }
 
 .skill-admin-portal-card {

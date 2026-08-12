@@ -130,6 +130,23 @@ describe("SkillCatalogService.syncAndList", () => {
           slug: "other-owner-assistant",
           skillPackages: [{ skillPackageId: "package-other-owner" }]
         }])
+      },
+      resourcePolicies: {
+        listAll: vi.fn().mockResolvedValue([{
+          organizationId: "org-1",
+          subjectType: "user",
+          subjectId: "user-2",
+          resourceType: "skill_package",
+          resourceId: "package-1",
+          effect: "allow"
+        }, {
+          organizationId: "org-1",
+          subjectType: "user",
+          subjectId: "user-3",
+          resourceType: "skill_package",
+          resourceId: "package-other-owner",
+          effect: "allow"
+        }])
       }
     });
 
@@ -138,10 +155,19 @@ describe("SkillCatalogService.syncAndList", () => {
     expect(record).toMatchObject({
       scope: "agent_mode",
       rawScope: "agent_mode",
+      sourceStatus: "active",
       owner: { userId: "user-1", displayName: "Current name", email: "current@example.com" },
       createdBy: { userId: "user-1", displayName: "Current name", email: "current@example.com" },
       organization: { id: "org-1", name: "Internal Organization" },
-      audiences: [{ type: "agent_mode", id: "mode-1", name: "Finance assistant", secondaryLabel: "finance-assistant" }]
+      audiences: [{ type: "agent_mode", id: "mode-1", name: "Finance assistant", secondaryLabel: "finance-assistant" }],
+      access: {
+        packageIds: ["package-1"],
+        subjects: [{
+          subjectType: "user",
+          subjectId: "user-2",
+          effect: "allow"
+        }]
+      }
     });
   });
 });
