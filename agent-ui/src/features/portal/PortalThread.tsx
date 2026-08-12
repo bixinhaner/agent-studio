@@ -23,10 +23,9 @@ import { ArrowDownIcon } from "lucide-react";
 import {
   readThreadReadingPosition,
   resolveReturnToLatestBehavior,
-  resolveThreadScrollFollowMode,
-  type ThreadScrollFollowMode,
   writeThreadReadingPosition
 } from "./thread-reading-position";
+import { createThreadScrollFollowController } from "./thread-scroll-follow-controller";
 
 const THREAD_BOTTOM_THRESHOLD_PX = 2;
 const SCROLLBAR_POINTER_ZONE_PX = 18;
@@ -127,8 +126,7 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
     } = {}
   } = threadConfig;
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const followModeRef = useRef<ThreadScrollFollowMode>("reading-history");
-  const lastScrollTopRef = useRef(0);
+  const followControllerRef = useRef(createThreadScrollFollowController());
   const touchStartYRef = useRef<number | null>(null);
   const scheduledScrollFrameRef = useRef(0);
   const savePositionTimerRef = useRef(0);
@@ -161,36 +159,31 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
   }, [persistReadingPosition]);
 
   const stopFollowingBottom = useCallback(() => {
-    followModeRef.current = resolveThreadScrollFollowMode({
-      current: followModeRef.current,
-      event: "user-scroll-up"
-    });
+    followControllerRef.current.onUserScrollUp();
   }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-    lastScrollTopRef.current = viewport.scrollTop;
     setViewportAtBottom(true);
   }, []);
 
   const scheduleScrollToBottom = useCallback(() => {
-    if (positioningRef.current || followModeRef.current !== "following") return;
+    if (positioningRef.current || !followControllerRef.current.shouldFollowPassiveContent()) return;
     if (scheduledScrollFrameRef.current) {
       window.cancelAnimationFrame(scheduledScrollFrameRef.current);
     }
     scheduledScrollFrameRef.current = window.requestAnimationFrame(() => {
       scheduledScrollFrameRef.current = 0;
-      if (!positioningRef.current && followModeRef.current === "following") scrollToBottom("instant");
+      if (!positioningRef.current && followControllerRef.current.shouldFollowPassiveContent()) {
+        scrollToBottom("instant");
+      }
     });
   }, [scrollToBottom]);
 
   const followLatestAfterUserSend = useCallback(() => {
-    followModeRef.current = resolveThreadScrollFollowMode({
-      current: followModeRef.current,
-      event: "user-send"
-    });
+    followControllerRef.current.onUserSend();
     setViewportAtBottom(true);
     if (savePositionTimerRef.current) {
       window.clearTimeout(savePositionTimerRef.current);
@@ -211,7 +204,7 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
 
   useLayoutEffect(() => {
     positioningRef.current = true;
-    followModeRef.current = "reading-history";
+    followControllerRef.current = createThreadScrollFollowController();
     setPositioning(true);
     const savedPosition = readThreadReadingPosition(browserStorage(), readingPositionKey);
     let frame = 0;
@@ -226,7 +219,6 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
       window.clearTimeout(placeholderTimer);
       const viewport = viewportRef.current;
       if (viewport) {
-        lastScrollTopRef.current = viewport.scrollTop;
         setViewportAtBottom(isThreadViewportAtBottom(viewport));
       }
       positioningRef.current = false;
@@ -247,14 +239,14 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
         if (anchor) {
           const viewportTop = viewport.getBoundingClientRect().top;
           viewport.scrollTop += anchor.getBoundingClientRect().top - viewportTop - savedPosition.offset;
-          followModeRef.current = "reading-history";
+          followControllerRef.current = createThreadScrollFollowController("reading-history");
         } else {
           viewport.scrollTo({ top: viewport.scrollHeight, behavior: "instant" });
-          followModeRef.current = "following";
+          followControllerRef.current = createThreadScrollFollowController("following");
         }
       } else {
         viewport.scrollTo({ top: viewport.scrollHeight, behavior: "instant" });
-        followModeRef.current = "following";
+        followControllerRef.current = createThreadScrollFollowController("following");
       }
 
       const signature = `${viewport.scrollHeight}:${viewport.clientHeight}:${messages.length}`;
@@ -315,31 +307,18 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
   }, [scheduleScrollToBottom]);
 
   useAuiEvent("thread.runStart", () => {
-    followModeRef.current = resolveThreadScrollFollowMode({
-      current: followModeRef.current,
-      event: "passive-content"
-    });
-    if (followModeRef.current === "following") scheduleScrollToBottom();
+    if (followControllerRef.current.shouldFollowPassiveContent()) scheduleScrollToBottom();
   });
 
   const handleScroll = useCallback(
     (event: ReactUIEvent<HTMLDivElement>) => {
       const viewport = event.currentTarget;
-      const scrollTop = viewport.scrollTop;
       const atBottom = isThreadViewportAtBottom(viewport);
-      if (scrollTop < lastScrollTopRef.current - THREAD_BOTTOM_THRESHOLD_PX) {
-        stopFollowingBottom();
-      } else if (atBottom) {
-        followModeRef.current = resolveThreadScrollFollowMode({
-          current: followModeRef.current,
-          event: "viewport-at-bottom"
-        });
-      }
+      followControllerRef.current.onViewportChange(atBottom);
       setViewportAtBottom(atBottom);
-      lastScrollTopRef.current = scrollTop;
       scheduleReadingPositionSave();
     },
-    [scheduleReadingPositionSave, stopFollowingBottom]
+    [scheduleReadingPositionSave]
   );
 
   const handleWheel = useCallback(
@@ -442,7 +421,7 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
                 label={scrollToBottomLabel}
                 viewportRef={viewportRef}
                 onScrollToBottom={(behavior) => {
-                  followModeRef.current = "following";
+                  followControllerRef.current = createThreadScrollFollowController("following");
                   scrollToBottom(behavior);
                 }}
               />

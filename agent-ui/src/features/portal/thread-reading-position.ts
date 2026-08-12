@@ -21,7 +21,12 @@ export type ThreadScrollFollowMode = "following" | "reading-history";
 
 export function resolveThreadScrollFollowMode(input: {
   current: ThreadScrollFollowMode;
-  event: "user-send" | "passive-content" | "user-scroll-up" | "viewport-at-bottom";
+  event:
+    | "user-send"
+    | "passive-content"
+    | "user-scroll-up"
+    | "viewport-at-bottom"
+    | "viewport-away-from-bottom";
 }): ThreadScrollFollowMode {
   switch (input.event) {
     case "user-send":
@@ -30,6 +35,7 @@ export function resolveThreadScrollFollowMode(input: {
     case "user-scroll-up":
       return "reading-history";
     case "passive-content":
+    case "viewport-away-from-bottom":
       return input.current;
   }
 }

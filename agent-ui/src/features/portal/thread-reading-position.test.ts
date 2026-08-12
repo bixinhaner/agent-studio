@@ -87,6 +87,22 @@ describe("thread scroll follow mode", () => {
       .toBe("following");
   });
 
+  it("keeps following when layout changes move the viewport away from the bottom after send", () => {
+    const afterSend = resolveThreadScrollFollowMode({ current: "reading-history", event: "user-send" });
+
+    expect(resolveThreadScrollFollowMode({
+      current: afterSend,
+      event: "viewport-away-from-bottom"
+    })).toBe("following");
+  });
+
+  it("does not resume following when a history reader remains away from the bottom", () => {
+    expect(resolveThreadScrollFollowMode({
+      current: "reading-history",
+      event: "viewport-away-from-bottom"
+    })).toBe("reading-history");
+  });
+
   it("does not let passive assistant content pull a history reader away", () => {
     expect(resolveThreadScrollFollowMode({ current: "reading-history", event: "passive-content" }))
       .toBe("reading-history");
