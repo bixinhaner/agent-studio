@@ -213,6 +213,42 @@ export function assertRecoveredMessageGraph(plan: MessageGraphRecoveryPlan): voi
   if (plan.headId && !byId.has(plan.headId)) throw new Error("Recovered head must exist");
 }
 
+export function planMessageGraphSuffixRebuild(input: {
+  messages: RecoverableMessage[];
+  headId?: string | null;
+  startExternalId: string;
+}): MessageGraphRecoveryPlan {
+  const ordered = orderedMessages(input.messages);
+  const startIndex = ordered.findIndex((message) => normalized(message.externalId) === normalized(input.startExternalId));
+  if (startIndex < 0) throw new Error("Suffix rebuild start message no longer exists");
+  const parents = new Map<string, string | null>();
+  for (const message of ordered) {
+    const id = normalized(message.externalId);
+    if (id) parents.set(id, normalized(message.parentId));
+  }
+  for (let index = startIndex; index < ordered.length; index += 1) {
+    const id = normalized(ordered[index]?.externalId);
+    if (!id) continue;
+    let previousId: string | null = null;
+    for (let previousIndex = index - 1; previousIndex >= 0; previousIndex -= 1) {
+      previousId = normalized(ordered[previousIndex]?.externalId);
+      if (previousId) break;
+    }
+    parents.set(id, previousId);
+  }
+  const fallbackHeadId = [...ordered].reverse().map((message) => normalized(message.externalId)).find(Boolean) ?? null;
+  return {
+    affected: true,
+    reasons: ["missing_parent"],
+    headId: fallbackHeadId,
+    messages: ordered.map((message, index) => ({
+      ...message,
+      nextParentId: normalized(message.externalId) ? (parents.get(normalized(message.externalId)!) ?? null) : null,
+      nextPosition: index
+    }))
+  };
+}
+
 export function messageGraphSnapshotSignature(messages: RecoverableMessage[]): string {
   return messages
     .map((message) => [

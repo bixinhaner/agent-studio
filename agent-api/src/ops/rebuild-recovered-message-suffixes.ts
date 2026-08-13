@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 import { createDbClient } from "../db/client.js";
 import {
   assertRecoveredMessageGraph,
+  messageGraphSnapshotSignature,
   planMessageGraphRecovery,
+  planMessageGraphSuffixRebuild,
   type RecoverableMessage
 } from "../persistence/message-graph-recovery.js";
 
@@ -64,21 +65,6 @@ async function writePrivateJson(filePath: string, value: unknown): Promise<void>
   }
 }
 
-function immutableSignature(messages: Array<RecoverableMessage & { content?: unknown; runConfig?: unknown }>): string {
-  const normalized = [...messages]
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((message) => ({
-      id: message.id,
-      externalId: message.externalId,
-      role: message.role,
-      content: message.content,
-      runConfig: message.runConfig,
-      createdAt: new Date(message.createdAt).toISOString(),
-      updatedAt: message.updatedAt ? new Date(message.updatedAt).toISOString() : null
-    }));
-  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
-}
-
 function visibleHeadDepth(plan: ReturnType<typeof planMessageGraphRecovery>): number {
   const parents = new Map(plan.messages
     .filter((message) => message.externalId)
@@ -99,7 +85,9 @@ async function main(): Promise<void> {
     const plan = planMessageGraphRecovery({ messages: entry.messages, headId: entry.thread.headId });
     if (!plan.reasons.includes("missing_parent") && !plan.reasons.includes("cycle")) return [];
     assertRecoveredMessageGraph(plan);
-    return [{ entry, plan, signature: immutableSignature(entry.messages) }];
+    const repairStart = plan.messages.find((message) => message.parentId !== message.nextParentId)?.externalId;
+    if (!repairStart) return [];
+    return [{ entry, repairStart }];
   });
   if (options.expectedThreads !== undefined && options.expectedThreads !== baselines.length) {
     throw new Error(`Topology thread guard failed: expected ${options.expectedThreads}, found ${baselines.length}`);
@@ -112,8 +100,19 @@ async function main(): Promise<void> {
       include: { messages: { orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }] } }
     });
     const currentById = new Map(currentThreads.map((thread) => [thread.id, thread]));
-    const preview = baselines.map(({ entry, plan, signature }) => {
+    const signatures = new Map<string, string>();
+    const plans = new Map<string, ReturnType<typeof planMessageGraphSuffixRebuild>>();
+    const preview = baselines.map(({ entry, repairStart }) => {
       const current = currentById.get(entry.thread.id);
+      if (!current) throw new Error(`Recovered thread no longer exists: ${entry.thread.id}`);
+      const plan = planMessageGraphSuffixRebuild({
+        messages: current.messages,
+        headId: current.headId,
+        startExternalId: repairStart!
+      });
+      assertRecoveredMessageGraph(plan);
+      plans.set(entry.thread.id, plan);
+      signatures.set(entry.thread.id, messageGraphSnapshotSignature(current.messages));
       const currentByMessageId = new Map(current?.messages.map((message) => [message.id, message]) ?? []);
       return {
         threadId: entry.thread.id,
@@ -123,7 +122,7 @@ async function main(): Promise<void> {
         changedParentsFromCurrent: plan.messages.filter((message) => currentByMessageId.get(message.id)?.parentId !== message.nextParentId).length,
         headBefore: current?.headId ?? null,
         headAfter: plan.headId,
-        immutableSnapshotMatches: current ? immutableSignature(current.messages) === signature : false
+        currentSnapshotCaptured: true
       };
     });
     const summary = {
@@ -131,10 +130,9 @@ async function main(): Promise<void> {
       topologyThreads: baselines.length,
       allMessagesVisibleAfter: preview.filter((item) => item.visibleHeadDepthAfter === item.messages).length,
       changedParents: preview.reduce((sum, item) => sum + item.changedParentsFromCurrent, 0),
-      immutableSnapshotMismatches: preview.filter((item) => !item.immutableSnapshotMatches).map((item) => item.threadId),
       generatedAt: new Date().toISOString()
     };
-    const applicableThreads = preview.filter((item) => item.immutableSnapshotMatches).length;
+    const applicableThreads = preview.length;
     if (options.expectedApplicable !== undefined && options.expectedApplicable !== applicableThreads) {
       throw new Error(`Applicable thread guard failed: expected ${options.expectedApplicable}, found ${applicableThreads}`);
     }
@@ -148,10 +146,6 @@ async function main(): Promise<void> {
     const skippedConcurrent: string[] = [];
     if (options.apply) {
       for (const baseline of baselines) {
-        if (summary.immutableSnapshotMismatches.includes(baseline.entry.thread.id)) {
-          skippedConcurrent.push(baseline.entry.thread.id);
-          continue;
-        }
         const outcome = await db.$transaction(async (tx) => {
           await tx.$queryRawUnsafe(
             'SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))',
@@ -161,8 +155,10 @@ async function main(): Promise<void> {
             where: { id: baseline.entry.thread.id },
             include: { messages: { orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }] } }
           });
-          if (!current || immutableSignature(current.messages) !== baseline.signature) return false;
-          for (const planned of baseline.plan.messages) {
+          if (!current || messageGraphSnapshotSignature(current.messages) !== signatures.get(baseline.entry.thread.id)) return false;
+          const plan = plans.get(baseline.entry.thread.id);
+          if (!plan) return false;
+          for (const planned of plan.messages) {
             const stored = current.messages.find((message) => message.id === planned.id);
             if (!stored) return false;
             if (stored.parentId !== planned.nextParentId || stored.position !== planned.nextPosition) {
@@ -172,10 +168,10 @@ async function main(): Promise<void> {
               });
             }
           }
-          if (current.headId !== baseline.plan.headId) {
+          if (current.headId !== plan.headId) {
             await tx.thread.update({
               where: { id: current.id },
-              data: { headId: baseline.plan.headId, updatedAt: current.updatedAt }
+              data: { headId: plan.headId, updatedAt: current.updatedAt }
             });
           }
           return true;

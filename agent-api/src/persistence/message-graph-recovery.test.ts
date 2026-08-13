@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assertRecoveredMessageGraph, planMessageGraphRecovery } from "./message-graph-recovery.js";
+import {
+  assertRecoveredMessageGraph,
+  planMessageGraphRecovery,
+  planMessageGraphSuffixRebuild
+} from "./message-graph-recovery.js";
 
 function message(input: Partial<{
   id: string;
@@ -112,5 +116,29 @@ describe("message graph recovery", () => {
     ]);
     expect(plan.headId).toBe("assistant-latest");
     expect(() => assertRecoveredMessageGraph(plan)).not.toThrow();
+  });
+
+  it("rebuilds from the original break point while preserving newly appended messages", () => {
+    const plan = planMessageGraphSuffixRebuild({
+      headId: "assistant-new",
+      startExternalId: "user-2",
+      messages: [
+        message({ externalId: "user-1", position: 0 }),
+        message({ externalId: "assistant-1", role: "assistant", parentId: "user-1", position: 1 }),
+        message({ externalId: "user-2", parentId: "assistant-1", position: 2 }),
+        message({ externalId: "assistant-2", role: "assistant", parentId: "user-2", position: 3 }),
+        message({ externalId: "user-new", parentId: "assistant-1", position: 4 }),
+        message({ externalId: "assistant-new", role: "assistant", parentId: "user-new", position: 5 })
+      ]
+    });
+    expect(plan.messages.map((item) => item.nextParentId)).toEqual([
+      null,
+      "user-1",
+      "assistant-1",
+      "user-2",
+      "assistant-2",
+      "user-new"
+    ]);
+    expect(plan.headId).toBe("assistant-new");
   });
 });
