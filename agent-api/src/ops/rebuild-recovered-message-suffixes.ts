@@ -14,6 +14,7 @@ type Options = {
   backup: string;
   outputDir: string;
   expectedThreads?: number;
+  expectedApplicable?: number;
 };
 
 type BackupThread = {
@@ -22,7 +23,7 @@ type BackupThread = {
 };
 
 function usage(): never {
-  console.error("Usage: tsx src/ops/rebuild-recovered-message-suffixes.ts --backup <before-state.json> --output-dir <path> [--dry-run|--apply] [--expected-threads <n>]");
+  console.error("Usage: tsx src/ops/rebuild-recovered-message-suffixes.ts --backup <before-state.json> --output-dir <path> [--dry-run|--apply] [--expected-threads <n>] [--expected-applicable <n>]");
   process.exit(2);
 }
 
@@ -38,6 +39,10 @@ function parseArgs(argv: string[]): Options {
       const value = Number.parseInt(argv[++index] ?? "", 10);
       if (!Number.isFinite(value) || value < 0) usage();
       options.expectedThreads = value;
+    } else if (arg === "--expected-applicable") {
+      const value = Number.parseInt(argv[++index] ?? "", 10);
+      if (!Number.isFinite(value) || value < 0) usage();
+      options.expectedApplicable = value;
     } else usage();
   }
   if (!options.backup || !options.outputDir) usage();
@@ -129,6 +134,10 @@ async function main(): Promise<void> {
       immutableSnapshotMismatches: preview.filter((item) => !item.immutableSnapshotMatches).map((item) => item.threadId),
       generatedAt: new Date().toISOString()
     };
+    const applicableThreads = preview.filter((item) => item.immutableSnapshotMatches).length;
+    if (options.expectedApplicable !== undefined && options.expectedApplicable !== applicableThreads) {
+      throw new Error(`Applicable thread guard failed: expected ${options.expectedApplicable}, found ${applicableThreads}`);
+    }
     await writePrivateJson(path.join(options.outputDir, "preview.json"), { summary, threads: preview });
     await writePrivateJson(path.join(options.outputDir, "before-suffix-rebuild.json"), {
       summary,
@@ -138,10 +147,11 @@ async function main(): Promise<void> {
     let applied = 0;
     const skippedConcurrent: string[] = [];
     if (options.apply) {
-      if (summary.immutableSnapshotMismatches.length) {
-        throw new Error("At least one recovered thread changed content after backup; refusing suffix rebuild");
-      }
       for (const baseline of baselines) {
+        if (summary.immutableSnapshotMismatches.includes(baseline.entry.thread.id)) {
+          skippedConcurrent.push(baseline.entry.thread.id);
+          continue;
+        }
         const outcome = await db.$transaction(async (tx) => {
           await tx.$queryRawUnsafe(
             'SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))',
