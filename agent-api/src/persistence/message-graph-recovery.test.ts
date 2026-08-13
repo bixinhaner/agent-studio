@@ -89,4 +89,28 @@ describe("message graph recovery", () => {
     expect(plan.affected).toBe(true);
     expect(plan.headId).toBe("assistant-1");
   });
+
+  it("rebuilds the suffix after the first orphan so every later message is on one visible chain", () => {
+    const plan = planMessageGraphRecovery({
+      headId: "assistant-latest",
+      messages: [
+        message({ externalId: "user-1", position: 0 }),
+        message({ externalId: "assistant-1", role: "assistant", parentId: "user-1", position: 1 }),
+        message({ externalId: "user-2", parentId: "temporary-1", position: 2 }),
+        message({ externalId: "assistant-2", role: "assistant", parentId: "user-2", position: 3 }),
+        message({ externalId: "user-3", parentId: "temporary-2", position: 4 }),
+        message({ externalId: "assistant-latest", role: "assistant", parentId: "user-3", position: 5 })
+      ]
+    });
+    expect(plan.messages.map((item) => item.nextParentId)).toEqual([
+      null,
+      "user-1",
+      "assistant-1",
+      "user-2",
+      "assistant-2",
+      "user-3"
+    ]);
+    expect(plan.headId).toBe("assistant-latest");
+    expect(() => assertRecoveredMessageGraph(plan)).not.toThrow();
+  });
 });

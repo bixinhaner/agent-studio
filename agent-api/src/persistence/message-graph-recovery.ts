@@ -103,6 +103,7 @@ export function planMessageGraphRecovery(input: {
   const ordered = orderedMessages(input.messages);
   const knownIds = new Set(ordered.map((message) => normalized(message.externalId)).filter(Boolean) as string[]);
   const reasons = new Set<MessageGraphRecoveryPlan["reasons"][number]>();
+  let topologyRepairStart: number | undefined;
   const positions = new Set<number>();
   for (const message of ordered) {
     if (positions.has(message.position)) reasons.add("duplicate_position");
@@ -116,6 +117,7 @@ export function planMessageGraphRecovery(input: {
     let parentId = normalized(message.parentId);
     if (parentId && !knownIds.has(parentId)) {
       reasons.add("missing_parent");
+      topologyRepairStart = Math.min(topologyRepairStart ?? index, index);
       parentId = nearestPrecedingId({
         ordered,
         index,
@@ -146,12 +148,33 @@ export function planMessageGraphRecovery(input: {
     const breakMessage = ordered[breakIndex];
     const breakId = normalized(breakMessage?.externalId);
     if (!breakId) continue;
+    const earliestCycleIndex = Math.min(...cycle.map((cycleId) =>
+      ordered.findIndex((candidate) => normalized(candidate.externalId) === cycleId)
+    ).filter((index) => index >= 0));
+    topologyRepairStart = Math.min(topologyRepairStart ?? earliestCycleIndex, earliestCycleIndex);
     parents.set(breakId, nearestPrecedingId({
       ordered,
       index: breakIndex,
       excluded: cycleIds,
       preferredRole: breakMessage.role === "user" ? "assistant" : breakMessage.role === "assistant" ? "user" : undefined
     }));
+  }
+
+  // Once a graph has broken, otherwise-valid later parent links can still form
+  // sibling branches that assistant-ui will not render on the selected head.
+  // Rebuild only the suffix from the first deterministic anomaly so every
+  // recovered historical message is visible in its actual stored order.
+  if (topologyRepairStart !== undefined) {
+    for (let index = topologyRepairStart; index < ordered.length; index += 1) {
+      const id = normalized(ordered[index]?.externalId);
+      if (!id) continue;
+      let previousId: string | null = null;
+      for (let previousIndex = index - 1; previousIndex >= 0; previousIndex -= 1) {
+        previousId = normalized(ordered[previousIndex]?.externalId);
+        if (previousId) break;
+      }
+      parents.set(id, previousId);
+    }
   }
 
   const requestedHeadId = normalized(input.headId);
@@ -161,7 +184,9 @@ export function planMessageGraphRecovery(input: {
   return {
     affected,
     reasons: [...reasons].sort(),
-    headId: requestedHeadId && knownIds.has(requestedHeadId) ? requestedHeadId : fallbackHeadId,
+    headId: topologyRepairStart !== undefined
+      ? fallbackHeadId
+      : requestedHeadId && knownIds.has(requestedHeadId) ? requestedHeadId : fallbackHeadId,
     messages: ordered.map((message, index) => ({
       ...message,
       nextParentId: normalized(message.externalId) ? (parents.get(normalized(message.externalId)!) ?? null) : null,
