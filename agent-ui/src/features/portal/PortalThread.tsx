@@ -15,7 +15,7 @@ import {
   type UIEvent as ReactUIEvent,
   type WheelEvent as ReactWheelEvent
 } from "react";
-import { ThreadPrimitive } from "@assistant-ui/react";
+import { ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { Thread, Composer, ThreadWelcome } from "@assistant-ui/react-ui";
 import { useAuiEvent } from "@assistant-ui/store";
 import { ArrowDownIcon } from "lucide-react";
@@ -49,6 +49,7 @@ export function isThreadScrollbarPointer(
 
 type PortalThreadProps = ComponentProps<typeof Thread> & {
   readingPositionKey?: string;
+  loadingLabel?: string;
   positioningLabel?: string;
   scrollToBottomLabel?: string;
 };
@@ -113,6 +114,7 @@ const AdaptiveScrollToBottom: FC<{
 export const PortalThread: FC<PortalThreadProps> = (config) => {
   const {
     readingPositionKey = "",
+    loadingLabel = "Loading conversation…",
     positioningLabel = "Restoring your reading position…",
     scrollToBottomLabel = "Scroll to bottom",
     ...threadConfig
@@ -133,7 +135,18 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
   const positioningRef = useRef(true);
   const [positioning, setPositioning] = useState(true);
   const [showPositioningPlaceholder, setShowPositioningPlaceholder] = useState(false);
+  const [showLoadingPlaceholder, setShowLoadingPlaceholder] = useState(false);
   const [viewportAtBottom, setViewportAtBottom] = useState(true);
+  const threadLoading = useAuiState((state) => state.thread.isLoading);
+
+  useEffect(() => {
+    if (!threadLoading) {
+      setShowLoadingPlaceholder(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setShowLoadingPlaceholder(true), POSITIONING_PLACEHOLDER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [threadLoading]);
 
   const persistReadingPosition = useCallback(() => {
     const viewport = viewportRef.current;
@@ -387,11 +400,11 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
 
   return (
     <div
-      className={`portal-thread-position-shell${positioning ? " is-positioning" : ""}`}
-      aria-busy={positioning || undefined}
+      className={`portal-thread-position-shell${positioning || threadLoading ? " is-positioning" : ""}`}
+      aria-busy={positioning || threadLoading || undefined}
     >
       <PortalThreadUserSendIntentContext.Provider value={followLatestAfterUserSend}>
-        <Thread.Root config={threadConfig} aria-hidden={positioning || undefined}>
+        <Thread.Root config={threadConfig} aria-hidden={positioning || threadLoading || undefined}>
           <ThreadPrimitive.Viewport
             ref={viewportRef}
             className="aui-thread-viewport"
@@ -430,15 +443,20 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
           </ThreadPrimitive.Viewport>
         </Thread.Root>
       </PortalThreadUserSendIntentContext.Provider>
-      {showPositioningPlaceholder ? (
+      {showPositioningPlaceholder || showLoadingPlaceholder ? (
         <div className="portal-thread-position-placeholder" role="status" aria-live="polite">
-          <span className="aui-sr-only">{positioningLabel}</span>
-          <div className="portal-thread-position-placeholder-content" aria-hidden="true">
-            <div className="portal-thread-position-placeholder-avatar" />
+          <span className="aui-sr-only">{threadLoading ? loadingLabel : positioningLabel}</span>
+          <div className="portal-thread-position-placeholder-content">
+            <div className="portal-thread-position-placeholder-avatar" aria-hidden="true" />
             <div className="portal-thread-position-placeholder-copy">
-              <span />
-              <span />
-              <span />
+              <strong className="portal-thread-position-placeholder-label">
+                {threadLoading ? loadingLabel : positioningLabel}
+              </strong>
+              <div className="portal-thread-position-placeholder-lines" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
           </div>
         </div>

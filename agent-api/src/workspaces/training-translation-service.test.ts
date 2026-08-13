@@ -63,6 +63,42 @@ describe("TrainingTranslationService", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
+  it("serves a stale translated message immediately until prewarm refreshes it", async () => {
+    const { service, runner } = createService();
+    const base = {
+      organizationId: "org-1",
+      requestedByUserId: "user-1"
+    };
+    const original = { id: "assistant-1", role: "assistant", content: [{ type: "text", text: "旧回答" }] };
+    const changed = { id: "assistant-1", role: "assistant", content: [{ type: "text", text: "新回答" }] };
+
+    await service.localizeMessages({
+      ...base,
+      entries: [{ sourceId: "message-1", value: original }]
+    });
+    const stale = await service.localizeMessages({
+      ...base,
+      entries: [{ sourceId: "message-1", value: changed }],
+      allowStale: true
+    });
+
+    expect(stale.get("message-1")).toEqual({
+      ...original,
+      content: [{ type: "text", text: "EN:旧回答" }]
+    });
+    expect(runner).toHaveBeenCalledTimes(1);
+
+    const refreshed = await service.localizeMessages({
+      ...base,
+      entries: [{ sourceId: "message-1", value: changed }]
+    });
+    expect(refreshed.get("message-1")).toEqual({
+      ...changed,
+      content: [{ type: "text", text: "EN:新回答" }]
+    });
+    expect(runner).toHaveBeenCalledTimes(2);
+  });
+
   it("translates visible prose and file display names without changing tool payloads", async () => {
     const { service } = createService();
     const source = {

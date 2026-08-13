@@ -62,6 +62,7 @@ function createApp() {
         updatedAt: "2026-07-31T00:00:00.000Z"
       }]
     }),
+    ensureEnglishPrewarm: vi.fn().mockResolvedValue({ status: "running" }),
     search: vi.fn().mockResolvedValue({ nodes: [], tasks: [] }),
     getFile: vi.fn(),
     listFileVersions: vi.fn()
@@ -104,8 +105,10 @@ describe("createTrainingCatalogRouter", () => {
     expect(service.listNodes).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
     expect(service.listThreadMessages).toHaveBeenCalledWith(expect.objectContaining({
       threadId: "thread-1",
-      locale: "en"
+      locale: "en",
+      allowStaleTranslations: true
     }));
+    expect(service.ensureEnglishPrewarm).toHaveBeenCalledWith(viewer);
   });
 
   it("does not expose mutation routes", async () => {

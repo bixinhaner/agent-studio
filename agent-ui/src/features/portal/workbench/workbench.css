@@ -2825,7 +2825,7 @@ button.session-rail-new-btn:active,
 }
 
 .portal-thread-position-placeholder-avatar,
-.portal-thread-position-placeholder-copy span {
+.portal-thread-position-placeholder-lines span {
   background: rgba(148, 163, 184, 0.18);
 }
 
@@ -2837,25 +2837,37 @@ button.session-rail-new-btn:active,
 
 .portal-thread-position-placeholder-copy {
   display: grid;
-  gap: 12px;
-  padding-top: 7px;
+  gap: 14px;
+  padding-top: 1px;
 }
 
-.portal-thread-position-placeholder-copy span {
+.portal-thread-position-placeholder-label {
+  color: var(--workbench-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.portal-thread-position-placeholder-lines {
+  display: grid;
+  gap: 12px;
+}
+
+.portal-thread-position-placeholder-lines span {
   display: block;
   height: 10px;
   border-radius: 999px;
 }
 
-.portal-thread-position-placeholder-copy span:nth-child(1) {
+.portal-thread-position-placeholder-lines span:nth-child(1) {
   width: 72%;
 }
 
-.portal-thread-position-placeholder-copy span:nth-child(2) {
+.portal-thread-position-placeholder-lines span:nth-child(2) {
   width: 91%;
 }
 
-.portal-thread-position-placeholder-copy span:nth-child(3) {
+.portal-thread-position-placeholder-lines span:nth-child(3) {
   width: 54%;
 }
 

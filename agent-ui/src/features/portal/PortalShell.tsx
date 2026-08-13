@@ -3918,6 +3918,14 @@ function reviveMessage(message: unknown, persistedCreatedAt?: string | null): un
   return revived;
 }
 
+export function shouldHydratePortalThreadSkills(input: {
+  threadId: string;
+  isExternalPortalUser: boolean;
+  trainingReadOnly: boolean;
+}): boolean {
+  return Boolean(input.threadId) && !input.isExternalPortalUser && !input.trainingReadOnly;
+}
+
 function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | undefined): unknown {
   const obj = asRecord(message);
   if (!obj || obj.role !== "assistant" || !feedback) return message;
@@ -7458,7 +7466,7 @@ export function PortalShell(props: {
 
   useEffect(() => {
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
-    if (!threadId || isExternalPortalUser) {
+    if (!shouldHydratePortalThreadSkills({ threadId, isExternalPortalUser, trainingReadOnly })) {
       enabledSkillIdsRef.current = [];
       hydratedSkillThreadIdRef.current = "";
       skillHydrationRef.current = null;
@@ -7516,7 +7524,7 @@ export function PortalShell(props: {
         skillHydrationRef.current = null;
       }
     };
-  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions]);
+  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions, trainingReadOnly]);
 
   useEffect(() => {
     let active = true;
@@ -10397,6 +10405,7 @@ export function PortalShell(props: {
               readingPositionKey={`${portalPreferenceUser?.id || "anonymous"}:${String(
                 activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty"
               )}`}
+              loadingLabel={t("thread.loadingConversation")}
               positioningLabel={t("thread.positioning")}
               scrollToBottomLabel={t("thread.returnToLatest")}
               strings={{

@@ -215,6 +215,7 @@ export class TrainingTranslationService {
     organizationId: string;
     requestedByUserId: string;
     entries: Array<{ sourceId: string; value: unknown }>;
+    allowStale?: boolean;
   }): Promise<Map<string, unknown>> {
     return this.localizeEntries({
       ...input,
@@ -233,6 +234,7 @@ export class TrainingTranslationService {
     organizationId: string;
     requestedByUserId: string;
     entries: Array<TranslationEntry<TSource>>;
+    allowStale?: boolean;
     prepare(value: TSource): { localized: TPrepared; slots: TextSlot[] };
     finish(value: TPrepared): TResult;
   }): Promise<Map<string, TResult>> {
@@ -257,6 +259,15 @@ export class TrainingTranslationService {
     for (const entry of input.entries) {
       const cache = cacheByKey.get(`${entry.sourceType}:${entry.sourceId}`);
       if (cache && cache.sourceHash === hashes.get(entry.sourceId)) {
+        const value = cachedValue<TResult>(cache.translatedJson);
+        if (value !== undefined) {
+          result.set(entry.sourceId, value);
+          continue;
+        }
+      }
+      // Read-only training pages prefer a previously translated snapshot over
+      // blocking the entire conversation while a background prewarm refreshes it.
+      if (cache && input.allowStale) {
         const value = cachedValue<TResult>(cache.translatedJson);
         if (value !== undefined) {
           result.set(entry.sourceId, value);

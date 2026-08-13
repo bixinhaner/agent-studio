@@ -20,6 +20,15 @@ function requestedLocale(req: Request): TrainingTranslationLocale | undefined {
   return req.query.lang === "en" ? "en" : undefined;
 }
 
+function scheduleEnglishPrewarm(
+  service: TrainingCatalogService,
+  viewer: TrainingCatalogViewer,
+  locale?: TrainingTranslationLocale
+): void {
+  if (locale !== "en") return;
+  void service.ensureEnglishPrewarm(viewer).catch(() => undefined);
+}
+
 function nodeOut(node: WorkspaceNodeSummary) {
   return {
     id: node.id,
@@ -203,8 +212,10 @@ export function createTrainingCatalogRouter(input: {
   router.get("/threads", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
-      const threads = await input.service.listThreads(viewer, requestedLocale(req));
+      const locale = requestedLocale(req);
+      const threads = await input.service.listThreads(viewer, locale);
       res.json({ threads: threads.map(threadOut) });
+      scheduleEnglishPrewarm(input.service, viewer, locale);
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training conversations");
     }
@@ -213,13 +224,15 @@ export function createTrainingCatalogRouter(input: {
   router.get("/threads/:threadId", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
+      const locale = requestedLocale(req);
       const threadId = String(req.params.threadId || "").trim();
-      const thread = (await input.service.listThreads(viewer, requestedLocale(req))).find((item) => item.id === threadId);
+      const thread = (await input.service.listThreads(viewer, locale)).find((item) => item.id === threadId);
       if (!thread) {
         res.status(404).json({ detail: "培训会话不存在" });
         return;
       }
       res.json({ thread: threadOut(thread) });
+      scheduleEnglishPrewarm(input.service, viewer, locale);
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training conversation");
     }
@@ -228,10 +241,12 @@ export function createTrainingCatalogRouter(input: {
   router.get("/threads/:threadId/messages", async (req, res) => {
     try {
       const viewer = await input.resolveViewer(req);
+      const locale = requestedLocale(req);
       const repository = await input.service.listThreadMessages({
         viewer,
         threadId: String(req.params.threadId || "").trim(),
-        locale: requestedLocale(req)
+        locale,
+        allowStaleTranslations: locale === "en"
       });
       res.json({
         head_id: repository.headId,
@@ -244,6 +259,7 @@ export function createTrainingCatalogRouter(input: {
         })),
         feedback: []
       });
+      scheduleEnglishPrewarm(input.service, viewer, locale);
     } catch (error) {
       sendTrainingError(res, error, "Failed to load training conversation messages");
     }

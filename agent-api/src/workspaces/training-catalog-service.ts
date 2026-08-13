@@ -85,6 +85,8 @@ export class TrainingCatalogAccessError extends Error {
 export class TrainingCatalogService {
   private readonly englishPrewarmByOrganization = new Map<string, TrainingEnglishPrewarmStatus>();
 
+  private static readonly ENGLISH_PREWARM_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
   constructor(
     private readonly db: PrismaClient,
     private readonly workspaces: PortalWorkspaceService,
@@ -504,6 +506,7 @@ export class TrainingCatalogService {
     viewer: TrainingCatalogViewer;
     threadId: string;
     locale?: TrainingTranslationLocale;
+    allowStaleTranslations?: boolean;
   }): Promise<{ headId: string | null; messages: Array<{
     parentId: string | null;
     message: unknown;
@@ -530,7 +533,8 @@ export class TrainingCatalogService {
       localized = await this.translations.localizeMessages({
         organizationId: input.viewer.organizationId,
         requestedByUserId: input.viewer.userId,
-        entries: rows.map((row) => ({ sourceId: row.id, value: row.content }))
+        entries: rows.map((row) => ({ sourceId: row.id, value: row.content })),
+        allowStale: input.allowStaleTranslations
       });
     }
     return {
@@ -629,6 +633,20 @@ export class TrainingCatalogService {
     this.englishPrewarmByOrganization.set(viewer.organizationId, status);
     void this.runEnglishPrewarm(viewer, status);
     return status;
+  }
+
+  async ensureEnglishPrewarm(viewer: TrainingCatalogViewer): Promise<TrainingEnglishPrewarmStatus> {
+    const current = this.getEnglishPrewarmStatus(viewer);
+    if (current.status === "running") return current;
+    const completedAt = current.completedAt ? Date.parse(current.completedAt) : Number.NaN;
+    if (
+      current.status === "completed"
+      && Number.isFinite(completedAt)
+      && Date.now() - completedAt < TrainingCatalogService.ENGLISH_PREWARM_REFRESH_INTERVAL_MS
+    ) {
+      return current;
+    }
+    return this.startEnglishPrewarm(viewer);
   }
 
   private async runEnglishPrewarm(
