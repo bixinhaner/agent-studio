@@ -167,7 +167,11 @@ import {
   isDeploymentDrainError
 } from "./portal/deployment-drain.js";
 import {
-  portalAutoRecoveryFailureAssistantMessage,
+  presentPortalFailure,
+  type PortalFailurePresentation
+} from "./portal/chat-failure-presentation.js";
+import { portalFailedAssistantMessage } from "./portal/chat-failure-message.js";
+import {
   portalAutoRecoveryPrompt,
   portalRuntimeEventHasAnySideEffect,
   portalRuntimeEventHasNonResumableSideEffect,
@@ -2469,6 +2473,7 @@ const streamSchema = z.object({
   user_message: z.unknown().optional(),
   display_message: z.string().optional(),
   selected_skill_ids: z.array(z.string().trim().min(1)).max(20).optional(),
+  portal_locale: z.enum(["en", "zh-CN"]).optional(),
   message: z.string().min(1)
 });
 
@@ -2613,7 +2618,11 @@ const ensureThreadSessionSchema = z.object({
   knowledge_set_ids: z.array(z.string()).optional(),
   selected_skill_ids: z.array(z.string().trim().min(1)).max(20).optional(),
   codex_run_config: z.record(z.unknown()).optional(),
-  allow_mode_change: z.boolean().optional()
+  allow_mode_change: z.boolean().optional(),
+  client_run_id: z.string().trim().min(1).max(200).optional(),
+  client_user_message_id: z.string().trim().min(1).max(200).optional(),
+  client_assistant_message_id: z.string().trim().min(1).max(200).optional(),
+  portal_locale: z.enum(["en", "zh-CN"]).optional()
 });
 
 const appendMessageSchema = z.object({
@@ -9360,51 +9369,6 @@ function portalUserMessage(input: {
   };
 }
 
-function portalFailedAssistantMessage(input: {
-  id: string;
-  sessionId: string;
-  runId: string;
-  autoRecoveryAttempted?: boolean;
-}) {
-  if (input.autoRecoveryAttempted) {
-    return portalAutoRecoveryFailureAssistantMessage({
-      id: input.id,
-      sessionId: input.sessionId,
-      runId: input.runId
-    });
-  }
-  const now = new Date().toISOString();
-  return {
-    id: input.id,
-    role: "assistant",
-    content: [
-      {
-        type: "text",
-        text: "I couldn't complete this response. Please try again."
-      }
-    ],
-    status: {
-      type: "incomplete",
-      reason: "error"
-    },
-    createdAt: now,
-    metadata: {
-      unstable_state: {},
-      unstable_annotations: [],
-      unstable_data: [],
-      steps: [],
-      custom: {
-        channel: "portal",
-        sessionId: input.sessionId,
-        runId: input.runId,
-        serverPersisted: true,
-        failed: true,
-        autoRecoveryAttempted: false
-      }
-    }
-  };
-}
-
 function findStoredMessageById(
   repository: {
     messages: Array<{
@@ -9551,6 +9515,7 @@ async function appendPortalFailedAssistant(input: {
   sessionId: string;
   runId: string;
   assistantMessageId?: string;
+  presentation: PortalFailurePresentation;
   autoRecoveryAttempted?: boolean;
 }): Promise<boolean> {
   if (!portalRunMayPersist(input)) return false;
@@ -9577,6 +9542,7 @@ async function appendPortalFailedAssistant(input: {
       id: assistantId,
       sessionId: input.sessionId,
       runId: input.runId,
+      presentation: input.presentation,
       autoRecoveryAttempted: input.autoRecoveryAttempted
     }),
     runConfig: {
@@ -9586,6 +9552,50 @@ async function appendPortalFailedAssistant(input: {
       serverPersisted: true,
       failed: true,
       autoRecoveryAttempted: input.autoRecoveryAttempted === true
+    }
+  });
+  return true;
+}
+
+async function appendPortalPreflightFailedAssistant(input: {
+  threadId: string;
+  userMessageId: string;
+  runId: string;
+  assistantMessageId?: string;
+  presentation: PortalFailurePresentation;
+}): Promise<boolean> {
+  const parentId = await requirePortalUserMessageParent({
+    threadId: input.threadId,
+    userMessageId: input.userMessageId
+  });
+  const repository = await conversationRecords.getMessageRepository(input.threadId);
+  const existingAssistant = repository.messages.find((item) =>
+    item.parentId === parentId &&
+    storedMessageRole(item.message) === "assistant" &&
+    storedPortalRunId(item.message, item.runConfig) === input.runId
+  );
+  if (existingAssistant) return false;
+  const assistantId = trimOrUndefined(input.assistantMessageId) ??
+    `portal-assistant-preflight-failed-${createHash("sha256")
+      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .digest("hex")
+      .slice(0, 24)}`;
+  await conversationRecords.appendMessage({
+    threadId: input.threadId,
+    parentId,
+    message: portalFailedAssistantMessage({
+      id: assistantId,
+      runId: input.runId,
+      presentation: input.presentation
+    }),
+    runConfig: {
+      channel: "portal",
+      runId: input.runId,
+      serverPersisted: true,
+      failed: true,
+      preflightFailed: true,
+      errorCode: input.presentation.code,
+      reasonCode: input.presentation.reasonCode
     }
   });
   return true;
@@ -12377,6 +12387,10 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.post("/api/threads/:threadId/session", async (req: Request, res: Response) => {
   const threadId = String(req.params.threadId || "").trim();
+  let failureContext: {
+    currentUser: ReturnType<typeof currentActorFromRequest>;
+    input: z.infer<typeof ensureThreadSessionSchema>;
+  } | undefined;
   const timing = createRuntimeStartupTimer({
     traceId: randomUUID(),
     source: "portal",
@@ -12389,6 +12403,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const currentUser = currentActorFromRequest(req);
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = ensureThreadSessionSchema.parse(req.body || {});
+    failureContext = { currentUser, input };
     await timing.time("ensure_thread_session.check_deploy_drain", () =>
       assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
     );
@@ -12397,8 +12412,40 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     res.json({ session: sessionOut(session) });
     timing.finish("success");
   } catch (error) {
-    timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
-    res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to ensure thread session"));
+    const rawDetail = error instanceof Error ? error.message : String(error);
+    const requestedLocale = failureContext?.input.portal_locale ?? req.header("accept-language");
+    const failurePayload = payloadForSessionAccessError(
+      error,
+      "Failed to ensure thread session",
+      requestedLocale
+    );
+    timing.finish("error", { error: rawDetail });
+    const input = failureContext?.input;
+    if (input?.client_run_id && input.client_user_message_id && failureContext) {
+      try {
+        const ownedThread = await getPortalOwnedThread(threadId, failureContext.currentUser);
+        if (ownedThread) {
+          await appendPortalPreflightFailedAssistant({
+            threadId,
+            userMessageId: input.client_user_message_id,
+            runId: input.client_run_id,
+            assistantMessageId: input.client_assistant_message_id,
+            presentation: presentPortalFailure({
+              payload: failurePayload,
+              rawDetail,
+              locale: requestedLocale
+            })
+          });
+        }
+      } catch (persistError) {
+        console.warn("portal preflight failure persistence failed", {
+          threadId,
+          userMessageId: input.client_user_message_id,
+          detail: persistError instanceof Error ? persistError.message : String(persistError)
+        });
+      }
+    }
+    res.status(statusCodeForSessionAccessError(error)).json(failurePayload);
   }
 });
 
@@ -12958,10 +13005,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalCurrentOrganizationId: string | undefined;
   let portalCurrentActor: CurrentActor | undefined;
   let portalQuestionPreview: string | undefined;
+  let portalLocale: string | undefined;
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
   let portalRuntimeFailure: string | undefined;
   let portalTurnFailure: string | undefined;
+  let portalFailurePresentation: PortalFailurePresentation | undefined;
   let portalAutoRecoveryAttempted = false;
   let portalFinalAnswerStarted = false;
   let portalNonResumableSideEffectStarted = false;
@@ -12992,7 +13041,25 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     portalRunId = input.client_run_id ?? portalStreamTraceId;
     portalAssistantMessageId = input.client_assistant_message_id;
     portalThreadId = input.thread_id;
+    portalUserMessageId = input.client_user_message_id ?? input.user_message_id;
     portalQuestionPreview = input.display_message ?? input.message;
+    portalLocale = input.portal_locale ?? req.header("accept-language") ?? undefined;
+    const persistEarlyStreamFailure = async (failurePayload: ReturnType<typeof payloadForSessionAccessError>) => {
+      if (!portalThreadId || !portalUserMessageId) return;
+      const ownedThread = await getPortalOwnedThread(portalThreadId, currentUser);
+      if (!ownedThread) return;
+      await appendPortalPreflightFailedAssistant({
+        threadId: portalThreadId,
+        userMessageId: portalUserMessageId,
+        runId: portalRunId,
+        assistantMessageId: portalAssistantMessageId,
+        presentation: presentPortalFailure({
+          payload: failurePayload,
+          rawDetail: failurePayload.detail,
+          locale: portalLocale
+        })
+      });
+    };
     logPortalStream("stream_opened", {
       requested_thread_id: input.thread_id,
       lifecycle: streamAbort.snapshot()
@@ -13002,7 +13069,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     timing.updateContext({ sessionId: input.session_id, threadId: input.thread_id });
     const drainReason = await timing.time("chat_stream.check_deploy_drain", () => getDeploymentDrainReason());
     if (drainReason) {
-      sendTrackedSSE("error", { detail: drainReason });
+      const failurePayload = {
+        detail: drainReason,
+        code: DEPLOYMENT_DRAIN_ERROR_CODE,
+        reason_code: "deployment_drain"
+      };
+      await persistEarlyStreamFailure(failurePayload);
+      sendTrackedSSE("error", failurePayload);
       finishTiming("error", { reason: "deployment_drain" });
       res.end();
       return;
@@ -13032,7 +13105,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         await timing.time("chat_stream.remove_invalid_session", () => sessions.remove(session.sessionId));
         liveRuntimeThreads.delete(session.sessionId);
       }
-      sendTrackedSSE("error", { detail: "Session does not exist or has expired" });
+      const failurePayload = {
+        detail: "Session does not exist or has expired",
+        code: "PORTAL_SESSION_EXPIRED",
+        reason_code: "session_missing_or_expired"
+      };
+      await persistEarlyStreamFailure(failurePayload);
+      sendTrackedSSE("error", failurePayload);
       finishTiming("error", { reason: "session_missing_or_expired" });
       res.end();
       return;
@@ -13044,13 +13123,25 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (requestedThreadId) {
       const boundThreadId = String(currentSession.threadId || "").trim();
       if (!boundThreadId) {
-        sendTrackedSSE("error", { detail: "Session is not bound to a thread. Refresh and try again." });
+        const failurePayload = {
+          detail: "Session is not bound to a thread. Refresh and try again.",
+          code: "PORTAL_SESSION_NOT_BOUND",
+          reason_code: "session_not_bound_to_thread"
+        };
+        await persistEarlyStreamFailure(failurePayload);
+        sendTrackedSSE("error", failurePayload);
         finishTiming("error", { reason: "session_not_bound_to_thread" });
         res.end();
         return;
       }
       if (boundThreadId !== requestedThreadId) {
-        sendTrackedSSE("error", { detail: "Session does not match the requested thread. Please try again." });
+        const failurePayload = {
+          detail: "Session does not match the requested thread. Please try again.",
+          code: "PORTAL_SESSION_THREAD_MISMATCH",
+          reason_code: "session_thread_mismatch"
+        };
+        await persistEarlyStreamFailure(failurePayload);
+        sendTrackedSSE("error", failurePayload);
         finishTiming("error", { reason: "session_thread_mismatch" });
         res.end();
         return;
@@ -13087,7 +13178,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       })
     );
     if (!currentSession.threadId) {
-      sendTrackedSSE("error", { detail: "Session is not bound to a thread. Refresh and try again." });
+      const failurePayload = {
+        detail: "Session is not bound to a thread. Refresh and try again.",
+        code: "PORTAL_SESSION_NOT_BOUND",
+        reason_code: "session_not_bound_to_thread"
+      };
+      await persistEarlyStreamFailure(failurePayload);
+      sendTrackedSSE("error", failurePayload);
       finishTiming("error", { reason: "session_not_bound_to_thread" });
       res.end();
       return;
@@ -13428,6 +13525,16 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    const failurePayload = payloadForSessionAccessError(
+      error,
+      "Chat stream failed",
+      portalLocale
+    );
+    portalFailurePresentation = presentPortalFailure({
+      payload: failurePayload,
+      rawDetail: detail,
+      locale: portalLocale
+    });
     if (portalUserMessageId && !explicitCancel.signal.aborted) {
       portalTurnFailure = detail;
     }
@@ -13441,7 +13548,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       sendTrackedSSE(
         "error",
         {
-          ...payloadForSessionAccessError(error, "Chat stream failed", req.header("accept-language")),
+          ...failurePayload,
           ...(portalAutoRecoveryAttempted ? { auto_recovery_attempted: true } : {})
         }
       );
@@ -13517,6 +13624,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sessionId: portalRuntimeSessionId,
         runId: portalRunId,
         assistantMessageId: portalAssistantMessageId,
+        presentation: portalFailurePresentation ?? presentPortalFailure({
+          payload: { detail: portalTurnFailure },
+          rawDetail: portalTurnFailure,
+          locale: portalLocale
+        }),
         autoRecoveryAttempted: portalAutoRecoveryAttempted
       }).catch((error) => {
         console.warn("portal chat failed to append failed assistant", {

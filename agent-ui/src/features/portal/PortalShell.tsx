@@ -150,7 +150,8 @@ import { resolvePortalChatRecoveryActive } from "./chat-recovery";
 import { completedAssistantContentForParent, isPortalTransportDisconnect } from "./background-run-recovery";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
-import { usePortalI18n, type PortalLocale } from "./i18n";
+import { portalAssistantErrorMessageKey } from "./assistant-error-notice";
+import { usePortalI18n, type PortalLocale, type PortalMessageKey } from "./i18n";
 import {
   PortalComposerWorkflowProvider,
   PortalQueueTray,
@@ -1373,68 +1374,19 @@ function errorCodeFromUnknown(error: unknown): string | undefined {
 }
 
 const DIRECT_MESSAGE_TEXT_MAX_CHARS = 20_000;
-const LARGE_DIRECT_MESSAGE_NOTICE =
-  "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
-const GENERIC_ASSISTANT_ERROR_NOTICE =
-  "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_PROCESS_ERROR_DETAIL =
   "The request could not be completed. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_TOOL_ERROR_DETAIL = "A background tool step needs attention. Please try again or contact your workspace admin.";
 const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step needs attention. Please try again or contact your workspace admin.";
 
-function formatAssistantErrorNotice(detail: string, code?: string): string {
-  const normalizedCode = (code || "").trim().toUpperCase();
-  const normalized = detail.replace(/\s+/g, " ").trim();
-  if (normalizedCode === "AI_SERVICE_BUSY") {
-    return normalized || "The AI service is currently busy. Please try again later.";
-  }
-  if (normalizedCode === "DIRECT_CHAT_MESSAGE_TOO_LARGE") {
-    return LARGE_DIRECT_MESSAGE_NOTICE;
-  }
-  if (normalizedCode === "AI_REQUEST_LIMIT_REACHED" || normalizedCode.endsWith("_TURN_LIMIT_EXCEEDED")) {
-    return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
-  }
-  if (normalizedCode === "SUBSCRIPTION_REQUIRED" || normalizedCode === "EXTERNAL_SUBSCRIPTION_REQUIRED") {
-    return "Access is not enabled yet. Please contact your workspace admin to enable a plan.";
-  }
-  if (normalizedCode === "SUBSCRIPTION_EXPIRED" || normalizedCode.endsWith("_SUBSCRIPTION_EXPIRED")) {
-    return "Your access has ended. Please contact your workspace admin to renew it.";
-  }
-  if (normalizedCode === "SUBSCRIPTION_PAUSED" || normalizedCode.endsWith("_SUBSCRIPTION_PAUSED")) {
-    return "Access is paused. Please contact your workspace admin to resume it.";
-  }
-  if (normalizedCode === "AI_TOKEN_LIMIT_REACHED" || normalizedCode.endsWith("_TOKEN_LIMIT_EXCEEDED")) {
-    return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
-  }
-  if (!normalized) return GENERIC_ASSISTANT_ERROR_NOTICE;
+type PortalTranslate = (key: PortalMessageKey, values?: Record<string, string | number>) => string;
 
-  if (/ai request limit reached|conversation limit reached/i.test(normalized)) {
-    return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
-  }
-  if (/a plan is required|workspace has not enabled access|has not enabled access/i.test(normalized)) {
-    return "Access is not enabled yet. Please contact your workspace admin to enable a plan.";
-  }
-  if (/access has ended|no longer active|subscription_expired/i.test(normalized)) {
-    return "Your access has ended. Please contact your workspace admin to renew it.";
-  }
-  if (/access is paused|currently paused|subscription_paused/i.test(normalized)) {
-    return "Access is paused. Please contact your workspace admin to resume it.";
-  }
-  if (/system is updating|agent studio is deploying|currently deploying|deployment drain/i.test(normalized)) {
-    return "System is updating. Please retry in a few minutes.";
-  }
-  if (/too large to send directly|upload (it|the content) as a .*file|direct messages are limited/i.test(normalized)) {
-    return LARGE_DIRECT_MESSAGE_NOTICE;
-  }
-  if (/service capacity|token limit|temporarily unavailable/i.test(normalized)) {
-    return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
-  }
-
-  return GENERIC_ASSISTANT_ERROR_NOTICE;
+function formatAssistantErrorNotice(detail: string, code: string | undefined, t: PortalTranslate): string {
+  return t(portalAssistantErrorMessageKey(detail, code));
 }
 
-function formatAssistantErrorNoticeFromError(error: unknown, fallback: string): string {
-  return formatAssistantErrorNotice(detailFromError(error, fallback), errorCodeFromUnknown(error));
+function formatAssistantErrorNoticeFromError(error: unknown, fallback: string, t: PortalTranslate): string {
+  return formatAssistantErrorNotice(detailFromError(error, fallback), errorCodeFromUnknown(error), t);
 }
 
 function formatUserLocalDateTime(value?: string | null): string {
@@ -2345,9 +2297,9 @@ function formatCharacterCount(value: number): string {
   return new Intl.NumberFormat(undefined).format(value);
 }
 
-function largeDirectMessageNotice(characters: number): string {
+function largeDirectMessageNotice(characters: number, baseNotice: string): string {
   return [
-    LARGE_DIRECT_MESSAGE_NOTICE,
+    baseNotice,
     `Current message: ${formatCharacterCount(characters)} characters.`
   ].join(" ");
 }
@@ -2544,7 +2496,7 @@ const UploadAwareComposer: FC = () => {
       : uploadBlockReason === "failed"
         ? t("thread.fixUploads")
         : sendBlockedByLargeText
-          ? LARGE_DIRECT_MESSAGE_NOTICE
+          ? t("thread.errorMessageTooLarge")
           : t("thread.send");
   const [composerSending, setComposerSending] = useState(false);
   const [largeTextNotice, setLargeTextNotice] = useState("");
@@ -2726,7 +2678,7 @@ const UploadAwareComposer: FC = () => {
           </div>
         ) : sendBlockedByLargeText ? (
           <p className="portal-upload-composer-hint" role="alert">
-            {largeDirectMessageNotice(composerText.length)}
+            {largeDirectMessageNotice(composerText.length, t("thread.errorMessageTooLarge"))}
           </p>
         ) : largeTextNotice ? (
           <p className="portal-upload-composer-hint" role="status">
@@ -2819,7 +2771,7 @@ const MobileAwareComposer: FC = () => {
     : sendBlockedByRuntime
       ? runtimeReadiness.notice
       : sendBlockedByLargeText
-        ? LARGE_DIRECT_MESSAGE_NOTICE
+        ? t("thread.errorMessageTooLarge")
         : t("thread.send");
   const composerWrapRef = useComposerMultilineRef(composerText);
   const [workflowNotice, setWorkflowNotice] = useState("");
@@ -2929,7 +2881,7 @@ const MobileAwareComposer: FC = () => {
           </div>
         ) : sendBlockedByLargeText ? (
           <p className="portal-upload-composer-hint" role="alert">
-            {largeDirectMessageNotice(composerText.length)}
+            {largeDirectMessageNotice(composerText.length, t("thread.errorMessageTooLarge"))}
           </p>
         ) : workflowNotice ? (
           <p className="portal-upload-composer-hint" role="status">{workflowNotice}</p>
@@ -4081,7 +4033,7 @@ const AssistantErrorNoticeCard: FC<{
         <AlertCircleIcon size={16} aria-hidden="true" />
         <span>{t("thread.requestFailed")}</span>
       </div>
-      <p>{notice || GENERIC_ASSISTANT_ERROR_NOTICE}</p>
+      <p>{notice || t("thread.errorGeneric")}</p>
       {rawDetail && rawDetail !== notice ? <span className="assistant-error-card-detail">{shorten(rawDetail, 260)}</span> : null}
     </div>
   );
@@ -4275,6 +4227,7 @@ const BuildVersionRefreshActivityBridge: FC<{ hasRunningSessions: boolean }> = (
 
 const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const notifyUserSendIntent = usePortalThreadUserSendIntent();
   const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   const recovery = useContext(PortalChatRecoveryContext);
@@ -4283,7 +4236,7 @@ const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
   }
   if (props.status.type === "incomplete" && (props.status.reason === "error" || props.status.error !== undefined)) {
     const detail = detailFromUnknown(props.status.error);
-    const notice = formatAssistantErrorNotice(detail);
+    const notice = formatAssistantErrorNotice(detail, undefined, t);
     const autoRecoveryAttempted = /portal_auto_recovery_exhausted/i.test(detail);
     if (autoRecoveryAttempted) {
       return (
@@ -7834,7 +7787,7 @@ export function PortalShell(props: {
             }
           });
         } catch (error) {
-          const notice = formatAssistantErrorNoticeFromError(error, "Failed to create thread");
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to create thread", t);
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
           throw new Error(notice);
@@ -8683,7 +8636,7 @@ export function PortalShell(props: {
             })
           });
         } catch (error) {
-          const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message");
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
           setErrorText(notice);
           stopRunningStageWaitTimers();
           updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
@@ -8707,6 +8660,7 @@ export function PortalShell(props: {
           runtimeModeOverride.threadId === threadId &&
           runtimeModeOverride.modeId === runtimeModeRef.current
         );
+        const clientRunId = createPortalRunId();
         let ensured: ThreadSessionOut;
         try {
           ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
@@ -8717,7 +8671,11 @@ export function PortalShell(props: {
               knowledge_set_ids: knowledgeSetIds,
               selected_skill_ids: turnSelectedSkillIds,
               codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
-              allow_mode_change: allowModeChange
+              allow_mode_change: allowModeChange,
+              client_run_id: clientRunId,
+              client_user_message_id: latestUserMessageId,
+              client_assistant_message_id: options.unstable_assistantMessageId,
+              portal_locale: localeRef.current
             }
           });
           if (allowModeChange) {
@@ -8734,7 +8692,7 @@ export function PortalShell(props: {
             ));
           }
         } catch (error) {
-          const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session");
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session", t);
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
           stopRunningStageWaitTimers();
@@ -8742,7 +8700,6 @@ export function PortalShell(props: {
           throw new Error(notice);
         }
         const session = ensured.session;
-        const clientRunId = createPortalRunId();
         const activeRun: PortalActiveRun = {
           sessionId: session.session_id,
           runId: clientRunId,
@@ -9259,6 +9216,7 @@ export function PortalShell(props: {
               user_message: latestUserMessageForPersistence,
               display_message: prompt,
               selected_skill_ids: turnSelectedSkillIds,
+              portal_locale: localeRef.current,
               message: runtimePrompt
             }),
             signal: options.abortSignal
@@ -9275,7 +9233,7 @@ export function PortalShell(props: {
                 (payload && typeof payload.code === "string" ? payload.code : "") ||
                 (payload && typeof payload.reason_code === "string" ? payload.reason_code : "");
               const autoRecoveryAttempted = payload?.auto_recovery_attempted === true;
-              const assistantErrorNotice = formatAssistantErrorNotice(detail, errorCode);
+              const assistantErrorNotice = formatAssistantErrorNotice(detail, errorCode, t);
               const processDetail = userSafeProcessDetail(detail);
               setErrorText(autoRecoveryAttempted ? "" : assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });

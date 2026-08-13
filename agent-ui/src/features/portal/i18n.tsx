@@ -234,6 +234,16 @@ const EN_MESSAGES = {
   "thread.reasoningSummary": "Reasoning summary",
   "thread.source": "Source: {label}",
   "thread.requestFailed": "Request could not be completed",
+  "thread.errorGeneric": "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.",
+  "thread.errorDeploymentDrain": "The system is being updated. Please try again in a few minutes.",
+  "thread.errorAiServiceBusy": "The AI service is currently busy. Please try again later.",
+  "thread.errorSkillLoadFailed": "The selected Skill could not be loaded, so this request was not started. Select it again and retry.",
+  "thread.errorMessageTooLarge": "This message is too large to send directly. Upload it as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.",
+  "thread.errorRequestLimit": "AI request limit reached. Please wait for the next reset or contact your workspace admin.",
+  "thread.errorSubscriptionRequired": "Access is not enabled yet. Please contact your workspace admin to enable a plan.",
+  "thread.errorSubscriptionExpired": "Your access has ended. Please contact your workspace admin to renew it.",
+  "thread.errorSubscriptionPaused": "Access is paused. Please contact your workspace admin to resume it.",
+  "thread.errorWorkspaceUnavailable": "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.",
   "thread.connectionRecovering": "Connection interrupted. Recovering automatically…",
   "thread.connectionRecoveringHelp": "Your question is preserved. The response will continue here when the connection recovers.",
   "thread.connectionBackground": "Connection interrupted. The task is continuing in the background…",
@@ -563,7 +573,7 @@ const EN_MESSAGES = {
   "skill.statusRefreshing": "Refreshing"
 } as const;
 
-type PortalMessageKey = keyof typeof EN_MESSAGES;
+export type PortalMessageKey = keyof typeof EN_MESSAGES;
 
 const ZH_MESSAGES: Record<PortalMessageKey, string> = {
   "language.current": "简体中文",
@@ -793,6 +803,16 @@ const ZH_MESSAGES: Record<PortalMessageKey, string> = {
   "thread.reasoningSummary": "推理摘要",
   "thread.source": "来源：{label}",
   "thread.requestFailed": "请求未能完成",
+  "thread.errorGeneric": "暂时无法完成本次回答，请重试；如果问题持续出现，请联系工作区管理员。",
+  "thread.errorDeploymentDrain": "系统正在升级，请几分钟后重试。",
+  "thread.errorAiServiceBusy": "AI 服务当前繁忙，请稍后重试。",
+  "thread.errorSkillLoadFailed": "所选 Skill 暂时未能加载，本次尚未开始执行。请重新选择后重试。",
+  "thread.errorMessageTooLarge": "消息内容过长，无法直接发送。请将内容上传为 .txt 或 .log 文件，再发送简短问题。单条消息最多 20,000 个字符。",
+  "thread.errorRequestLimit": "AI 请求次数已达上限，请等待下个周期重置，或联系工作区管理员。",
+  "thread.errorSubscriptionRequired": "当前尚未开通访问权限，请联系工作区管理员启用订阅方案。",
+  "thread.errorSubscriptionExpired": "当前访问权限已到期，请联系工作区管理员续订。",
+  "thread.errorSubscriptionPaused": "当前访问权限已暂停，请联系工作区管理员恢复。",
+  "thread.errorWorkspaceUnavailable": "工作区暂时不可用，请在下个周期重置后重试，或联系工作区管理员。",
   "thread.connectionRecovering": "连接出现波动，正在自动恢复…",
   "thread.connectionRecoveringHelp": "问题已保留，连接恢复后会在这里继续显示回答。",
   "thread.connectionBackground": "连接已断开，任务正在后台继续…",
