@@ -1036,9 +1036,12 @@ model Message {
   createdAt  DateTime    @default(now()) @map("created_at")
   updatedAt  DateTime    @updatedAt @map("updated_at")
   thread     Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  parent     Message?    @relation("MessageParent", fields: [threadId, parentId], references: [threadId, externalId], onDelete: NoAction, onUpdate: NoAction)
+  children   Message[]   @relation("MessageParent")
 
   @@index([threadId, createdAt])
   @@index([threadId, position])
+  @@unique([threadId, position])
   @@unique([threadId, externalId])
   @@map("messages")
 }
