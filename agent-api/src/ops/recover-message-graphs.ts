@@ -201,7 +201,10 @@ async function main(): Promise<void> {
     if (options.apply) {
       for (const candidate of affected) {
         const outcome = await db.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`thread-messages:${candidate.thread.id}`}, 0))`;
+          await tx.$queryRawUnsafe(
+            'SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))',
+            `thread-messages:${candidate.thread.id}`
+          );
           const current = await tx.thread.findUnique({
             where: { id: candidate.thread.id },
             include: { messages: { orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }] } }
