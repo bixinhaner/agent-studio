@@ -1302,27 +1302,8 @@ function TranscriptMessageBubble(props: {
           ) : null}
         </div>
         <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
-          {props.message.text ? (
-            <ConversationAuditMarkdown text={props.message.text} threadId={props.threadId} workspace={props.workspace} />
-          ) : (
-            <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
-              {attachmentCount > 0
-                ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述`
-                : processRows.length > 0
-                  ? "本条助手回复主要包含处理过程，未输出独立正文"
-                  : "[无文本内容]"}
-            </span>
-          )}
-          <TranscriptAttachmentList
-            attachments={props.message.attachments}
-            threadId={props.threadId}
-            workspace={props.workspace}
-          />
-          {isAssistant && fileChanges.length > 0 ? (
-            <ConversationAuditArtifactFiles changes={fileChanges} threadId={props.threadId} />
-          ) : null}
           {isAssistant && (instructionReads.length > 0 || processRows.length > 0) ? (
-            <div className="admin-chat-bubble-footer">
+            <div className="admin-chat-bubble-context">
               {instructionReads.length > 0 ? (
                 <div className="admin-instruction-read-summary">
                   <span className="admin-instruction-read-summary-label">指令已读取</span>
@@ -1348,6 +1329,25 @@ function TranscriptMessageBubble(props: {
                 </Button>
               ) : null}
             </div>
+          ) : null}
+          {props.message.text ? (
+            <ConversationAuditMarkdown text={props.message.text} threadId={props.threadId} workspace={props.workspace} />
+          ) : (
+            <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
+              {attachmentCount > 0
+                ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述`
+                : processRows.length > 0
+                  ? "本条助手回复主要包含处理过程，未输出独立正文"
+                  : "[无文本内容]"}
+            </span>
+          )}
+          <TranscriptAttachmentList
+            attachments={props.message.attachments}
+            threadId={props.threadId}
+            workspace={props.workspace}
+          />
+          {isAssistant && fileChanges.length > 0 ? (
+            <ConversationAuditArtifactFiles changes={fileChanges} threadId={props.threadId} />
           ) : null}
         </div>
       </div>

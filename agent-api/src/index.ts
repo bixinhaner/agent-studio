@@ -90,6 +90,7 @@ import {
 } from "./codex-memory/engine.js";
 import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
+import { orderAssistantContentParts } from "./messages/assistant-content-order.js";
 import { EnterpriseContextService, type EnterpriseContextChannel } from "./enterprise-context-service.js";
 import { sendOfficePdfPreview } from "./files/office-preview-service.js";
 import {
@@ -9224,23 +9225,16 @@ function portalAssistantMessage(input: {
   runId: string;
   contentParts?: Record<string, unknown>[];
 }) {
-  const leadingContentParts = (input.contentParts ?? []).filter((part) =>
-    part.type === "data" && part.name === "codex_instruction_reads"
-  );
-  const trailingContentParts = (input.contentParts ?? []).filter((part) =>
-    !(part.type === "data" && part.name === "codex_instruction_reads")
-  );
   return {
     id: input.id,
     role: "assistant",
-    content: [
-      ...leadingContentParts,
+    content: orderAssistantContentParts([
+      ...(input.contentParts ?? []),
       {
         type: "text",
         text: input.answerText
-      },
-      ...trailingContentParts
-    ],
+      }
+    ]),
     status: {
       type: "complete",
       reason: "stop"

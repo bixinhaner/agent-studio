@@ -202,6 +202,7 @@ import {
 import { PORTAL_ANTD_THEME } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
+import { orderAssistantContentParts } from "./assistant-content-order";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
   selectVisibleWorkspaceThreads,
@@ -3895,7 +3896,9 @@ function reviveMessage(message: unknown, persistedCreatedAt?: string | null): un
   };
 
   if (role === "assistant") {
-    revived.content = consolidateCodexFileChangeParts(revived.content as unknown[]);
+    revived.content = orderAssistantContentParts(
+      consolidateCodexFileChangeParts(revived.content as unknown[])
+    );
     if (!("unstable_state" in fixedMetadata)) fixedMetadata.unstable_state = {};
     if (!Array.isArray(fixedMetadata.unstable_annotations)) fixedMetadata.unstable_annotations = [];
     if (!Array.isArray(fixedMetadata.unstable_data)) fixedMetadata.unstable_data = [];
@@ -9180,7 +9183,7 @@ export function PortalShell(props: {
         };
 
         const snapshotContent = (): any[] => {
-          return orderedParts.map((part) => {
+          return orderAssistantContentParts(orderedParts.map((part) => {
             const item = asRecord(part);
             if (!item) return { ...part };
             if (item.type === "text" && typeof item.text === "string") {
@@ -9221,7 +9224,7 @@ export function PortalShell(props: {
               ...part,
               data: { ...payload }
             };
-          });
+          }));
         };
 
         const runningThreadKeys = normalizeThreadIdentityKeys(threadId, localThreadId);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { normalizeAssistantMessageContentOrder } from "../messages/assistant-content-order.js";
 import type { ReasoningEffort } from "../model-config.js";
 
 export type ThreadStatus = "regular" | "archived";
@@ -314,7 +315,7 @@ function matchesFeedbackTarget(item: ThreadFeedback, payload: Omit<ThreadFeedbac
 function mapMessageRow(row: MessageRow): StoredMessageItem {
   return {
     parentId: row.parentId ?? null,
-    message: row.content,
+    message: normalizeAssistantMessageContentOrder(row.content),
     runConfig: asRecord(row.runConfig) ?? undefined,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
@@ -436,7 +437,11 @@ export class ThreadRepository {
     }
 
     return this.db.$transaction(async (tx) => {
-      const externalIds = persistedExternalIds(record.messages);
+      const normalizedMessages = record.messages.map((item) => ({
+        ...item,
+        message: normalizeAssistantMessageContentOrder(item.message)
+      }));
+      const externalIds = persistedExternalIds(normalizedMessages);
       const created = await tx.thread.create({
         data: {
           id: record.id,
@@ -461,7 +466,7 @@ export class ThreadRepository {
         }
       });
 
-      for (const [index, item] of record.messages.entries()) {
+      for (const [index, item] of normalizedMessages.entries()) {
         const createdAt = resolvedMessageCreatedAt(item, toDate(record.createdAt));
         await tx.message.create({
           data: {
@@ -479,7 +484,7 @@ export class ThreadRepository {
         });
       }
 
-      return this.loadThreadRecord(tx, created, record.messages);
+      return this.loadThreadRecord(tx, created, normalizedMessages);
     });
   }
 
@@ -555,6 +560,10 @@ export class ThreadRepository {
 
   async appendMessage(threadId: string, item: StoredMessageItem): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
+      const normalizedItem = {
+        ...item,
+        message: normalizeAssistantMessageContentOrder(item.message)
+      };
       await lockThreadMessages(tx, threadId);
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
@@ -563,9 +572,9 @@ export class ThreadRepository {
         where: { threadId },
         orderBy: { position: "asc" }
       });
-      const incomingId = messageIdOf(item.message);
+      const incomingId = messageIdOf(normalizedItem.message);
       const position = messages.reduce((maximum, message) => Math.max(maximum, message.position), -1) + 1;
-      assertIncomingMessageGraph(messages, item);
+      assertIncomingMessageGraph(messages, normalizedItem);
 
       if (incomingId) {
         const existing = messages.find((message) => message.externalId === incomingId);
@@ -573,27 +582,27 @@ export class ThreadRepository {
           await tx.message.update({
             where: { id: existing.id },
             data: {
-              role: normalizeMessageRole(item.message),
-              content: item.message,
-              parentId: item.parentId,
-              runConfig: item.runConfig ?? null,
+              role: normalizeMessageRole(normalizedItem.message),
+              content: normalizedItem.message,
+              parentId: normalizedItem.parentId,
+              runConfig: normalizedItem.runConfig ?? null,
               updatedAt: new Date()
             }
           });
         } else {
-          const createdAt = resolvedMessageCreatedAt(item);
+          const createdAt = resolvedMessageCreatedAt(normalizedItem);
           await tx.message.create({
             data: {
               id: randomUUID(),
               threadId,
               externalId: incomingId,
-              role: normalizeMessageRole(item.message),
-              content: item.message,
-              parentId: item.parentId,
-              runConfig: item.runConfig ?? null,
+              role: normalizeMessageRole(normalizedItem.message),
+              content: normalizedItem.message,
+              parentId: normalizedItem.parentId,
+              runConfig: normalizedItem.runConfig ?? null,
               position,
               createdAt,
-              updatedAt: resolvedMessageUpdatedAt(item, createdAt)
+              updatedAt: resolvedMessageUpdatedAt(normalizedItem, createdAt)
             }
           });
         }
@@ -605,19 +614,19 @@ export class ThreadRepository {
           }
         });
       } else {
-        const createdAt = resolvedMessageCreatedAt(item);
+        const createdAt = resolvedMessageCreatedAt(normalizedItem);
         await tx.message.create({
           data: {
             id: randomUUID(),
             threadId,
             externalId: null,
-            role: normalizeMessageRole(item.message),
-            content: item.message,
-            parentId: item.parentId,
-            runConfig: item.runConfig ?? null,
+            role: normalizeMessageRole(normalizedItem.message),
+            content: normalizedItem.message,
+            parentId: normalizedItem.parentId,
+            runConfig: normalizedItem.runConfig ?? null,
             position,
             createdAt,
-            updatedAt: resolvedMessageUpdatedAt(item, createdAt)
+            updatedAt: resolvedMessageUpdatedAt(normalizedItem, createdAt)
           }
         });
         await tx.thread.update({
@@ -641,10 +650,14 @@ export class ThreadRepository {
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
 
-      assertMessageGraphForPersistence(repository.messages);
+      const normalizedMessages = repository.messages.map((item) => ({
+        ...item,
+        message: normalizeAssistantMessageContentOrder(item.message)
+      }));
+      assertMessageGraphForPersistence(normalizedMessages);
       await tx.message.deleteMany({ where: { threadId } });
-      const externalIds = persistedExternalIds(repository.messages);
-      for (const [index, item] of repository.messages.entries()) {
+      const externalIds = persistedExternalIds(normalizedMessages);
+      for (const [index, item] of normalizedMessages.entries()) {
         const createdAt = resolvedMessageCreatedAt(item);
         await tx.message.create({
           data: {
