@@ -68,7 +68,8 @@ function immutableSignature(messages: Array<RecoverableMessage & { content?: unk
       role: message.role,
       content: message.content,
       runConfig: message.runConfig,
-      createdAt: new Date(message.createdAt).toISOString()
+      createdAt: new Date(message.createdAt).toISOString(),
+      updatedAt: message.updatedAt ? new Date(message.updatedAt).toISOString() : null
     }));
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
@@ -120,14 +121,12 @@ async function main(): Promise<void> {
         immutableSnapshotMatches: current ? immutableSignature(current.messages) === signature : false
       };
     });
-    if (preview.some((item) => !item.immutableSnapshotMatches)) {
-      throw new Error("At least one recovered thread changed content after backup; refusing suffix rebuild");
-    }
     const summary = {
       mode: options.apply ? "apply" : "dry-run",
       topologyThreads: baselines.length,
       allMessagesVisibleAfter: preview.filter((item) => item.visibleHeadDepthAfter === item.messages).length,
       changedParents: preview.reduce((sum, item) => sum + item.changedParentsFromCurrent, 0),
+      immutableSnapshotMismatches: preview.filter((item) => !item.immutableSnapshotMatches).map((item) => item.threadId),
       generatedAt: new Date().toISOString()
     };
     await writePrivateJson(path.join(options.outputDir, "preview.json"), { summary, threads: preview });
@@ -139,6 +138,9 @@ async function main(): Promise<void> {
     let applied = 0;
     const skippedConcurrent: string[] = [];
     if (options.apply) {
+      if (summary.immutableSnapshotMismatches.length) {
+        throw new Error("At least one recovered thread changed content after backup; refusing suffix rebuild");
+      }
       for (const baseline of baselines) {
         const outcome = await db.$transaction(async (tx) => {
           await tx.$queryRawUnsafe(
