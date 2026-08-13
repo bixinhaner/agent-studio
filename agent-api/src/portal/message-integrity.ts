@@ -24,13 +24,37 @@ export function assertPortalAssistantHasUserParent(input: {
 }
 
 export function assertPortalMessageRepositoryIntegrity(messages: PortalMessageSummary[]): void {
-  const seen: PortalMessageSummary[] = [];
+  const byId = new Map<string, PortalMessageSummary>();
   for (const message of messages) {
+    const id = normalized(message.id);
+    if (!id) throw new Error("Portal message requires an id");
+    if (byId.has(id)) throw new Error("Portal message ids must be unique");
+    byId.set(id, message);
+  }
+
+  for (const [id, message] of byId) {
+    const parentId = normalized(message.parentId);
+    if (parentId && !byId.has(parentId)) {
+      throw new Error("Portal message parent must exist in the same thread");
+    }
+    if (parentId === id) {
+      throw new Error("Portal message cannot reference itself as parent");
+    }
+
+    const visited = new Set([id]);
+    let cursor = parentId;
+    while (cursor) {
+      if (visited.has(cursor)) {
+        throw new Error("Portal message graph cannot contain a cycle");
+      }
+      visited.add(cursor);
+      cursor = normalized(byId.get(cursor)?.parentId);
+    }
+
     assertPortalAssistantHasUserParent({
       role: message.role,
       parentId: message.parentId,
-      existingMessages: seen
+      existingMessages: messages
     });
-    seen.push(message);
   }
 }

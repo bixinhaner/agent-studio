@@ -13,6 +13,7 @@
     "report:local-codex-usage": "tsx src/ops/local-codex-usage-report.ts",
     "build:local-codex-usage-report": "node scripts/build-local-codex-usage-report.mjs",
     "report:portal-chat-startup": "tsx src/ops/portal-chat-startup-report.ts",
+    "messages:recover-graphs": "tsx src/ops/recover-message-graphs.ts",
     "skills:backfill-instruction-reads": "tsx src/ops/backfill-historical-instruction-reads.ts",
     "skills:backfill-presentations": "tsx src/ops/backfill-skill-catalog-presentations.ts",
     "usage:backfill-long-context": "tsx src/ops/backfill-codex-long-context-costs.ts",

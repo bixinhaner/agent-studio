@@ -29,6 +29,51 @@ export function isPortalAssistantMessage(message: unknown): boolean {
   return normalized(asRecord(message)?.role) === "assistant";
 }
 
+export function resolvePortalUserMessageParent(input: {
+  current: PortalRepositorySnapshot;
+  incomingMessage: unknown;
+  requestedParentId?: string | null;
+}): string | null {
+  const incoming = asRecord(input.incomingMessage);
+  if (normalized(incoming?.role) !== "user") {
+    return normalized(input.requestedParentId) ?? null;
+  }
+
+  const incomingId = normalized(incoming?.id);
+  const existingIncoming = incomingId
+    ? input.current.messages.find((item) => portalRepositoryMessageId(item.message) === incomingId)
+    : undefined;
+  if (existingIncoming) {
+    return normalized(existingIncoming.parentId) ?? null;
+  }
+
+  const assistantsById = new Map<string, PortalRepositoryMessage>();
+  for (const item of input.current.messages) {
+    if (!isPortalAssistantMessage(item.message)) continue;
+    const id = portalRepositoryMessageId(item.message);
+    if (id) assistantsById.set(id, item);
+  }
+
+  const requestedParentId = normalized(input.requestedParentId);
+  if (requestedParentId && assistantsById.has(requestedParentId)) {
+    return requestedParentId;
+  }
+
+  const currentHeadId = normalized(input.current.headId);
+  if (currentHeadId && assistantsById.has(currentHeadId)) {
+    return currentHeadId;
+  }
+
+  for (let index = input.current.messages.length - 1; index >= 0; index -= 1) {
+    const item = input.current.messages[index];
+    if (!isPortalAssistantMessage(item.message)) continue;
+    const id = portalRepositoryMessageId(item.message);
+    if (id) return id;
+  }
+
+  return null;
+}
+
 /**
  * Portal assistant messages are runtime output. Browsers may render a live
  * projection, but only the API process is allowed to persist that projection.

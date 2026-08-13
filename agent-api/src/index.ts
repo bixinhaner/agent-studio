@@ -186,6 +186,7 @@ import {
 } from "./portal/message-integrity.js";
 import {
   mergePortalClientRepositoryReplacement,
+  resolvePortalUserMessageParent,
   shouldIgnorePortalClientMessageAppend
 } from "./portal/message-server-authority.js";
 import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
@@ -12575,9 +12576,15 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       res.json({ ok: true, ignored: true, head_id: repository.headId ?? null });
       return;
     }
+    const repository = await conversationRecords.getMessageRepository(threadId);
+    const parentId = resolvePortalUserMessageParent({
+      current: repository,
+      incomingMessage: input.message,
+      requestedParentId: input.parent_id ?? null
+    });
     const updated = await conversationRecords.appendMessage({
       threadId,
-      parentId: input.parent_id ?? null,
+      parentId,
       message: input.message,
       runConfig: input.run_config,
       createdAt: input.created_at,

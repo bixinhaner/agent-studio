@@ -159,8 +159,17 @@ export type ThreadRepositoryDb = {
   thread: ThreadTable;
   message: MessageTable;
   runtimeSession: RuntimeSessionTable;
+  $queryRawUnsafe?<T>(query: string, ...values: unknown[]): Promise<T>;
   $transaction<T>(callback: (tx: ThreadRepositoryDb) => Promise<T>): Promise<T>;
 };
+
+async function lockThreadMessages(db: ThreadRepositoryDb, threadId: string): Promise<void> {
+  if (!db.$queryRawUnsafe) return;
+  await db.$queryRawUnsafe(
+    'SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))',
+    `thread-messages:${threadId}`
+  );
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -172,6 +181,58 @@ function messageIdOf(message: unknown): string | null {
   if (!obj) return null;
   const id = obj.id;
   return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+type MessageGraphItem = {
+  parentId: string | null;
+  message: unknown;
+};
+
+export function assertMessageGraphForPersistence(items: MessageGraphItem[]): void {
+  const byId = new Map<string, MessageGraphItem>();
+  for (const item of items) {
+    const id = messageIdOf(item.message);
+    if (!id) continue;
+    if (byId.has(id)) throw new Error("Message ids must be unique within a thread");
+    byId.set(id, item);
+  }
+
+  for (const [id, item] of byId) {
+    const parentId = trimOrUndefined(item.parentId ?? undefined);
+    if (parentId && !byId.has(parentId)) {
+      throw new Error("Message parent must exist within the same thread");
+    }
+    const visited = new Set([id]);
+    let cursor = parentId;
+    while (cursor) {
+      if (visited.has(cursor)) throw new Error("Message graph cannot contain a cycle");
+      visited.add(cursor);
+      cursor = trimOrUndefined(byId.get(cursor)?.parentId ?? undefined);
+    }
+  }
+}
+
+function assertIncomingMessageGraph(messages: MessageRow[], item: StoredMessageItem): void {
+  const incomingId = messageIdOf(item.message);
+  if (!incomingId) {
+    if (trimOrUndefined(item.parentId ?? undefined)) {
+      throw new Error("A message without an id cannot reference a parent");
+    }
+    return;
+  }
+  const byId = new Map(messages
+    .filter((message) => message.externalId && message.externalId !== incomingId)
+    .map((message) => [message.externalId!, trimOrUndefined(message.parentId ?? undefined) ?? null]));
+  let cursor = trimOrUndefined(item.parentId ?? undefined) ?? null;
+  if (cursor && !byId.has(cursor)) {
+    throw new Error("Message parent must exist within the same thread");
+  }
+  const visited = new Set([incomingId]);
+  while (cursor) {
+    if (visited.has(cursor)) throw new Error("Message graph cannot contain a cycle");
+    visited.add(cursor);
+    cursor = byId.get(cursor) ?? null;
+  }
 }
 
 function normalizeMessageRole(message: unknown): "user" | "assistant" | "system" | "tool" {
@@ -494,6 +555,7 @@ export class ThreadRepository {
 
   async appendMessage(threadId: string, item: StoredMessageItem): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
+      await lockThreadMessages(tx, threadId);
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
 
@@ -502,7 +564,8 @@ export class ThreadRepository {
         orderBy: { position: "asc" }
       });
       const incomingId = messageIdOf(item.message);
-      const position = messages.length;
+      const position = messages.reduce((maximum, message) => Math.max(maximum, message.position), -1) + 1;
+      assertIncomingMessageGraph(messages, item);
 
       if (incomingId) {
         const existing = messages.find((message) => message.externalId === incomingId);
@@ -574,9 +637,11 @@ export class ThreadRepository {
     repository: { headId?: string | null; messages: StoredMessageItem[] }
   ): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
+      await lockThreadMessages(tx, threadId);
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
 
+      assertMessageGraphForPersistence(repository.messages);
       await tx.message.deleteMany({ where: { threadId } });
       const externalIds = persistedExternalIds(repository.messages);
       for (const [index, item] of repository.messages.entries()) {
