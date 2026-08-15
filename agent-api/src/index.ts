@@ -91,6 +91,7 @@ import {
 import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { orderAssistantContentParts } from "./messages/assistant-content-order.js";
+import { resolveCompletedAssistantText } from "./messages/assistant-completion.js";
 import { EnterpriseContextService, type EnterpriseContextChannel } from "./enterprise-context-service.js";
 import { sendOfficePdfPreview } from "./files/office-preview-service.js";
 import {
@@ -3836,6 +3837,7 @@ type CodexChannelTurnInput = {
   departmentIdSnapshot?: () => Promise<string | undefined>;
   signal?: AbortSignal;
   emptyAnswerText: string;
+  locale?: string;
   projectionOptions?: ConstructorParameters<typeof CodexRunProjection>[0];
   hasExternalContext?: (session: SessionRecord) => boolean;
   artifactScanStartedAt?: Date;
@@ -3924,13 +3926,13 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
         });
       },
       async onDone(payload) {
-        answerText = payload.answer.trim() || input.emptyAnswerText;
+        const runtimeAnswerText = payload.answer.trim();
         try {
           generatedArtifacts = await registerGeneratedArtifactsForSession({
             currentUser: input.currentUser,
             session: currentSession,
             changes: runtimeFileChanges,
-            answerText,
+            answerText: runtimeAnswerText,
             changedAfter: input.artifactScanStartedAt
           });
           if (generatedArtifacts.length > 0) {
@@ -3946,9 +3948,15 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
           });
           input.onArtifactError?.(error);
         }
-        finalizedProcess = runProjection.finalize({ finalAnswer: answerText });
         const artifactPolicy = await resolveArtifactPolicyForActor(input.currentUser);
         artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
+        answerText = resolveCompletedAssistantText({
+          answerText: runtimeAnswerText,
+          emptyAnswerText: input.emptyAnswerText,
+          generatedArtifactCount: artifactContentPart ? generatedArtifacts.length : 0,
+          locale: input.locale
+        });
+        finalizedProcess = runProjection.finalize({ finalAnswer: answerText });
         await input.onDone?.({
           session: currentSession,
           liveThread,
@@ -5425,6 +5433,7 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
     },
     signal: mergedAbort.signal,
     emptyAnswerText: input.request.locale.toLowerCase().startsWith("zh") ? "没有生成回答。" : "No answer was generated.",
+    locale: input.request.locale,
     artifactScanStartedAt: new Date(startedAt - 2000),
     logLabel: "action connector chat",
     shouldSkipRetry: () => true,
@@ -5630,6 +5639,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       usageSource: "crest_chat_stream",
       signal: runAbort.signal,
       emptyAnswerText: "(无输出)",
+      locale: "zh",
       artifactScanStartedAt: new Date(Date.now() - 2000),
       logLabel: "crest chat",
       shouldSkipRetry: () => explicitCancel.signal.aborted,
@@ -9068,6 +9078,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
           : undefined,
       emptyAnswerText: "已完成处理，但没有生成可发送的文本回复。",
+      locale: "zh",
       artifactScanStartedAt: new Date(Date.now() - 2000),
       logLabel: "DingTalk bot",
       onEvent({ event }) {
@@ -13388,8 +13399,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
           }
           let serverPersistedAssistant = false;
+          let artifacts: ThreadArtifactRecord[] = [];
+          let artifactContentPart: Record<string, unknown> | undefined;
           try {
-            const artifacts = await timing.time("chat_stream.register_artifacts", () =>
+            artifacts = await timing.time("chat_stream.register_artifacts", () =>
               registerGeneratedArtifactsForSession({
                 currentUser,
                 session: currentSession,
@@ -13398,7 +13411,6 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
                 changedAfter: artifactScanStartedAt
               })
             );
-            let artifactContentPart: Record<string, unknown> | undefined;
             if (artifacts.length > 0) {
               const policy = await resolveArtifactPolicyForActor(currentUser);
               artifactContentPart = artifactContentPartForArtifacts(artifacts, policy);
@@ -13407,34 +13419,6 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
                 artifacts: artifacts.map(artifactOut),
                 content_part: artifactContentPart
               });
-            }
-            if (currentSession.threadId) {
-              const instructionReadContentPart = instructionReadObserver.contentPart();
-              const finalizedProcess = portalRunProjection.finalize({ finalAnswer: payload.answer });
-              const persistedContentParts = [
-                instructionReadContentPart,
-                ...finalizedProcess.contentParts,
-                artifactContentPart
-              ]
-                .filter((part): part is Record<string, unknown> => Boolean(part));
-              serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
-                persistPortalAssistantMessageWithRetry({
-                  threadId: currentSession.threadId!,
-                  userMessageId: persistedPortalUserMessageId,
-                  sessionId: currentSession.sessionId,
-                  runId: portalRunId,
-                  assistantMessageId: portalAssistantMessageId,
-                  answerText: payload.answer,
-                  contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
-                })
-              );
-              if (serverPersistedAssistant) {
-                portalAssistantMessageWritten = true;
-                markPortalActiveChatRunAssistantWritten({
-                  sessionId: currentSession.sessionId,
-                  userId: currentUser.id
-                });
-              }
             }
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
@@ -13445,11 +13429,44 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
             sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
           }
+          const completedAnswerText = resolveCompletedAssistantText({
+            answerText: payload.answer,
+            generatedArtifactCount: artifactContentPart ? artifacts.length : 0,
+            locale: portalLocale
+          });
+          if (currentSession.threadId) {
+            const instructionReadContentPart = instructionReadObserver.contentPart();
+            const finalizedProcess = portalRunProjection.finalize({ finalAnswer: completedAnswerText });
+            const persistedContentParts = [
+              instructionReadContentPart,
+              ...finalizedProcess.contentParts,
+              artifactContentPart
+            ]
+              .filter((part): part is Record<string, unknown> => Boolean(part));
+            serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
+              persistPortalAssistantMessageWithRetry({
+                threadId: currentSession.threadId!,
+                userMessageId: persistedPortalUserMessageId,
+                sessionId: currentSession.sessionId,
+                runId: portalRunId,
+                assistantMessageId: portalAssistantMessageId,
+                answerText: completedAnswerText,
+                contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
+              })
+            );
+            if (serverPersistedAssistant) {
+              portalAssistantMessageWritten = true;
+              markPortalActiveChatRunAssistantWritten({
+                sessionId: currentSession.sessionId,
+                userId: currentUser.id
+              });
+            }
+          }
           streamAbort.markSettled();
           sendTrackedSSE("done", {
             session_id: currentSession.sessionId,
             run_id: portalRunId,
-            answer: payload.answer,
+            answer: completedAnswerText,
             server_persisted: serverPersistedAssistant,
             completed_at: new Date().toISOString()
           });

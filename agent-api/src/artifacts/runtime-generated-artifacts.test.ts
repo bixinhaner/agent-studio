@@ -77,6 +77,31 @@ describe("runtime generated artifacts", () => {
     expect(changes[0]?.dataBase64).toBe("iVBORw0KGgo=");
   });
 
+  it("extracts image-generation-end events used by image-only completions", () => {
+    const changes = extractRuntimeFileChanges({
+      type: "event_msg",
+      raw: {
+        type: "event_msg",
+        payload: {
+          type: "image_generation_end",
+          call_id: "ig_completed",
+          status: "completed",
+          saved_path: "/tmp/codex-home/generated_images/thread/ig_completed.png",
+          result: "iVBORw0KGgo="
+        }
+      }
+    });
+
+    expect(changes).toMatchObject([{
+      kind: "generated_image",
+      sourcePath: "/tmp/codex-home/generated_images/thread/ig_completed.png",
+      metadata: {
+        runtimeItemType: "image_generation_end",
+        imageGenerationId: "ig_completed"
+      }
+    }]);
+  });
+
   it("copies generated images from codex home into the workspace artifact directory", async () => {
     const root = await makeTempRoot();
     const workspacePath = path.join(root, "workspace");

@@ -15,6 +15,7 @@
     "report:portal-chat-startup": "tsx src/ops/portal-chat-startup-report.ts",
     "messages:recover-graphs": "tsx src/ops/recover-message-graphs.ts",
     "messages:rebuild-recovered-suffixes": "tsx src/ops/rebuild-recovered-message-suffixes.ts",
+    "messages:backfill-image-only-tail": "node dist/ops/backfill-image-only-tail.js",
     "skills:backfill-instruction-reads": "tsx src/ops/backfill-historical-instruction-reads.ts",
     "skills:backfill-presentations": "tsx src/ops/backfill-skill-catalog-presentations.ts",
     "usage:backfill-long-context": "tsx src/ops/backfill-codex-long-context-costs.ts",

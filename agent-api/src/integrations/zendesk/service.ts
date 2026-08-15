@@ -10,6 +10,7 @@ import {
   type RuntimeUsageSnapshot
 } from "../../live-runtime-session.js";
 import { CodexExecutionService, CodexRunProjection } from "../../operations/codex-execution-service.js";
+import { resolveCompletedAssistantText } from "../../messages/assistant-completion.js";
 import {
   extractRuntimeFileChanges,
   type RuntimeFileChange
@@ -2652,11 +2653,8 @@ export class ZendeskIntegrationService {
       output = retryResult.output;
       latestUsage = retryResult.latestUsage;
     }
-    const runtimeProcess = runtimeProjection.finalize({ finalAnswer: output.trim() });
-    processRows.push(...runtimeProcess.traceRows);
-    processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
     const artifactContentParts: Record<string, unknown>[] = [];
-    if (this.dependencies.registerGeneratedArtifacts && runtimeFileChanges.length > 0) {
+    if (this.dependencies.registerGeneratedArtifacts) {
       try {
         artifactContentParts.push(...await this.dependencies.registerGeneratedArtifacts({
           sessionId: runtimeSessionLease?.sessionId,
@@ -2678,6 +2676,15 @@ export class ZendeskIntegrationService {
         processRows.push(zendeskProcessRow("error", "Generated artifact registration failed", detail));
       }
     }
+    output = resolveCompletedAssistantText({
+      answerText: output,
+      emptyAnswerText: "No answer was generated.",
+      generatedArtifactCount: artifactContentParts.length,
+      locale: "en"
+    });
+    const runtimeProcess = runtimeProjection.finalize({ finalAnswer: output });
+    processRows.push(...runtimeProcess.traceRows);
+    processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.length}`));
 
     if (latestUsage && this.dependencies.recordUsage) {
       try {
@@ -2723,7 +2730,7 @@ export class ZendeskIntegrationService {
       runId: run.runId
     });
     return {
-      answerText: output.trim(),
+      answerText: output,
       preparedContext,
       runtimeOptions: publicRuntimeOptions,
       audit,
