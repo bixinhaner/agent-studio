@@ -11,6 +11,8 @@ describe("branding runtime", () => {
     document.documentElement.style.removeProperty("--auth-brand-background-image");
     document.documentElement.style.removeProperty("--brand-primary");
     document.documentElement.style.removeProperty("--brand-accent");
+    document.documentElement.style.removeProperty("--brand-primary-rgb");
+    document.documentElement.style.removeProperty("--brand-accent-rgb");
     for (const icon of Array.from(document.querySelectorAll('link[rel~="icon"]'))) {
       icon.remove();
     }
@@ -36,6 +38,19 @@ describe("branding runtime", () => {
     ).toBe('url("/assets/bailey-login-bg.png")');
     expect(document.documentElement.style.getPropertyValue("--brand-primary")).toBe(DEFAULT_BRANDING.primaryColor);
     expect(document.documentElement.style.getPropertyValue("--brand-accent")).toBe(DEFAULT_BRANDING.accentColor);
+    expect(document.documentElement.style.getPropertyValue("--brand-primary-rgb")).toBe("255 70 20");
+    expect(document.documentElement.style.getPropertyValue("--brand-accent-rgb")).toBe("255 131 61");
+  });
+
+  it("publishes RGB channels for brand-colored shadows and motion", () => {
+    applyDocumentBranding({
+      ...DEFAULT_BRANDING,
+      primaryColor: "#0066FF",
+      accentColor: "#2CCFF0"
+    });
+
+    expect(document.documentElement.style.getPropertyValue("--brand-primary-rgb")).toBe("0 102 255");
+    expect(document.documentElement.style.getPropertyValue("--brand-accent-rgb")).toBe("44 207 240");
   });
 
   it("resolves uploaded branding assets through the API base", () => {

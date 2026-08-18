@@ -25,7 +25,7 @@ import {
   Trash2,
   UploadCloud
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BrandMark } from "../branding/BrandMark";
 import { uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "../system-settings/api";
@@ -37,6 +37,11 @@ import {
   regeneratePublicBrandProjection,
   updatePublicBrand
 } from "./api";
+import {
+  BRAND_PREVIEW_SCENES,
+  BrandCustomerPreview,
+  type BrandPreviewScene
+} from "./BrandCustomerPreview";
 import type { PublicBrandInput, PublicBrandLookups, PublicBrandRecord } from "./types";
 
 const { TextArea } = Input;
@@ -59,6 +64,15 @@ const DETAIL_TABS: Array<{ key: DetailTab; label: string }> = [
   { key: "knowledge", label: "资料与输出" },
   { key: "customers", label: "客户归属" }
 ];
+
+const PREVIEW_SCENE_BY_TAB: Record<DetailTab, BrandPreviewScene> = {
+  entry: "login",
+  experience: "portal",
+  email: "email",
+  payment: "billing",
+  knowledge: "conversation",
+  customers: "access"
+};
 
 function emptyBrand(): PublicBrandInput {
   return {
@@ -217,6 +231,7 @@ export function BrandManagementView() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+  const [previewScene, setPreviewScene] = useState<BrandPreviewScene>("login");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -264,6 +279,7 @@ export function BrandManagementView() {
   function openDetail(id?: string, nextTab: DetailTab = "entry") {
     if (id) selectBrand(id);
     setTab(nextTab);
+    setPreviewScene(PREVIEW_SCENE_BY_TAB[nextTab]);
     setScreen("detail");
   }
 
@@ -416,6 +432,10 @@ export function BrandManagementView() {
   }
 
   const knowledgeSets = lookups?.knowledgeSets.filter((item) => draft.knowledgeSetIds.includes(item.id)) ?? [];
+  const previewPlanNames = lookups?.plans
+    .filter((item) => draft.subscriptionPlanIds.includes(item.id))
+    .map((item) => item.name) ?? [];
+  const previewSceneLabel = BRAND_PREVIEW_SCENES.find((item) => item.value === previewScene)?.label || "客户场景";
   return (
     <div className="brand-detail-page">
       <header className="brand-detail-header">
@@ -423,7 +443,7 @@ export function BrandManagementView() {
         <div className="brand-detail-title"><h1>{draft.name || "新增品牌"}</h1><Tag color={draft.status === "active" ? "success" : "default"}>{draft.status === "active" ? "已启用" : "已停用"}</Tag><span>{draft.domains.find((domain) => domain.isPrimary)?.hostname}</span></div>
         <div className="brand-detail-actions">{draft.primaryBaseUrl ? <Button href={draft.primaryBaseUrl} target="_blank" icon={<ExternalLink size={16} />}>打开入口</Button> : null}<Button type="primary" icon={<Save size={16} />} loading={saving} onClick={() => void save()}>保存并检查</Button></div>
       </header>
-      <nav className="brand-detail-tabs" aria-label="品牌配置分类">{DETAIL_TABS.map((item) => <button type="button" key={item.key} className={tab === item.key ? "is-active" : ""} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
+      <nav className="brand-detail-tabs" aria-label="品牌配置分类">{DETAIL_TABS.map((item) => <button type="button" key={item.key} className={tab === item.key ? "is-active" : ""} onClick={() => { setTab(item.key); setPreviewScene(PREVIEW_SCENE_BY_TAB[item.key]); }}>{item.label}</button>)}</nav>
       {error ? <Alert className="brand-detail-alert" type="error" showIcon message={error} closable onClose={() => setError("")} /> : null}
       {success ? <Alert className="brand-detail-alert" type="success" showIcon message={success} closable onClose={() => setSuccess("")} /> : null}
       <div className="brand-detail-workspace">
@@ -464,7 +484,21 @@ export function BrandManagementView() {
           {tab === "customers" ? <section className="brand-config-section"><div className="brand-section-heading"><h2>客户归属</h2><p>客户组织绑定品牌后，只能从该品牌域名登录；注册、审核、开通与套餐流程保持不变。</p></div><label className="brand-config-field brand-field-wide"><span>已归属客户组织</span><Select mode="multiple" optionFilterProp="label" value={draft.organizationIds} options={(lookups?.organizations || []).map((item) => ({ value: item.id, label: `${item.name} · ${item.slug}`, disabled: Boolean(item.publicBrandId && item.publicBrandId !== selectedId) }))} onChange={(organizationIds) => patch({ organizationIds })} /></label></section> : null}
         </main>
         <aside className="brand-detail-aside">
-          <section className="brand-customer-preview"><div className="brand-preview-head"><strong>客户预览</strong><Segmented size="small" value={previewDevice} options={[{ value: "desktop", label: "桌面端" }, { value: "mobile", label: "移动端" }]} onChange={(value) => setPreviewDevice(value as "desktop" | "mobile")} /></div><div className={`brand-preview-canvas is-${previewDevice}`} style={{ "--preview-brand": draft.primaryColor } as CSSProperties}><BrandMark className="brand-preview-logo" imageClassName="brand-preview-logo-image" name={draft.platformName || draft.name || "Brand"} logoUrl={draft.logoUrl || draft.iconUrl || ""} />{draft.assistantAvatarUrl ? <img className="brand-preview-avatar" src={draft.assistantAvatarUrl} alt="" /> : <span className="brand-preview-avatar-placeholder" />}<p>{(previewDevice === "mobile" ? draft.portalWelcomeMessageMobile : draft.portalWelcomeMessageDesktop).replace("{{assistantName}}", draft.assistantName)}</p><button type="button">开始对话</button></div></section>
+          <section className="brand-customer-preview">
+            <div className="brand-preview-head">
+              <div><strong>客户预览</strong><span>{previewSceneLabel}</span></div>
+              <Segmented size="small" value={previewDevice} options={[{ value: "desktop", label: "桌面端" }, { value: "mobile", label: "移动端" }]} onChange={(value) => setPreviewDevice(value as "desktop" | "mobile")} />
+            </div>
+            <Select
+              className="brand-preview-scene-select"
+              value={previewScene}
+              options={BRAND_PREVIEW_SCENES}
+              onChange={(value) => setPreviewScene(value as BrandPreviewScene)}
+              aria-label="选择客户预览场景"
+            />
+            <BrandCustomerPreview brand={draft} scene={previewScene} device={previewDevice} planNames={previewPlanNames} />
+            <p className="brand-preview-caption">预览随当前草稿实时更新；保存并通过检查后才会影响客户入口。</p>
+          </section>
           {selected ? <section className="brand-detail-readiness"><div><strong>上线检查</strong><span>{selected.readiness.checks.filter((check) => check.ok).length}/{selected.readiness.checks.length}</span></div><ReadinessList brand={selected} /><Button block icon={<RefreshCw size={16} />} loading={checking} onClick={() => void runCheck()}>查看全部检查项</Button></section> : <section className="brand-detail-readiness"><ShieldCheck size={24} /><strong>保存后开始上线检查</strong></section>}
           {tab === "knowledge" && knowledgeSets.length ? <section className="brand-source-summary"><strong>已选资料源</strong>{knowledgeSets.map((item) => <div key={item.id}><span>{item.name}</span><small>{item.itemCount?.toLocaleString() || 0} 项</small></div>)}</section> : null}
         </aside>

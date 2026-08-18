@@ -45,6 +45,13 @@ function setAuthBackgroundAsset(assetUrl: string): void {
   );
 }
 
+function colorChannels(hexColor: string, fallback: string): string {
+  const normalized = /^#[0-9a-f]{6}$/i.test(hexColor) ? hexColor : fallback;
+  return [1, 3, 5]
+    .map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16))
+    .join(" ");
+}
+
 export function getAuthBackgroundAssetUrl(branding: PublicBranding): string {
   return resolveBrandingAssetUrl(branding.loginBackgroundUrl.trim());
 }
@@ -56,6 +63,14 @@ export function applyDocumentBranding(branding: PublicBranding): void {
   setAuthBackgroundAsset(getAuthBackgroundAssetUrl(branding));
   document.documentElement.style.setProperty("--brand-primary", branding.primaryColor);
   document.documentElement.style.setProperty("--brand-accent", branding.accentColor);
+  document.documentElement.style.setProperty(
+    "--brand-primary-rgb",
+    colorChannels(branding.primaryColor, DEFAULT_BRANDING.primaryColor)
+  );
+  document.documentElement.style.setProperty(
+    "--brand-accent-rgb",
+    colorChannels(branding.accentColor, DEFAULT_BRANDING.accentColor)
+  );
 }
 
 export function readStoredBrandingResponse(): PublicBrandingResponse | null {
