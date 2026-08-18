@@ -369,6 +369,9 @@ import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
+import { createPublicBrandAdminRouter } from "./public-brands/admin-router.js";
+import { createPublicBrandContextMiddleware } from "./public-brands/middleware.js";
+import { PublicBrandService } from "./public-brands/service.js";
 import {
   buildIntegrationAgentWorkspacePath,
   buildSharedIntegrationCodexHomeScope,
@@ -381,7 +384,11 @@ import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
-import { resolvePublicBranding, resolvePublicPlatformName } from "./system-settings/public-branding.js";
+import {
+  resolveBrandPublicBranding,
+  resolvePublicBranding,
+  resolvePublicPlatformName
+} from "./system-settings/public-branding.js";
 import {
   createAuthenticatedExternalWebGate,
   createExternalWebSurfaceGate,
@@ -576,6 +583,7 @@ const codexExecution = new CodexExecutionService({
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
+const publicBrands = new PublicBrandService(db);
 const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
 const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage, async (thread) => {
   if (thread.workspace && shouldRemoveWorkspaceOnThreadHardDelete(thread.id, thread.workspace)) {
@@ -886,7 +894,17 @@ const billingService = new BillingService({
   config: appConfig.billing,
   emailSender: authEmailSender,
   notifications: notificationRecords,
-  resolveBrandName: () => resolvePublicPlatformName(systemSettings)
+  resolveBrandName: () => resolvePublicPlatformName(systemSettings),
+  resolveOrganizationBrand: async (organizationId) => {
+    const brand = await publicBrands.getForOrganization(organizationId);
+    return brand
+      ? {
+          platformName: brand.platformName,
+          billingPortalUrl: brand.billingPortalUrl,
+          subscriptionPlanIds: brand.subscriptionPlanIds
+        }
+      : undefined;
+  }
 });
 const conversationRecovery = new ConversationRecoveryService({
   db: db as never,
@@ -938,6 +956,7 @@ const accessRequestService = createAccessRequestService({
   emailSender: authEmailSender,
   appBaseUrl: appConfig.appBaseUrl,
   accessRequestConfig: appConfig.accessRequests,
+  publicBrands,
   findInternalUsers: async () => {
     const rows = await db.user.findMany({
       where: {
@@ -2052,14 +2071,16 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
       return recent;
     }
   },
-  policies: policyService
+  policies: policyService,
+  publicBrands
 });
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   knowledgeSets,
   policies: policyService,
   storage: knowledgeSetStorage,
   resourceAccessLogs,
-  securityAlerts: alertEvaluation
+  securityAlerts: alertEvaluation,
+  publicBrands
 });
 const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient, {
   loadUserDetailCache: createDingTalkDetailCacheLoader(db as unknown as DingTalkDetailCacheDb)
@@ -10777,12 +10798,24 @@ function isExactOriginAllowed(origin: string, allowedOrigins: string[]): boolean
   }
 }
 
-function isAllowedCorsOrigin(origin: string, requestPath = ""): boolean {
+function isAllowedCorsOrigin(origin: string, requestPath = "", requestHost = ""): boolean {
   if (
     requestPath.startsWith("/api/action-connectors/") &&
     isExactOriginAllowed(origin, appConfig.actionConnectorAllowedOrigins)
   ) {
     return true;
+  }
+
+  try {
+    const parsedOrigin = new URL(origin);
+    if (
+      (parsedOrigin.protocol === "http:" || parsedOrigin.protocol === "https:") &&
+      parsedOrigin.host.toLowerCase() === requestHost.trim().toLowerCase()
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
   }
 
   const appBaseUrl = appConfig.appBaseUrl.trim();
@@ -10802,7 +10835,7 @@ function corsOptionsForRequest(req: Request): CorsOptions {
   return {
     credentials: true,
     origin(origin, callback) {
-      if (!origin || isAllowedCorsOrigin(origin, req.path)) {
+      if (!origin || isAllowedCorsOrigin(origin, req.path, req.header("host") ?? "")) {
         callback(null, true);
         return;
       }
@@ -10849,6 +10882,7 @@ app.post(
   }
 );
 app.use(express.json({ limit: "1mb" }));
+app.use(createPublicBrandContextMiddleware(publicBrands));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
 
@@ -10906,10 +10940,13 @@ app.get("/internal/deploy/drain-status", async (req: Request, res: Response) => 
   });
 });
 
-app.get("/public-api/branding", async (_req: Request, res: Response) => {
+app.get("/public-api/branding", async (req: Request, res: Response) => {
   try {
-    const branding = await resolvePublicBranding(systemSettings);
+    const branding = req.publicBrand
+      ? resolveBrandPublicBranding(req.publicBrand)
+      : await resolvePublicBranding(systemSettings);
     res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Vary", "Host");
     res.json(branding);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read branding";
@@ -11019,7 +11056,8 @@ registerCommonApiRoutes(app, {
         accessRequestService.markActivatedFromInvite(organizationInviteId, userId)
     },
     systemSettings,
-    externalWebAccess
+    externalWebAccess,
+    publicBrands
   }),
   rbacAdminRouter: createRbacRouter({
     roles,
@@ -11055,6 +11093,7 @@ registerCommonApiRoutes(app, {
     securityDomainAccess,
     conversationSecurityReviewTest: (input) => conversationSecurityReview.testReview(input)
   }),
+  publicBrandAdminRouter: createPublicBrandAdminRouter(publicBrands),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
     requirePermission,
@@ -11140,7 +11179,8 @@ registerCommonApiRoutes(app, {
     knowledgeSets,
     storage: knowledgeSetStorage,
     policies: policyService,
-    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId)
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
+    publicBrands
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
   externalWebAccessMiddleware: createAuthenticatedExternalWebGate(externalWebAccess),
@@ -11194,7 +11234,8 @@ app.use("/api/admin", createAdminBillingRouter(billingService));
 app.use(
   "/api/portal",
   createPortalBillingRouter(billingService, {
-    subscriptionEntitlements
+    subscriptionEntitlements,
+    publicBrands
   })
 );
 

@@ -170,7 +170,7 @@ function inviteMembershipTypeLabel(value: string | null | undefined): string {
 }
 
 function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string; mode: AuthEntryMode }) {
-  const { branding } = useBranding();
+  const { brand, branding } = useBranding();
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   const [inviteLoading, setInviteLoading] = useState(Boolean(props.inviteToken));
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -367,7 +367,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             >
               {requestPending ? "Sending..." : "Continue with Email"}
             </button>
-            {!props.inviteToken ? (
+            {!props.inviteToken && brand.accessRequestEnabled ? (
               <button className="auth-modern-dropdown-link" onClick={() => replaceLocationPath("/access/apply")}>
                 Apply for Trial Access
               </button>
@@ -443,16 +443,18 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               trial access.
             </p>
             <div className="auth-access-modal-actions">
-              <button
-                type="button"
-                className="auth-modern-sso-btn auth-access-modal-primary"
-                onClick={() => {
-                  setAccessHelpOpen(false);
-                  replaceLocationPath("/access/apply");
-                }}
-              >
-                Apply for Trial Access
-              </button>
+              {brand.accessRequestEnabled ? (
+                <button
+                  type="button"
+                  className="auth-modern-sso-btn auth-access-modal-primary"
+                  onClick={() => {
+                    setAccessHelpOpen(false);
+                    replaceLocationPath("/access/apply");
+                  }}
+                >
+                  Apply for Trial Access
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="auth-modern-primary-btn"
@@ -478,10 +480,10 @@ function AppContent(props: {
   externalWebAccessLoading: boolean;
 }) {
   const auth = useAuth();
-  const { branding } = useBranding();
+  const { brand, branding } = useBranding();
   const adminEligible = useMemo(
-    () => canOpenAdmin(auth.user?.role, auth.activeOrganization?.type),
-    [auth.activeOrganization?.type, auth.user?.role]
+    () => !brand.externalOnly && canOpenAdmin(auth.user?.role, auth.activeOrganization?.type),
+    [auth.activeOrganization?.type, auth.user?.role, brand.externalOnly]
   );
   const [view, setView] = useState<AppShellView>(() => {
     if (typeof window === "undefined") return "portal";
@@ -531,12 +533,13 @@ function AppContent(props: {
     }
     setView("portal");
   };
-  const effectiveAuthMode: AuthEntryMode =
-    !props.inviteToken &&
-    !props.reviewRequestId &&
-    !props.aiResponseReviewId &&
-    isNeutralAuthEntryPath(props.pathname) &&
-    readPreferredAuthEntryMode() === "internal"
+  const effectiveAuthMode: AuthEntryMode = brand.externalOnly
+    ? "external"
+    : !props.inviteToken &&
+        !props.reviewRequestId &&
+        !props.aiResponseReviewId &&
+        isNeutralAuthEntryPath(props.pathname) &&
+        readPreferredAuthEntryMode() === "internal"
       ? "internal"
       : props.authMode;
   const isExternalWebActor =

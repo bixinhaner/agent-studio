@@ -38,7 +38,11 @@ function createServiceMock() {
   };
 }
 
-function buildApp(service: ReturnType<typeof createServiceMock>, actor: PortalActor) {
+function buildApp(
+  service: ReturnType<typeof createServiceMock>,
+  actor: PortalActor,
+  publicBrand?: { billingEnabled: boolean; subscriptionPlanIds: string[]; billingSuccessUrl?: string; billingCancelUrl?: string }
+) {
   const app = express();
   app.use(express.json());
   app.use(((req, _res, next) => {
@@ -64,7 +68,9 @@ function buildApp(service: ReturnType<typeof createServiceMock>, actor: PortalAc
     };
     next();
   }) as RequestHandler);
-  app.use(createPortalBillingRouter(service as unknown as BillingService));
+  app.use(createPortalBillingRouter(service as unknown as BillingService, {
+    publicBrands: publicBrand ? { getForOrganization: async () => publicBrand } as never : undefined
+  }));
   return app;
 }
 
@@ -102,5 +108,18 @@ describe("createPortalBillingRouter", () => {
         displayName: "Portal User"
       }
     });
+  });
+
+  it("rejects plans that are not assigned to the organization brand", async () => {
+    const service = createServiceMock();
+    const app = buildApp(
+      service,
+      { userType: "external_user", organizationType: "customer" },
+      { billingEnabled: true, subscriptionPlanIds: ["plan-ranley"] }
+    );
+
+    await request(app).post("/billing/checkout").send({ planId: "plan-bailey" }).expect(403);
+
+    expect(service.createPortalCheckout).not.toHaveBeenCalled();
   });
 });

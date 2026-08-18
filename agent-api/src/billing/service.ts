@@ -140,6 +140,12 @@ type BillingEmailPlanOption = {
   monthlyCompletedTurnLimit: number | null;
 };
 
+type BillingOrganizationBrand = {
+  platformName?: string;
+  billingPortalUrl?: string;
+  subscriptionPlanIds?: string[];
+};
+
 type StripeCustomerCandidate = {
   id: string;
   email: string | null;
@@ -634,6 +640,7 @@ export class BillingService {
       emailSender?: AuthEmailSender;
       notifications?: NotificationRecordRepository;
       resolveBrandName?: () => Promise<string>;
+      resolveOrganizationBrand?: (organizationId: string) => Promise<BillingOrganizationBrand | undefined>;
     }
   ) {}
 
@@ -1283,6 +1290,7 @@ export class BillingService {
     planId: string;
     promotionCode?: string | null;
     autoRenew?: boolean;
+    checkoutUrls?: { successUrl?: string; cancelUrl?: string };
   }) {
     const customer = await this.ensureBillingCustomerForOrganization(input);
     return this.createCheckout({
@@ -1292,7 +1300,8 @@ export class BillingService {
       planId: input.planId,
       promotionCode: input.promotionCode,
       autoRenew: input.autoRenew ?? customer.defaultAutoRenew,
-      source: "portal"
+      source: "portal",
+      checkoutUrls: input.checkoutUrls
     });
   }
 
@@ -1615,6 +1624,7 @@ export class BillingService {
     promotionCode?: string | null;
     autoRenew: boolean;
     source: string;
+    checkoutUrls?: { successUrl?: string; cancelUrl?: string };
   }) {
     const config = await this.resolveBillingConfig();
     const plan = await this.db.subscriptionPlan.findUnique({ where: { id: input.planId } });
@@ -1675,7 +1685,8 @@ export class BillingService {
       customer: input.customer,
       organization: input.organization,
       user: input.user,
-      mode: checkoutMode
+      mode: checkoutMode,
+      checkoutUrls: input.checkoutUrls
     });
     const updated = await this.db.billingOrder.update({
       where: { id: order.id },
@@ -1958,13 +1969,14 @@ export class BillingService {
     organization: BillingOrganizationInput;
     user: BillingUserInput;
     mode: string;
+    checkoutUrls?: { successUrl?: string; cancelUrl?: string };
   }): Promise<StripeCheckoutSession> {
     const config = await this.resolveBillingConfig();
     if (!config.stripeSecretKey) {
       throw new Error("Stripe is not configured");
     }
-    const successUrl = this.resolveSuccessUrl(config);
-    const cancelUrl = this.resolveCancelUrl(config);
+    const successUrl = trimOrUndefined(input.checkoutUrls?.successUrl) ?? this.resolveSuccessUrl(config);
+    const cancelUrl = trimOrUndefined(input.checkoutUrls?.cancelUrl) ?? this.resolveCancelUrl(config);
     if (!successUrl || !cancelUrl) {
       throw new Error("Billing success/cancel URLs are not configured");
     }
@@ -2447,6 +2459,7 @@ export class BillingService {
         const renewalDate = billingDateLabel(autoRenewal?.nextRenewalAt ?? grant.expiresAt);
         const variables = await this.buildEmailVariables({
           config,
+          organizationId: grant.principalId,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
           planName: grant.plan?.name ?? "Agent Studio",
           expiresAtLocal: accessEndDate,
@@ -2558,6 +2571,7 @@ export class BillingService {
         const renewalDate = billingDateLabel(renewal.lastPaymentFailedAt ?? renewal.nextRenewalAt);
         const variables = await this.buildEmailVariables({
           config,
+          organizationId: renewal.organizationId,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
           planName: plan?.name ?? "Agent Studio",
           expiresAtLocal: renewalDate,
@@ -2652,6 +2666,7 @@ export class BillingService {
 
   private async buildEmailVariables(input: {
     config: BillingResolvedConfig;
+    organizationId?: string;
     companyName: string | null | undefined;
     planName: string | null | undefined;
     expiresAtLocal: string;
@@ -2665,9 +2680,20 @@ export class BillingService {
     currentPlanName?: string | null;
     planOptions: BillingEmailPlanOption[];
   }): Promise<Record<string, string>> {
-    const brandName = await this.resolveBrandName();
+    let organizationBrand: BillingOrganizationBrand | undefined;
+    if (input.organizationId) {
+      try {
+        organizationBrand = await this.options.resolveOrganizationBrand?.(input.organizationId);
+      } catch {
+        organizationBrand = undefined;
+      }
+    }
+    const brandName = trimOrUndefined(organizationBrand?.platformName) ?? await this.resolveBrandName();
+    const allowedPlanIds = new Set(organizationBrand?.subscriptionPlanIds ?? []);
     const planComparison = billingPlanComparison({
-      plans: input.planOptions,
+      plans: allowedPlanIds.size
+        ? input.planOptions.filter((plan) => allowedPlanIds.has(plan.id))
+        : input.planOptions,
       scenario: input.scenario,
       currentPlanName: input.currentPlanName
     });
@@ -2683,7 +2709,7 @@ export class BillingService {
       renewal_summary: trimOrUndefined(input.renewalSummary) ?? "Open billing to review your access and renewal settings.",
       plan_options_text: planComparison.text,
       plan_options_html: planComparison.html,
-      renew_url: this.resolvePortalBillingUrl(input.config),
+      renew_url: trimOrUndefined(organizationBrand?.billingPortalUrl) ?? this.resolvePortalBillingUrl(input.config),
       amount_due: input.amountDue
     };
   }

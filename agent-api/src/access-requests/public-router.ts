@@ -25,7 +25,7 @@ const publicAccessRequestSchema = z.object({
     .nullable()
     .transform((value) => value ?? ""),
   snNumber: z.string().trim().min(1, "At least one device SN is required").max(500),
-  salesContactEmail: z.string().trim().min(1, "Baicells sales contact is required").max(200),
+  salesContactEmail: z.string().trim().min(1, "Sales contact is required").max(200),
   customerNote: z.string().trim().max(4000).optional()
 });
 
@@ -80,9 +80,14 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
 
   router.post("/", withProofFiles, async (req: Request, res: Response) => {
     try {
+      if (req.publicBrand && !req.publicBrand.accessRequestEnabled) {
+        res.status(404).json({ detail: "Access requests are not available on this brand" });
+        return;
+      }
       const input = publicAccessRequestSchema.parse(req.body ?? {});
       const created = await service.submitPublicRequest({
         ...input,
+        publicBrandId: req.publicBrand?.id ?? null,
         purchaseProofFiles: proofFilesFromRequest(req)
       });
       res.status(201).json(created);
@@ -98,7 +103,7 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
         res.status(404).json({ detail: "Access request does not exist" });
         return;
       }
-      res.json({ request: await service.getPublicRequestByToken(token) });
+      res.json({ request: await service.getPublicRequestByToken(token, req.publicBrand?.id ?? null) });
     } catch (error) {
       res.status(404).json({ detail: detailFromError(error) });
     }
@@ -112,7 +117,7 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
         res.status(404).json({ detail: "Purchase proof file does not exist" });
         return;
       }
-      sendAttachmentFile(res, await service.getPublicPurchaseProofFile(token, attachmentId));
+      sendAttachmentFile(res, await service.getPublicPurchaseProofFile(token, attachmentId, req.publicBrand?.id ?? null));
     } catch (error) {
       res.status(404).json({ detail: detailFromError(error) });
     }
@@ -129,6 +134,7 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
       res.json({
         request: await service.resubmitPublicRequest(token, {
           ...input,
+          publicBrandId: req.publicBrand?.id ?? null,
           purchaseProofFiles: proofFilesFromRequest(req)
         })
       });

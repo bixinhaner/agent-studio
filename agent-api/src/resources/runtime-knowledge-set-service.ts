@@ -1,3 +1,5 @@
+import type { PublicBrandService } from "../public-brands/service.js";
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -166,6 +168,7 @@ export class RuntimeKnowledgeSetService {
       storage: KnowledgeSetStorageLike;
       resourceAccessLogs?: ResourceAccessLogServiceLike;
       securityAlerts?: SecurityAlertServiceLike;
+      publicBrands?: Pick<PublicBrandService, "getForOrganization">;
     }
   ) {}
 
@@ -183,11 +186,14 @@ export class RuntimeKnowledgeSetService {
       throw new Error("Session workspace does not exist or is invalid");
     }
 
-    const selectedKnowledgeSetIds = resolveSelectedKnowledgeSetIds({
-      workspacePath,
-      knowledgeSetIds: input.knowledgeSetIds,
-      codexRunConfig: input.codexRunConfig
-    });
+    const brand = await this.options.publicBrands?.getForOrganization(input.organizationId);
+    const selectedKnowledgeSetIds = brand
+      ? [...brand.knowledgeSetIds]
+      : resolveSelectedKnowledgeSetIds({
+          workspacePath,
+          knowledgeSetIds: input.knowledgeSetIds,
+          codexRunConfig: input.codexRunConfig
+        });
 
     const knowledgeSetById = new Map(
       (await this.options.knowledgeSets.list())
@@ -215,14 +221,16 @@ export class RuntimeKnowledgeSetService {
     }
 
     const allowedKnowledgeSetIds = new Set(
-      await this.options.policies.filterAllowedResources({
-        userId: input.userId,
-        roleIds: input.roleIds,
-        departmentIds: input.departmentIds,
-        organizationId: input.organizationId,
-        resourceType: "knowledge_set",
-        candidateIds: selectedKnowledgeSetIds
-      })
+      brand
+        ? selectedKnowledgeSetIds
+        : await this.options.policies.filterAllowedResources({
+            userId: input.userId,
+            roleIds: input.roleIds,
+            departmentIds: input.departmentIds,
+            organizationId: input.organizationId,
+            resourceType: "knowledge_set",
+            candidateIds: selectedKnowledgeSetIds
+          })
     );
     const deniedKnowledgeSetId = selectedKnowledgeSetIds.find((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId));
     if (deniedKnowledgeSetId) {

@@ -65,13 +65,33 @@ export function createCurrentUserMiddleware(options: {
         return;
       }
 
-      const activeMemberships = await options.memberships.listActiveForUser(user.id);
+      const activeMemberships = (await options.memberships.listActiveForUser(user.id)).filter((membership) =>
+        req.publicBrand
+          ? membership.organization?.publicBrandId === req.publicBrand.id
+          : !membership.organization?.publicBrandId
+      );
       let activeMembership =
         session.activeOrganizationId
           ? await options.memberships.getActiveForUserAndOrganization(user.id, session.activeOrganizationId)
           : undefined;
+      if (
+        activeMembership &&
+        (req.publicBrand
+          ? activeMembership.organization?.publicBrandId !== req.publicBrand.id
+          : Boolean(activeMembership.organization?.publicBrandId))
+      ) {
+        activeMembership = undefined;
+      }
       if (!activeMembership) {
         activeMembership = activeMemberships[0];
+      }
+
+      if (!activeMembership) {
+        req.currentUser = undefined;
+        req.currentOrganization = undefined;
+        req.currentMembership = undefined;
+        next();
+        return;
       }
 
       req.currentUser = user;

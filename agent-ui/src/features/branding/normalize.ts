@@ -1,6 +1,7 @@
 import {
   DEFAULT_BRANDING,
   DEFAULT_ADMIN_CONSOLE_CONFIG,
+  DEFAULT_BRAND_IDENTITY,
   DEFAULT_PORTAL_BEHAVIOR,
   type PublicBranding,
   type PublicBrandingResponse,
@@ -25,7 +26,13 @@ export function normalizeBranding(value: Partial<PublicBranding> | null | undefi
     loginBackgroundUrl: resolveBrandingAssetUrl(asString(value?.loginBackgroundUrl)),
     portalWelcomeIllustrationUrl: resolveBrandingAssetUrl(asString(value?.portalWelcomeIllustrationUrl)),
     assistantName: asString(value?.assistantName) || DEFAULT_BRANDING.assistantName,
-    assistantAvatarUrl: resolveBrandingAssetUrl(asString(value?.assistantAvatarUrl))
+    assistantAvatarUrl: resolveBrandingAssetUrl(asString(value?.assistantAvatarUrl)),
+    primaryColor: /^#[0-9a-f]{6}$/i.test(asString(value?.primaryColor))
+      ? asString(value?.primaryColor).toUpperCase()
+      : DEFAULT_BRANDING.primaryColor,
+    accentColor: /^#[0-9a-f]{6}$/i.test(asString(value?.accentColor))
+      ? asString(value?.accentColor).toUpperCase()
+      : DEFAULT_BRANDING.accentColor
   };
 }
 
@@ -76,6 +83,19 @@ export function normalizeBrandingResponse(
 ): PublicBrandingResponse {
   return {
     branding: normalizeBranding(value?.branding),
+    brand: {
+      id: asString(value?.brand?.id) || undefined,
+      key: asString(value?.brand?.key) || DEFAULT_BRAND_IDENTITY.key,
+      custom: typeof value?.brand?.custom === "boolean" ? value.brand.custom : DEFAULT_BRAND_IDENTITY.custom,
+      externalOnly:
+        typeof value?.brand?.externalOnly === "boolean" ? value.brand.externalOnly : DEFAULT_BRAND_IDENTITY.externalOnly,
+      accessRequestEnabled:
+        typeof value?.brand?.accessRequestEnabled === "boolean"
+          ? value.brand.accessRequestEnabled
+          : DEFAULT_BRAND_IDENTITY.accessRequestEnabled,
+      billingEnabled:
+        typeof value?.brand?.billingEnabled === "boolean" ? value.brand.billingEnabled : DEFAULT_BRAND_IDENTITY.billingEnabled
+    },
     adminConsole: {
       showOperationsAndConversationMenus:
         typeof value?.adminConsole?.showOperationsAndConversationMenus === "boolean"

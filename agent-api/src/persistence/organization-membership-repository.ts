@@ -21,6 +21,7 @@ type OrganizationRow = {
   name: string;
   type: string | null;
   status: string | null;
+  publicBrandId: string | null;
   ownerUserId: string | null;
   settingsJson: unknown;
   createdAt: Date | string;
@@ -81,6 +82,7 @@ function mapOrganization(row: OrganizationRow): OrganizationRecord {
     name: row.name,
     type: trimOrUndefined(row.type) ?? "customer",
     status: trimOrUndefined(row.status) ?? "active",
+    publicBrandId: trimOrUndefined(row.publicBrandId),
     ownerUserId: trimOrUndefined(row.ownerUserId),
     settingsJson: row.settingsJson ?? undefined,
     createdAt: toIsoString(row.createdAt),

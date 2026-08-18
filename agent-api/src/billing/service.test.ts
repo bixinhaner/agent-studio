@@ -600,7 +600,14 @@ describe("BillingService Stripe admin settings", () => {
       db,
       config: { ...createBillingConfig(), billingEmailEnabled: true },
       emailSender,
-      resolveBrandName: async () => "Bailey"
+      resolveBrandName: async () => "Bailey",
+      resolveOrganizationBrand: async (organizationId) => organizationId === "org-1"
+        ? {
+            platformName: "Ranley",
+            billingPortalUrl: "https://ranley.cloud-ran.ai/?billing=renew",
+            subscriptionPlanIds: ["plan-plus"]
+          }
+        : undefined
     });
 
     await expect(service.runReminderSweep({ now: new Date("2026-06-12T00:00:00.000Z") })).resolves.toMatchObject({
@@ -613,9 +620,11 @@ describe("BillingService Stripe admin settings", () => {
     expect(findManyArgs.where.expiresAt.lt.toISOString()).toBe("2026-06-12T00:00:00.000Z");
     const html = send.mock.calls[0]?.[0]?.html ?? "";
     expect(send.mock.calls[0]?.[0]?.to).toEqual(["customer@example.com"]);
+    expect(send.mock.calls[0]?.[0]?.subject).toBe("Ranley expired");
     expect(html).toContain("Customer &lt;Inc&gt;");
     expect(html).toContain("This access did not renew automatically. Choose a plan to restore access.");
-    expect(html).toContain("https://bailey.baicells.com/?billing=renew");
+    expect(html).toContain("https://ranley.cloud-ran.ai/?billing=renew");
+    expect(`${send.mock.calls[0]?.[0]?.text}${html}`).not.toContain("Bailey");
   });
 
   it("only lists active priced plans as billable", async () => {

@@ -200,7 +200,7 @@ import {
   switchWorkbenchTab,
   toggleSessionRail
 } from "./workbench/layout-state";
-import { PORTAL_ANTD_THEME } from "./workbench/theme";
+import { createPortalAntdTheme } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
@@ -1296,7 +1296,7 @@ const DraftOnlyThreadWelcome: FC = () => {
   const { branding } = useBranding();
   const { locale, t } = usePortalI18n();
   const portalWelcomeIllustrationUrl = branding.portalWelcomeIllustrationUrl.trim();
-  const assistantDisplayName = branding.assistantName.trim() || "Bailey";
+  const assistantDisplayName = branding.assistantName.trim() || "AI Assistant";
 
   return (
     <ThreadPrimitive.Empty>
@@ -6680,7 +6680,11 @@ export function PortalShell(props: {
   onExitTraining?: () => void;
 }) {
   const auth = useAuth();
-  const { branding, behavior } = useBranding();
+  const { brand, branding, behavior } = useBranding();
+  const portalAntdTheme = useMemo(
+    () => createPortalAntdTheme(branding.primaryColor, branding.accentColor),
+    [branding.accentColor, branding.primaryColor]
+  );
   const { locale, intlLocale, antdLocale, t } = usePortalI18n();
   const trainingReadOnly = props.trainingReadOnly ?? false;
   const workspaceDataSource: PortalWorkspaceDataSource = useMemo(
@@ -6913,6 +6917,7 @@ export function PortalShell(props: {
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
   const [showProcessTrace, setShowProcessTrace] = useState(() => resolveShowProcessTracePreference(portalPreferenceUser));
+  const effectiveShowProcessTrace = brand.externalOnly ? false : showProcessTrace;
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(() =>
     resolveCollapseFinalTraceOnDonePreference(portalPreferenceUser)
   );
@@ -7061,7 +7066,7 @@ export function PortalShell(props: {
   localeRef.current = locale;
   runtimeOptionsRef.current = runtimeOptions;
   runtimeModeRef.current = runtimeMode;
-  showProcessTraceRef.current = showProcessTrace;
+  showProcessTraceRef.current = effectiveShowProcessTrace;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
   runningStageSecondaryTextRef.current = runningStageSecondaryText;
@@ -7306,7 +7311,8 @@ export function PortalShell(props: {
   const [billingReturnNotice, setBillingReturnNotice] = useState<PortalBillingReturnNotice | null>(null);
   const [subscriptionReminderModalOpen, setSubscriptionReminderModalOpen] = useState(false);
   const [dismissedSubscriptionReminderKey, setDismissedSubscriptionReminderKey] = useState("");
-  const canUseCustomerBilling = isExternalPortalUser && auth.activeOrganization?.type === "customer";
+  const canUseCustomerBilling =
+    brand.billingEnabled && isExternalPortalUser && auth.activeOrganization?.type === "customer";
   const openCustomerBillingPanel = useCallback(() => {
     if (!canUseCustomerBilling) return;
     setBillingPanelOpen(true);
@@ -8574,7 +8580,7 @@ export function PortalShell(props: {
         const latestUserMessageForPersistence = latestUserMessage
           ? sanitizeMessageForPersistence(latestUserMessage.message)
           : undefined;
-        const isSkillCreationRequest = isSkillCreationIntent(prompt);
+        const isSkillCreationRequest = !isExternalPortalUser && isSkillCreationIntent(prompt);
         const runtimePrompt = isSkillCreationRequest ? buildSkillCreatorReviewPrompt(prompt) : prompt;
 
         const threadId = await resolveRunThreadId({
@@ -10626,7 +10632,7 @@ export function PortalShell(props: {
         <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
         <RunningStageTextContext.Provider value={runningStageContextValue}>
         <MobileWorkbenchContext.Provider value={isMobile}>
-          <ConfigProvider theme={PORTAL_ANTD_THEME} locale={antdLocale}>
+          <ConfigProvider theme={portalAntdTheme} locale={antdLocale}>
             <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>
               <PortalTopBar
                 sessionRailCollapsed={layoutState.isSessionRailCollapsed}
@@ -10995,7 +11001,7 @@ export function PortalShell(props: {
                     <span className="field-label">{t("settings.showTrace")}</span>
                     <input
                       type="checkbox"
-                      checked={showProcessTrace}
+                      checked={effectiveShowProcessTrace}
                       onChange={(e) => void handleShowProcessTraceChange(e.target.checked)}
                       disabled={portalPreferenceSaving}
                     />
@@ -11008,7 +11014,7 @@ export function PortalShell(props: {
                       type="checkbox"
                       checked={collapseFinalTraceOnDone}
                       onChange={(e) => void handleCollapseFinalTraceOnDoneChange(e.target.checked)}
-                      disabled={!showProcessTrace || portalPreferenceSaving}
+                      disabled={!effectiveShowProcessTrace || portalPreferenceSaving}
                     />
                     <span className="field-help">{t("settings.collapseTraceHelp")}</span>
                   </label>

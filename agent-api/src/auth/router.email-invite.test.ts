@@ -30,7 +30,12 @@ type TestUserState = {
   updatedAt: string;
 };
 
-function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?: boolean; maintenanceEnabled?: boolean }) {
+function createEmailAuthHarness(input?: {
+  invites?: InviteState[];
+  existingUser?: boolean;
+  maintenanceEnabled?: boolean;
+  publicBrandId?: string;
+}) {
   const email = "customer@example.com";
   const organization = {
     id: "org-1",
@@ -38,6 +43,7 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
     name: "Customer Org",
     type: "customer",
     status: "active",
+    publicBrandId: input?.publicBrandId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -59,6 +65,7 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
     invites: [...(input?.invites ?? [])],
     challenges: [] as Array<{
       id: string;
+      publicBrandId?: string;
       channel: string;
       targetRef: string;
       challengeHash: string;
@@ -230,6 +237,7 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
       async create(challenge: Record<string, unknown>) {
         const next = {
           id: `challenge-${state.challenges.length + 1}`,
+          publicBrandId: challenge.publicBrandId ? String(challenge.publicBrandId) : undefined,
           channel: String(challenge.channel),
           targetRef: String(challenge.targetRef),
           challengeHash: String(challenge.challengeHash),
@@ -243,9 +251,10 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
         state.challenges.push(next);
         return next;
       },
-      async listActive(query: { channel: string; targetRef: string; purpose: string }) {
+      async listActive(query: { channel: string; targetRef: string; purpose: string; publicBrandId?: string | null }) {
         return state.challenges.filter(
           (item) =>
+            item.publicBrandId === (query.publicBrandId || undefined) &&
             item.channel === query.channel &&
             item.targetRef === query.targetRef &&
             item.purpose === query.purpose &&
@@ -275,6 +284,16 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
 
   const app = express();
   app.use(express.json());
+  if (input?.publicBrandId) {
+    app.use((req, _res, next) => {
+      req.publicBrand = {
+        id: input.publicBrandId!,
+        platformName: "Ranley",
+        externalOnly: true
+      } as never;
+      next();
+    });
+  }
   app.use("/api/auth", createAuthRouter(options as never));
   return { app, state, email, organization, markActivatedFromInvite };
 }
@@ -355,6 +374,26 @@ describe("email invitation sign-in", () => {
     expect(requested.body.challenge_id).toBe("challenge-1");
     expect(harness.state.challenges[0]).toMatchObject({ purpose: "email_sign_in" });
     expect(harness.state.challenges[0].inviteId).toBeUndefined();
+  });
+
+  it("keeps email verification codes isolated to the requesting public brand", async () => {
+    const harness = createEmailAuthHarness({ existingUser: true, publicBrandId: "brand-ranley" });
+
+    const requested = await request(harness.app).post("/api/auth/email/request").send({ email: harness.email });
+
+    expect(requested.status).toBe(200);
+    expect(harness.state.challenges[0]).toMatchObject({
+      purpose: "email_sign_in",
+      publicBrandId: "brand-ranley"
+    });
+
+    harness.state.challenges[0]!.publicBrandId = "brand-bailey";
+    const verified = await request(harness.app)
+      .post("/api/auth/email/verify")
+      .send({ email: harness.email, code: harness.state.sentCode });
+
+    expect(verified.status).toBe(400);
+    expect(verified.body.detail).toBe("Verification code is invalid or expired");
   });
 
   it("does not choose an organization when multiple active invitations exist", async () => {

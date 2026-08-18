@@ -2,6 +2,7 @@ import { normalizeBrandingResponse } from "./normalize";
 import {
   DEFAULT_BRANDING,
   DEFAULT_ADMIN_CONSOLE_CONFIG,
+  DEFAULT_BRAND_IDENTITY,
   DEFAULT_PORTAL_BEHAVIOR,
   type PublicBranding,
   type PublicBrandingResponse
@@ -13,6 +14,7 @@ export const BRANDING_STORAGE_KEY = "agent-studio-public-branding";
 export function fallbackBrandingResponse(): PublicBrandingResponse {
   return {
     branding: DEFAULT_BRANDING,
+    brand: DEFAULT_BRAND_IDENTITY,
     adminConsole: DEFAULT_ADMIN_CONSOLE_CONFIG,
     behavior: DEFAULT_PORTAL_BEHAVIOR
   };
@@ -52,6 +54,8 @@ export function applyDocumentBranding(branding: PublicBranding): void {
   document.title = branding.platformName.trim() || DEFAULT_BRANDING.platformName;
   setFaviconAsset(branding.iconUrl.trim() || branding.logoUrl.trim());
   setAuthBackgroundAsset(getAuthBackgroundAssetUrl(branding));
+  document.documentElement.style.setProperty("--brand-primary", branding.primaryColor);
+  document.documentElement.style.setProperty("--brand-accent", branding.accentColor);
 }
 
 export function readStoredBrandingResponse(): PublicBrandingResponse | null {

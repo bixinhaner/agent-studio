@@ -11,6 +11,7 @@ import type { InstalledPluginRecord } from "../codex-plugins/installed-plugin-se
 import { resolveSkillCatalogPresentation, selectCatalogEntry } from "../skill-catalog/service.js";
 import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
 import type { PortalSkillPresentation } from "./skill-presentation.js";
+import type { PublicBrandService } from "../public-brands/service.js";
 
 export type PortalRuntimeOptionRunProfile = {
   id: string;
@@ -100,6 +101,7 @@ type RuntimeOptionServiceDependencies = {
   skillCatalog?: {
     listPublished(input: { organizationId?: string }): Promise<SkillCatalogEntryRecord[]>;
   };
+  publicBrands?: Pick<PublicBrandService, "getForOrganization">;
 };
 
 type RuntimeOptionRequest = {
@@ -339,7 +341,8 @@ export class PortalRuntimeOptionService {
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, installedPlugins, recentSkillIds, catalogEntries] = await Promise.all([
+    const [brand, modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, installedPlugins, recentSkillIds, catalogEntries] = await Promise.all([
+      this.deps.publicBrands?.getForOrganization(input.organizationId) ?? Promise.resolve(undefined),
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
       this.deps.skillPackages.list(),
@@ -352,17 +355,23 @@ export class PortalRuntimeOptionService {
     ]);
 
     const activeVisibleModeRows = modeRows.filter(
-      (mode) => isActive(mode.status) && mode.visibleToUsers && matchesOrganization(mode.organizationId, input.organizationId)
+      (mode) =>
+        isActive(mode.status) &&
+        mode.visibleToUsers &&
+        matchesOrganization(mode.organizationId, input.organizationId) &&
+        (!brand || mode.id === brand.agentModeId)
     );
     const allowedModeIds = new Set(
-      await this.deps.policies.filterAllowedResources({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        roleIds: input.roleIds,
-        departmentIds: input.departmentIds,
-        resourceType: "agent_mode",
-        candidateIds: activeVisibleModeRows.map((mode) => mode.id)
-      })
+      brand
+        ? activeVisibleModeRows.map((mode) => mode.id)
+        : await this.deps.policies.filterAllowedResources({
+            organizationId: input.organizationId,
+            userId: input.userId,
+            roleIds: input.roleIds,
+            departmentIds: input.departmentIds,
+            resourceType: "agent_mode",
+            candidateIds: activeVisibleModeRows.map((mode) => mode.id)
+          })
     );
 
     const runProfileMap = new Map(runProfileRows.map((runProfile) => [runProfile.id, runProfile] as const));
@@ -391,14 +400,16 @@ export class PortalRuntimeOptionService {
       }
 
       const authorizedRunProfileIds = new Set(
-        await this.deps.policies.filterAllowedResources({
-          organizationId: input.organizationId,
-          userId: input.userId,
-          roleIds: input.roleIds,
-          departmentIds: input.departmentIds,
-          resourceType: "run_profile",
-          candidateIds: [runProfile.id]
-        })
+        brand
+          ? [runProfile.id]
+          : await this.deps.policies.filterAllowedResources({
+              organizationId: input.organizationId,
+              userId: input.userId,
+              roleIds: input.roleIds,
+              departmentIds: input.departmentIds,
+              resourceType: "run_profile",
+              candidateIds: [runProfile.id]
+            })
       );
       if (!authorizedRunProfileIds.has(runProfile.id)) {
         continue;

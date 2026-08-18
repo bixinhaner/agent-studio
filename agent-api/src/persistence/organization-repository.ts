@@ -4,6 +4,7 @@ export type OrganizationRecord = {
   name: string;
   type: string;
   status: string;
+  publicBrandId?: string;
   ownerUserId?: string;
   settingsJson?: unknown;
   createdAt: string;
@@ -16,6 +17,7 @@ type OrganizationRow = {
   name: string;
   type: string | null;
   status: string | null;
+  publicBrandId: string | null;
   ownerUserId: string | null;
   settingsJson: unknown;
   createdAt: Date | string;
@@ -56,6 +58,7 @@ function mapOrganization(row: OrganizationRow): OrganizationRecord {
     name: row.name,
     type: trimOrUndefined(row.type) ?? "customer",
     status: trimOrUndefined(row.status) ?? "active",
+    publicBrandId: trimOrUndefined(row.publicBrandId),
     ownerUserId: trimOrUndefined(row.ownerUserId),
     settingsJson: row.settingsJson ?? undefined,
     createdAt: toIsoString(row.createdAt),
@@ -106,6 +109,7 @@ export class OrganizationRepository {
     name: string;
     type?: string;
     status?: string;
+    publicBrandId?: string | null;
     ownerUserId?: string | null;
     settingsJson?: unknown;
   }): Promise<OrganizationRecord> {
@@ -115,6 +119,7 @@ export class OrganizationRepository {
         name: input.name.trim(),
         type: trimOrUndefined(input.type) ?? "customer",
         status: trimOrUndefined(input.status) ?? "active",
+        publicBrandId: trimOrUndefined(input.publicBrandId ?? undefined) ?? null,
         ownerUserId: trimOrUndefined(input.ownerUserId ?? undefined) ?? null,
         settingsJson: input.settingsJson ?? null
       }
@@ -126,6 +131,7 @@ export class OrganizationRepository {
     name?: string;
     type?: string;
     status?: string;
+    publicBrandId?: string | null;
     ownerUserId?: string | null;
     settingsJson?: unknown;
   }): Promise<OrganizationRecord> {
@@ -143,6 +149,10 @@ export class OrganizationRepository {
         name: input.name === undefined ? existing.name : input.name.trim(),
         type: input.type === undefined ? existing.type : trimOrUndefined(input.type) ?? existing.type,
         status: input.status === undefined ? existing.status : trimOrUndefined(input.status) ?? existing.status,
+        publicBrandId:
+          input.publicBrandId === undefined
+            ? existing.publicBrandId
+            : trimOrUndefined(input.publicBrandId ?? undefined) ?? null,
         ownerUserId:
           input.ownerUserId === undefined
             ? existing.ownerUserId

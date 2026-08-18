@@ -15,6 +15,7 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  Palette,
   Search,
   Settings,
   ShieldCheck,
@@ -80,6 +81,9 @@ const IntegrationCenterShellLazy = lazy(() =>
 const SystemSettingsShellLazy = lazy(() =>
   import("../system-settings/SystemSettingsShell").then((module) => ({ default: module.SystemSettingsShell }))
 );
+const BrandManagementViewLazy = lazy(() =>
+  import("../public-brands/BrandManagementView").then((module) => ({ default: module.BrandManagementView }))
+);
 
 type AdminConsoleSection = AdminSection | "broadcasts";
 type AdminConsoleGroup = "operations" | "governance" | "runtime";
@@ -129,6 +133,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "codex-memory",
   "skill-drafts",
   "integrations",
+  "brands",
   "system-settings"
 ];
 
@@ -282,6 +287,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "runtime",
     keywords: ["集成", "dingtalk", "zendesk"],
     icon: <Component size={18} />
+  },
+  brands: {
+    id: "brands",
+    title: "品牌入口",
+    description: "配置外部品牌域名、界面、能力、套餐和客户归属。",
+    scope: "多品牌入口与客户分流",
+    cadence: "按品牌上线与变更维护",
+    group: "runtime",
+    keywords: ["品牌", "域名", "入口", "Ranley", "branding"],
+    icon: <Palette size={18} />
   },
   "system-settings": {
     id: "system-settings",
@@ -464,6 +479,12 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <SystemSettingsShellLazy />
+        </Suspense>
+      );
+    case "brands":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <BrandManagementViewLazy />
         </Suspense>
       );
     case "rbac":

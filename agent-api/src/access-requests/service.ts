@@ -16,6 +16,7 @@ import type { SubscriptionGrantRepository } from "../persistence/subscription-gr
 import type { SubscriptionPlanRecord, SubscriptionPlanRepository } from "../persistence/subscription-plan-repository.js";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 import type { PurchaseProofStorage, PurchaseProofUploadFile } from "./purchase-proof-storage.js";
+import type { PublicBrandService } from "../public-brands/service.js";
 
 export type AccessRequestStatus =
   | "submitted"
@@ -55,6 +56,7 @@ export type AccessRequestReviewDecisionResult = {
 };
 
 export type AccessRequestPublicFormInput = {
+  publicBrandId?: string | null;
   applicantEmail: string;
   contactName: string;
   companyName: string;
@@ -116,6 +118,7 @@ export type AccessRequestProvisionInput = {
 
 export type AdminAccessRequestSummary = {
   id: string;
+  publicBrand: { id: string; key: string; name: string } | null;
   requestType: string;
   commercialIntent: string;
   status: string;
@@ -238,6 +241,7 @@ type AccessRequestServiceOptions = {
   policies?: AccessRequestPolicyRepository;
   emailSender: AuthEmailSender;
   appBaseUrl?: string;
+  publicBrands?: Pick<PublicBrandService, "getById">;
   accessRequestConfig: {
     internalEmailDomains: string[];
     publicEmailBlocklistExtra: string[];
@@ -687,6 +691,19 @@ function attachmentToView(
 }
 
 export function createAccessRequestService(options: AccessRequestServiceOptions) {
+  async function requestBrand(request: Pick<AccessRequestRecord, "publicBrandId">) {
+    return options.publicBrands?.getById(request.publicBrandId);
+  }
+
+  async function requestBaseUrl(request: Pick<AccessRequestRecord, "publicBrandId">): Promise<string | undefined> {
+    return trimOrUndefined((await requestBrand(request))?.primaryBaseUrl) ?? trimOrUndefined(options.appBaseUrl);
+  }
+
+  function ensurePublicBrandMatch(request: Pick<AccessRequestRecord, "publicBrandId">, publicBrandId?: string | null) {
+    if (trimOrUndefined(request.publicBrandId) !== trimOrUndefined(publicBrandId ?? undefined)) {
+      throw new Error("Access request does not exist");
+    }
+  }
   async function listPurchaseProofViews(
     request: AccessRequestRecord,
     route: "admin" | "public" | "reviewer"
@@ -824,14 +841,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     request: AccessRequestRecord,
     attachmentRoute: "admin" | "reviewer" = "admin"
   ): Promise<AdminAccessRequestDetail> {
-    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments] = await Promise.all([
+    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand] = await Promise.all([
       options.reviewers.listForRequest(request.id),
       options.events.listForRequest(request.id),
       resolveRelatedUsers(options.users, [request.ownerUserId ?? "", request.targetUserId ?? ""]),
       resolveOrganizationMap(options.organizations, [request.targetOrganizationId ?? ""]),
       resolvePlanMap(options.subscriptionPlans, [request.requestedPlanId ?? "", request.approvedPlanId ?? ""]),
       loadInternalDirectory(),
-      listPurchaseProofViews(request, attachmentRoute)
+      listPurchaseProofViews(request, attachmentRoute),
+      requestBrand(request)
     ]);
 
     const owner = request.ownerUserId ? ownerMap.get(request.ownerUserId) ?? null : null;
@@ -841,6 +859,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
 
     return {
       id: request.id,
+      publicBrand: brand ? { id: brand.id, key: brand.key, name: brand.name } : null,
       requestType: request.requestType,
       commercialIntent: request.commercialIntent,
       status: request.status,
@@ -899,7 +918,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       adminNote: request.adminNote,
       reviewSummary: request.reviewSummary,
       rejectionReason: request.rejectionReason,
-      publicAccessUrl: buildUrl(options.appBaseUrl, `/access/apply/${request.publicToken}`),
+      publicAccessUrl: buildUrl(await requestBaseUrl(request), `/access/apply/${request.publicToken}`),
       reviewersList: reviewers.map((reviewer) => ({
         id: reviewer.id,
         reviewerEmail: reviewer.reviewerEmail,
@@ -929,8 +948,10 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     const targetOrganization = request.targetOrganizationId ? orgMap.get(request.targetOrganizationId) ?? null : null;
     const requestedPlan = request.requestedPlanId ? planMap.get(request.requestedPlanId) ?? null : null;
     const approvedPlan = request.approvedPlanId ? planMap.get(request.approvedPlanId) ?? null : null;
+    const brand = await requestBrand(request);
     return {
       id: request.id,
+      publicBrand: brand ? { id: brand.id, key: brand.key, name: brand.name } : null,
       requestType: request.requestType,
       commercialIntent: request.commercialIntent,
       status: request.status,
@@ -1005,7 +1026,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const poNumber = trimOrUndefined(input.poNumber) ?? "";
       const snNumber = trimOrUndefined(input.snNumber);
       if (!contactName || !companyName || !countryRegion || !salesContact || !snNumber) {
-        throw new Error("Contact name, company, country, Baicells sales contact, and at least one device SN are required");
+        throw new Error("Contact name, company, country, sales contact, and at least one device SN are required");
       }
       if (!purchaseProofFiles.length) {
         throw new Error("Purchase proof file is required");
@@ -1019,6 +1040,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
 
       const rawToken = issuePublicToken();
       const request = await options.requests.create({
+        publicBrandId: input.publicBrandId ?? null,
         requestType: "trial",
         commercialIntent: "trial",
         status: "submitted",
@@ -1057,7 +1079,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         `${companyName} submitted a trial access request.`
       );
 
-      const publicLink = buildUrl(options.appBaseUrl, `/access/apply/${rawToken}`);
+      const publicLink = buildUrl(await requestBaseUrl(request), `/access/apply/${rawToken}`);
       await options.emailSender.send({
         to: applicantEmail,
         subject: `We received your access request for ${companyName}`,
@@ -1094,18 +1116,19 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       };
     },
 
-    async getPublicRequestByToken(rawToken: string): Promise<PublicAccessRequestView> {
+    async getPublicRequestByToken(rawToken: string, publicBrandId?: string | null): Promise<PublicAccessRequestView> {
       const request = await options.requests.getByPublicToken(rawToken);
       if (!request) {
         throw new Error("Access request does not exist");
       }
+      ensurePublicBrandMatch(request, publicBrandId);
       const targetOrganization = request.targetOrganizationId
         ? (await options.organizations.getById(request.targetOrganizationId)) ?? null
         : null;
       return buildPublicView(request, targetOrganization);
     },
 
-    async getPublicPurchaseProofFile(rawToken: string, attachmentId: string): Promise<{
+    async getPublicPurchaseProofFile(rawToken: string, attachmentId: string, publicBrandId?: string | null): Promise<{
       attachment: AccessRequestAttachmentRecord;
       content: Buffer;
     }> {
@@ -1113,6 +1136,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!request) {
         throw new Error("Access request does not exist");
       }
+      ensurePublicBrandMatch(request, publicBrandId);
       return readAttachmentFile(request, attachmentId);
     },
 
@@ -1121,6 +1145,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!existing) {
         throw new Error("Access request does not exist");
       }
+      ensurePublicBrandMatch(existing, input.publicBrandId);
       if (existing.status !== "needs_info") {
         throw new Error("This request is not waiting for more information");
       }
@@ -1143,7 +1168,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const poNumber = trimOrUndefined(input.poNumber) ?? "";
       const snNumber = trimOrUndefined(input.snNumber);
       if (!contactName || !countryRegion || !salesContact || !snNumber) {
-        throw new Error("Contact name, country, Baicells sales contact, and at least one device SN are required");
+        throw new Error("Contact name, country, sales contact, and at least one device SN are required");
       }
       if (!purchaseProofFiles.length && !existingProofs.length) {
         throw new Error("Purchase proof file is required");
@@ -1580,6 +1605,10 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!plan || plan.status !== "active") {
         throw new Error("Selected plan does not exist");
       }
+      const brand = await requestBrand(request);
+      if (brand && !brand.subscriptionPlanIds.includes(plan.id)) {
+        throw new Error("Selected package is not available for this brand");
+      }
 
       let organization: OrganizationRecord | undefined;
       if (input.targetMode === "existing_organization") {
@@ -1588,7 +1617,12 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           throw new Error("organizationId is required");
         }
         organization = await options.organizations.getById(organizationId);
-        if (!organization || organization.type !== "customer" || organization.status !== "active") {
+        if (
+          !organization ||
+          organization.type !== "customer" ||
+          organization.status !== "active" ||
+          trimOrUndefined(organization.publicBrandId) !== trimOrUndefined(request.publicBrandId)
+        ) {
           throw new Error("Target organization does not exist");
         }
       } else {
@@ -1602,6 +1636,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           name: organizationName,
           type: "customer",
           status: "active",
+          publicBrandId: request.publicBrandId ?? null,
           ownerUserId: actor.actorUserId ?? null
         });
       }
@@ -1640,7 +1675,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         invitedByUserId: actor.actorUserId ?? null
       });
-      const inviteUrl = buildUrl(options.appBaseUrl, `/invite/${rawInviteToken}`);
+      const inviteUrl = buildUrl(await requestBaseUrl(request), `/invite/${rawInviteToken}`);
       await options.emailSender.send({
         to: request.applicantEmail,
         subject: `${organization.name} access is ready`,

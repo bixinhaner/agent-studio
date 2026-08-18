@@ -5,6 +5,7 @@ import { Router, type Request, type Response } from "express";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
 import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
+import type { PublicBrandService } from "../public-brands/service.js";
 import { PolicyService } from "./policy-service.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
@@ -41,6 +42,7 @@ export function createResourcesPortalRouter(options: {
   storage: Pick<KnowledgeSetStorage, "resolveReadableMountPath">;
   policies: Pick<PolicyService, "filterAllowedResources">;
   listDepartmentIdsForUser(userId: string): Promise<string[]>;
+  publicBrands?: Pick<PublicBrandService, "getForOrganization">;
 }): Router {
   const router = Router();
 
@@ -48,6 +50,11 @@ export function createResourcesPortalRouter(options: {
     const currentUser = req.currentUser;
     if (!currentUser) {
       res.status(401).json({ detail: "Unauthorized" });
+      return;
+    }
+
+    if (await options.publicBrands?.getForOrganization(req.currentOrganization?.id)) {
+      res.json({ knowledgeSets: [] });
       return;
     }
 
@@ -89,6 +96,11 @@ export function createResourcesPortalRouter(options: {
     const currentUser = req.currentUser;
     if (!currentUser) {
       res.status(401).json({ detail: "Unauthorized" });
+      return;
+    }
+
+    if (await options.publicBrands?.getForOrganization(req.currentOrganization?.id)) {
+      res.status(403).json({ detail: "Knowledge-set files are managed by the assigned assistant" });
       return;
     }
 

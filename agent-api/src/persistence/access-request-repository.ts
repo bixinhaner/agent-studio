@@ -1,5 +1,6 @@
 export type AccessRequestRecord = {
   id: string;
+  publicBrandId?: string;
   requestType: string;
   commercialIntent: string;
   status: string;
@@ -39,6 +40,7 @@ export type AccessRequestRecord = {
 };
 
 export type CreateAccessRequestInput = {
+  publicBrandId?: string | null;
   requestType?: string;
   commercialIntent?: string;
   status?: string;
@@ -88,6 +90,7 @@ export type UpdateAccessRequestInput = Omit<Partial<CreateAccessRequestInput>, "
 
 type AccessRequestRow = {
   id: string;
+  publicBrandId: string | null;
   requestType: string | null;
   commercialIntent: string | null;
   status: string | null;
@@ -163,6 +166,7 @@ function toIsoString(value: Date | string | null | undefined): string | undefine
 function mapRequest(row: AccessRequestRow): AccessRequestRecord {
   return {
     id: row.id,
+    publicBrandId: trimOrUndefined(row.publicBrandId),
     requestType: trimOrUndefined(row.requestType) ?? "trial",
     commercialIntent: trimOrUndefined(row.commercialIntent) ?? "trial",
     status: trimOrUndefined(row.status) ?? "submitted",
@@ -204,6 +208,8 @@ function mapRequest(row: AccessRequestRow): AccessRequestRecord {
 
 function buildUpdateData(input: UpdateAccessRequestInput): Record<string, unknown> {
   return {
+    publicBrandId:
+      input.publicBrandId === undefined ? undefined : trimOrUndefined(input.publicBrandId ?? undefined) ?? null,
     requestType: input.requestType === undefined ? undefined : trimOrUndefined(input.requestType) ?? "trial",
     commercialIntent:
       input.commercialIntent === undefined ? undefined : trimOrUndefined(input.commercialIntent) ?? "trial",
@@ -261,6 +267,7 @@ export class AccessRequestRepository {
   async create(input: CreateAccessRequestInput): Promise<AccessRequestRecord> {
     const row = await this.db.accessRequest.create({
       data: {
+        publicBrandId: trimOrUndefined(input.publicBrandId ?? undefined) ?? null,
         requestType: trimOrUndefined(input.requestType) ?? "trial",
         commercialIntent: trimOrUndefined(input.commercialIntent) ?? "trial",
         status: trimOrUndefined(input.status) ?? "submitted",

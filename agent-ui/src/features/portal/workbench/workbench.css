@@ -4,22 +4,22 @@
 .workbench-compact-right-drawer,
 .portal-topbar-mobile-actions-drawer,
 .workbench-left-drawer {
-  --workbench-accent: #FF4614;
-  --workbench-accent-strong: #E63B0F;
+  --workbench-accent: var(--brand-primary, #FF4614);
+  --workbench-accent-strong: var(--brand-primary, #E63B0F);
   --workbench-border: #f0f0f0;
   --workbench-surface: #ffffff;
   --workbench-text: #111827;
   --workbench-muted-text: #6b7280;
   --workbench-success: #15803d;
   --workbench-danger: #b42318;
-  --workbench-accent-soft: #fff7f3;
+  --workbench-accent-soft: color-mix(in srgb, var(--workbench-accent) 8%, #ffffff);
   --workbench-success-soft: #f0fdf4;
   --workbench-danger-soft: #fff7f5;
   --workbench-bg: #f7f9fa;
   --workbench-sidebar-bg: #ffffff;
-  --workbench-sidebar-hover: #fff3f0;
-  --workbench-sidebar-active-bg: rgba(255, 70, 20, 0.08);
-  --workbench-sidebar-active-text: #FF4614;
+  --workbench-sidebar-hover: color-mix(in srgb, var(--workbench-accent) 7%, #ffffff);
+  --workbench-sidebar-active-bg: color-mix(in srgb, var(--workbench-accent) 9%, transparent);
+  --workbench-sidebar-active-text: var(--workbench-accent);
   --workbench-motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
   --workbench-motion-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
   --workbench-motion-ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -2365,7 +2365,7 @@ button.session-rail-new-btn,
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: linear-gradient(135deg, #FF7B54 0%, #FF4614 100%);
+  background: linear-gradient(135deg, var(--brand-accent, #FF7B54) 0%, var(--workbench-accent) 100%);
   color: white;
   border-radius: 8px;
   height: 40px;
@@ -2378,7 +2378,7 @@ button.session-rail-new-btn,
     color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
     transform var(--workbench-motion-fast) var(--workbench-motion-ease-soft);
   font-size: 14px;
-  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--workbench-accent) 30%, transparent), inset 0 2px 4px rgba(255, 255, 255, 0.4);
   appearance: none;
   position: relative;
   overflow: hidden;
@@ -2405,15 +2405,15 @@ button.session-rail-new-btn::after,
 
 button.session-rail-new-btn:hover,
 .session-rail-new-btn:hover {
-  background: linear-gradient(135deg, #ff9e80 0%, #FA5C32 100%);
+  background: linear-gradient(135deg, var(--brand-accent, #ff9e80) 0%, var(--workbench-accent) 100%);
   color: white;
-  box-shadow: 0 6px 20px rgba(255, 70, 20, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--workbench-accent) 40%, transparent), inset 0 2px 4px rgba(255, 255, 255, 0.5);
 }
 
 button.session-rail-new-btn:active,
 .session-rail-new-btn:active {
   transform: scale(0.985);
-  box-shadow: 0 2px 8px rgba(255, 70, 20, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--workbench-accent) 30%, transparent);
 }
 
 .session-rail-list {
@@ -6037,7 +6037,7 @@ button.session-rail-new-btn:active,
 
 .bailey-welcome-greeting b,
 .bailey-welcome-greeting span {
-  color: #FF4614;
+  color: var(--workbench-accent);
   font-weight: 600;
 }
 
@@ -6096,7 +6096,7 @@ button.session-rail-new-btn:active,
   flex-shrink: 0;
 }
 
-.bailey-suggestion-icon-wrap.icon-green { color: #FF4614; background: rgba(255, 70, 20, 0.1); }
+.bailey-suggestion-icon-wrap.icon-green { color: var(--workbench-accent); background: color-mix(in srgb, var(--workbench-accent) 10%, transparent); }
 .bailey-suggestion-icon-wrap.icon-blue { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
 .bailey-suggestion-icon-wrap.icon-orange { color: #f97316; background: rgba(249, 115, 22, 0.1); }
 .bailey-suggestion-icon-wrap.icon-purple { color: #a855f7; background: rgba(168, 85, 247, 0.1); }
@@ -6198,9 +6198,9 @@ button.session-rail-new-btn:active,
 .bailey-active-dot {
   width: 8px;
   height: 8px;
-  background-color: #FF4614;
+  background-color: var(--workbench-accent);
   border-radius: 50%;
-  box-shadow: 0 0 6px rgba(255, 70, 20, 0.6);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--workbench-accent) 60%, transparent);
   margin-right: 8px;
   flex-shrink: 0;
 }

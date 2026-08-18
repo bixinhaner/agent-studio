@@ -1,5 +1,6 @@
 export type LoginChallengeRecord = {
   id: string;
+  publicBrandId?: string;
   channel: string;
   targetRef: string;
   challengeHash: string;
@@ -14,6 +15,7 @@ export type LoginChallengeRecord = {
 
 type LoginChallengeRow = {
   id: string;
+  publicBrandId: string | null;
   channel: string;
   targetRef: string;
   challengeHash: string;
@@ -28,12 +30,12 @@ type LoginChallengeRow = {
 
 type LoginChallengeTable = {
   findMany(args?: {
-    where?: { targetRef?: string; purpose?: string; channel?: string; consumedAt?: null; inviteId?: string | null };
+    where?: { targetRef?: string; purpose?: string; channel?: string; consumedAt?: null; inviteId?: string | null; publicBrandId?: string | null };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<LoginChallengeRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<LoginChallengeRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<LoginChallengeRow>;
-  deleteMany?(args: { where?: { targetRef?: string; purpose?: string; channel?: string; consumedAt?: null } }): Promise<{ count: number }>;
+  deleteMany?(args: { where?: { targetRef?: string; purpose?: string; channel?: string; consumedAt?: null; publicBrandId?: string | null } }): Promise<{ count: number }>;
 };
 
 export type LoginChallengeRepositoryDb = {
@@ -56,6 +58,7 @@ function toIsoString(value: Date | string): string {
 function mapChallenge(row: LoginChallengeRow): LoginChallengeRecord {
   return {
     id: row.id,
+    publicBrandId: trimOrUndefined(row.publicBrandId),
     channel: row.channel,
     targetRef: row.targetRef,
     challengeHash: row.challengeHash,
@@ -73,6 +76,7 @@ export class LoginChallengeRepository {
   constructor(private readonly db: LoginChallengeRepositoryDb) {}
 
   async create(input: {
+    publicBrandId?: string | null;
     channel: string;
     targetRef: string;
     challengeHash: string;
@@ -87,12 +91,14 @@ export class LoginChallengeRepository {
           channel: input.channel.trim(),
           targetRef: input.targetRef.trim().toLowerCase(),
           purpose: input.purpose.trim(),
-          consumedAt: null
+          consumedAt: null,
+          publicBrandId: trimOrUndefined(input.publicBrandId ?? undefined) ?? null
         }
       });
     }
     const created = await this.db.loginChallenge.create({
       data: {
+        publicBrandId: trimOrUndefined(input.publicBrandId ?? undefined) ?? null,
         channel: input.channel.trim(),
         targetRef: input.targetRef.trim().toLowerCase(),
         challengeHash: input.challengeHash.trim(),
@@ -105,13 +111,14 @@ export class LoginChallengeRepository {
     return mapChallenge(created);
   }
 
-  async listActive(input: { channel: string; targetRef: string; purpose: string }): Promise<LoginChallengeRecord[]> {
+  async listActive(input: { channel: string; targetRef: string; purpose: string; publicBrandId?: string | null }): Promise<LoginChallengeRecord[]> {
     const rows = await this.db.loginChallenge.findMany({
       where: {
         channel: input.channel.trim(),
         targetRef: input.targetRef.trim().toLowerCase(),
         purpose: input.purpose.trim(),
-        consumedAt: null
+        consumedAt: null,
+        publicBrandId: trimOrUndefined(input.publicBrandId ?? undefined) ?? null
       },
       orderBy: { createdAt: "desc" }
     });

@@ -67,6 +67,7 @@ export type AccessRequestReviewerSummary = {
 
 export type AdminAccessRequestSummary = {
   id: string;
+  publicBrand: { id: string; key: string; name: string } | null;
   requestType: string;
   commercialIntent: string;
   status: string;

@@ -2,13 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyDocumentBranding, BRANDING_STORAGE_KEY, readStoredBrandingResponse } from "../runtime";
 import { resolveBrandingAssetUrl } from "../asset-url";
-import { DEFAULT_ADMIN_CONSOLE_CONFIG, DEFAULT_BRANDING } from "../types";
+import { DEFAULT_ADMIN_CONSOLE_CONFIG, DEFAULT_BRAND_IDENTITY, DEFAULT_BRANDING } from "../types";
 
 describe("branding runtime", () => {
   afterEach(() => {
     window.localStorage.clear();
     document.title = "";
     document.documentElement.style.removeProperty("--auth-brand-background-image");
+    document.documentElement.style.removeProperty("--brand-primary");
+    document.documentElement.style.removeProperty("--brand-accent");
     for (const icon of Array.from(document.querySelectorAll('link[rel~="icon"]'))) {
       icon.remove();
     }
@@ -32,6 +34,8 @@ describe("branding runtime", () => {
     expect(
       document.documentElement.style.getPropertyValue("--auth-brand-background-image")
     ).toBe('url("/assets/bailey-login-bg.png")');
+    expect(document.documentElement.style.getPropertyValue("--brand-primary")).toBe(DEFAULT_BRANDING.primaryColor);
+    expect(document.documentElement.style.getPropertyValue("--brand-accent")).toBe(DEFAULT_BRANDING.accentColor);
   });
 
   it("resolves uploaded branding assets through the API base", () => {
@@ -87,6 +91,7 @@ describe("branding runtime", () => {
         platformName: "Bailey",
         externalLoginCopy: "Welcome aboard."
       },
+      brand: DEFAULT_BRAND_IDENTITY,
       adminConsole: DEFAULT_ADMIN_CONSOLE_CONFIG,
       behavior: expect.objectContaining({
         portalWelcomeMessageDesktop: expect.any(String),

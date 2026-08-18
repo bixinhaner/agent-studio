@@ -2206,10 +2206,10 @@ body.access-request-route #root {
   border-radius: 20px;
   padding: 10px 12px;
   background: linear-gradient(#fff, #fff) padding-box,
-              linear-gradient(135deg, #FF4614, #FF833D, #FFD07A, #FF833D, #FF4614) border-box;
+              linear-gradient(135deg, var(--brand-primary, #FF4614), var(--brand-accent, #FF833D), var(--brand-primary, #FF4614)) border-box;
   background-size: 300% 300%;
   animation: magic-border-flow 6s ease-in-out infinite;
-  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.08);
+  box-shadow: 0 12px 36px color-mix(in srgb, var(--brand-primary, #FF4614) 8%, transparent);
 }
 
 .assistant-running-card.is-image {
@@ -2359,7 +2359,7 @@ body.access-request-route #root {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background-color: #FF4614;
+  background-color: var(--brand-primary, #FF4614);
   border: none;
   animation: assistant-pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
   flex: 0 0 auto;
@@ -2384,7 +2384,7 @@ body.access-request-route #root {
   border-radius: 4px;
   padding: 1px 8px;
   font-size: 11px;
-  color: #E63B0F;
+  color: var(--brand-primary, #E63B0F);
   background: #fff3f0;
   font-variant-numeric: tabular-nums;
 }
@@ -7796,7 +7796,7 @@ body.access-request-route #root {
 .thread-public-share-actionbar-link {
   border: 0;
   background: transparent;
-  color: #FF4614;
+  color: var(--brand-primary, #FF4614);
   cursor: pointer;
   padding: 0;
   font-weight: 600;
@@ -7829,8 +7829,8 @@ body.access-request-route #root {
 
 .thread-public-share-primary-btn,
 .thread-public-share-modal-primary {
-  border-color: #FF4614;
-  background: linear-gradient(135deg, #FF4614 0%, #FF8533 100%);
+  border-color: var(--brand-primary, #FF4614);
+  background: linear-gradient(135deg, var(--brand-primary, #FF4614) 0%, var(--brand-accent, #FF8533) 100%);
   color: #ffffff;
   box-shadow: 0 10px 22px rgba(255, 70, 20, 0.28);
 }
@@ -8854,7 +8854,7 @@ body.public-share-mode #root {
  * ----------------------------------------------------
  */
 .aui-user-message-content {
-  background: linear-gradient(135deg, #FF4614 0%, #FF6B33 100%) !important;
+  background: linear-gradient(135deg, var(--brand-primary, #FF4614) 0%, var(--brand-accent, #FF6B33) 100%) !important;
   color: #fff !important;
   border-radius: 20px 20px 4px 20px !important;
   box-shadow: 0 8px 24px rgba(255, 70, 20, 0.15) !important;
@@ -9188,7 +9188,7 @@ body.public-share-mode #root {
 /* Composer action buttons */
 .aui-composer-send:not(:disabled),
 .aui-composer-send-btn:not(:disabled) {
-  background: linear-gradient(135deg, #FF4614 0%, #FF8533 100%) !important;
+  background: linear-gradient(135deg, var(--brand-primary, #FF4614) 0%, var(--brand-accent, #FF8533) 100%) !important;
   border-color: transparent !important;
   color: #fff !important;
   border-radius: 999px !important;
@@ -9220,9 +9220,9 @@ body.public-share-mode #root {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
 }
 .aui-thread-welcome-suggestion:hover {
-  border-color: #FF4614 !important;
-  background: linear-gradient(135deg, rgba(255, 70, 20, 0.05) 0%, rgba(255, 0, 127, 0.02) 100%) !important;
-  box-shadow: 0 8px 24px rgba(255, 70, 20, 0.08) !important;
+  border-color: var(--brand-primary, #FF4614) !important;
+  background: color-mix(in srgb, var(--brand-primary, #FF4614) 5%, #ffffff) !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--brand-primary, #FF4614) 8%, transparent) !important;
 }
 .aui-thread-welcome-suggestion:active {
   transform: scale(0.98) !important;

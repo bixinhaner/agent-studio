@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
+import type { PublicBrandService } from "../public-brands/service.js";
 import type { BillingEmailScenario, BillingService } from "./service.js";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -317,6 +318,7 @@ export function createPortalBillingRouter(
   service: BillingService,
   options: {
     subscriptionEntitlements?: Pick<SubscriptionEntitlementService, "getPortalSubscriptionStatus">;
+    publicBrands?: Pick<PublicBrandService, "getForOrganization">;
   } = {}
 ): Router {
   const router = Router();
@@ -326,7 +328,7 @@ export function createPortalBillingRouter(
       const actor = requirePortalBillingCustomer(req, res);
       if (!actor) return;
       const { organization, user } = actor;
-      const [billing, subscriptionStatus] = await Promise.all([
+      const [billing, subscriptionStatus, brand] = await Promise.all([
         service.getPortalSummary({ organization, user }),
         options.subscriptionEntitlements
           ? options.subscriptionEntitlements.getPortalSubscriptionStatus({
@@ -337,8 +339,14 @@ export function createPortalBillingRouter(
               },
               model: ""
             })
-          : Promise.resolve(null)
+          : Promise.resolve(null),
+        options.publicBrands?.getForOrganization(organization.id) ?? Promise.resolve(undefined)
       ]);
+      if (brand) {
+        billing.plans = brand.billingEnabled
+          ? billing.plans.filter((plan) => brand.subscriptionPlanIds.includes(plan.id))
+          : [];
+      }
       res.json({
         billing,
         subscriptionStatus: subscriptionStatus ? portalSubscriptionStatusPayload(subscriptionStatus) : null
@@ -353,10 +361,19 @@ export function createPortalBillingRouter(
       const actor = requirePortalBillingCustomer(req, res);
       if (!actor) return;
       const { organization, user } = actor;
+      const brand = await options.publicBrands?.getForOrganization(organization.id);
+      if (brand && !brand.billingEnabled) {
+        res.status(403).json({ detail: "Billing is not enabled for this brand" });
+        return;
+      }
       const billing = await service.getPortalSummary({ organization, user });
       const planId = trimOrUndefined(req.body?.planId);
       if (!planId) {
         res.status(400).json({ detail: "planId is required" });
+        return;
+      }
+      if (brand && !brand.subscriptionPlanIds.includes(planId)) {
+        res.status(403).json({ detail: "This plan is not available for this brand" });
         return;
       }
       const preview = await service.previewPromotion({
@@ -381,12 +398,24 @@ export function createPortalBillingRouter(
         res.status(400).json({ detail: "planId is required" });
         return;
       }
+      const brand = await options.publicBrands?.getForOrganization(actor.organization.id);
+      if (brand && !brand.billingEnabled) {
+        res.status(403).json({ detail: "Billing is not enabled for this brand" });
+        return;
+      }
+      if (brand && !brand.subscriptionPlanIds.includes(planId)) {
+        res.status(403).json({ detail: "This plan is not available for this brand" });
+        return;
+      }
       const result = await service.createPortalCheckout({
         organization: actor.organization,
         user: actor.user,
         planId,
         promotionCode: req.body?.promotionCode,
-        autoRenew: parseBoolean(req.body?.autoRenew, true)
+        autoRenew: parseBoolean(req.body?.autoRenew, true),
+        checkoutUrls: brand
+          ? { successUrl: brand.billingSuccessUrl, cancelUrl: brand.billingCancelUrl }
+          : undefined
       });
       res.status(201).json(result);
     } catch (error) {

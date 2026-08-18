@@ -175,6 +175,7 @@ function createService(input: {
   catalogEntries?: SkillCatalogEntryRecord[];
   managedSkills?: CodexManagedSkillRecord[];
   installedPlugins?: InstalledPluginRecord[];
+  publicBrandAgentModeId?: string;
 }) {
   const allowedByType = input.allowedByType ?? {};
   return new PortalRuntimeOptionService({
@@ -207,11 +208,37 @@ function createService(input: {
     },
     skillCatalog: {
       listPublished: async () => input.catalogEntries ?? []
-    }
+    },
+    publicBrands: input.publicBrandAgentModeId
+      ? {
+          getForOrganization: async () => ({ agentModeId: input.publicBrandAgentModeId })
+        }
+      : undefined
   } as never);
 }
 
 describe("PortalRuntimeOptionService", () => {
+  it("only exposes the agent mode assigned to a public brand", async () => {
+    const service = createService({
+      modes: [agentMode(), agentMode({ id: "mode-other", name: "Other", slug: "other" })],
+      publicBrandAgentModeId: "mode-tech",
+      allowedByType: {
+        agent_mode: [],
+        run_profile: [],
+        skill_package: ["package-allowed"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(result.modes.map((mode) => mode.id)).toEqual(["mode-tech"]);
+  });
+
   it("keeps an authorized agent mode visible while filtering unauthorized skill packages", async () => {
     const service = createService({
       allowedByType: {

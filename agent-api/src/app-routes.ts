@@ -13,6 +13,7 @@ export function registerCommonApiRoutes(
     authRouter: Router;
     rbacAdminRouter?: Router;
     adminRouter: AdminRouterLike;
+    publicBrandAdminRouter?: Router;
     systemSettingsRouter?: Router;
     integrationCenterRouter?: Router;
     monitoringAdminRouter?: Router;
@@ -48,6 +49,7 @@ export function registerCommonApiRoutes(
     options.rbacAdminRouter ?? Router(),
     requireInternalRole("admin"),
     options.adminRouter,
+    options.publicBrandAdminRouter ?? Router(),
     systemSettingsMount,
     options.integrationCenterRouter ?? Router(),
     options.monitoringAdminRouter ?? Router(),

@@ -4,7 +4,7 @@
   --auth-border: #E5E7EB;
   --auth-text: #111827;
   --auth-subtext: #6B7280;
-  --auth-accent: #FF4614;
+  --auth-accent: var(--brand-primary, #FF4614);
   --auth-input-bg: rgba(255, 255, 255, 0.6);
   --auth-input-border: #D1D5DB;
   --auth-radius: 20px;
@@ -124,7 +124,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #FF7B54 0%, #FF4614 100%);
+  background: linear-gradient(135deg, var(--brand-accent, #FF7B54) 0%, var(--auth-accent) 100%);
   color: white;
   border: none;
   border-radius: 12px;
@@ -136,7 +136,7 @@
     box-shadow 260ms var(--auth-motion-ease-soft),
     transform 220ms var(--auth-motion-ease-soft),
     opacity 220ms var(--auth-motion-ease-soft);
-  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--auth-accent) 30%, transparent), inset 0 2px 4px rgba(255, 255, 255, 0.4);
   position: relative;
   overflow: hidden;
 }
@@ -164,15 +164,15 @@
 .auth-modern-sso-btn:hover:not(:disabled),
 .auth-modern-accent-btn:hover:not(:disabled),
 .auth-access-modal-primary:hover {
-  background: linear-gradient(135deg, #ff9e80 0%, #FA5C32 100%);
-  box-shadow: 0 6px 20px rgba(255, 70, 20, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  background: linear-gradient(135deg, var(--brand-accent, #ff9e80) 0%, var(--auth-accent) 100%);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--auth-accent) 40%, transparent), inset 0 2px 4px rgba(255, 255, 255, 0.5);
   transform: translateY(-1px);
 }
 
 .auth-modern-sso-btn:active:not(:disabled),
 .auth-modern-accent-btn:active:not(:disabled) {
   transform: scale(0.985);
-  box-shadow: 0 2px 8px rgba(255, 70, 20, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--auth-accent) 30%, transparent);
 }
 
 .auth-modern-sso-btn:disabled,
@@ -226,7 +226,7 @@
 .auth-modern-input:focus {
   border-color: var(--auth-accent);
   background: #ffffff;
-  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.12), 0 0 0 3px rgba(255, 70, 20, 0.1);
+  box-shadow: 0 12px 36px color-mix(in srgb, var(--auth-accent) 12%, transparent), 0 0 0 3px color-mix(in srgb, var(--auth-accent) 10%, transparent);
 }
 
 .auth-modern-primary-btn {

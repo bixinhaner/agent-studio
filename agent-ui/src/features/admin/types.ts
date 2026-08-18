@@ -11,6 +11,7 @@ export type AdminSection =
   | "codex-memory"
   | "skill-drafts"
   | "integrations"
+  | "brands"
   | "system-settings"
   | "organization"
   | "rbac";

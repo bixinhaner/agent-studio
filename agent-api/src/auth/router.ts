@@ -21,6 +21,8 @@ import type { LoginChallengeRepository } from "../persistence/login-challenge-re
 import { resolvePublicPlatformName } from "../system-settings/public-branding.js";
 import type { SystemSettingsVersionRecord } from "../system-settings/types.js";
 import { createPublicExternalWebGate, type ExternalWebAccessService } from "../external-web-access.js";
+import type { PublicBrandService } from "../public-brands/service.js";
+import { organizationMatchesRequestBrand } from "../public-brands/middleware.js";
 
 const dingtalkSessionSchema = z.object({
   code: z.string().trim().min(1, "code is required"),
@@ -460,6 +462,7 @@ export function createAuthRouter(options: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
   };
   externalWebAccess?: Pick<ExternalWebAccessService, "isMaintenanceEnabled">;
+  publicBrands?: Pick<PublicBrandService, "getById">;
 }): Router {
   const router = Router();
   const externalWebGate = options.externalWebAccess
@@ -474,7 +477,36 @@ export function createAuthRouter(options: {
     return configured;
   }
 
+  function filterMembershipsForRequest(
+    req: Request,
+    memberships: Awaited<ReturnType<OrganizationMembershipRepository["listActiveForUser"]>>
+  ) {
+    return memberships.filter((membership) => organizationMatchesRequestBrand(req, membership.organization));
+  }
+
+  async function requestPlatformName(req: Request): Promise<string> {
+    return req.publicBrand?.platformName ?? resolvePublicPlatformName(options.systemSettings);
+  }
+
+  async function brandForOrganization(organization: { publicBrandId?: string | null }) {
+    return options.publicBrands?.getById(organization.publicBrandId);
+  }
+
+  async function publicBaseUrlForOrganization(organization: { publicBrandId?: string | null }): Promise<string | undefined> {
+    const brand = await brandForOrganization(organization);
+    return trimOrUndefined(brand?.primaryBaseUrl) ?? trimOrUndefined(options.appBaseUrl);
+  }
+
+  async function inviteMatchesRequestBrand(req: Request, invite: { organizationId: string }): Promise<boolean> {
+    const organization = await options.organizations.getById(invite.organizationId);
+    return organizationMatchesRequestBrand(req, organization);
+  }
+
   router.get("/dingtalk/config", (req: Request, res: Response) => {
+    if (req.publicBrand?.externalOnly) {
+      res.status(404).json({ detail: "Internal sign-in is not available on this brand" });
+      return;
+    }
     const redirectUri = resolveDingTalkRedirectUriForRequest(req, options.dingtalkConfig);
     const resolved = resolveDingTalkConfig({
       ...options.dingtalkConfig,
@@ -512,6 +544,10 @@ export function createAuthRouter(options: {
 
   router.post("/dingtalk/session", async (req: Request, res: Response) => {
     try {
+      if (req.publicBrand?.externalOnly) {
+        res.status(404).json({ detail: "Internal sign-in is not available on this brand" });
+        return;
+      }
       const input = dingtalkSessionSchema.parse(req.body ?? {});
       const expectedState = options.oauthStates.read(req.headers.cookie);
       if (!expectedState || expectedState.state !== input.state || expectedState.nonce !== input.nonce) {
@@ -566,6 +602,10 @@ export function createAuthRouter(options: {
 
   router.post("/crest/session", async (req: Request, res: Response) => {
     try {
+      if (req.publicBrand?.externalOnly) {
+        res.status(404).json({ detail: "Internal sign-in is not available on this brand" });
+        return;
+      }
       const input = crestSessionSchema.parse(req.body ?? {});
       const resolved = await resolveConfiguredCrest();
       const missing = resolved.ok ? [] : [...resolved.missing];
@@ -615,7 +655,7 @@ export function createAuthRouter(options: {
 
   router.get("/whoami", requireCurrentUser, async (req: Request, res: Response) => {
     const currentUser = req.currentUser!;
-    const memberships = await options.memberships.listActiveForUser(currentUser.id);
+    const memberships = filterMembershipsForRequest(req, await options.memberships.listActiveForUser(currentUser.id));
     const identities = await options.identities.listForUser(currentUser.id);
     res.json(await buildAuthEnvelope({
       user: currentUser,
@@ -641,7 +681,7 @@ export function createAuthRouter(options: {
         }
       });
       req.currentUser = updatedUser;
-      const memberships = await options.memberships.listActiveForUser(updatedUser.id);
+      const memberships = filterMembershipsForRequest(req, await options.memberships.listActiveForUser(updatedUser.id));
       const identities = await options.identities.listForUser(updatedUser.id);
       res.json(
         await buildAuthEnvelope({
@@ -658,7 +698,7 @@ export function createAuthRouter(options: {
 
   router.get("/organizations", requireCurrentUser, async (req: Request, res: Response) => {
     const currentUser = req.currentUser!;
-    const memberships = await options.memberships.listActiveForUser(currentUser.id);
+    const memberships = filterMembershipsForRequest(req, await options.memberships.listActiveForUser(currentUser.id));
     res.json({
       active_organization_id: req.currentOrganization?.id ?? null,
       memberships: memberships.map(membershipOut)
@@ -674,11 +714,15 @@ export function createAuthRouter(options: {
         res.status(404).json({ detail: "Organization does not exist or is not authorized" });
         return;
       }
+      if (!organizationMatchesRequestBrand(req, membership.organization)) {
+        res.status(404).json({ detail: "Organization does not exist or is not authorized on this brand" });
+        return;
+      }
       const identities = await options.identities.listForUser(currentUser.id);
       res.setHeader("Set-Cookie", options.cookies.create(currentUser.id, membership.organizationId));
       res.json(await buildAuthEnvelope({
         user: currentUser,
-        memberships: await options.memberships.listActiveForUser(currentUser.id),
+        memberships: filterMembershipsForRequest(req, await options.memberships.listActiveForUser(currentUser.id)),
         activeOrganizationId: membership.organizationId,
         identities
       }));
@@ -700,7 +744,7 @@ export function createAuthRouter(options: {
         return;
       }
       const organization = await options.organizations.getById(invite.organizationId);
-      if (!organization) {
+      if (!organization || !organizationMatchesRequestBrand(req, organization)) {
         res.status(404).json({ detail: "Organization not found" });
         return;
       }
@@ -760,9 +804,9 @@ export function createAuthRouter(options: {
         invitedByUserId: req.currentUser!.id
       });
 
-      const inviteUrlBase = trimOrUndefined(options.appBaseUrl);
+      const inviteUrlBase = await publicBaseUrlForOrganization(organization);
       const inviteUrl = inviteUrlBase ? `${inviteUrlBase.replace(/\/+$/, "")}/invite/${rawToken}` : undefined;
-      const platformName = await resolvePublicPlatformName(options.systemSettings);
+      const platformName = (await brandForOrganization(organization))?.platformName ?? await resolvePublicPlatformName(options.systemSettings);
       await options.emailSender.send({
         to: invite.email,
         subject: `${organization.name} invited you to ${platformName}`,
@@ -795,6 +839,10 @@ export function createAuthRouter(options: {
         res.status(404).json({ detail: "Invite not found" });
         return;
       }
+      if (explicitInvite && !(await inviteMatchesRequestBrand(req, explicitInvite))) {
+        res.status(404).json({ detail: "Invite not found" });
+        return;
+      }
       const email = toEmail(input.email) ?? explicitInvite?.email;
       if (!email) {
         res.status(400).json({ detail: "email is required" });
@@ -811,12 +859,16 @@ export function createAuthRouter(options: {
         return;
       }
 
-      const pendingInvites = explicitInvite ? [explicitInvite] : await options.invites.listPendingByEmail(email);
+      const pendingInviteCandidates = explicitInvite ? [explicitInvite] : await options.invites.listPendingByEmail(email);
+      const pendingInvites = [];
+      for (const candidate of pendingInviteCandidates) {
+        if (await inviteMatchesRequestBrand(req, candidate)) pendingInvites.push(candidate);
+      }
       const activePendingInvites = pendingInvites.filter((item) => isActivePendingInvite(item));
       const invite = explicitInvite ?? (activePendingInvites.length === 1 ? activePendingInvites[0] : undefined);
 
       const shouldUseInternalEntry =
-        !invite &&
+        !invite && !req.publicBrand?.externalOnly &&
         (await isInternalUserForEmail({
           users: options.users,
           identities: options.identities,
@@ -847,6 +899,7 @@ export function createAuthRouter(options: {
 
       const code = issueLoginCode();
       const challenge = await options.challenges.create({
+        publicBrandId: req.publicBrand?.id ?? null,
         channel: "email",
         targetRef: email,
         challengeHash: hashToken(code),
@@ -857,7 +910,7 @@ export function createAuthRouter(options: {
       });
 
       const organization = invite?.organizationId ? await options.organizations.getById(invite.organizationId) : undefined;
-      const platformName = await resolvePublicPlatformName(options.systemSettings);
+      const platformName = await requestPlatformName(req);
       const subject = invite && organization
         ? `${organization.name} invite sign-in verification code`
         : `${platformName} sign-in verification code`;
@@ -891,6 +944,10 @@ export function createAuthRouter(options: {
         res.status(404).json({ detail: "Invite not found" });
         return;
       }
+      if (invite && !(await inviteMatchesRequestBrand(req, invite))) {
+        res.status(404).json({ detail: "Invite not found" });
+        return;
+      }
       const email = input.email.trim().toLowerCase();
       if (invite && invite.email !== email) {
         res.status(400).json({ detail: "Invite email does not match" });
@@ -899,6 +956,7 @@ export function createAuthRouter(options: {
 
       const challengeHash = hashToken(input.code);
       const inviteChallenges = await options.challenges.listActive({
+        publicBrandId: req.publicBrand?.id ?? null,
         channel: "email",
         targetRef: email,
         purpose: "invite_accept"
@@ -906,6 +964,7 @@ export function createAuthRouter(options: {
       const signInChallenges = invite
         ? []
         : await options.challenges.listActive({
+            publicBrandId: req.publicBrand?.id ?? null,
             channel: "email",
             targetRef: email,
             purpose: "email_sign_in"
@@ -918,7 +977,12 @@ export function createAuthRouter(options: {
 
       if (!invite && challenge.purpose === "invite_accept" && challenge.inviteId) {
         const pendingInvites = await options.invites.listPendingByEmail(email);
-        invite = pendingInvites.find((item) => item.id === challenge.inviteId);
+        for (const candidate of pendingInvites) {
+          if (candidate.id === challenge.inviteId && await inviteMatchesRequestBrand(req, candidate)) {
+            invite = candidate;
+            break;
+          }
+        }
       }
       if (challenge.purpose === "invite_accept" && (!invite || invite.id !== challenge.inviteId)) {
         res.status(400).json({ detail: "Invitation is no longer available" });
@@ -965,7 +1029,7 @@ export function createAuthRouter(options: {
         activeOrganizationId = invite.organizationId;
       }
 
-      const activeMemberships = await options.memberships.listActiveForUser(user.id);
+      const activeMemberships = filterMembershipsForRequest(req, await options.memberships.listActiveForUser(user.id));
       const selectedOrganizationId =
         (activeOrganizationId && activeMemberships.some((membership) => membership.organizationId === activeOrganizationId)
           ? activeOrganizationId
@@ -998,7 +1062,7 @@ export function createAuthRouter(options: {
       res.setHeader("Set-Cookie", options.cookies.create(user.id, selectedOrganizationId));
       res.json(await buildAuthEnvelope({
         user,
-        memberships: await options.memberships.listActiveForUser(user.id),
+        memberships: activeMemberships,
         activeOrganizationId: selectedOrganizationId,
         identities: identities.length ? identities : [identity]
       }));

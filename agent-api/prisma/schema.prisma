@@ -82,6 +82,8 @@ model Organization {
   name           String
   type           String                       @default("customer")
   status         String                       @default("active")
+  publicBrandId  String?                      @map("public_brand_id")
+  publicBrand    PublicBrand?                 @relation(fields: [publicBrandId], references: [id], onDelete: Restrict)
   ownerUserId    String?                      @map("owner_user_id")
   owner          User?                        @relation("OrganizationOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   settingsJson   Json?                        @map("settings_json")
@@ -101,7 +103,66 @@ model Organization {
   portalTrainingTranslations PortalTrainingTranslation[]
 
   @@index([type, status])
+  @@index([publicBrandId, type, status])
   @@map("organizations")
+}
+
+model PublicBrand {
+  id                           String              @id @default(cuid())
+  key                          String              @unique
+  name                         String
+  status                       String              @default("disabled")
+  primaryBaseUrl               String?             @map("primary_base_url")
+  primaryColor                 String              @default("#0066FF") @map("primary_color")
+  accentColor                  String              @default("#2CCFF0") @map("accent_color")
+  platformName                 String              @map("platform_name")
+  headerSubtitle               String              @map("header_subtitle")
+  externalLoginCopy            String              @map("external_login_copy")
+  logoUrl                      String?             @map("logo_url")
+  iconUrl                      String?             @map("icon_url")
+  loginBackgroundUrl           String?             @map("login_background_url")
+  portalWelcomeIllustrationUrl String?             @map("portal_welcome_illustration_url")
+  assistantName                String              @map("assistant_name")
+  assistantAvatarUrl           String?             @map("assistant_avatar_url")
+  portalWelcomeMessageDesktop  String              @map("portal_welcome_message_desktop")
+  portalWelcomeMessageMobile   String              @map("portal_welcome_message_mobile")
+  portalWelcomeSuggestions     Json                @default("[]") @map("portal_welcome_suggestions")
+  answerFeedbackEnabled        Boolean             @default(true) @map("answer_feedback_enabled")
+  answerFeedbackPrompt         String              @default("Was this answer helpful?") @map("answer_feedback_prompt")
+  externalOnly                 Boolean             @default(true) @map("external_only")
+  accessRequestEnabled         Boolean             @default(true) @map("access_request_enabled")
+  billingEnabled               Boolean             @default(true) @map("billing_enabled")
+  billingSuccessUrl            String?             @map("billing_success_url")
+  billingCancelUrl             String?             @map("billing_cancel_url")
+  billingPortalUrl             String?             @map("billing_portal_url")
+  agentModeId                  String?             @map("agent_mode_id")
+  knowledgeSetIds              Json                @default("[]") @map("knowledge_set_ids")
+  subscriptionPlanIds          Json                @default("[]") @map("subscription_plan_ids")
+  createdByUserId              String?             @map("created_by_user_id")
+  updatedByUserId              String?             @map("updated_by_user_id")
+  createdAt                    DateTime            @default(now()) @map("created_at")
+  updatedAt                    DateTime            @updatedAt @map("updated_at")
+  domains                      PublicBrandDomain[]
+  organizations               Organization[]
+  accessRequests               AccessRequest[]
+  loginChallenges              LoginChallenge[]
+
+  @@index([status, name])
+  @@map("public_brands")
+}
+
+model PublicBrandDomain {
+  id            String      @id @default(cuid())
+  publicBrandId String      @map("public_brand_id")
+  publicBrand   PublicBrand @relation(fields: [publicBrandId], references: [id], onDelete: Cascade)
+  hostname      String      @unique
+  status        String      @default("active")
+  isPrimary     Boolean     @default(false) @map("is_primary")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@index([publicBrandId, status])
+  @@map("public_brand_domains")
 }
 
 model SecurityDomainAccessPolicy {
@@ -318,6 +379,8 @@ model OrganizationInvite {
 
 model AccessRequest {
   id                   String              @id @default(cuid())
+  publicBrandId        String?             @map("public_brand_id")
+  publicBrand          PublicBrand?        @relation(fields: [publicBrandId], references: [id], onDelete: Restrict)
   requestType          String              @default("trial") @map("request_type")
   commercialIntent     String              @default("trial") @map("commercial_intent")
   status               String              @default("submitted")
@@ -370,6 +433,7 @@ model AccessRequest {
   @@index([applicantEmailDomain, createdAt])
   @@index([ownerUserId, status])
   @@index([targetOrganizationId, status])
+  @@index([publicBrandId, status, createdAt])
   @@map("access_requests")
 }
 
@@ -442,6 +506,8 @@ model AccessRequestEvent {
 
 model LoginChallenge {
   id             String               @id @default(cuid())
+  publicBrandId  String?              @map("public_brand_id")
+  publicBrand    PublicBrand?         @relation(fields: [publicBrandId], references: [id], onDelete: Restrict)
   channel        String
   targetRef      String               @map("target_ref")
   challengeHash  String               @map("challenge_hash")
@@ -456,6 +522,7 @@ model LoginChallenge {
   updatedAt      DateTime             @updatedAt @map("updated_at")
 
   @@index([targetRef, purpose, expiresAt])
+  @@index([publicBrandId, targetRef, purpose, expiresAt])
   @@index([organizationId, purpose])
   @@map("login_challenges")
 }

@@ -118,10 +118,10 @@ body.access-request-route #root {
   align-items: center;
   min-height: 60px;
   padding: 10px 14px;
-  border: 1px solid rgba(255, 70, 20, 0.28);
+  border: 1px solid color-mix(in srgb, var(--brand-primary, #ff4614) 28%, transparent);
   border-radius: 12px;
   background:
-    linear-gradient(180deg, rgba(255, 70, 20, 0.06), rgba(255, 70, 20, 0.02)),
+    linear-gradient(180deg, color-mix(in srgb, var(--brand-primary, #ff4614) 6%, transparent), color-mix(in srgb, var(--brand-primary, #ff4614) 2%, transparent)),
     var(--admin-color-surface-solid, #fff);
   cursor: pointer;
   transition:
@@ -132,8 +132,8 @@ body.access-request-route #root {
 
 .auth-access-upload-box:hover,
 .auth-access-upload-box:focus-within {
-  border-color: rgba(255, 70, 20, 0.62);
-  box-shadow: 0 14px 34px rgba(255, 70, 20, 0.12);
+  border-color: color-mix(in srgb, var(--brand-primary, #ff4614) 62%, transparent);
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--brand-primary, #ff4614) 12%, transparent);
   transform: translateY(-1px);
 }
 
@@ -153,9 +153,9 @@ body.access-request-route #root {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: #ff4614;
+  background: var(--brand-primary, #ff4614);
   color: #fff;
-  box-shadow: 0 10px 24px rgba(255, 70, 20, 0.22);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--brand-primary, #ff4614) 22%, transparent);
 }
 
 .auth-access-upload-copy {
@@ -183,7 +183,7 @@ body.access-request-route #root {
   justify-content: center;
   min-height: 30px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 70, 20, 0.28);
+  border: 1px solid color-mix(in srgb, var(--brand-primary, #ff4614) 28%, transparent);
   border-radius: 999px;
   color: #d9360d;
   font-size: 12px;
@@ -243,8 +243,8 @@ body.access-request-route #root {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(255, 70, 20, 0.08);
-  color: #ff4614;
+  background: color-mix(in srgb, var(--brand-primary, #ff4614) 8%, transparent);
+  color: var(--brand-primary, #ff4614);
 }
 
 .auth-access-status-table {
@@ -529,7 +529,7 @@ body.access-request-route #root {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #ff4614;
+  color: var(--brand-primary, #ff4614);
 }
 
 .access-review-meta {

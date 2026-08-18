@@ -9,6 +9,17 @@ export type PublicBranding = {
   portalWelcomeIllustrationUrl: string;
   assistantName: string;
   assistantAvatarUrl: string;
+  primaryColor: string;
+  accentColor: string;
+};
+
+export type PublicBrandIdentity = {
+  id?: string;
+  key: string;
+  custom: boolean;
+  externalOnly: boolean;
+  accessRequestEnabled: boolean;
+  billingEnabled: boolean;
 };
 
 export type PublicPortalWelcomeSuggestion = {
@@ -29,6 +40,7 @@ export type PublicPortalBehavior = {
 
 export type PublicBrandingResponse = {
   branding: PublicBranding;
+  brand: PublicBrandIdentity;
   adminConsole: PublicAdminConsoleConfig;
   behavior: PublicPortalBehavior;
   publishedAt?: string;
@@ -52,7 +64,17 @@ export const DEFAULT_BRANDING: PublicBranding = {
   loginBackgroundUrl: "",
   portalWelcomeIllustrationUrl: "",
   assistantName: "AI Assistant",
-  assistantAvatarUrl: ""
+  assistantAvatarUrl: "",
+  primaryColor: "#FF4614",
+  accentColor: "#FF833D"
+};
+
+export const DEFAULT_BRAND_IDENTITY: PublicBrandIdentity = {
+  key: "default",
+  custom: false,
+  externalOnly: false,
+  accessRequestEnabled: true,
+  billingEnabled: true
 };
 
 export const DEFAULT_PORTAL_BEHAVIOR: PublicPortalBehavior = {
@@ -61,19 +83,19 @@ export const DEFAULT_PORTAL_BEHAVIOR: PublicPortalBehavior = {
   portalWelcomeSuggestions: [
     {
       label: "Check product & version fit",
-      prompt: "Help me identify the correct Baicells product line, model, software branch, and version scope for this scenario. If key context is missing, ask for the minimum details needed before giving a conclusion."
+      prompt: "Help me identify the correct product line, model, software branch, and version scope for this scenario. If key context is missing, ask for the minimum details needed before giving a conclusion."
     },
     {
       label: "Review deployment plan",
-      prompt: "Review this Baicells deployment or configuration plan. Point out mismatches, risks, and the recommended next steps based on official product guidance."
+      prompt: "Review this deployment or configuration plan. Point out mismatches, risks, and the recommended next steps based on official product guidance."
     },
     {
       label: "Analyze alarm or KPI issue",
-      prompt: "Analyze this Baicells alarm, KPI, log, or fault symptom. Explain likely causes, the recommended troubleshooting path, and what information is still needed."
+      prompt: "Analyze this alarm, KPI, log, or fault symptom. Explain likely causes, the recommended troubleshooting path, and what information is still needed."
     },
     {
       label: "Recommend solution design",
-      prompt: "Recommend a Baicells product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
+      prompt: "Recommend a product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
     }
   ],
   answerFeedback: {

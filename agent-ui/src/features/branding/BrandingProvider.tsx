@@ -7,10 +7,11 @@ import {
   readStoredBrandingResponse,
   writeStoredBrandingResponse
 } from "./runtime";
-import type { PublicAdminConsoleConfig, PublicBranding, PublicPortalBehavior } from "./types";
+import type { PublicAdminConsoleConfig, PublicBrandIdentity, PublicBranding, PublicPortalBehavior } from "./types";
 
 type BrandingContextValue = {
   branding: PublicBranding;
+  brand: PublicBrandIdentity;
   adminConsole: PublicAdminConsoleConfig;
   behavior: PublicPortalBehavior;
   loading: boolean;
@@ -23,6 +24,7 @@ const BrandingContext = createContext<BrandingContextValue | null>(null);
 export function BrandingProvider({ children }: PropsWithChildren) {
   const initial = readStoredBrandingResponse() ?? fallbackBrandingResponse();
   const [branding, setBranding] = useState<PublicBranding>(initial.branding);
+  const [brand, setBrand] = useState<PublicBrandIdentity>(initial.brand);
   const [adminConsole, setAdminConsole] = useState<PublicAdminConsoleConfig>(initial.adminConsole);
   const [behavior, setBehavior] = useState<PublicPortalBehavior>(initial.behavior);
   const [loading, setLoading] = useState(true);
@@ -34,12 +36,14 @@ export function BrandingProvider({ children }: PropsWithChildren) {
     try {
       const response = await fetchPublicBranding();
       setBranding(response.branding);
+      setBrand(response.brand);
       setAdminConsole(response.adminConsole);
       setBehavior(response.behavior);
       writeStoredBrandingResponse(response);
     } catch (nextError) {
       const fallback = readStoredBrandingResponse() ?? fallbackBrandingResponse();
       setBranding(fallback.branding);
+      setBrand(fallback.brand);
       setAdminConsole(fallback.adminConsole);
       setBehavior(fallback.behavior);
       setError(nextError instanceof Error ? nextError.message : "Failed to load branding");
@@ -59,13 +63,14 @@ export function BrandingProvider({ children }: PropsWithChildren) {
   const value = useMemo<BrandingContextValue>(
     () => ({
       branding,
+      brand,
       adminConsole,
       behavior,
       loading,
       error,
       reload
     }),
-    [adminConsole, behavior, branding, error, loading, reload]
+    [adminConsole, behavior, brand, branding, error, loading, reload]
   );
 
   return <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>;
