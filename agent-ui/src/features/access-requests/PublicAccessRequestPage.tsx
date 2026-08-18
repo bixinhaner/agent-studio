@@ -68,7 +68,7 @@ function requiredFieldLabel(label: string): string {
 }
 
 export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
-  const { branding } = useBranding();
+  const { brand, branding } = useBranding();
   const [loading, setLoading] = useState(Boolean(props.token));
   const [saving, setSaving] = useState(false);
   const [request, setRequest] = useState<PublicAccessRequest | null>(null);
@@ -129,7 +129,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
             ["Company", request.companyName],
             ["Country / Region", request.countryRegion ?? "—"],
             ["SN Number", request.snNumber ?? "—"],
-            ["Baicells Sales Contact", request.salesContactEmail],
+            [brand.accessSalesContactLabel, request.salesContactEmail],
             ["Last Updated", formatLocalTime(request.updatedAt)],
             ["Target Organization", request.targetOrganization?.name ?? "Pending Provisioning"]
           ]
@@ -233,7 +233,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>{requiredFieldLabel("Baicells Sales Contact")}</span>
+              <span>{requiredFieldLabel(brand.accessSalesContactLabel)}</span>
               <input
                 className="auth-modern-input"
                 value={form.salesContactEmail}

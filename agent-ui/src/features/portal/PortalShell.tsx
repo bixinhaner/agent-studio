@@ -1258,7 +1258,7 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
   const classes = ["icon-green", "icon-blue", "icon-orange", "icon-purple"];
 
   return (
-    <div className="bailey-suggestion-grid">
+    <div className="portal-welcome-suggestion-grid">
       {behavior.portalWelcomeSuggestions.map((suggestion, index) => {
         const Icon = icons[index % icons.length];
         const iconClass = classes[index % classes.length];
@@ -1276,15 +1276,15 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
         return (
           <ThreadPrimitive.Suggestion
             key={`${localizedSuggestion.label}-${index}`}
-            className="bailey-suggestion-card"
+            className="portal-welcome-suggestion-card"
             prompt={localizedSuggestion.prompt}
             send={false}
             clearComposer
           >
-            <div className={`bailey-suggestion-icon-wrap ${iconClass}`}>
+            <div className={`portal-welcome-suggestion-icon-wrap ${iconClass}`}>
               <Icon size={20} strokeWidth={2.5} />
             </div>
-            <span className="bailey-suggestion-text">{localizedSuggestion.label}</span>
+            <span className="portal-welcome-suggestion-text">{localizedSuggestion.label}</span>
           </ThreadPrimitive.Suggestion>
         );
       })}
@@ -1300,21 +1300,21 @@ const DraftOnlyThreadWelcome: FC = () => {
 
   return (
     <ThreadPrimitive.Empty>
-      <div className="bailey-welcome-container">
+      <div className="portal-welcome-welcome-container">
         {portalWelcomeIllustrationUrl ? (
-          <div className="bailey-illustration-shell">
+          <div className="portal-welcome-illustration-shell">
             <img
-              className="bailey-illustration"
+              className="portal-welcome-illustration"
               src={portalWelcomeIllustrationUrl}
               alt={assistantDisplayName}
               loading="eager"
             />
           </div>
         ) : null}
-        <h1 className="bailey-welcome-greeting">
+        <h1 className="portal-welcome-welcome-greeting">
           {locale === "zh-CN" ? <>你好，我是 <span>{assistantDisplayName}</span>。</> : <>Hello, I&apos;m <span>{assistantDisplayName}</span>.</>}
         </h1>
-        <p className="bailey-welcome-subtitle">
+        <p className="portal-welcome-welcome-subtitle">
           {t("welcome.subtitle")}
         </p>
         <DraftOnlyWelcomeSuggestions />
@@ -3483,11 +3483,11 @@ function collectSkillRootPathsFromChanges(changes: CodexFileChangeView[]): strin
 function buildSkillCreatorReviewPrompt(prompt: string): string {
   return `${prompt}
 
-Agent Studio skill install workflow:
+Platform skill install workflow:
 - Use the normal skill-creator workflow to create or update a standard Codex Skill directory with a valid SKILL.md.
 - Do not install or copy the skill into CODEX_HOME, ~/.codex, or any global Codex skills directory.
 - Create the generated skill inside this thread workspace, preferably under ./skill-drafts/<skill-name>.
-- When the skill files are ready, stop at the generated files. Agent Studio will offer an Install skill action that installs the skill through the backend and makes it available in new chats.`;
+- When the skill files are ready, stop at the generated files. The platform will offer an Install skill action that installs the skill through the backend and makes it available in new chats.`;
 }
 
 function isKnowledgeSetPreviewPath(pathname: string): boolean {
@@ -8229,7 +8229,7 @@ export function PortalShell(props: {
         : `${t("welcome.greeting", { assistant: assistantDisplayName })} ${t("welcome.subtitle")}`
       : applyPortalWelcomeTemplate(welcomeMessageTemplate, {
           assistantName: assistantDisplayName,
-          platformName: branding.platformName.trim() || "Agent Studio"
+          platformName: branding.platformName.trim() || "Workspace"
         }) ||
         (isMobile
           ? t("welcome.subtitle")
@@ -10948,7 +10948,7 @@ export function PortalShell(props: {
             {canUseCustomerBilling ? (
               <Modal
                 open={subscriptionReminderModalOpen}
-                title={blockedSubscriptionStatus ? t("access.expired") : t("access.renewPlatform", { platform: branding.platformName.trim() || "Agent Studio" })}
+                title={blockedSubscriptionStatus ? t("access.expired") : t("access.renewPlatform", { platform: branding.platformName.trim() || "Workspace" })}
                 okText={blockedSubscriptionStatus ? t("access.renewNow") : t("access.chooseRenewal")}
                 cancelText={t("access.later")}
                 onOk={() => {

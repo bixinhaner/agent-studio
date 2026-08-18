@@ -30,3 +30,11 @@ export async function checkPublicBrand(id: string): Promise<PublicBrandReadiness
   );
   return response.readiness;
 }
+
+export async function regeneratePublicBrandProjection(id: string): Promise<PublicBrandRecord> {
+  const response = await api<{ brand: PublicBrandRecord }>(
+    `/api/admin/brands/${encodeURIComponent(id)}/knowledge-projection`,
+    { method: "POST" }
+  );
+  return response.brand;
+}

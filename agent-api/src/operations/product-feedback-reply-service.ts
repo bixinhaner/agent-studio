@@ -12,6 +12,7 @@ import type {
   ProductFeedbackRecord,
   ProductFeedbackRepository
 } from "../persistence/product-feedback-repository.js";
+import type { PublicBrandRecord } from "../public-brands/types.js";
 
 export const PRODUCT_FEEDBACK_REPLY_MAX_IMAGES = 3;
 export const PRODUCT_FEEDBACK_REPLY_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -104,6 +105,11 @@ type ReplyInput = {
   uploads?: ProductFeedbackReplyUpload[];
 };
 
+type FeedbackBrand = Pick<
+  PublicBrandRecord,
+  "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
+>;
+
 export class ProductFeedbackReplyService {
   constructor(
     private readonly deps: {
@@ -112,6 +118,7 @@ export class ProductFeedbackReplyService {
       emailSender: AuthEmailSender;
       resolveBrandName?: () => string | Promise<string>;
       resolvePortalUrl?: () => string | Promise<string>;
+      resolveOrganizationBrand?: (organizationId: string) => Promise<FeedbackBrand | undefined>;
     }
   ) {}
 
@@ -227,6 +234,7 @@ export class ProductFeedbackReplyService {
     try {
       delivery = await this.deps.emailSender.send({
         to: recipientEmail,
+        ...await this.resolveEmailEnvelope(feedback.organizationId),
         subject: normalized.subject,
         text: normalized.bodyText,
         html: await this.buildHtml(feedback, normalized),
@@ -289,7 +297,7 @@ export class ProductFeedbackReplyService {
   }
 
   private async buildDraft(feedback: ProductFeedbackRecord): Promise<ProductFeedbackReplyDraft> {
-    const brandName = await this.resolveBrandName();
+    const brandName = await this.resolveBrandName(feedback.organizationId);
     const defaultLanguage = containsCjk(feedback.description) ? "zh" : "en";
     const summary = summarize(feedback.description, defaultLanguage === "zh" ? 36 : 70);
     return {
@@ -372,7 +380,7 @@ export class ProductFeedbackReplyService {
         ...image,
         sourceId: "sourceId" in image ? image.sourceId : undefined,
         checksum,
-        cid: `product-feedback-${feedback.id}-${index + 1}-${checksum.slice(0, 12)}@bailey`
+        cid: `product-feedback-${feedback.id}-${index + 1}-${checksum.slice(0, 12)}@brand-message`
       };
     });
     return { subject, bodyText, templateLanguage, images };
@@ -382,7 +390,11 @@ export class ProductFeedbackReplyService {
     feedback: ProductFeedbackRecord,
     input: { subject: string; bodyText: string; templateLanguage: ProductFeedbackReplyLanguage; images: ResolvedReplyImage[] }
   ): Promise<string> {
-    const [brandName, portalUrl] = await Promise.all([this.resolveBrandName(), this.resolvePortalUrl()]);
+    const organizationBrand = await this.resolveOrganizationBrand(feedback.organizationId);
+    const [brandName, portalUrl] = await Promise.all([
+      this.resolveBrandName(feedback.organizationId),
+      this.resolvePortalUrl(feedback.organizationId)
+    ]);
     return recoveryEmailHtml({
       brandName,
       subject: input.subject,
@@ -391,6 +403,7 @@ export class ProductFeedbackReplyService {
       lastOccurredAt: feedback.createdAt,
       resolutionSummary: input.bodyText,
       portalUrl,
+      primaryColor: organizationBrand?.primaryColor,
       issueKind: "product_feedback_reply",
       inlineImages: input.images.map((image) => ({ cid: image.cid, name: image.name }))
     });
@@ -417,14 +430,36 @@ export class ProductFeedbackReplyService {
     return updated;
   }
 
-  private async resolveBrandName(): Promise<string> {
-    const resolved = trimOrUndefined(await this.deps.resolveBrandName?.());
-    return resolved ?? "Bailey";
+  private async resolveOrganizationBrand(organizationId?: string): Promise<FeedbackBrand | undefined> {
+    return organizationId ? this.deps.resolveOrganizationBrand?.(organizationId) : undefined;
   }
 
-  private async resolvePortalUrl(): Promise<string> {
+  private async resolveBrandName(organizationId?: string): Promise<string> {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    const organizationBrandName = trimOrUndefined(brand?.platformName);
+    if (organizationBrandName) return organizationBrandName;
+    const resolved = trimOrUndefined(await this.deps.resolveBrandName?.());
+    return resolved ?? "Workspace";
+  }
+
+  private async resolvePortalUrl(organizationId?: string): Promise<string> {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    const organizationPortalUrl = trimOrUndefined(brand?.primaryBaseUrl);
+    if (organizationPortalUrl) return organizationPortalUrl;
     const resolved = trimOrUndefined(await this.deps.resolvePortalUrl?.());
     return resolved ?? "#";
+  }
+
+  private async resolveEmailEnvelope(organizationId?: string) {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    if (!brand) return {};
+    if (!brand.emailSenderVerified || !trimOrUndefined(brand.emailFromAddress)) {
+      throw new Error(`${brand.platformName} email delivery is not ready`);
+    }
+    return {
+      from: `${trimOrUndefined(brand.emailFromName) ?? brand.platformName} <${brand.emailFromAddress}>`,
+      replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
+    };
   }
 }
 

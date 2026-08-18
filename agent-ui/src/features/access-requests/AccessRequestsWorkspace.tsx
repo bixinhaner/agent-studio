@@ -417,7 +417,7 @@ export function AccessRequestsWorkspace() {
         title: "品牌入口",
         key: "publicBrand",
         width: 120,
-        render: (_, record) => <Tag color={record.publicBrand ? "blue" : "default"}>{record.publicBrand?.name ?? "Bailey"}</Tag>
+        render: (_, record) => <Tag color={record.publicBrand ? "blue" : "default"}>{record.publicBrand?.name ?? "未归属品牌"}</Tag>
       },
       {
         title: "公司 / 申请人",
@@ -617,7 +617,7 @@ export function AccessRequestsWorkspace() {
                 children: (
                   <div className="access-admin-tab">
                     <div className="access-admin-kv-grid">
-                      <div><span>品牌入口</span><strong>{selectedRequest.publicBrand?.name ?? "Bailey"}</strong></div>
+                      <div><span>品牌入口</span><strong>{selectedRequest.publicBrand?.name ?? "未归属品牌"}</strong></div>
                       <div><span>公司</span><strong>{selectedRequest.companyName}</strong></div>
                       <div><span>申请邮箱</span><strong>{selectedRequest.applicantEmail}</strong></div>
                       <div><span>联系人</span><strong>{selectedRequest.contactName ?? "—"}</strong></div>

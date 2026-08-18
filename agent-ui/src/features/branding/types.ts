@@ -20,6 +20,13 @@ export type PublicBrandIdentity = {
   externalOnly: boolean;
   accessRequestEnabled: boolean;
   billingEnabled: boolean;
+  accessSalesContactLabel: string;
+  supportEmail?: string;
+  supportUrl?: string;
+  privacyUrl?: string;
+  termsUrl?: string;
+  billingMerchantName?: string;
+  billingSupportEmail?: string;
 };
 
 export type PublicPortalWelcomeSuggestion = {
@@ -55,7 +62,7 @@ export const DEFAULT_ADMIN_CONSOLE_CONFIG: PublicAdminConsoleConfig = {
 };
 
 export const DEFAULT_BRANDING: PublicBranding = {
-  platformName: "Agent Studio",
+  platformName: "Workspace",
   headerSubtitle: "Enterprise Agent Platform",
   internalLoginCopy: "Sign in to continue.",
   externalLoginCopy: "Welcome. Sign in to continue.",
@@ -74,7 +81,8 @@ export const DEFAULT_BRAND_IDENTITY: PublicBrandIdentity = {
   custom: false,
   externalOnly: false,
   accessRequestEnabled: true,
-  billingEnabled: true
+  billingEnabled: true,
+  accessSalesContactLabel: "Sales Contact"
 };
 
 export const DEFAULT_PORTAL_BEHAVIOR: PublicPortalBehavior = {

@@ -94,7 +94,14 @@ export function normalizeBrandingResponse(
           ? value.brand.accessRequestEnabled
           : DEFAULT_BRAND_IDENTITY.accessRequestEnabled,
       billingEnabled:
-        typeof value?.brand?.billingEnabled === "boolean" ? value.brand.billingEnabled : DEFAULT_BRAND_IDENTITY.billingEnabled
+        typeof value?.brand?.billingEnabled === "boolean" ? value.brand.billingEnabled : DEFAULT_BRAND_IDENTITY.billingEnabled,
+      accessSalesContactLabel: asString(value?.brand?.accessSalesContactLabel) || DEFAULT_BRAND_IDENTITY.accessSalesContactLabel,
+      supportEmail: asString(value?.brand?.supportEmail) || undefined,
+      supportUrl: asString(value?.brand?.supportUrl) || undefined,
+      privacyUrl: asString(value?.brand?.privacyUrl) || undefined,
+      termsUrl: asString(value?.brand?.termsUrl) || undefined,
+      billingMerchantName: asString(value?.brand?.billingMerchantName) || undefined,
+      billingSupportEmail: asString(value?.brand?.billingSupportEmail) || undefined
     },
     adminConsole: {
       showOperationsAndConversationMenus:

@@ -53,6 +53,20 @@ const suggestionSchema = z.object({
   prompt: z.string().trim().min(1).max(2000)
 });
 
+const optionalEmailSchema = z
+  .string()
+  .trim()
+  .email("email is invalid")
+  .optional()
+  .nullable()
+  .transform((value) => value || null);
+
+const replacementRuleSchema = z.object({
+  source: z.string().trim().min(1).max(200),
+  target: z.string().trim().max(200),
+  mode: z.enum(["replace", "remove"])
+});
+
 export const publicBrandInputSchema = z
   .object({
     key: brandKeySchema,
@@ -77,12 +91,31 @@ export const publicBrandInputSchema = z
     answerFeedbackPrompt: z.string().trim().min(1).max(200),
     externalOnly: z.boolean(),
     accessRequestEnabled: z.boolean(),
+    accessSalesContactLabel: z.string().trim().min(1).max(120),
     billingEnabled: z.boolean(),
     billingSuccessUrl: optionalHttpUrlSchema,
     billingCancelUrl: optionalHttpUrlSchema,
     billingPortalUrl: optionalHttpUrlSchema,
+    supportEmail: optionalEmailSchema,
+    supportUrl: optionalHttpUrlSchema,
+    privacyUrl: optionalHttpUrlSchema,
+    termsUrl: optionalHttpUrlSchema,
+    emailFromName: z.string().trim().min(1).max(120),
+    emailFromAddress: optionalEmailSchema,
+    emailReplyTo: optionalEmailSchema,
+    emailSenderVerified: z.boolean(),
+    billingMerchantName: z.string().trim().max(120).optional().nullable().transform((value) => value || null),
+    billingSupportEmail: optionalEmailSchema,
+    paymentAccountMode: z.enum(["shared", "connected"]),
+    paymentStripeAccountId: z.string().trim().max(120).optional().nullable().transform((value) => value || null),
+    paymentAccountReady: z.boolean(),
+    resourceBindingMode: z.enum(["brand_managed", "organization_policy"]),
     agentModeId: z.string().trim().max(200).optional().nullable().transform((value) => value || null),
     knowledgeSetIds: z.array(z.string().trim().min(1)).max(50),
+    knowledgeIsolationMode: z.enum(["direct", "brand_projection"]),
+    knowledgeReplacementRules: z.array(replacementRuleSchema).max(100),
+    outputProtectionEnabled: z.boolean(),
+    outputForbiddenTerms: z.array(z.string().trim().min(1).max(200)).max(100),
     subscriptionPlanIds: z.array(z.string().trim().min(1)).max(50),
     domains: z
       .array(z.object({ hostname: hostnameSchema, status: z.enum(["active", "disabled"]), isPrimary: z.boolean() }))
@@ -100,6 +133,15 @@ export const publicBrandInputSchema = z
     }
     if (value.domains.find((domain) => domain.isPrimary)?.status !== "active") {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["domains"], message: "the primary domain must be active" });
+    }
+    if (value.paymentAccountMode === "connected" && !value.paymentStripeAccountId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["paymentStripeAccountId"], message: "connected payments require a Stripe account ID" });
+    }
+    if (value.knowledgeIsolationMode === "brand_projection" && value.knowledgeReplacementRules.length === 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["knowledgeReplacementRules"], message: "brand projection requires at least one replacement rule" });
+    }
+    if (value.outputProtectionEnabled && value.outputForbiddenTerms.length === 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["outputForbiddenTerms"], message: "output protection requires at least one forbidden term" });
     }
   });
 
@@ -138,12 +180,36 @@ export type PublicBrandRecord = {
   answerFeedbackPrompt: string;
   externalOnly: boolean;
   accessRequestEnabled: boolean;
+  accessSalesContactLabel: string;
   billingEnabled: boolean;
   billingSuccessUrl?: string;
   billingCancelUrl?: string;
   billingPortalUrl?: string;
+  supportEmail?: string;
+  supportUrl?: string;
+  privacyUrl?: string;
+  termsUrl?: string;
+  emailFromName: string;
+  emailFromAddress?: string;
+  emailReplyTo?: string;
+  emailSenderVerified: boolean;
+  billingMerchantName?: string;
+  billingSupportEmail?: string;
+  paymentAccountMode: "shared" | "connected";
+  paymentStripeAccountId?: string;
+  paymentAccountReady: boolean;
+  resourceBindingMode: "brand_managed" | "organization_policy";
   agentModeId?: string;
   knowledgeSetIds: string[];
+  knowledgeIsolationMode: "direct" | "brand_projection";
+  knowledgeReplacementRules: Array<{ source: string; target: string; mode: "replace" | "remove" }>;
+  knowledgeProjectionStorage: Record<string, string>;
+  knowledgeProjectionStatus: "not_required" | "pending" | "building" | "ready" | "failed";
+  knowledgeProjectionItemCount: number;
+  knowledgeProjectionAt?: string;
+  knowledgeProjectionError?: string;
+  outputProtectionEnabled: boolean;
+  outputForbiddenTerms: string[];
   subscriptionPlanIds: string[];
   createdByUserId?: string;
   updatedByUserId?: string;

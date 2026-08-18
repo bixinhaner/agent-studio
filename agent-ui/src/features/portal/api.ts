@@ -107,6 +107,13 @@ export type PortalBillingOrder = {
 };
 
 export type PortalBillingSummary = {
+  brand: {
+    name: string;
+    merchantName?: string;
+    supportEmail?: string;
+    supportUrl?: string;
+    paymentReady: boolean;
+  } | null;
   organization: {
     id: string;
     name: string;

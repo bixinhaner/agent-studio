@@ -29,7 +29,5 @@ export function organizationMatchesRequestBrand(
   organization: { publicBrandId?: string | null } | null | undefined
 ): boolean {
   if (!organization) return false;
-  return req.publicBrand
-    ? organization.publicBrandId === req.publicBrand.id
-    : !organization.publicBrandId;
+  return Boolean(req.publicBrand && organization.publicBrandId === req.publicBrand.id);
 }

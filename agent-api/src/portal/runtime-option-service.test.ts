@@ -211,7 +211,10 @@ function createService(input: {
     },
     publicBrands: input.publicBrandAgentModeId
       ? {
-          getForOrganization: async () => ({ agentModeId: input.publicBrandAgentModeId })
+          getForOrganization: async () => ({
+            agentModeId: input.publicBrandAgentModeId,
+            resourceBindingMode: "brand_managed"
+          })
         }
       : undefined
   } as never);

@@ -23,6 +23,13 @@ export type PublicBrandingResponse = {
     externalOnly: boolean;
     accessRequestEnabled: boolean;
     billingEnabled: boolean;
+    accessSalesContactLabel: string;
+    supportEmail?: string;
+    supportUrl?: string;
+    privacyUrl?: string;
+    termsUrl?: string;
+    billingMerchantName?: string;
+    billingSupportEmail?: string;
   };
   adminConsole: {
     showOperationsAndConversationMenus: boolean;
@@ -72,7 +79,8 @@ export async function resolvePublicBranding(reader: SystemSettingsBrandingReader
       custom: false,
       externalOnly: false,
       accessRequestEnabled: true,
-      billingEnabled: true
+      billingEnabled: true,
+      accessSalesContactLabel: "Sales Contact"
     },
     branding: systemSettingsBrandingSchema.parse(payload.branding ?? defaultBranding()),
     adminConsole: {
@@ -99,7 +107,14 @@ export function resolveBrandPublicBranding(brand: PublicBrandRecord): PublicBran
       custom: true,
       externalOnly: brand.externalOnly,
       accessRequestEnabled: brand.accessRequestEnabled,
-      billingEnabled: brand.billingEnabled
+      billingEnabled: brand.billingEnabled,
+      accessSalesContactLabel: brand.accessSalesContactLabel,
+      supportEmail: brand.supportEmail,
+      supportUrl: brand.supportUrl,
+      privacyUrl: brand.privacyUrl,
+      termsUrl: brand.termsUrl,
+      billingMerchantName: brand.billingMerchantName,
+      billingSupportEmail: brand.billingSupportEmail
     },
     branding: {
       platformName: brand.platformName,
@@ -116,7 +131,7 @@ export function resolveBrandPublicBranding(brand: PublicBrandRecord): PublicBran
       accentColor: brand.accentColor
     },
     adminConsole: {
-      showOperationsAndConversationMenus: false
+      showOperationsAndConversationMenus: !brand.externalOnly
     },
     behavior: {
       portalWelcomeMessageDesktop: brand.portalWelcomeMessageDesktop,

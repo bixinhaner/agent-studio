@@ -18,13 +18,16 @@ describe("public brand request context", () => {
     expect(resolveByHostname).toHaveBeenCalledWith("ranley.cloud-ran.ai");
   });
 
-  it("keeps branded and legacy organizations mutually isolated", () => {
+  it("requires every organization to match a resolved brand", () => {
     const ranleyRequest = { publicBrand: { id: "brand-ranley" } } as never;
-    const baileyRequest = {} as never;
+    const baileyRequest = { publicBrand: { id: "brand-bailey" } } as never;
+    const unknownRequest = {} as never;
 
     expect(organizationMatchesRequestBrand(ranleyRequest, { publicBrandId: "brand-ranley" })).toBe(true);
     expect(organizationMatchesRequestBrand(ranleyRequest, { publicBrandId: null })).toBe(false);
-    expect(organizationMatchesRequestBrand(baileyRequest, { publicBrandId: null })).toBe(true);
+    expect(organizationMatchesRequestBrand(baileyRequest, { publicBrandId: "brand-bailey" })).toBe(true);
     expect(organizationMatchesRequestBrand(baileyRequest, { publicBrandId: "brand-ranley" })).toBe(false);
+    expect(organizationMatchesRequestBrand(unknownRequest, { publicBrandId: "brand-bailey" })).toBe(false);
+    expect(organizationMatchesRequestBrand(unknownRequest, { publicBrandId: null })).toBe(false);
   });
 });

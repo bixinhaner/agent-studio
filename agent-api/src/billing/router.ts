@@ -348,7 +348,16 @@ export function createPortalBillingRouter(
           : [];
       }
       res.json({
-        billing,
+        billing: {
+          ...billing,
+          brand: brand ? {
+            name: brand.platformName,
+            merchantName: brand.billingMerchantName,
+            supportEmail: brand.billingSupportEmail ?? brand.supportEmail,
+            supportUrl: brand.supportUrl,
+            paymentReady: brand.paymentAccountReady
+          } : null
+        },
         subscriptionStatus: subscriptionStatus ? portalSubscriptionStatusPayload(subscriptionStatus) : null
       });
     } catch (error) {
@@ -407,6 +416,10 @@ export function createPortalBillingRouter(
         res.status(403).json({ detail: "This plan is not available for this brand" });
         return;
       }
+      if (brand && !brand.paymentAccountReady) {
+        res.status(409).json({ detail: "Payment is not ready for this brand. Please contact support." });
+        return;
+      }
       const result = await service.createPortalCheckout({
         organization: actor.organization,
         user: actor.user,
@@ -415,7 +428,8 @@ export function createPortalBillingRouter(
         autoRenew: parseBoolean(req.body?.autoRenew, true),
         checkoutUrls: brand
           ? { successUrl: brand.billingSuccessUrl, cancelUrl: brand.billingCancelUrl }
-          : undefined
+          : undefined,
+        stripeAccountId: brand?.paymentAccountMode === "connected" ? brand.paymentStripeAccountId : undefined
       });
       res.status(201).json(result);
     } catch (error) {

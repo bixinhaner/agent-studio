@@ -488,6 +488,17 @@ export function createAuthRouter(options: {
     return req.publicBrand?.platformName ?? resolvePublicPlatformName(options.systemSettings);
   }
 
+  function emailEnvelope(brand: Awaited<ReturnType<typeof brandForOrganization>> | Request["publicBrand"]) {
+    if (!brand) return {};
+    if (!brand.emailSenderVerified || !trimOrUndefined(brand.emailFromAddress)) {
+      throw new Error(`${brand.platformName} email delivery is not ready`);
+    }
+    return {
+      from: `${brand.emailFromName} <${brand.emailFromAddress}>`,
+      replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
+    };
+  }
+
   async function brandForOrganization(organization: { publicBrandId?: string | null }) {
     return options.publicBrands?.getById(organization.publicBrandId);
   }
@@ -790,6 +801,11 @@ export function createAuthRouter(options: {
         res.status(404).json({ detail: "Organization does not exist or is unavailable" });
         return;
       }
+      const organizationBrand = await brandForOrganization(organization);
+      if (organizationBrand && (!organizationBrand.emailSenderVerified || !trimOrUndefined(organizationBrand.emailFromAddress))) {
+        res.status(409).json({ detail: `${organizationBrand.platformName} email delivery is not ready` });
+        return;
+      }
 
       const rawToken = randomUUID().replace(/-/g, "");
       const invite = await options.invites.create({
@@ -806,9 +822,10 @@ export function createAuthRouter(options: {
 
       const inviteUrlBase = await publicBaseUrlForOrganization(organization);
       const inviteUrl = inviteUrlBase ? `${inviteUrlBase.replace(/\/+$/, "")}/invite/${rawToken}` : undefined;
-      const platformName = (await brandForOrganization(organization))?.platformName ?? await resolvePublicPlatformName(options.systemSettings);
+      const platformName = organizationBrand?.platformName ?? await resolvePublicPlatformName(options.systemSettings);
       await options.emailSender.send({
         to: invite.email,
+        ...emailEnvelope(organizationBrand),
         subject: `${organization.name} invited you to ${platformName}`,
         text: inviteUrl
           ? `You were invited to join ${organization.name}.\n\nOpen this link: ${inviteUrl}\n\nIf prompted, use this email address to request a verification code.`
@@ -832,6 +849,10 @@ export function createAuthRouter(options: {
 
   router.post("/email/request", externalWebGate, async (req: Request, res: Response) => {
     try {
+      if (req.publicBrand && (!req.publicBrand.emailSenderVerified || !trimOrUndefined(req.publicBrand.emailFromAddress))) {
+        res.status(503).json({ detail: `${req.publicBrand.platformName} email sign-in is temporarily unavailable` });
+        return;
+      }
       const input = requestEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);
       const explicitInvite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
@@ -916,6 +937,7 @@ export function createAuthRouter(options: {
         : `${platformName} sign-in verification code`;
       await options.emailSender.send({
         to: email,
+        ...emailEnvelope(req.publicBrand),
         subject,
         text: [
           invite && organization ? `You are accepting an invite from ${organization.name}.` : `You are signing in to ${platformName}.`,

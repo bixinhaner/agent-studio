@@ -359,10 +359,10 @@ export class PortalRuntimeOptionService {
         isActive(mode.status) &&
         mode.visibleToUsers &&
         matchesOrganization(mode.organizationId, input.organizationId) &&
-        (!brand || mode.id === brand.agentModeId)
+        (!brand || brand.resourceBindingMode === "organization_policy" || mode.id === brand.agentModeId)
     );
     const allowedModeIds = new Set(
-      brand
+      brand?.resourceBindingMode === "brand_managed"
         ? activeVisibleModeRows.map((mode) => mode.id)
         : await this.deps.policies.filterAllowedResources({
             organizationId: input.organizationId,

@@ -97,7 +97,7 @@ export default defineConfig({
     __AGENT_STUDIO_BUILD_ID__: JSON.stringify(buildVersionInfo.buildId)
   },
   build: {
-    emptyOutDir: false,
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

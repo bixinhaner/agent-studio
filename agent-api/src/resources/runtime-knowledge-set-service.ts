@@ -168,7 +168,7 @@ export class RuntimeKnowledgeSetService {
       storage: KnowledgeSetStorageLike;
       resourceAccessLogs?: ResourceAccessLogServiceLike;
       securityAlerts?: SecurityAlertServiceLike;
-      publicBrands?: Pick<PublicBrandService, "getForOrganization">;
+      publicBrands?: Pick<PublicBrandService, "getForOrganization" | "ensureKnowledgeProjection">;
     }
   ) {}
 
@@ -186,8 +186,12 @@ export class RuntimeKnowledgeSetService {
       throw new Error("Session workspace does not exist or is invalid");
     }
 
-    const brand = await this.options.publicBrands?.getForOrganization(input.organizationId);
-    const selectedKnowledgeSetIds = brand
+    const resolvedBrand = await this.options.publicBrands?.getForOrganization(input.organizationId);
+    const brand = resolvedBrand
+      ? await this.options.publicBrands?.ensureKnowledgeProjection(resolvedBrand) ?? resolvedBrand
+      : undefined;
+    const brandManagesResources = brand?.resourceBindingMode === "brand_managed";
+    const selectedKnowledgeSetIds = brandManagesResources
       ? [...brand.knowledgeSetIds]
       : resolveSelectedKnowledgeSetIds({
           workspacePath,
@@ -221,7 +225,7 @@ export class RuntimeKnowledgeSetService {
     }
 
     const allowedKnowledgeSetIds = new Set(
-      brand
+      brandManagesResources
         ? selectedKnowledgeSetIds
         : await this.options.policies.filterAllowedResources({
             userId: input.userId,
@@ -251,7 +255,13 @@ export class RuntimeKnowledgeSetService {
       if (!knowledgeSet) {
         throw new Error("Knowledge set does not exist or is not enabled");
       }
-      return this.options.storage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
+      const projectionStorageKey = brandManagesResources && brand?.knowledgeIsolationMode === "brand_projection"
+        ? brand.knowledgeProjectionStorage[knowledgeSetId]
+        : undefined;
+      if (brandManagesResources && brand?.knowledgeIsolationMode === "brand_projection" && !projectionStorageKey) {
+        throw new Error("Brand knowledge projection is not ready");
+      }
+      return this.options.storage.resolveReadableMountPath(projectionStorageKey ?? resolveKnowledgeSetStorageKey(knowledgeSet));
     });
 
     if (this.options.resourceAccessLogs) {

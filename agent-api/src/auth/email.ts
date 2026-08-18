@@ -28,6 +28,7 @@ export type AuthEmailSender = {
   send(input: {
     to: string | string[];
     cc?: string | string[];
+    from?: string;
     replyTo?: string;
     subject: string;
     text: string;
@@ -61,6 +62,7 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
     async send(input) {
       const to = normalizeAddressList(input.to);
       const cc = normalizeAddressList(input.cc);
+      const messageFrom = trimOrUndefined(input.from) ?? from;
       const replyTo = trimOrUndefined(input.replyTo);
       if (!to.length) {
         throw new Error("email target is required");
@@ -71,6 +73,7 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
         console.info(`[${label}]`, {
           to,
           cc,
+          from: messageFrom,
           replyTo,
           subject: input.subject,
           text: input.text,
@@ -85,7 +88,7 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
       }
 
       await transporter.sendMail({
-        from,
+        from: messageFrom,
         to: to.join(", "),
         cc: cc.length ? cc.join(", ") : undefined,
         replyTo,

@@ -243,7 +243,7 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
       const viewport = viewportRef.current;
       if (!viewport) return false;
       const messages = threadMessageElements(viewport);
-      const welcomeReady = Boolean(viewport.querySelector(".aui-thread-welcome-root, .bailey-welcome-container"));
+      const welcomeReady = Boolean(viewport.querySelector(".aui-thread-welcome-root, .portal-welcome-welcome-container"));
       if (!force && messages.length === 0 && !welcomeReady) return false;
 
       if (savedPosition && !savedPosition.atBottom && savedPosition.messageId) {

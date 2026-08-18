@@ -37,13 +37,14 @@ function createEmailAuthHarness(input?: {
   publicBrandId?: string;
 }) {
   const email = "customer@example.com";
+  const publicBrandId = input?.publicBrandId ?? "brand-bailey";
   const organization = {
     id: "org-1",
     slug: "customer-org",
     name: "Customer Org",
     type: "customer",
     status: "active",
-    publicBrandId: input?.publicBrandId,
+    publicBrandId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -284,16 +285,17 @@ function createEmailAuthHarness(input?: {
 
   const app = express();
   app.use(express.json());
-  if (input?.publicBrandId) {
-    app.use((req, _res, next) => {
-      req.publicBrand = {
-        id: input.publicBrandId!,
-        platformName: "Ranley",
-        externalOnly: true
-      } as never;
-      next();
-    });
-  }
+  app.use((req, _res, next) => {
+    req.publicBrand = {
+      id: publicBrandId,
+      platformName: publicBrandId === "brand-ranley" ? "Ranley" : "Bailey",
+      externalOnly: true,
+      emailFromName: publicBrandId === "brand-ranley" ? "Ranley" : "Bailey",
+      emailFromAddress: publicBrandId === "brand-ranley" ? "support@cloud-ran.ai" : "support@baicells.com",
+      emailSenderVerified: true
+    } as never;
+    next();
+  });
   app.use("/api/auth", createAuthRouter(options as never));
   return { app, state, email, organization, markActivatedFromInvite };
 }

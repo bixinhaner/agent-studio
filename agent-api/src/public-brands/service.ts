@@ -23,6 +23,30 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function stringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1].trim()))
+  );
+}
+
+function replacementRules(value: unknown): PublicBrandRecord["knowledgeReplacementRules"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = trimOrUndefined((item as { source?: string }).source);
+    const target = typeof (item as { target?: unknown }).target === "string" ? (item as { target: string }).target.trim() : "";
+    const mode = (item as { mode?: unknown }).mode;
+    return source && (mode === "replace" || mode === "remove") ? [{ source, target, mode }] : [];
+  });
+}
+
+type ProjectionServiceLike = {
+  ensure(brand: PublicBrandRecord): Promise<PublicBrandRecord>;
+  regenerate(brandId: string): Promise<unknown>;
+};
+
 function welcomeSuggestions(value: unknown): Array<{ label: string; prompt: string }> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -36,7 +60,7 @@ function welcomeSuggestions(value: unknown): Array<{ label: string; prompt: stri
 type BrandRow = Prisma.PublicBrandGetPayload<{
   include: {
     domains: true;
-    organizations: { select: { id: true } };
+    organizations: { select: { id: true; type: true } };
   };
 }>;
 
@@ -65,12 +89,38 @@ function mapBrand(row: NonNullable<BrandRow>): PublicBrandRecord {
     answerFeedbackPrompt: row.answerFeedbackPrompt,
     externalOnly: row.externalOnly,
     accessRequestEnabled: row.accessRequestEnabled,
+    accessSalesContactLabel: row.accessSalesContactLabel,
     billingEnabled: row.billingEnabled,
     billingSuccessUrl: trimOrUndefined(row.billingSuccessUrl),
     billingCancelUrl: trimOrUndefined(row.billingCancelUrl),
     billingPortalUrl: trimOrUndefined(row.billingPortalUrl),
+    supportEmail: trimOrUndefined(row.supportEmail),
+    supportUrl: trimOrUndefined(row.supportUrl),
+    privacyUrl: trimOrUndefined(row.privacyUrl),
+    termsUrl: trimOrUndefined(row.termsUrl),
+    emailFromName: row.emailFromName,
+    emailFromAddress: trimOrUndefined(row.emailFromAddress),
+    emailReplyTo: trimOrUndefined(row.emailReplyTo),
+    emailSenderVerified: row.emailSenderVerified,
+    billingMerchantName: trimOrUndefined(row.billingMerchantName),
+    billingSupportEmail: trimOrUndefined(row.billingSupportEmail),
+    paymentAccountMode: row.paymentAccountMode === "connected" ? "connected" : "shared",
+    paymentStripeAccountId: trimOrUndefined(row.paymentStripeAccountId),
+    paymentAccountReady: row.paymentAccountReady,
+    resourceBindingMode: row.resourceBindingMode === "organization_policy" ? "organization_policy" : "brand_managed",
     agentModeId: trimOrUndefined(row.agentModeId),
     knowledgeSetIds: stringArray(row.knowledgeSetIds),
+    knowledgeIsolationMode: row.knowledgeIsolationMode === "brand_projection" ? "brand_projection" : "direct",
+    knowledgeReplacementRules: replacementRules(row.knowledgeReplacementRules),
+    knowledgeProjectionStorage: stringMap(row.knowledgeProjectionStorage),
+    knowledgeProjectionStatus: (["pending", "building", "ready", "failed"] as string[]).includes(row.knowledgeProjectionStatus)
+      ? row.knowledgeProjectionStatus as PublicBrandRecord["knowledgeProjectionStatus"]
+      : "not_required",
+    knowledgeProjectionItemCount: row.knowledgeProjectionItemCount,
+    knowledgeProjectionAt: row.knowledgeProjectionAt?.toISOString(),
+    knowledgeProjectionError: trimOrUndefined(row.knowledgeProjectionError),
+    outputProtectionEnabled: row.outputProtectionEnabled,
+    outputForbiddenTerms: stringArray(row.outputForbiddenTerms),
     subscriptionPlanIds: stringArray(row.subscriptionPlanIds),
     createdByUserId: trimOrUndefined(row.createdByUserId),
     updatedByUserId: trimOrUndefined(row.updatedByUserId),
@@ -84,7 +134,7 @@ function mapBrand(row: NonNullable<BrandRow>): PublicBrandRecord {
       createdAt: toIsoString(domain.createdAt),
       updatedAt: toIsoString(domain.updatedAt)
     })),
-    organizationIds: (row.organizations ?? []).map((organization) => organization.id)
+    organizationIds: (row.organizations ?? []).filter((organization) => organization.type === "customer").map((organization) => organization.id)
   };
 }
 
@@ -112,12 +162,36 @@ function brandData(input: PublicBrandInput, actorUserId: string) {
     answerFeedbackPrompt: input.answerFeedbackPrompt,
     externalOnly: input.externalOnly,
     accessRequestEnabled: input.accessRequestEnabled,
+    accessSalesContactLabel: input.accessSalesContactLabel,
     billingEnabled: input.billingEnabled,
     billingSuccessUrl: input.billingSuccessUrl,
     billingCancelUrl: input.billingCancelUrl,
     billingPortalUrl: input.billingPortalUrl,
+    supportEmail: input.supportEmail,
+    supportUrl: input.supportUrl,
+    privacyUrl: input.privacyUrl,
+    termsUrl: input.termsUrl,
+    emailFromName: input.emailFromName,
+    emailFromAddress: input.emailFromAddress,
+    emailReplyTo: input.emailReplyTo,
+    emailSenderVerified: input.emailSenderVerified,
+    billingMerchantName: input.billingMerchantName,
+    billingSupportEmail: input.billingSupportEmail,
+    paymentAccountMode: input.paymentAccountMode,
+    paymentStripeAccountId: input.paymentStripeAccountId,
+    paymentAccountReady: input.paymentAccountReady,
+    resourceBindingMode: input.resourceBindingMode,
     agentModeId: input.agentModeId,
     knowledgeSetIds: input.knowledgeSetIds,
+    knowledgeIsolationMode: input.knowledgeIsolationMode,
+    knowledgeReplacementRules: input.knowledgeReplacementRules,
+    knowledgeProjectionStatus: input.knowledgeIsolationMode === "brand_projection" ? "pending" : "not_required",
+    knowledgeProjectionStorage: input.knowledgeIsolationMode === "brand_projection" ? undefined : {},
+    knowledgeProjectionItemCount: input.knowledgeIsolationMode === "brand_projection" ? undefined : 0,
+    knowledgeProjectionAt: input.knowledgeIsolationMode === "brand_projection" ? undefined : null,
+    knowledgeProjectionError: null,
+    outputProtectionEnabled: input.outputProtectionEnabled,
+    outputForbiddenTerms: input.outputForbiddenTerms,
     subscriptionPlanIds: input.subscriptionPlanIds,
     updatedByUserId: actorUserId
   };
@@ -134,7 +208,25 @@ export function normalizeRequestHostname(value: unknown): string | undefined {
 }
 
 export class PublicBrandService {
+  private projection?: ProjectionServiceLike;
+
   constructor(private readonly db: PrismaClient) {}
+
+  setProjectionService(projection: ProjectionServiceLike): void {
+    this.projection = projection;
+  }
+
+  async ensureKnowledgeProjection(brand: PublicBrandRecord): Promise<PublicBrandRecord> {
+    return this.projection?.ensure(brand) ?? brand;
+  }
+
+  async regenerateKnowledgeProjection(brandId: string): Promise<PublicBrandRecord> {
+    if (!this.projection) throw new Error("Brand knowledge projection is not configured");
+    await this.projection.regenerate(brandId);
+    const brand = await this.getById(brandId);
+    if (!brand) throw new Error("Brand does not exist");
+    return brand;
+  }
 
   async resolveByHostname(hostname: string | undefined): Promise<PublicBrandRecord | undefined> {
     const normalized = normalizeRequestHostname(hostname);
@@ -144,7 +236,7 @@ export class PublicBrandService {
         status: "active",
         domains: { some: { hostname: normalized, status: "active" } }
       },
-      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true } } }
+      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true, type: true } } }
     });
     return row ? mapBrand(row) : undefined;
   }
@@ -154,7 +246,7 @@ export class PublicBrandService {
     if (!normalized) return undefined;
     const row = await this.db.publicBrand.findUnique({
       where: { id: normalized },
-      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true } } }
+      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true, type: true } } }
     });
     return row ? mapBrand(row) : undefined;
   }
@@ -171,7 +263,7 @@ export class PublicBrandService {
 
   async list(): Promise<PublicBrandRecord[]> {
     const rows = await this.db.publicBrand.findMany({
-      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true } } },
+      include: { domains: { orderBy: [{ isPrimary: "desc" }, { hostname: "asc" }] }, organizations: { select: { id: true, type: true } } },
       orderBy: [{ status: "asc" }, { name: "asc" }]
     });
     return rows.map((row) => mapBrand(row));
@@ -213,7 +305,7 @@ export class PublicBrandService {
         data: parsed.domains.map((domain) => ({ ...domain, publicBrandId: brandId }))
       });
       await tx.organization.updateMany({
-        where: { publicBrandId: brandId, ...(parsed.organizationIds.length ? { id: { notIn: parsed.organizationIds } } : {}) },
+        where: { publicBrandId: brandId, type: "customer", ...(parsed.organizationIds.length ? { id: { notIn: parsed.organizationIds } } : {}) },
         data: { publicBrandId: null }
       });
       if (parsed.organizationIds.length) {
@@ -239,20 +331,32 @@ export class PublicBrandService {
         : Promise.resolve(0)
     ]);
     const checks = [
-      { key: "domain", ok: brand.domains.some((domain) => domain.status === "active" && domain.isPrimary), detail: "Active primary domain" },
-      { key: "branding", ok: Boolean(brand.logoUrl && brand.assistantAvatarUrl), detail: "Logo and assistant avatar" },
-      { key: "agent", ok: Boolean(agentMode), detail: "Active customer-visible agent" },
+      { key: "domain", ok: brand.domains.some((domain) => domain.status === "active" && domain.isPrimary), detail: "域名与证书" },
+      { key: "branding", ok: Boolean(brand.logoUrl && brand.assistantAvatarUrl), detail: "入口体验" },
+      { key: "agent", ok: brand.resourceBindingMode === "organization_policy" || Boolean(agentMode), detail: "客户智能体" },
       {
         key: "knowledge",
-        ok: brand.knowledgeSetIds.length > 0 && knowledgeSetCount === brand.knowledgeSetIds.length,
-        detail: "Active knowledge sets"
+        ok: brand.resourceBindingMode === "organization_policy" || (brand.knowledgeSetIds.length > 0 && knowledgeSetCount === brand.knowledgeSetIds.length),
+        detail: "资料来源"
+      },
+      {
+        key: "projection",
+        ok: brand.knowledgeIsolationMode === "direct" || brand.knowledgeProjectionStatus === "ready",
+        detail: "资料投影"
+      },
+      {
+        key: "output",
+        ok: !brand.outputProtectionEnabled || brand.outputForbiddenTerms.length > 0,
+        detail: "输出保护"
       },
       {
         key: "plans",
         ok: brand.subscriptionPlanIds.length > 0 && planCount === brand.subscriptionPlanIds.length,
-        detail: "Active subscription plans"
+        detail: "计费套餐"
       },
-      { key: "urls", ok: Boolean(brand.primaryBaseUrl), detail: "Primary public URL" }
+      { key: "email", ok: Boolean(brand.emailSenderVerified && brand.emailFromAddress), detail: "邮件发件人" },
+      { key: "payment", ok: !brand.billingEnabled || Boolean(brand.paymentAccountReady && brand.billingMerchantName), detail: "支付商户" },
+      { key: "urls", ok: Boolean(brand.primaryBaseUrl), detail: "公开入口地址" }
     ];
     return { ready: checks.every((check) => check.ok), checks };
   }
@@ -265,11 +369,16 @@ export class PublicBrandService {
   async lookups() {
     const [agentModes, knowledgeSets, plans, organizations] = await Promise.all([
       this.db.agentMode.findMany({ where: { status: "active", visibleToUsers: true }, select: { id: true, name: true, slug: true }, orderBy: { name: "asc" } }),
-      this.db.knowledgeSet.findMany({ where: { status: "active" }, select: { id: true, name: true, slug: true }, orderBy: { name: "asc" } }),
+      this.db.knowledgeSet.findMany({ where: { status: "active" }, select: { id: true, name: true, slug: true, _count: { select: { items: true } } }, orderBy: { name: "asc" } }),
       this.db.subscriptionPlan.findMany({ where: { status: "active" }, select: { id: true, name: true, slug: true, billingStatus: true }, orderBy: { name: "asc" } }),
       this.db.organization.findMany({ where: { type: "customer" }, select: { id: true, name: true, slug: true, publicBrandId: true, status: true }, orderBy: { name: "asc" } })
     ]);
-    return { agentModes, knowledgeSets, plans, organizations };
+    return {
+      agentModes,
+      knowledgeSets: knowledgeSets.map(({ _count, ...knowledgeSet }) => ({ ...knowledgeSet, itemCount: _count.items })),
+      plans,
+      organizations
+    };
   }
 
   private async validateBindings(db: Prisma.TransactionClient, input: PublicBrandInput): Promise<void> {

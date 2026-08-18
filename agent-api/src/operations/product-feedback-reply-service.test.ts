@@ -87,6 +87,7 @@ function createNotifications() {
 function createHarness(input: {
   feedback?: ProductFeedbackRecord;
   emailSender?: AuthEmailSender;
+  useRanleyBrand?: boolean;
 } = {}) {
   let feedback = input.feedback ?? createFeedback();
   const notifications = createNotifications();
@@ -106,7 +107,19 @@ function createHarness(input: {
     notifications,
     emailSender,
     resolveBrandName: () => "Bailey",
-    resolvePortalUrl: () => "https://portal.example.com"
+    resolvePortalUrl: () => "https://portal.example.com",
+    resolveOrganizationBrand: input.useRanleyBrand
+      ? async () => ({
+          platformName: "Ranley",
+          primaryBaseUrl: "https://ranley.cloud-ran.ai",
+          primaryColor: "#0066FF",
+          emailFromName: "Ranley",
+          emailFromAddress: "support@cloud-ran.ai",
+          emailReplyTo: "support@cloud-ran.ai",
+          supportEmail: "support@cloud-ran.ai",
+          emailSenderVerified: true
+        })
+      : undefined
   });
   return { service, repository, notifications, emailSender };
 }
@@ -151,7 +164,7 @@ describe("ProductFeedbackReplyService", () => {
   });
 
   it("sends styled HTML with CID attachments, records metadata, and resolves only after delivery", async () => {
-    const { service, repository, notifications, emailSender } = createHarness();
+    const { service, repository, notifications, emailSender } = createHarness({ useRanleyBrand: true });
     const upload = Buffer.from("admin illustration");
 
     const result = await service.sendAndResolve({
@@ -172,8 +185,13 @@ describe("ProductFeedbackReplyService", () => {
 
     expect(emailSender.send).toHaveBeenCalledTimes(1);
     const sent = vi.mocked(emailSender.send).mock.calls[0][0];
+    expect(sent.from).toBe("Ranley <support@cloud-ran.ai>");
+    expect(sent.replyTo).toBe("support@cloud-ran.ai");
     expect(sent.text).toBe("现在可以通过更多菜单重命名文件夹。");
     expect(sent.html).toContain("您的反馈已有处理结果");
+    expect(sent.html).toContain("background:#0066FF");
+    expect(sent.html).toContain("href=\"https://ranley.cloud-ran.ai\"");
+    expect(sent.html).not.toContain("Bailey");
     expect(sent.html).toContain("cid:product-feedback-feedback-1-1-");
     expect(sent.attachments).toHaveLength(2);
     expect(sent.attachments?.every((attachment) => Boolean(attachment.cid))).toBe(true);

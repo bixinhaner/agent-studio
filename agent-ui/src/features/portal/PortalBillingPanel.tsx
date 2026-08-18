@@ -181,7 +181,7 @@ export function PortalBillingPanel(props: {
   const selectedPlanLabel = showCycleToggle
     ? `${selectedGroup?.title ?? t("billing.noPlanShort")} · ${activeCycle === "year" ? t("billing.annual") : t("billing.monthly")}`
     : selectedGroup?.title ?? t("billing.noPlanShort");
-  const paidCheckoutUnavailable = payableNow > 0 && !summary?.defaults.stripeReady;
+  const paidCheckoutUnavailable = payableNow > 0 && (!summary?.defaults.stripeReady || summary?.brand?.paymentReady === false);
   const recommendedGroup = useMemo(
     () => recommendedBillingPlanFamily(planGroups, activeCycle),
     [activeCycle, planGroups]
@@ -259,6 +259,14 @@ export function PortalBillingPanel(props: {
         </div>
         <Button type="text" icon={<RefreshCw size={16} />} loading={refreshing} onClick={() => void loadSummary(true)} aria-label={t("billing.refreshAria")} />
       </div>
+
+      {summary.brand?.merchantName ? (
+        <div className="portal-billing-merchant">
+          <span>{t("billing.securePayment")}</span>
+          <strong>{summary.brand.merchantName}</strong>
+          {summary.brand.supportEmail ? <a href={`mailto:${summary.brand.supportEmail}`}>{summary.brand.supportEmail}</a> : null}
+        </div>
+      ) : null}
 
       {props.subscriptionStatus?.accessState === "blocked" ? (
         <Alert

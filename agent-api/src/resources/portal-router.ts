@@ -53,7 +53,7 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    if (await options.publicBrands?.getForOrganization(req.currentOrganization?.id)) {
+    if ((await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed") {
       res.json({ knowledgeSets: [] });
       return;
     }
@@ -99,7 +99,7 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    if (await options.publicBrands?.getForOrganization(req.currentOrganization?.id)) {
+    if ((await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed") {
       res.status(403).json({ detail: "Knowledge-set files are managed by the assigned assistant" });
       return;
     }

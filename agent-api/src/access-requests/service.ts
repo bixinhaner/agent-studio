@@ -453,7 +453,7 @@ async function ensureTrialNotRepeated(options: {
 function ensureInternalReviewerEmail(email: string, allowedDomains: string[]): void {
   const domain = emailDomain(email).toLowerCase();
   if (!domain || !allowedDomains.includes(domain)) {
-    throw new Error("Reviewer email must be an internal Baicells email");
+    throw new Error("Reviewer email must use an approved internal company domain");
   }
 }
 
@@ -699,6 +699,18 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     return trimOrUndefined((await requestBrand(request))?.primaryBaseUrl) ?? trimOrUndefined(options.appBaseUrl);
   }
 
+  async function requestEmailEnvelope(request: Pick<AccessRequestRecord, "publicBrandId">) {
+    const brand = await requestBrand(request);
+    if (!brand) return {};
+    if (!brand.emailSenderVerified || !trimOrUndefined(brand.emailFromAddress)) {
+      throw new Error(`${brand.platformName} email delivery is not ready`);
+    }
+    return {
+      from: `${brand.emailFromName} <${brand.emailFromAddress}>`,
+      replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
+    };
+  }
+
   function ensurePublicBrandMatch(request: Pick<AccessRequestRecord, "publicBrandId">, publicBrandId?: string | null) {
     if (trimOrUndefined(request.publicBrandId) !== trimOrUndefined(publicBrandId ?? undefined)) {
       throw new Error("Access request does not exist");
@@ -823,6 +835,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     if (!recipients.length) return;
     await options.emailSender.send({
       to: recipients,
+      ...await requestEmailEnvelope(request),
       subject,
       text,
       debugLabel
@@ -1082,6 +1095,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const publicLink = buildUrl(await requestBaseUrl(request), `/access/apply/${rawToken}`);
       await options.emailSender.send({
         to: applicantEmail,
+        ...await requestEmailEnvelope(request),
         subject: `We received your access request for ${companyName}`,
         text: [
           `We received your access request for ${companyName}.`,
@@ -1412,6 +1426,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       await options.emailSender.send({
         to: recipients.to,
         cc: recipients.cc,
+        ...await requestEmailEnvelope(updated),
         subject: `Review access request: ${updated.companyName}`,
         text: [
           `${updated.companyName} submitted an access request.`,
@@ -1461,6 +1476,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const publicLink = buildUrl(options.appBaseUrl, `/access/apply/${existing.publicToken}`);
       await options.emailSender.send({
         to: updated.applicantEmail,
+        ...await requestEmailEnvelope(updated),
         subject: `More information needed for ${updated.companyName}`,
         text: [
           `We need more information to continue reviewing ${updated.companyName}.`,
@@ -1494,6 +1510,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       });
       await options.emailSender.send({
         to: updated.applicantEmail,
+        ...await requestEmailEnvelope(updated),
         subject: `Access request update for ${updated.companyName}`,
         text: [`Your access request for ${updated.companyName} was rejected.`, reason].join("\n"),
         debugLabel: "access-request-rejected"
@@ -1678,6 +1695,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const inviteUrl = buildUrl(await requestBaseUrl(request), `/invite/${rawInviteToken}`);
       await options.emailSender.send({
         to: request.applicantEmail,
+        ...await requestEmailEnvelope(request),
         subject: `${organization.name} access is ready`,
         text: [
           `${organization.name} access has been approved.`,

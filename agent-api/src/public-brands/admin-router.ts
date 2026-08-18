@@ -61,5 +61,15 @@ export function createPublicBrandAdminRouter(brands: PublicBrandService): Router
     }
   });
 
+  router.post("/brands/:brandId/knowledge-projection", async (req: Request, res: Response) => {
+    try {
+      const brand = await brands.regenerateKnowledgeProjection(req.params.brandId);
+      res.json({ brand: { ...brand, readiness: await brands.readiness(brand) } });
+    } catch (error) {
+      const detail = detailFromError(error);
+      res.status(detail === "Brand does not exist" ? 404 : 400).json({ detail });
+    }
+  });
+
   return router;
 }

@@ -3,6 +3,12 @@ export type PublicBrandSuggestion = {
   prompt: string;
 };
 
+export type PublicBrandReplacementRule = {
+  source: string;
+  target: string;
+  mode: "replace" | "remove";
+};
+
 export type PublicBrandDomain = {
   id?: string;
   hostname: string;
@@ -40,12 +46,31 @@ export type PublicBrandInput = {
   answerFeedbackPrompt: string;
   externalOnly: boolean;
   accessRequestEnabled: boolean;
+  accessSalesContactLabel: string;
   billingEnabled: boolean;
   billingSuccessUrl: string | null;
   billingCancelUrl: string | null;
   billingPortalUrl: string | null;
+  supportEmail: string | null;
+  supportUrl: string | null;
+  privacyUrl: string | null;
+  termsUrl: string | null;
+  emailFromName: string;
+  emailFromAddress: string | null;
+  emailReplyTo: string | null;
+  emailSenderVerified: boolean;
+  billingMerchantName: string | null;
+  billingSupportEmail: string | null;
+  paymentAccountMode: "shared" | "connected";
+  paymentStripeAccountId: string | null;
+  paymentAccountReady: boolean;
+  resourceBindingMode: "brand_managed" | "organization_policy";
   agentModeId: string | null;
   knowledgeSetIds: string[];
+  knowledgeIsolationMode: "direct" | "brand_projection";
+  knowledgeReplacementRules: PublicBrandReplacementRule[];
+  outputProtectionEnabled: boolean;
+  outputForbiddenTerms: string[];
   subscriptionPlanIds: string[];
   domains: PublicBrandDomain[];
   organizationIds: string[];
@@ -57,12 +82,17 @@ export type PublicBrandRecord = PublicBrandInput & {
   updatedByUserId?: string;
   createdAt: string;
   updatedAt: string;
+  knowledgeProjectionStorage: Record<string, string>;
+  knowledgeProjectionStatus: "not_required" | "pending" | "building" | "ready" | "failed";
+  knowledgeProjectionItemCount: number;
+  knowledgeProjectionAt?: string;
+  knowledgeProjectionError?: string;
   readiness: PublicBrandReadiness;
 };
 
 export type PublicBrandLookups = {
   agentModes: Array<{ id: string; name: string; slug: string }>;
-  knowledgeSets: Array<{ id: string; name: string; slug: string }>;
+  knowledgeSets: Array<{ id: string; name: string; slug: string; itemCount?: number }>;
   plans: Array<{ id: string; name: string; slug: string; billingStatus: string }>;
   organizations: Array<{ id: string; name: string; slug: string; publicBrandId?: string | null; status: string }>;
 };

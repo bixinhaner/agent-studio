@@ -1954,7 +1954,25 @@ body.portal-workbench-mode {
   margin: 4px 0;
   font-size: 24px;
   line-height: 1.2;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+}
+
+.portal-billing-merchant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e5e7eb;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.portal-billing-merchant strong {
+  color: #111827;
+}
+
+.portal-billing-merchant a {
+  margin-left: auto;
 }
 
 .portal-billing-head p,
@@ -2394,10 +2412,10 @@ button.session-rail-new-btn::after,
   height: 200%;
   background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
   transform: rotate(30deg);
-  animation: bailey-sparkle 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation: portal-welcome-sparkle 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-@keyframes bailey-sparkle {
+@keyframes portal-welcome-sparkle {
   0% { transform: rotate(30deg) translateY(0) translateX(-100%); }
   50% { transform: rotate(30deg) translateY(0) translateX(100%); }
   100% { transform: rotate(30deg) translateY(0) translateX(100%); }
@@ -2718,7 +2736,7 @@ button.session-rail-new-btn:active,
   overflow-y: auto;
 }
 
-.portal-workbench-root .thread-wrap .aui-thread-viewport:has(.bailey-welcome-container) {
+.portal-workbench-root .thread-wrap .aui-thread-viewport:has(.portal-welcome-welcome-container) {
   overflow: hidden;
 }
 
@@ -5966,8 +5984,8 @@ button.session-rail-new-btn:active,
   }
 }
 
-/* Bailey Workspace UI Custom Styles */
-.bailey-welcome-container {
+/* Portal workspace custom styles */
+.portal-welcome-welcome-container {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -5981,7 +5999,7 @@ button.session-rail-new-btn:active,
   overflow: hidden;
 }
 
-.bailey-illustration-shell {
+.portal-welcome-illustration-shell {
   position: relative;
   width: 100%;
   max-width: 860px;
@@ -5997,7 +6015,7 @@ button.session-rail-new-btn:active,
 }
 
 /* 底层舞台光场：制造底部氛围溶圈光晕 */
-.bailey-illustration-shell::before {
+.portal-welcome-illustration-shell::before {
   content: "";
   position: absolute;
   bottom: 0%;
@@ -6011,7 +6029,7 @@ button.session-rail-new-btn:active,
   filter: blur(24px);
 }
 
-.bailey-illustration {
+.portal-welcome-illustration {
   width: 100%;
   height: 100%;
   max-height: 100%;
@@ -6025,7 +6043,7 @@ button.session-rail-new-btn:active,
   transform-origin: center;
 }
 
-.bailey-welcome-greeting {
+.portal-welcome-welcome-greeting {
   font-size: clamp(24px, 2.6vw, 32px);
   font-weight: 600;
   color: #111827;
@@ -6035,13 +6053,13 @@ button.session-rail-new-btn:active,
   text-align: center;
 }
 
-.bailey-welcome-greeting b,
-.bailey-welcome-greeting span {
+.portal-welcome-welcome-greeting b,
+.portal-welcome-welcome-greeting span {
   color: var(--workbench-accent);
   font-weight: 600;
 }
 
-.bailey-welcome-subtitle {
+.portal-welcome-welcome-subtitle {
   font-size: 14px;
   color: #6b7280;
   margin: 0;
@@ -6049,7 +6067,7 @@ button.session-rail-new-btn:active,
   text-align: center;
 }
 
-.bailey-suggestion-grid {
+.portal-welcome-suggestion-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
@@ -6060,7 +6078,7 @@ button.session-rail-new-btn:active,
   flex: 0 0 auto;
 }
 
-.bailey-suggestion-card {
+.portal-welcome-suggestion-card {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6080,13 +6098,13 @@ button.session-rail-new-btn:active,
   position: relative;
 }
 
-.bailey-suggestion-card:hover {
+.portal-welcome-suggestion-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 26px rgba(255, 70, 20, 0.08);
   background: rgba(255, 255, 255, 0.96);
 }
 
-.bailey-suggestion-icon-wrap {
+.portal-welcome-suggestion-icon-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6096,12 +6114,12 @@ button.session-rail-new-btn:active,
   flex-shrink: 0;
 }
 
-.bailey-suggestion-icon-wrap.icon-green { color: var(--workbench-accent); background: color-mix(in srgb, var(--workbench-accent) 10%, transparent); }
-.bailey-suggestion-icon-wrap.icon-blue { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
-.bailey-suggestion-icon-wrap.icon-orange { color: #f97316; background: rgba(249, 115, 22, 0.1); }
-.bailey-suggestion-icon-wrap.icon-purple { color: #a855f7; background: rgba(168, 85, 247, 0.1); }
+.portal-welcome-suggestion-icon-wrap.icon-green { color: var(--workbench-accent); background: color-mix(in srgb, var(--workbench-accent) 10%, transparent); }
+.portal-welcome-suggestion-icon-wrap.icon-blue { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+.portal-welcome-suggestion-icon-wrap.icon-orange { color: #f97316; background: rgba(249, 115, 22, 0.1); }
+.portal-welcome-suggestion-icon-wrap.icon-purple { color: #a855f7; background: rgba(168, 85, 247, 0.1); }
 
-.bailey-suggestion-text {
+.portal-welcome-suggestion-text {
   font-size: 13px;
   font-weight: 500;
   color: #1f2937;
@@ -6113,27 +6131,27 @@ button.session-rail-new-btn:active,
 }
 
 @media (max-height: 760px) {
-  .bailey-welcome-container {
+  .portal-welcome-welcome-container {
     gap: 8px;
     padding-top: 4px;
     padding-bottom: 10px;
   }
 
-  .bailey-illustration-shell {
+  .portal-welcome-illustration-shell {
     height: clamp(170px, 34vh, 290px);
     max-height: min(34vh, 290px);
   }
 
-  .bailey-welcome-subtitle {
+  .portal-welcome-welcome-subtitle {
     font-size: 14px;
   }
 
-  .bailey-suggestion-card {
+  .portal-welcome-suggestion-card {
     min-height: 52px;
     padding: 9px 12px;
   }
 
-  .bailey-suggestion-icon-wrap {
+  .portal-welcome-suggestion-icon-wrap {
     width: 32px;
     height: 32px;
     border-radius: 9px;
@@ -6141,28 +6159,28 @@ button.session-rail-new-btn:active,
 }
 
 @media (max-width: 900px) {
-  .bailey-welcome-container {
+  .portal-welcome-welcome-container {
     justify-content: center;
     padding: 8px 0 10px;
     gap: 10px;
   }
 
-  .bailey-illustration-shell {
+  .portal-welcome-illustration-shell {
     width: min(100%, 460px);
     height: clamp(120px, 26vh, 210px);
     max-height: min(26vh, 210px);
   }
 
-  .bailey-welcome-greeting {
+  .portal-welcome-welcome-greeting {
     font-size: clamp(22px, 7vw, 30px);
   }
 
-  .bailey-welcome-subtitle {
+  .portal-welcome-welcome-subtitle {
     max-width: min(100%, 360px);
     padding: 0 14px;
   }
 
-  .bailey-suggestion-grid {
+  .portal-welcome-suggestion-grid {
     display: flex;
     width: 100%;
     max-width: 100%;
@@ -6174,28 +6192,28 @@ button.session-rail-new-btn:active,
     scrollbar-width: none;
   }
 
-  .bailey-suggestion-grid::-webkit-scrollbar {
+  .portal-welcome-suggestion-grid::-webkit-scrollbar {
     display: none;
   }
 
-  .bailey-suggestion-card {
+  .portal-welcome-suggestion-card {
     flex: 0 0 min(78vw, 280px);
     scroll-snap-align: center;
   }
 }
 
 @media (max-width: 640px), (max-height: 620px) {
-  .bailey-illustration-shell {
+  .portal-welcome-illustration-shell {
     height: clamp(96px, 22vh, 170px);
     max-height: min(22vh, 170px);
   }
 
-  .bailey-welcome-subtitle {
+  .portal-welcome-welcome-subtitle {
     display: none;
   }
 }
 
-.bailey-active-dot {
+.portal-welcome-active-dot {
   width: 8px;
   height: 8px;
   background-color: var(--workbench-accent);
@@ -6239,27 +6257,27 @@ button.session-rail-new-btn:active,
 .session-rail-list > *:nth-child(n+9) { animation-delay: 235ms; }
 
 /* 2. Welcome Area */
-.bailey-welcome-container > * {
+.portal-welcome-welcome-container > * {
   animation: aui-fade-in-up var(--workbench-motion-slow) var(--workbench-motion-ease-enter) backwards;
 }
-.bailey-welcome-container > *:nth-child(1) { animation-delay: 80ms; }
-.bailey-welcome-container > *:nth-child(2) { animation-delay: 180ms; }
-.bailey-welcome-container > *:nth-child(3) { animation-delay: 280ms; }
-.bailey-welcome-container > *:nth-child(4) { animation-delay: 380ms; }
+.portal-welcome-welcome-container > *:nth-child(1) { animation-delay: 80ms; }
+.portal-welcome-welcome-container > *:nth-child(2) { animation-delay: 180ms; }
+.portal-welcome-welcome-container > *:nth-child(3) { animation-delay: 280ms; }
+.portal-welcome-welcome-container > *:nth-child(4) { animation-delay: 380ms; }
 
 /* 3. Welcome Suggestion Cards staggered inner */
-.bailey-suggestion-grid > * {
+.portal-welcome-suggestion-grid > * {
   animation: aui-fade-in-up 560ms var(--workbench-motion-ease-enter) backwards;
 }
-.bailey-suggestion-grid > *:nth-child(1) { animation-delay: 420ms; }
-.bailey-suggestion-grid > *:nth-child(2) { animation-delay: 490ms; }
-.bailey-suggestion-grid > *:nth-child(3) { animation-delay: 560ms; }
-.bailey-suggestion-grid > *:nth-child(4) { animation-delay: 630ms; }
+.portal-welcome-suggestion-grid > *:nth-child(1) { animation-delay: 420ms; }
+.portal-welcome-suggestion-grid > *:nth-child(2) { animation-delay: 490ms; }
+.portal-welcome-suggestion-grid > *:nth-child(3) { animation-delay: 560ms; }
+.portal-welcome-suggestion-grid > *:nth-child(4) { animation-delay: 630ms; }
 
 @media (prefers-reduced-motion: reduce) {
   .session-rail-list > *,
-  .bailey-welcome-container > *,
-  .bailey-suggestion-grid > * {
+  .portal-welcome-welcome-container > *,
+  .portal-welcome-suggestion-grid > * {
     animation: none;
   }
 }

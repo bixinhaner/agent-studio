@@ -447,7 +447,7 @@ describe("BillingService Stripe admin settings", () => {
     expect(html).toContain("$999.00");
     expect(html).toContain("1,200 AI requests/month");
     expect(html).toContain("Current");
-    expect(html).toContain("https://bailey.baicells.com/?billing=renew");
+    expect(html).toContain("https://aiagent.indonesiacentral.cloudapp.azure.com/?billing=renew");
     expect(raw.billingEmailRule.findMany).not.toHaveBeenCalled();
   });
 
@@ -485,7 +485,7 @@ describe("BillingService Stripe admin settings", () => {
     expect(message?.subject).toBe("Bailey automatic renewal payment needs attention");
     expect(message?.text).toContain("Automatic renewal needs attention. Standard Edition Annual.");
     expect(message?.text).toContain("We could not process the $999.00 renewal payment.");
-    expect(message?.text).toContain("https://bailey.baicells.com/?billing=renew");
+    expect(message?.text).toContain("https://aiagent.indonesiacentral.cloudapp.azure.com/?billing=renew");
     expect(`${message?.text}${message?.html}`).not.toContain("{{");
     expect(`${message?.text}${message?.html}`).not.toContain("Choose a plan");
   });
@@ -605,7 +605,12 @@ describe("BillingService Stripe admin settings", () => {
         ? {
             platformName: "Ranley",
             billingPortalUrl: "https://ranley.cloud-ran.ai/?billing=renew",
-            subscriptionPlanIds: ["plan-plus"]
+            subscriptionPlanIds: ["plan-plus"],
+            emailFromName: "Ranley",
+            emailFromAddress: "support@cloud-ran.ai",
+            emailReplyTo: "support@cloud-ran.ai",
+            supportEmail: "support@cloud-ran.ai",
+            emailSenderVerified: true
           }
         : undefined
     });

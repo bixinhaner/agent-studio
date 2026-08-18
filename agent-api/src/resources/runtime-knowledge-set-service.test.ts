@@ -15,7 +15,12 @@ describe("RuntimeKnowledgeSetService public brand binding", () => {
       policies: { filterAllowedResources },
       storage: { resolveReadableMountPath: (key: string) => `/data/${key}` },
       publicBrands: {
-        getForOrganization: async () => ({ knowledgeSetIds: ["knowledge-ranley"] })
+        getForOrganization: async () => ({
+          resourceBindingMode: "brand_managed",
+          knowledgeSetIds: ["knowledge-ranley"],
+          knowledgeIsolationMode: "direct"
+        }),
+        ensureKnowledgeProjection: async (brand: unknown) => brand
       }
     } as never);
 

@@ -9,7 +9,7 @@ import {
 } from "./types";
 import { resolveBrandingAssetUrl } from "./asset-url";
 
-export const BRANDING_STORAGE_KEY = "agent-studio-public-branding";
+export const BRANDING_STORAGE_KEY = "portal-runtime-branding-v2";
 
 export function fallbackBrandingResponse(): PublicBrandingResponse {
   return {

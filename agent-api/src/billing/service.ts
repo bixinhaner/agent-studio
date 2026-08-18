@@ -26,6 +26,7 @@ type BillingResolvedConfig = BillingConfig & {
   rotatedAt: string | null;
   portalBillingUrl: string;
   billingEmailEnabled: boolean;
+  stripeAccountId?: string;
 };
 
 type BillingOrganizationInput = {
@@ -144,6 +145,11 @@ type BillingOrganizationBrand = {
   platformName?: string;
   billingPortalUrl?: string;
   subscriptionPlanIds?: string[];
+  emailFromName?: string;
+  emailFromAddress?: string;
+  emailReplyTo?: string;
+  supportEmail?: string;
+  emailSenderVerified?: boolean;
 };
 
 type StripeCustomerCandidate = {
@@ -167,7 +173,7 @@ const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const STRIPE_BILLING_INTEGRATION_TYPE = "stripe";
 const STRIPE_BILLING_INTEGRATION_SLUG = "billing-stripe";
 const STRIPE_WEBHOOK_ENDPOINT_PATH = "/api/integrations/stripe/webhook";
-const DEFAULT_PORTAL_BILLING_URL = "https://bailey.baicells.com/?billing=renew";
+const DEFAULT_PORTAL_BILLING_URL = "https://aiagent.indonesiacentral.cloudapp.azure.com/?billing=renew";
 const STRIPE_REQUIRED_WEBHOOK_EVENTS = [
   "checkout.session.completed",
   "invoice.paid",
@@ -648,7 +654,7 @@ export class BillingService {
     return this.options.db;
   }
 
-  private async resolveBillingConfig(): Promise<BillingResolvedConfig> {
+  private async resolveBillingConfig(stripeAccountId?: string): Promise<BillingResolvedConfig> {
     const fallback: BillingConfig = {
       stripeSecretKey: trimOrUndefined(this.options.config.stripeSecretKey) ?? "",
       stripeWebhookSigningSecret: trimOrUndefined(this.options.config.stripeWebhookSigningSecret) ?? "",
@@ -697,17 +703,30 @@ export class BillingService {
       secretKeyPreview: previewSecret(stripeSecretKey),
       webhookSigningSecretPreview: previewSecret(webhookSigningSecret),
       updatedAt: toIsoString(instance?.config?.updatedAt ?? instance?.updatedAt),
-      rotatedAt: toIsoString(instance?.secret?.rotatedAt)
+      rotatedAt: toIsoString(instance?.secret?.rotatedAt),
+      stripeAccountId: trimOrUndefined(stripeAccountId)
     };
   }
 
   private async resolveBrandName(): Promise<string> {
     try {
       const brandName = await this.options.resolveBrandName?.();
-      return trimOrUndefined(brandName) ?? "Agent Studio";
+      return trimOrUndefined(brandName) ?? "Workspace";
     } catch {
-      return "Agent Studio";
+      return "Workspace";
     }
+  }
+
+  private async organizationEmailEnvelope(organizationId: string) {
+    const brand = await this.options.resolveOrganizationBrand?.(organizationId).catch(() => undefined);
+    if (!brand) return {};
+    if (!brand.emailSenderVerified || !trimOrUndefined(brand.emailFromAddress)) {
+      throw new Error(`${brand.platformName} email delivery is not ready`);
+    }
+    return {
+      from: `${trimOrUndefined(brand.emailFromName) ?? trimOrUndefined(brand.platformName) ?? "AI Assistant"} <${brand.emailFromAddress}>`,
+      replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
+    };
   }
 
   async stripeConfigStatus() {
@@ -1291,8 +1310,9 @@ export class BillingService {
     promotionCode?: string | null;
     autoRenew?: boolean;
     checkoutUrls?: { successUrl?: string; cancelUrl?: string };
+    stripeAccountId?: string;
   }) {
-    const customer = await this.ensureBillingCustomerForOrganization(input);
+    const customer = await this.ensureBillingCustomerForOrganization(input, input.stripeAccountId);
     return this.createCheckout({
       organization: input.organization,
       user: input.user,
@@ -1301,7 +1321,8 @@ export class BillingService {
       promotionCode: input.promotionCode,
       autoRenew: input.autoRenew ?? customer.defaultAutoRenew,
       source: "portal",
-      checkoutUrls: input.checkoutUrls
+      checkoutUrls: input.checkoutUrls,
+      stripeAccountId: input.stripeAccountId
     });
   }
 
@@ -1341,7 +1362,7 @@ export class BillingService {
       } else {
         lookup.status = "multiple";
         lookup.stripeCustomerId = null;
-        lookup.message = "The matched Stripe customer is already linked to another Agent Studio organization.";
+        lookup.message = "The matched Stripe customer is already linked to another organization.";
       }
     }
     const updated = await this.db.billingCustomer.update({
@@ -1625,8 +1646,9 @@ export class BillingService {
     autoRenew: boolean;
     source: string;
     checkoutUrls?: { successUrl?: string; cancelUrl?: string };
+    stripeAccountId?: string;
   }) {
-    const config = await this.resolveBillingConfig();
+    const config = await this.resolveBillingConfig(input.stripeAccountId);
     const plan = await this.db.subscriptionPlan.findUnique({ where: { id: input.planId } });
     if (!plan) throw new Error("Plan does not exist");
     if (plan.status !== "active") throw new Error("Plan is not active");
@@ -1686,7 +1708,8 @@ export class BillingService {
       organization: input.organization,
       user: input.user,
       mode: checkoutMode,
-      checkoutUrls: input.checkoutUrls
+      checkoutUrls: input.checkoutUrls,
+      stripeAccountId: input.stripeAccountId
     });
     const updated = await this.db.billingOrder.update({
       where: { id: order.id },
@@ -1800,8 +1823,8 @@ export class BillingService {
   private async ensureBillingCustomerForOrganization(input: {
     organization: BillingOrganizationInput;
     user: BillingUserInput;
-  }) {
-    const config = await this.resolveBillingConfig();
+  }, stripeAccountId?: string) {
+    const config = await this.resolveBillingConfig(stripeAccountId);
     const existing = await this.db.billingCustomer.findUnique({ where: { organizationId: input.organization.id } });
     const latestAccessRequest = await this.db.accessRequest.findFirst({
       where: {
@@ -1833,7 +1856,7 @@ export class BillingService {
             ...stripeCustomerLookup,
             status: "multiple",
             stripeCustomerId: null,
-            message: "The matched Stripe customer is already linked to another Agent Studio organization."
+            message: "The matched Stripe customer is already linked to another organization."
           };
         }
       }
@@ -1970,8 +1993,9 @@ export class BillingService {
     user: BillingUserInput;
     mode: string;
     checkoutUrls?: { successUrl?: string; cancelUrl?: string };
+    stripeAccountId?: string;
   }): Promise<StripeCheckoutSession> {
-    const config = await this.resolveBillingConfig();
+    const config = await this.resolveBillingConfig(input.stripeAccountId);
     if (!config.stripeSecretKey) {
       throw new Error("Stripe is not configured");
     }
@@ -2059,7 +2083,8 @@ export class BillingService {
     const response = await fetch(`${STRIPE_API_BASE}${path}`, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${config.stripeSecretKey}`
+        Authorization: `Bearer ${config.stripeSecretKey}`,
+        ...(config.stripeAccountId ? { "Stripe-Account": config.stripeAccountId } : {})
       }
     });
     const payload = await response.json().catch(() => ({}));
@@ -2078,7 +2103,8 @@ export class BillingService {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.stripeSecretKey}`,
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...(config.stripeAccountId ? { "Stripe-Account": config.stripeAccountId } : {})
       },
       body
     });
@@ -2213,7 +2239,7 @@ export class BillingService {
 
   private async handleCheckoutCompleted(session: StripeCheckoutSession) {
     const orderId = trimOrUndefined(session.metadata?.agent_studio_order_id) ?? trimOrUndefined(session.client_reference_id);
-    if (!orderId) throw new Error("Stripe checkout session missing Agent Studio order id");
+    if (!orderId) throw new Error("Stripe checkout session is missing the billing order id");
     const order = await this.db.billingOrder.findUnique({ where: { id: orderId } });
     if (!order) throw new Error("Billing order for checkout session does not exist");
     await this.db.billingOrder.update({
@@ -2461,7 +2487,7 @@ export class BillingService {
           config,
           organizationId: grant.principalId,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
-          planName: grant.plan?.name ?? "Agent Studio",
+          planName: grant.plan?.name ?? "Current plan",
           expiresAtLocal: accessEndDate,
           accessEndDate,
           renewalDate,
@@ -2495,6 +2521,7 @@ export class BillingService {
         if (!this.options.emailSender) throw new Error("email sender is not configured");
         const delivery = await this.options.emailSender.send({
           to: recipients,
+          ...await this.organizationEmailEnvelope(grant.principalId),
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
           html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables, ["plan_options_html"]) : undefined,
@@ -2573,7 +2600,7 @@ export class BillingService {
           config,
           organizationId: renewal.organizationId,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
-          planName: plan?.name ?? "Agent Studio",
+          planName: plan?.name ?? "Current plan",
           expiresAtLocal: renewalDate,
           renewalDate,
           emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays, "failed"),
@@ -2601,6 +2628,7 @@ export class BillingService {
         if (!this.options.emailSender) throw new Error("email sender is not configured");
         const delivery = await this.options.emailSender.send({
           to: recipients,
+          ...await this.organizationEmailEnvelope(renewal.organizationId),
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
           html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables, ["plan_options_html"]) : undefined,

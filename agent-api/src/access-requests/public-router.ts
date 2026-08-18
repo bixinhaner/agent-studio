@@ -84,6 +84,10 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
         res.status(404).json({ detail: "Access requests are not available on this brand" });
         return;
       }
+      if (req.publicBrand && (!req.publicBrand.emailSenderVerified || !req.publicBrand.emailFromAddress?.trim())) {
+        res.status(503).json({ detail: `${req.publicBrand.platformName} email delivery is temporarily unavailable` });
+        return;
+      }
       const input = publicAccessRequestSchema.parse(req.body ?? {});
       const created = await service.submitPublicRequest({
         ...input,
@@ -125,6 +129,10 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
 
   router.patch("/:token", withProofFiles, async (req: Request, res: Response) => {
     try {
+      if (req.publicBrand && (!req.publicBrand.emailSenderVerified || !req.publicBrand.emailFromAddress?.trim())) {
+        res.status(503).json({ detail: `${req.publicBrand.platformName} email delivery is temporarily unavailable` });
+        return;
+      }
       const token = String(req.params.token || "").trim();
       if (!token) {
         res.status(404).json({ detail: "Access request does not exist" });

@@ -1,6 +1,7 @@
 import type { AuthEmailSender } from "../auth/email.js";
 import type { BillingService } from "../billing/service.js";
 import type { NotificationRecordRepository } from "../persistence/notification-record-repository.js";
+import type { PublicBrandRecord } from "../public-brands/types.js";
 
 export type ConversationRecoveryStatus = "open" | "ready_to_notify" | "notified" | "closed";
 export type ConversationRecoveryStatusFilter = "all" | ConversationRecoveryStatus;
@@ -221,6 +222,10 @@ type ConversationRecoveryCaseBase = Omit<
   "user" | "organization" | "suggestedEmail" | "compensation"
 >;
 type RecoveryEmailIssueKind = "response_failure" | "experience_report" | "product_feedback_reply";
+type RecoveryBrand = Pick<
+  PublicBrandRecord,
+  "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
+>;
 
 export class ConversationRecoveryService {
   constructor(
@@ -231,6 +236,7 @@ export class ConversationRecoveryService {
       billing: Pick<BillingService, "grantGiftDays">;
       resolveBrandName?: () => string | Promise<string>;
       resolvePortalUrl?: () => string | Promise<string>;
+      resolveOrganizationBrand?: (organizationId: string) => Promise<RecoveryBrand | undefined>;
     }
   ) {}
 
@@ -362,8 +368,9 @@ export class ConversationRecoveryService {
   }): Promise<{ case: ConversationRecoveryCaseRecord; notificationId: string; delivered: boolean; mode: "smtp" | "debug" }> {
     const row = await this.getCaseRow(input.caseId);
     const hydrated = await this.hydrate(row);
-    const brandName = await this.resolveBrandName();
-    const portalUrl = await this.resolvePortalUrl();
+    const organizationBrand = await this.resolveOrganizationBrand(row.organizationId ?? undefined);
+    const brandName = await this.resolveBrandName(row.organizationId ?? undefined);
+    const portalUrl = await this.resolvePortalUrl(row.organizationId ?? undefined);
     const recipientEmail = normalizeEmail(input.recipientEmail) ?? normalizeEmail(hydrated.suggestedEmail.recipientEmail);
     const subject = trimOrUndefined(input.subject);
     const bodyText = trimOrUndefined(input.bodyText);
@@ -400,6 +407,7 @@ export class ConversationRecoveryService {
     try {
       const delivery = await this.deps.emailSender.send({
         to: recipientEmail,
+        ...await this.resolveEmailEnvelope(row.organizationId ?? undefined),
         subject,
         text: bodyText,
         html: recoveryEmailHtml({
@@ -412,6 +420,7 @@ export class ConversationRecoveryService {
           resolutionSummary: trimOrUndefined(input.resolutionSummary ?? undefined) ?? hydrated.resolutionSummary,
           compensationDays: compensationDaysForEmail(row),
           portalUrl,
+          primaryColor: organizationBrand?.primaryColor,
           issueKind: recoveryEmailIssueKind(row)
         }),
         debugLabel: "conversation-recovery-email"
@@ -542,7 +551,7 @@ export class ConversationRecoveryService {
   ): Promise<ConversationRecoveryCaseRecord[]> {
     const userIds = unique(rows.map((row) => row.userId));
     const organizationIds = unique(rows.map((row) => row.organizationId));
-    const [users, organizations, billingCustomers, plans, grants, brandName] = await Promise.all([
+    const [users, organizations, billingCustomers, plans, grants, defaultBrandName, organizationBrands] = await Promise.all([
       userIds.length
         ? this.deps.db.user.findMany({
             where: { id: { in: userIds } },
@@ -573,17 +582,27 @@ export class ConversationRecoveryService {
           })
         }))
       ),
-      this.resolveBrandName()
+      this.resolveBrandName(),
+      Promise.all(
+        organizationIds.map(async (organizationId) => ({
+          organizationId,
+          brand: await this.resolveOrganizationBrand(organizationId)
+        }))
+      )
     ]);
     const userById = new Map(users.map((user) => [user.id, mapUser(user)]));
     const organizationById = new Map(organizations.map((organization) => [organization.id, mapOrganization(organization)]));
     const billingCustomerByOrg = new Map(billingCustomers.map((item) => [item.organizationId, item.customer]));
     const grantPlanByOrg = new Map(grants.map((item) => [item.organizationId, item.grant?.planId ?? undefined]));
+    const brandByOrg = new Map(organizationBrands.map((item) => [item.organizationId, item.brand]));
     const firstActivePlan = plans.find((plan) => plan.status === "active") ?? plans[0];
 
     return rows.map((row) => {
       const user = row.userId ? userById.get(row.userId) ?? null : null;
       const organization = row.organizationId ? organizationById.get(row.organizationId) ?? null : null;
+      const brandName = row.organizationId
+        ? trimOrUndefined(brandByOrg.get(row.organizationId)?.platformName) ?? defaultBrandName
+        : defaultBrandName;
       const billingCustomer = row.organizationId ? billingCustomerByOrg.get(row.organizationId) ?? null : null;
       const base = mapCaseRow(row);
       const audience = resolveAudience(base.audience, user, organization);
@@ -642,14 +661,36 @@ export class ConversationRecoveryService {
     return plan?.id;
   }
 
-  private async resolveBrandName(): Promise<string> {
-    const resolved = await this.deps.resolveBrandName?.();
-    return trimOrUndefined(resolved) ?? "AgentStudio";
+  private async resolveOrganizationBrand(organizationId?: string): Promise<RecoveryBrand | undefined> {
+    return organizationId ? this.deps.resolveOrganizationBrand?.(organizationId) : undefined;
   }
 
-  private async resolvePortalUrl(): Promise<string> {
+  private async resolveBrandName(organizationId?: string): Promise<string> {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    const organizationBrandName = trimOrUndefined(brand?.platformName);
+    if (organizationBrandName) return organizationBrandName;
+    const resolved = await this.deps.resolveBrandName?.();
+    return trimOrUndefined(resolved) ?? "Workspace";
+  }
+
+  private async resolvePortalUrl(organizationId?: string): Promise<string> {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    const organizationPortalUrl = trimOrUndefined(brand?.primaryBaseUrl);
+    if (organizationPortalUrl) return organizationPortalUrl.replace(/\/+$/, "");
     const resolved = await this.deps.resolvePortalUrl?.();
-    return trimOrUndefined(resolved)?.replace(/\/+$/, "") || "https://bailey.baicells.com";
+    return trimOrUndefined(resolved)?.replace(/\/+$/, "") || "#";
+  }
+
+  private async resolveEmailEnvelope(organizationId?: string) {
+    const brand = await this.resolveOrganizationBrand(organizationId);
+    if (!brand) return {};
+    if (!brand.emailSenderVerified || !trimOrUndefined(brand.emailFromAddress)) {
+      throw new Error(`${brand.platformName} email delivery is not ready`);
+    }
+    return {
+      from: `${trimOrUndefined(brand.emailFromName) ?? brand.platformName} <${brand.emailFromAddress}>`,
+      replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
+    };
   }
 }
 
@@ -911,12 +952,14 @@ export function recoveryEmailHtml(input: {
   resolutionSummary?: string;
   compensationDays?: number;
   portalUrl: string;
+  primaryColor?: string;
   issueKind: RecoveryEmailIssueKind;
   inlineImages?: Array<{
     cid: string;
     name: string;
   }>;
 }): string {
+  const primaryColor = /^#[0-9a-f]{6}$/i.test(input.primaryColor ?? "") ? input.primaryColor! : "#FF4614";
   const copy = recoveryEmailCopy(input.brandName, input.templateLanguage, input.issueKind);
   const occurredAt = formatRecoveryEmailTime(input.lastOccurredAt, input.templateLanguage);
   const resolution = trimOrUndefined(input.resolutionSummary)
@@ -942,7 +985,7 @@ export function recoveryEmailHtml(input: {
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   <tr>
                     <td style="vertical-align:middle;">
-                      <span style="display:inline-block;width:12px;height:12px;border-radius:999px;background:#FF4614;margin-right:8px;vertical-align:middle;"></span>
+                      <span style="display:inline-block;width:12px;height:12px;border-radius:999px;background:${primaryColor};margin-right:8px;vertical-align:middle;"></span>
                       <span style="font-size:15px;line-height:22px;font-weight:bold;color:#111827;vertical-align:middle;">${escapeHtml(input.brandName)}</span>
                     </td>
                     <td align="right" style="vertical-align:middle;">
@@ -983,7 +1026,7 @@ export function recoveryEmailHtml(input: {
             ${inlineImagesBlock}
             <tr>
               <td align="center" style="padding:0 34px 30px;font-family:Arial,Helvetica,sans-serif;">
-                <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#FF4614;color:#ffffff;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:15px;line-height:20px;font-weight:bold;">${escapeHtml(copy.cta)}</a>
+                <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:${primaryColor};color:#ffffff;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:15px;line-height:20px;font-weight:bold;">${escapeHtml(copy.cta)}</a>
               </td>
             </tr>
             <tr>

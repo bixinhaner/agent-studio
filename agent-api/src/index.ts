@@ -372,6 +372,14 @@ import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-se
 import { createPublicBrandAdminRouter } from "./public-brands/admin-router.js";
 import { createPublicBrandContextMiddleware } from "./public-brands/middleware.js";
 import { PublicBrandService } from "./public-brands/service.js";
+import { PublicBrandKnowledgeProjectionService } from "./public-brands/knowledge-projection.js";
+import type { PublicBrandRecord } from "./public-brands/types.js";
+import {
+  applyBrandPolicyToUnknown,
+  applyBrandTextPolicy,
+  brandRuntimePolicyPrompt,
+  sanitizeRuntimeEventForBrand
+} from "./public-brands/content-policy.js";
 import {
   buildIntegrationAgentWorkspacePath,
   buildSharedIntegrationCodexHomeScope,
@@ -901,7 +909,12 @@ const billingService = new BillingService({
       ? {
           platformName: brand.platformName,
           billingPortalUrl: brand.billingPortalUrl,
-          subscriptionPlanIds: brand.subscriptionPlanIds
+          subscriptionPlanIds: brand.subscriptionPlanIds,
+          emailFromName: brand.emailFromName,
+          emailFromAddress: brand.emailFromAddress,
+          emailReplyTo: brand.emailReplyTo,
+          supportEmail: brand.supportEmail,
+          emailSenderVerified: brand.emailSenderVerified
         }
       : undefined;
   }
@@ -912,14 +925,16 @@ const conversationRecovery = new ConversationRecoveryService({
   notifications: notificationRecords,
   billing: billingService,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings),
-  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
+  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl,
+  resolveOrganizationBrand: async (organizationId) => publicBrands.getForOrganization(organizationId)
 });
 const productFeedbackReply = new ProductFeedbackReplyService({
   feedback: productFeedback,
   notifications: notificationRecords,
   emailSender: authEmailSender,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings),
-  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
+  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl,
+  resolveOrganizationBrand: async (organizationId) => publicBrands.getForOrganization(organizationId)
 });
 const customerExperienceIssues = new CustomerExperienceIssueReporter({
   recovery: conversationRecovery,
@@ -978,6 +993,7 @@ const accessRequestService = createAccessRequestService({
   }
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+publicBrands.setProjectionService(new PublicBrandKnowledgeProjectionService(db, knowledgeSetStorage));
 const usageRollups = new UsageRollupService({
   usageEvents: usageEventRepository,
   rollups: usageRollupRepository
@@ -3024,13 +3040,13 @@ function hasUnreadAssistantCompletion(thread: ThreadRecord, lastReadAt?: string)
 
 function threadOut(
   thread: ThreadRecord,
-  options?: { isRunning?: boolean; hasUnreadCompletion?: boolean }
+  options?: { isRunning?: boolean; hasUnreadCompletion?: boolean; brand?: PublicBrandRecord }
 ) {
   return {
     id: thread.id,
     organization_id: thread.organizationId ?? null,
     status: thread.status,
-    title: thread.title,
+    title: options?.brand && thread.title ? applyBrandTextPolicy(thread.title, options.brand) : thread.title,
     external_id: thread.externalId,
     model: thread.model,
     reasoning_effort: thread.reasoningEffort,
@@ -10154,6 +10170,7 @@ async function registerGeneratedArtifactsForSession(input: {
   changes: RuntimeFileChange[];
   answerText?: string;
   changedAfter?: Date;
+  brand?: PublicBrandRecord;
 }): Promise<ThreadArtifactRecord[]> {
   const threadId = trimOrUndefined(input.session.threadId);
   const workspacePath = trimOrUndefined(input.session.workspace);
@@ -10181,7 +10198,8 @@ async function registerGeneratedArtifactsForSession(input: {
     thread,
     changes: input.changes,
     answerText: input.answerText,
-    changedAfter: input.changedAfter
+    changedAfter: input.changedAfter,
+    brand: input.brand
   });
 }
 
@@ -10234,6 +10252,7 @@ async function registerGeneratedArtifactsForThread(input: {
   changes: RuntimeFileChange[];
   answerText?: string;
   changedAfter?: Date;
+  brand?: PublicBrandRecord;
 }): Promise<ThreadArtifactRecord[]> {
   const threadId = trimOrUndefined(input.thread.id);
   const workspacePath = trimOrUndefined(input.session.workspace) ?? trimOrUndefined(input.thread.workspace);
@@ -10280,14 +10299,38 @@ async function registerGeneratedArtifactsForThread(input: {
   for (const change of candidates) {
     if (shouldSkipArtifactChange(change)) continue;
 
+    let registeredChange = change;
     let resolved: { absolutePath: string; relativePath: string };
     try {
       resolved = resolveWorkspaceFilePath({ workspacePath, filePath: change.path });
     } catch {
       continue;
     }
+    if (input.brand?.outputProtectionEnabled) {
+      const protectedRelativePath = resolved.relativePath
+        .split(path.sep)
+        .map((segment) => applyBrandTextPolicy(segment, input.brand!).trim() || "content")
+        .join(path.sep);
+      if (protectedRelativePath !== resolved.relativePath) {
+        const protectedPath = resolveWorkspaceFilePath({ workspacePath, filePath: protectedRelativePath });
+        const targetExists = await fs.stat(protectedPath.absolutePath).then(() => true).catch(() => false);
+        if (targetExists) continue;
+        await fs.mkdir(path.dirname(protectedPath.absolutePath), { recursive: true });
+        await fs.rename(resolved.absolutePath, protectedPath.absolutePath);
+        resolved = protectedPath;
+        registeredChange = { ...change, path: protectedRelativePath };
+      }
+    }
     if (seen.has(resolved.relativePath)) continue;
     seen.add(resolved.relativePath);
+
+    if (input.brand?.outputProtectionEnabled && [".csv", ".html", ".json", ".log", ".md", ".sql", ".tsv", ".txt", ".xml", ".yaml", ".yml"].includes(path.extname(resolved.relativePath).toLowerCase())) {
+      const originalText = await fs.readFile(resolved.absolutePath, "utf8").catch(() => undefined);
+      if (originalText !== undefined) {
+        const protectedText = applyBrandTextPolicy(originalText, input.brand);
+        if (protectedText !== originalText) await fs.writeFile(resolved.absolutePath, protectedText, "utf8");
+      }
+    }
 
     const inspection = await inspectArtifactFileForPolicy({
       absolutePath: resolved.absolutePath,
@@ -10298,19 +10341,20 @@ async function registerGeneratedArtifactsForThread(input: {
 
     const status = inspection.blockedReason ? "blocked" : "ready";
     const artifactMetadata: Record<string, unknown> = {
-      changeKind: change.kind,
-      originalPath: change.path
+      changeKind: registeredChange.kind,
+      originalPath: registeredChange.path
     };
-    if (change.sourcePath) artifactMetadata.sourcePath = change.sourcePath;
-    if (change.metadata) {
-      for (const [key, value] of Object.entries(change.metadata)) {
+    if (registeredChange.sourcePath) artifactMetadata.sourcePath = registeredChange.sourcePath;
+    if (registeredChange.metadata) {
+      for (const [key, value] of Object.entries(registeredChange.metadata)) {
         if (value !== undefined) artifactMetadata[key] = value;
       }
     }
-    const displayName =
+    const rawDisplayName =
       trimOrUndefined(
-        typeof change.metadata?.displayName === "string" ? change.metadata.displayName : undefined
+        typeof registeredChange.metadata?.displayName === "string" ? registeredChange.metadata.displayName : undefined
       ) ?? path.basename(resolved.relativePath);
+    const displayName = input.brand ? applyBrandTextPolicy(rawDisplayName, input.brand) : rawDisplayName;
     const previousArtifact = await threadArtifacts.getByThreadPath(threadId, resolved.relativePath);
     let artifact = await threadArtifacts.upsertForThreadPath({
       organizationId: input.thread.organizationId ?? input.actor.organizationId,
@@ -10942,6 +10986,10 @@ app.get("/internal/deploy/drain-status", async (req: Request, res: Response) => 
 
 app.get("/public-api/branding", async (req: Request, res: Response) => {
   try {
+    if (!req.publicBrand && !isLocalHostHeader(req.header("host"))) {
+      res.status(421).json({ detail: "Brand domain is not configured" });
+      return;
+    }
     const branding = req.publicBrand
       ? resolveBrandPublicBranding(req.publicBrand)
       : await resolvePublicBranding(systemSettings);
@@ -12126,7 +12174,8 @@ app.get("/api/threads", async (req: Request, res: Response) => {
   res.json({
     threads: filtered.map((thread) =>
       threadOut(thread, {
-        hasUnreadCompletion: hasUnreadAssistantCompletion(thread, readStates.get(thread.id)?.lastReadAt)
+        hasUnreadCompletion: hasUnreadAssistantCompletion(thread, readStates.get(thread.id)?.lastReadAt),
+        brand: req.publicBrand
       })
     )
   });
@@ -12243,7 +12292,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       : createdThread;
 
     res.json({
-      thread: threadOut(updated),
+      thread: threadOut(updated, { brand: req.publicBrand }),
       session: session ? sessionOut(session) : null
     });
     timing.finish("success", { modeId: allocated.modeId, sessionStarted: shouldStartSession });
@@ -12260,7 +12309,7 @@ app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
     res.status(404).json({ detail: "Thread does not exist" });
     return;
   }
-  res.json({ thread: threadOut(thread) });
+  res.json({ thread: threadOut(thread, { brand: req.publicBrand }) });
 });
 
 app.post("/api/threads/:threadId/read", async (req: Request, res: Response) => {
@@ -12331,7 +12380,7 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
         updated = (await threads.get(threadId, currentUser.organizationId)) ?? updated;
       }
     }
-    res.json({ thread: threadOut(updated) });
+    res.json({ thread: threadOut(updated, { brand: req.publicBrand }) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to update thread";
     res.status(400).json({ detail });
@@ -12384,7 +12433,7 @@ app.put("/api/threads/:threadId/skills", async (req: Request, res: Response) => 
       enabledSkills
     );
     const updated = await threads.update(threadId, { codexRunConfig: nextRunConfig });
-    res.json({ thread: threadOut(updated) });
+    res.json({ thread: threadOut(updated, { brand: req.publicBrand }) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to update thread skills";
     res.status(400).json({ detail });
@@ -12420,7 +12469,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 
     if (deleteMode.mode === "archive") {
       const updated = thread.status === "archived" ? thread : await threads.update(threadId, { status: "archived" });
-      res.json({ ok: true, mode: "archived", thread: threadOut(updated) });
+      res.json({ ok: true, mode: "archived", thread: threadOut(updated, { brand: req.publicBrand }) });
       return;
     }
 
@@ -12510,12 +12559,17 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
-    const repository = await conversationRecords.getMessageRepository(threadId);
+    const [repository, portalBrand] = await Promise.all([
+      conversationRecords.getMessageRepository(threadId),
+      publicBrands.getForOrganization(currentUser.organizationId)
+    ]);
     res.json({
       head_id: repository.headId ?? null,
       messages: repository.messages.map((item) => ({
         parent_id: item.parentId,
-        message: repairPortalAssistantCompletionStatus(item.message),
+        message: portalBrand
+          ? applyBrandPolicyToUnknown(repairPortalAssistantCompletionStatus(item.message), portalBrand)
+          : repairPortalAssistantCompletionStatus(item.message),
         run_config: item.runConfig,
         created_at: item.createdAt,
         updated_at: item.updatedAt
@@ -13317,10 +13371,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       resolvePortalTurnSkillInputs(turnSkills)
     );
     const instructionReadObserver = new CodexInstructionReadObserver({ selectedSkills: turnSkillInputs });
-    const runtimeMessage = withExplicitSkillMentions(
+    const baseRuntimeMessage = withExplicitSkillMentions(
       withSkillActivationPrompts(input.message, turnRunConfig),
       turnSkills
     );
+    const portalBrand = await timing.time("chat_stream.resolve_public_brand", () =>
+      publicBrands.getForOrganization(currentUser.organizationId)
+    );
+    const policyPrompt = portalBrand ? brandRuntimePolicyPrompt(portalBrand) : "";
+    const runtimeMessage = policyPrompt
+      ? `${policyPrompt}\n\nCustomer request:\n${baseRuntimeMessage}`
+      : baseRuntimeMessage;
     timing.mark("chat_stream.runtime_prompt_prepared", {
       inputLength: input.message.length,
       runtimePromptLength: runtimeMessage.length,
@@ -13428,7 +13489,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
               });
             });
           }
-          sendTrackedSSE("codex", event);
+          const protectedEvent = portalBrand ? sanitizeRuntimeEventForBrand(event, portalBrand) : event;
+          if (!(portalBrand?.outputProtectionEnabled && portalRuntimeEventStartsFinalAnswer(event))) {
+            sendTrackedSSE("codex", protectedEvent);
+          }
         },
         async onDone(payload) {
           timing.mark("chat_stream.on_done_started");
@@ -13449,7 +13513,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
                 session: currentSession,
                 changes: runtimeFileChanges,
                 answerText: payload.answer,
-                changedAfter: artifactScanStartedAt
+                changedAfter: artifactScanStartedAt,
+                brand: portalBrand
               })
             );
             if (artifacts.length > 0) {
@@ -13470,11 +13535,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
             sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
           }
-          const completedAnswerText = resolveCompletedAssistantText({
+          const resolvedAnswerText = resolveCompletedAssistantText({
             answerText: payload.answer,
             generatedArtifactCount: artifactContentPart ? artifacts.length : 0,
             locale: portalLocale
           });
+          const completedAnswerText = portalBrand
+            ? applyBrandTextPolicy(resolvedAnswerText, portalBrand)
+            : resolvedAnswerText;
           if (currentSession.threadId) {
             const instructionReadContentPart = instructionReadObserver.contentPart();
             const finalizedProcess = portalRunProjection.finalize({ finalAnswer: completedAnswerText });

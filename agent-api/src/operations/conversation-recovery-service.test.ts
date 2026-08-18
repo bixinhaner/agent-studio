@@ -207,7 +207,17 @@ describe("ConversationRecoveryService", () => {
       notifications,
       billing: { grantGiftDays: vi.fn() } as never,
       resolveBrandName: () => "AgentStudio",
-      resolvePortalUrl: () => "https://portal.example.com"
+      resolvePortalUrl: () => "https://portal.example.com",
+      resolveOrganizationBrand: async () => ({
+        platformName: "Ranley",
+        primaryBaseUrl: "https://ranley.cloud-ran.ai",
+        primaryColor: "#0066FF",
+        emailFromName: "Ranley",
+        emailFromAddress: "support@cloud-ran.ai",
+        emailReplyTo: "support@cloud-ran.ai",
+        supportEmail: "support@cloud-ran.ai",
+        emailSenderVerified: true
+      })
     });
 
     const result = await service.sendResolutionEmail({
@@ -223,6 +233,8 @@ describe("ConversationRecoveryService", () => {
 
     expect(emailSender.send).toHaveBeenCalledWith(expect.objectContaining({
       to: "user@example.com",
+      from: "Ranley <support@cloud-ran.ai>",
+      replyTo: "support@cloud-ran.ai",
       subject: "问题已修复",
       text: "我们已经修复该问题。",
       html: expect.stringContaining("<table role=\"presentation\"")
@@ -233,10 +245,12 @@ describe("ConversationRecoveryService", () => {
     expect(sendHtml).toContain("We detected an incomplete response and addressed the issue");
     expect(sendHtml).toContain("What we addressed");
     expect(sendHtml).toContain("已修复运行时配置");
-    expect(sendHtml).toContain("Continue using AgentStudio");
+    expect(sendHtml).toContain("Continue using Ranley");
+    expect(sendHtml).toContain("href=\"https://ranley.cloud-ran.ai\"");
     expect(sendHtml).toContain("background:#fafafa");
-    expect(sendHtml).toContain("background:#FF4614");
-    expect(sendHtml).toContain("href=\"https://portal.example.com\"");
+    expect(sendHtml).toContain("background:#0066FF");
+    expect(sendHtml).not.toContain("AgentStudio");
+    expect(sendHtml).toContain("href=\"https://ranley.cloud-ran.ai\"");
     expect(sendHtml).not.toContain("Access credit");
     expect(sendHtml).not.toContain("runtime error");
     expect(notifications.create).toHaveBeenCalledWith(expect.objectContaining({

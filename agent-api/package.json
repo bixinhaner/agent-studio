@@ -27,7 +27,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "dev:seed": "tsx prisma/seed-dev.ts",
-    "brands:provision:ranley": "tsx src/ops/provision-ranley-brand.ts"
+    "brands:provision:ranley": "tsx src/ops/provision-ranley-brand.ts",
+    "brands:migrate:v2": "tsx src/ops/migrate-public-brands-v2.ts"
   },
   "dependencies": {
     "@openai/codex-sdk": "0.144.1",
