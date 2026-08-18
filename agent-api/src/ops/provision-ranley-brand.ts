@@ -7,10 +7,10 @@ const BRAND_KEY = "ranley";
 const HOSTNAME = "ranley.cloud-ran.ai";
 const BASE_URL = `https://${HOSTNAME}`;
 const PLAN_SLUGS = [
-  "trial",
-  "standard-primary-annual",
-  "standard-plus-annual",
-  "standard-pro-annual"
+  "trial-for-plus",
+  "primary-annual",
+  "plus-annual",
+  "pro-annual"
 ];
 
 async function main() {
