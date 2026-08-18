@@ -380,7 +380,14 @@ export function BrandManagementView() {
                     const passed = brand.readiness.checks.filter((check) => check.ok).length;
                     return (
                       <tr key={brand.id} className={selectedId === brand.id ? "is-selected" : ""} onClick={() => selectBrand(brand.id)}>
-                        <td><div className="brand-table-identity"><span style={{ background: brand.primaryColor }}>{brand.logoUrl ? <img src={brand.logoUrl} alt="" /> : null}</span><strong>{brand.name}</strong></div></td>
+                        <td>
+                          <div className="brand-table-identity">
+                            <span className="brand-table-logo" style={{ background: brand.primaryColor }}>
+                              {brand.logoUrl ? <img className="brand-table-logo-image" src={brand.logoUrl} alt="" /> : null}
+                            </span>
+                            <strong>{brand.name}</strong>
+                          </div>
+                        </td>
                         <td><span className="brand-domain-primary">{brand.domains.find((domain) => domain.isPrimary)?.hostname || brand.key}</span>{brand.domains.length > 1 ? <small>+{brand.domains.length - 1}</small> : null}</td>
                         <td><Tag color={brand.readiness.ready ? "success" : brand.status === "active" ? "warning" : "default"}>{readinessLabel(brand)}</Tag></td>
                         <td>{brand.organizationIds.length}</td>
@@ -395,7 +402,7 @@ export function BrandManagementView() {
           </section>
           <aside className="brand-check-panel">
             {selected ? <>
-              <div className="brand-check-head"><BrandMark name={selected.platformName} logoUrl={selected.logoUrl || selected.iconUrl || ""} /><div><strong>{selected.name}</strong><span>{selected.domains.find((domain) => domain.isPrimary)?.hostname}</span></div></div>
+              <div className="brand-check-head"><BrandMark className="brand-check-logo" imageClassName="brand-check-logo-image" name={selected.platformName} logoUrl={selected.logoUrl || selected.iconUrl || ""} /><div><strong>{selected.name}</strong><span>{selected.domains.find((domain) => domain.isPrimary)?.hostname}</span></div></div>
               <p>检查品牌上线所需配置与隔离项</p>
               <ReadinessList brand={selected} />
               {!selected.readiness.ready ? <Alert type="warning" showIcon message="存在未完成的必要检查项" description="未就绪的客户能力会失败关闭，不会回退显示其他品牌。" /> : null}
@@ -457,7 +464,7 @@ export function BrandManagementView() {
           {tab === "customers" ? <section className="brand-config-section"><div className="brand-section-heading"><h2>客户归属</h2><p>客户组织绑定品牌后，只能从该品牌域名登录；注册、审核、开通与套餐流程保持不变。</p></div><label className="brand-config-field brand-field-wide"><span>已归属客户组织</span><Select mode="multiple" optionFilterProp="label" value={draft.organizationIds} options={(lookups?.organizations || []).map((item) => ({ value: item.id, label: `${item.name} · ${item.slug}`, disabled: Boolean(item.publicBrandId && item.publicBrandId !== selectedId) }))} onChange={(organizationIds) => patch({ organizationIds })} /></label></section> : null}
         </main>
         <aside className="brand-detail-aside">
-          <section className="brand-customer-preview"><div className="brand-preview-head"><strong>客户预览</strong><Segmented size="small" value={previewDevice} options={[{ value: "desktop", label: "桌面端" }, { value: "mobile", label: "移动端" }]} onChange={(value) => setPreviewDevice(value as "desktop" | "mobile")} /></div><div className={`brand-preview-canvas is-${previewDevice}`} style={{ "--preview-brand": draft.primaryColor } as CSSProperties}><BrandMark name={draft.platformName || draft.name || "Brand"} logoUrl={draft.logoUrl || draft.iconUrl || ""} />{draft.assistantAvatarUrl ? <img className="brand-preview-avatar" src={draft.assistantAvatarUrl} alt="" /> : <span className="brand-preview-avatar-placeholder" />}<p>{(previewDevice === "mobile" ? draft.portalWelcomeMessageMobile : draft.portalWelcomeMessageDesktop).replace("{{assistantName}}", draft.assistantName)}</p><button type="button">开始对话</button></div></section>
+          <section className="brand-customer-preview"><div className="brand-preview-head"><strong>客户预览</strong><Segmented size="small" value={previewDevice} options={[{ value: "desktop", label: "桌面端" }, { value: "mobile", label: "移动端" }]} onChange={(value) => setPreviewDevice(value as "desktop" | "mobile")} /></div><div className={`brand-preview-canvas is-${previewDevice}`} style={{ "--preview-brand": draft.primaryColor } as CSSProperties}><BrandMark className="brand-preview-logo" imageClassName="brand-preview-logo-image" name={draft.platformName || draft.name || "Brand"} logoUrl={draft.logoUrl || draft.iconUrl || ""} />{draft.assistantAvatarUrl ? <img className="brand-preview-avatar" src={draft.assistantAvatarUrl} alt="" /> : <span className="brand-preview-avatar-placeholder" />}<p>{(previewDevice === "mobile" ? draft.portalWelcomeMessageMobile : draft.portalWelcomeMessageDesktop).replace("{{assistantName}}", draft.assistantName)}</p><button type="button">开始对话</button></div></section>
           {selected ? <section className="brand-detail-readiness"><div><strong>上线检查</strong><span>{selected.readiness.checks.filter((check) => check.ok).length}/{selected.readiness.checks.length}</span></div><ReadinessList brand={selected} /><Button block icon={<RefreshCw size={16} />} loading={checking} onClick={() => void runCheck()}>查看全部检查项</Button></section> : <section className="brand-detail-readiness"><ShieldCheck size={24} /><strong>保存后开始上线检查</strong></section>}
           {tab === "knowledge" && knowledgeSets.length ? <section className="brand-source-summary"><strong>已选资料源</strong>{knowledgeSets.map((item) => <div key={item.id}><span>{item.name}</span><small>{item.itemCount?.toLocaleString() || 0} 项</small></div>)}</section> : null}
         </aside>
