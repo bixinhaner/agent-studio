@@ -269,8 +269,17 @@ export class ActionConnectorConversationRecorder {
       }
     });
 
-    let parentId = thread.headId ?? null;
     const repository = await this.deps.conversations.getMessageRepository(thread.id);
+    const knownMessageIds = new Set(repository.messages.map((item) => messageId(item.message)).filter(Boolean));
+    let parentId = thread.headId && knownMessageIds.has(thread.headId) ? thread.headId : null;
+    if (!parentId) {
+      for (const item of [...repository.messages].reverse()) {
+        const existingMessageId = messageId(item.message);
+        if (!existingMessageId) continue;
+        parentId = existingMessageId;
+        break;
+      }
+    }
     let userMessageId = input.request.approvedAction
       ? findLatestMatchingUserMessageId(repository, input.request.message)
       : undefined;

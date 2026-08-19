@@ -5369,6 +5369,24 @@ function emitActionConnectorRuntimeEvent(
   }
 }
 
+async function resolveExistingConversationParentId(
+  threadId: string,
+  preferredParentId?: string | null
+): Promise<string | null> {
+  const repository = await conversationRecords.getMessageRepository(threadId);
+  const preferred = trimOrUndefined(preferredParentId ?? undefined);
+  if (preferred && repository.messages.some((item) => storedMessageId(item.message) === preferred)) return preferred;
+  const repositoryHead = trimOrUndefined(repository.headId ?? undefined);
+  if (repositoryHead && repository.messages.some((item) => storedMessageId(item.message) === repositoryHead)) {
+    return repositoryHead;
+  }
+  for (const item of [...repository.messages].reverse()) {
+    const messageId = storedMessageId(item.message);
+    if (messageId) return messageId;
+  }
+  return null;
+}
+
 async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
   const startedAt = Date.now();
@@ -5395,9 +5413,13 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
     trimOrUndefined(prepared.identity?.externalUnionId);
   const externalUserName = trimOrUndefined(prepared.identity?.externalUserName);
   const userMessageId = `${ACTION_CONNECTOR_CHANNEL}-user-${prepared.runId}`;
+  const actionConnectorParentId = await resolveExistingConversationParentId(
+    prepared.thread.id,
+    prepared.thread.headId
+  );
   await conversationRecords.appendMessage({
     threadId: prepared.thread.id,
-    parentId: prepared.thread.headId ?? null,
+    parentId: actionConnectorParentId,
     message: actionConnectorStoredMessage("user", userMessageId, input.request.message, {
       integrationInstanceId: input.connector.id,
       externalConversationKey: prepared.externalConversationKey,
@@ -5895,17 +5917,18 @@ async function closeDanglingCrestUserHead(input: {
   context: Record<string, unknown>;
 }): Promise<string | null> {
   const headId = trimOrUndefined(input.headId ?? undefined);
-  if (!headId) return null;
   try {
     const repository = await conversationRecords.getMessageRepository(input.threadId);
-    const headMessage = repository.messages.find((item) => storedMessageId(item.message) === headId);
-    if (!headMessage || storedMessageRole(headMessage.message) !== "user") return headId;
+    const resolvedHeadId = await resolveExistingConversationParentId(input.threadId, headId);
+    if (!resolvedHeadId) return null;
+    const headMessage = repository.messages.find((item) => storedMessageId(item.message) === resolvedHeadId);
+    if (!headMessage || storedMessageRole(headMessage.message) !== "user") return resolvedHeadId;
     const message = asRecord(headMessage.message);
     const metadata = asRecord(message?.metadata);
-    if (metadata?.channel !== "crest") return headId;
+    if (metadata?.channel !== "crest") return resolvedHeadId;
     const stoppedId = await appendCrestStoppedAssistant({
       threadId: input.threadId,
-      parentId: headId,
+      parentId: resolvedHeadId,
       conversationId: input.conversationId,
       context: input.context,
       reason: "dangling_user_head",
@@ -5918,7 +5941,7 @@ async function closeDanglingCrestUserHead(input: {
       headId,
       detail: error instanceof Error ? error.message : String(error)
     });
-    return headId;
+    return await resolveExistingConversationParentId(input.threadId, headId).catch(() => null);
   }
 }
 
@@ -7987,10 +8010,11 @@ async function syncZendeskConversationBeforeAgentRun(input: {
   const userMessageId = `zendesk-requester-${preparedComment.id}`;
   const userText = zendeskRequesterMessageText(input);
   const acceptedAt = new Date().toISOString();
+  const zendeskParentId = await resolveExistingConversationParentId(ensured.thread.id, ensured.thread.headId);
 
   const updated = await conversationRecords.appendMessage({
     threadId: ensured.thread.id,
-    parentId: ensured.thread.headId ?? null,
+    parentId: zendeskParentId,
     message: zendeskMessage({
       id: userMessageId,
       role: "user",
@@ -9123,9 +9147,10 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
         externalConversationKey
       }
     });
+    const dingtalkParentId = await resolveExistingConversationParentId(thread.id, thread.headId);
     await conversationRecords.appendMessage({
       threadId: thread.id,
-      parentId: thread.headId ?? null,
+      parentId: dingtalkParentId,
       message: userMessage,
       runConfig: {
         channel: DINGTALK_BOT_CHANNEL,
