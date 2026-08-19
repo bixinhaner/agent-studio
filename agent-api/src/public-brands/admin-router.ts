@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { ZodError } from "zod";
 
 import type { PublicBrandService } from "./service.js";
+import type { PublicBrandEmailTransportService } from "./email-transport.js";
 
 function detailFromError(error: unknown): string {
   if (error instanceof ZodError) {
@@ -10,7 +11,10 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Brand request failed";
 }
 
-export function createPublicBrandAdminRouter(brands: PublicBrandService): Router {
+export function createPublicBrandAdminRouter(
+  brands: PublicBrandService,
+  emailTransports: PublicBrandEmailTransportService
+): Router {
   const router = Router();
 
   router.get("/brands", async (_req: Request, res: Response) => {
@@ -58,6 +62,37 @@ export function createPublicBrandAdminRouter(brands: PublicBrandService): Router
       res.json({ readiness: await brands.readiness(brand) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/brands/:brandId/email-transport", async (req: Request, res: Response) => {
+    try {
+      res.json({ transport: await emailTransports.get(req.params.brandId) });
+    } catch (error) {
+      const detail = detailFromError(error);
+      res.status(detail === "Brand does not exist" ? 404 : 400).json({ detail });
+    }
+  });
+
+  router.put("/brands/:brandId/email-transport", async (req: Request, res: Response) => {
+    try {
+      const transport = await emailTransports.update(req.params.brandId, req.body, req.currentUser!.id);
+      const brand = await brands.getById(req.params.brandId);
+      res.json({ transport, readiness: brand ? await brands.readiness(brand) : undefined });
+    } catch (error) {
+      const detail = detailFromError(error);
+      res.status(detail === "Brand does not exist" ? 404 : 400).json({ detail });
+    }
+  });
+
+  router.post("/brands/:brandId/email-transport/test", async (req: Request, res: Response) => {
+    try {
+      const transport = await emailTransports.test(req.params.brandId, req.body, req.currentUser!.id);
+      const brand = await brands.getById(req.params.brandId);
+      res.json({ transport, readiness: brand ? await brands.readiness(brand) : undefined });
+    } catch (error) {
+      const detail = detailFromError(error);
+      res.status(detail === "Brand does not exist" ? 404 : 400).json({ detail });
     }
   });
 

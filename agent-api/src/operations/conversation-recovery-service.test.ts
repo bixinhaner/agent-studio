@@ -209,6 +209,7 @@ describe("ConversationRecoveryService", () => {
       resolveBrandName: () => "AgentStudio",
       resolvePortalUrl: () => "https://portal.example.com",
       resolveOrganizationBrand: async () => ({
+        id: "brand-ranley",
         platformName: "Ranley",
         primaryBaseUrl: "https://ranley.cloud-ran.ai",
         primaryColor: "#0066FF",

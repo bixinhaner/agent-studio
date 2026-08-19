@@ -17,10 +17,14 @@ import {
   CircleAlert,
   ExternalLink,
   Globe2,
+  KeyRound,
+  MailCheck,
   Plus,
   RefreshCw,
   Save,
   Search,
+  Send,
+  Server,
   ShieldCheck,
   Trash2,
   UploadCloud
@@ -32,9 +36,12 @@ import { uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "../sy
 import {
   checkPublicBrand,
   createPublicBrand,
+  fetchPublicBrandEmailTransport,
   fetchPublicBrandLookups,
   fetchPublicBrands,
   regeneratePublicBrandProjection,
+  testPublicBrandEmailTransport,
+  updatePublicBrandEmailTransport,
   updatePublicBrand
 } from "./api";
 import {
@@ -42,7 +49,13 @@ import {
   BrandCustomerPreview,
   type BrandPreviewScene
 } from "./BrandCustomerPreview";
-import type { PublicBrandInput, PublicBrandLookups, PublicBrandRecord } from "./types";
+import type {
+  PublicBrandEmailTransport,
+  PublicBrandEmailTransportInput,
+  PublicBrandInput,
+  PublicBrandLookups,
+  PublicBrandRecord
+} from "./types";
 
 const { TextArea } = Input;
 type DetailTab = "entry" | "experience" | "email" | "payment" | "knowledge" | "customers";
@@ -72,6 +85,23 @@ const PREVIEW_SCENE_BY_TAB: Record<DetailTab, BrandPreviewScene> = {
   payment: "billing",
   knowledge: "conversation",
   customers: "access"
+};
+
+const EMPTY_EMAIL_TRANSPORT: PublicBrandEmailTransport = {
+  mode: "shared",
+  smtpHost: null,
+  smtpPort: 587,
+  smtpSecurity: "starttls",
+  smtpUsername: null,
+  passwordConfigured: false,
+  verificationStatus: "pending",
+  smtpConnected: false,
+  senderAccepted: false,
+  deliveryAccepted: false,
+  lastTestedAt: null,
+  lastTestError: null,
+  credentialsRotatedAt: null,
+  updatedAt: null
 };
 
 function emptyBrand(): PublicBrandInput {
@@ -236,6 +266,12 @@ export function BrandManagementView() {
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [projecting, setProjecting] = useState(false);
+  const [emailTransport, setEmailTransport] = useState<PublicBrandEmailTransport>(EMPTY_EMAIL_TRANSPORT);
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [emailTestRecipient, setEmailTestRecipient] = useState("");
+  const [emailTransportDirty, setEmailTransportDirty] = useState(false);
+  const [emailTransportLoading, setEmailTransportLoading] = useState(false);
+  const [emailTesting, setEmailTesting] = useState(false);
   const [uploading, setUploading] = useState<AssetField | "">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -248,6 +284,19 @@ export function BrandManagementView() {
     return matchesQuery && matchesStatus && Boolean(label);
   }), [brands, query, statusFilter]);
 
+  async function loadEmailTransport(brandId: string, fallbackRecipient?: string | null) {
+    setEmailTransportLoading(true);
+    try {
+      const transport = await fetchPublicBrandEmailTransport(brandId);
+      setEmailTransport(transport);
+      setSmtpPassword("");
+      setEmailTransportDirty(false);
+      setEmailTestRecipient((current) => current || fallbackRecipient || "");
+    } finally {
+      setEmailTransportLoading(false);
+    }
+  }
+
   async function load(preferredId?: string) {
     setLoading(true);
     setError("");
@@ -259,6 +308,13 @@ export function BrandManagementView() {
       setSelectedId(nextId);
       const nextSelected = nextBrands.find((brand) => brand.id === nextId);
       setDraft(nextSelected ? toInput(nextSelected) : emptyBrand());
+      if (nextSelected) {
+        await loadEmailTransport(nextSelected.id, nextSelected.emailFromAddress);
+      } else {
+        setEmailTransport(EMPTY_EMAIL_TRANSPORT);
+        setSmtpPassword("");
+        setEmailTransportDirty(false);
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "品牌配置加载失败");
     } finally {
@@ -271,7 +327,13 @@ export function BrandManagementView() {
   function selectBrand(id: string) {
     const next = brands.find((brand) => brand.id === id);
     setSelectedId(id);
-    if (next) setDraft(toInput(next));
+    if (next) {
+      setDraft(toInput(next));
+      setEmailTestRecipient(next.emailFromAddress || "");
+      void loadEmailTransport(next.id, next.emailFromAddress).catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : "邮件通道加载失败");
+      });
+    }
     setError("");
     setSuccess("");
   }
@@ -287,6 +349,30 @@ export function BrandManagementView() {
     setDraft((current) => ({ ...current, ...value }));
   }
 
+  function patchEmailTransport(value: Partial<PublicBrandEmailTransport>) {
+    setEmailTransport((current) => ({
+      ...current,
+      ...value,
+      verificationStatus: "pending",
+      smtpConnected: false,
+      senderAccepted: false,
+      deliveryAccepted: false,
+      lastTestError: null
+    }));
+    setEmailTransportDirty(true);
+  }
+
+  function emailTransportInput(): PublicBrandEmailTransportInput {
+    return {
+      mode: emailTransport.mode,
+      smtpHost: emailTransport.smtpHost,
+      smtpPort: emailTransport.smtpPort,
+      smtpSecurity: emailTransport.smtpSecurity,
+      smtpUsername: emailTransport.smtpUsername,
+      ...(smtpPassword ? { smtpPassword } : {})
+    };
+  }
+
   async function save() {
     setSaving(true);
     setError("");
@@ -295,12 +381,48 @@ export function BrandManagementView() {
       const saved = selectedId
         ? await updatePublicBrand(selectedId, normalizeInput(draft))
         : await createPublicBrand(normalizeInput(draft));
+      if (emailTransportDirty) {
+        await updatePublicBrandEmailTransport(saved.id, emailTransportInput());
+      }
       await load(saved.id);
       setSuccess("品牌配置已保存；未通过上线检查的能力仍保持关闭");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "保存失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function testEmailTransport() {
+    if (!selectedId) {
+      setError("请先保存品牌，再测试邮件通道");
+      return;
+    }
+    if (!emailTestRecipient.trim()) {
+      setError("请输入测试收件邮箱");
+      return;
+    }
+    setEmailTesting(true);
+    setError("");
+    setSuccess("");
+    try {
+      await updatePublicBrand(selectedId, normalizeInput(draft));
+      await updatePublicBrandEmailTransport(selectedId, emailTransportInput());
+      const result = await testPublicBrandEmailTransport(selectedId, emailTestRecipient.trim());
+      setEmailTransport(result.transport);
+      setSmtpPassword("");
+      setEmailTransportDirty(false);
+      await load(selectedId);
+      setSuccess(`测试邮件已由 SMTP 接收并提交至 ${emailTestRecipient.trim()}，品牌邮件通道已开放`);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "邮件通道测试失败");
+      try {
+        await loadEmailTransport(selectedId, draft.emailFromAddress);
+      } catch {
+        // Preserve the actionable test error when status refresh also fails.
+      }
+    } finally {
+      setEmailTesting(false);
     }
   }
 
@@ -466,9 +588,58 @@ export function BrandManagementView() {
             <section className="brand-config-section"><div className="brand-section-heading"><h2>Portal 体验</h2><p>只展示客户完成问答和服务申请所需的信息。</p></div><div className="brand-config-grid"><label className="brand-config-field brand-field-wide"><span>桌面欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageDesktop} onChange={(event) => patch({ portalWelcomeMessageDesktop: event.target.value })} /></label><label className="brand-config-field brand-field-wide"><span>移动端欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageMobile} onChange={(event) => patch({ portalWelcomeMessageMobile: event.target.value })} /></label><div className="brand-config-field brand-field-wide"><span>快捷问题</span><SuggestionEditor value={draft.portalWelcomeSuggestions} onChange={(portalWelcomeSuggestions) => patch({ portalWelcomeSuggestions })} /></div><label className="brand-config-field brand-field-wide"><span>回答反馈提示</span><Input value={draft.answerFeedbackPrompt} disabled={!draft.answerFeedbackEnabled} onChange={(event) => patch({ answerFeedbackPrompt: event.target.value })} /></label></div><div className="brand-toggle-grid"><label><Switch checked={draft.externalOnly} onChange={(externalOnly) => patch({ externalOnly })} /><span>仅允许外部客户登录</span></label><label><Switch checked={draft.accessRequestEnabled} onChange={(accessRequestEnabled) => patch({ accessRequestEnabled })} /><span>开放试用申请</span></label><label><Switch checked={draft.billingEnabled} onChange={(billingEnabled) => patch({ billingEnabled })} /><span>开放套餐购买</span></label><label><Switch checked={draft.answerFeedbackEnabled} onChange={(answerFeedbackEnabled) => patch({ answerFeedbackEnabled })} /><span>收集回答反馈</span></label></div></section>
           </> : null}
 
-          {tab === "email" ? <>
-            <section className="brand-config-section"><div className="brand-section-heading"><h2>客户邮件身份</h2><p>验证码、邀请、审核与计费通知都使用同一品牌发件身份。</p></div><div className="brand-config-grid"><label className="brand-config-field"><span>发件人名称</span><Input value={draft.emailFromName} onChange={(event) => patch({ emailFromName: event.target.value })} /></label><label className="brand-config-field"><span>发件邮箱</span><Input value={draft.emailFromAddress || ""} onChange={(event) => patch({ emailFromAddress: event.target.value, emailSenderVerified: false })} /></label><label className="brand-config-field"><span>回复邮箱</span><Input value={draft.emailReplyTo || ""} onChange={(event) => patch({ emailReplyTo: event.target.value })} /></label><label className="brand-config-field"><span>销售联系人字段名</span><Input value={draft.accessSalesContactLabel} onChange={(event) => patch({ accessSalesContactLabel: event.target.value })} /></label></div><div className="brand-verification-row"><div>{draft.emailSenderVerified ? <CheckCircle2 size={18} /> : <CircleAlert size={18} />}<span><strong>{draft.emailSenderVerified ? "发件域名已验证" : "发件域名待验证"}</strong><small>验证 SPF、DKIM 和实际投递后再标记就绪。</small></span></div><Switch checked={draft.emailSenderVerified} checkedChildren="已验证" unCheckedChildren="待验证" onChange={(emailSenderVerified) => patch({ emailSenderVerified })} /></div></section>
-          </> : null}
+          {tab === "email" ? <Spin spinning={emailTransportLoading}>
+            <section className="brand-config-section">
+              <div className="brand-section-heading"><h2>客户邮件身份</h2><p>验证码、邀请、审核与计费通知都使用同一品牌发件身份。</p></div>
+              <div className="brand-config-grid">
+                <label className="brand-config-field"><span>发件人名称</span><Input value={draft.emailFromName} onChange={(event) => patch({ emailFromName: event.target.value })} /></label>
+                <label className="brand-config-field"><span>发件邮箱</span><Input value={draft.emailFromAddress || ""} onChange={(event) => { patch({ emailFromAddress: event.target.value, emailSenderVerified: false }); setEmailTransport((current) => ({ ...current, verificationStatus: "pending", smtpConnected: false, senderAccepted: false, deliveryAccepted: false })); }} /></label>
+                <label className="brand-config-field"><span>回复邮箱</span><Input value={draft.emailReplyTo || ""} onChange={(event) => patch({ emailReplyTo: event.target.value })} /></label>
+                <label className="brand-config-field"><span>销售联系人字段名</span><Input value={draft.accessSalesContactLabel} onChange={(event) => patch({ accessSalesContactLabel: event.target.value })} /></label>
+              </div>
+              <div className={`brand-email-state ${emailTransport.verificationStatus}`}>
+                {emailTransport.verificationStatus === "verified" ? <CheckCircle2 size={18} /> : <CircleAlert size={18} />}
+                <span><strong>{emailTransport.verificationStatus === "verified" ? "品牌邮件身份已验证" : emailTransport.verificationStatus === "failed" ? "上次验证失败" : "品牌邮件身份待验证"}</strong><small>发件邮箱或通道参数改变后，系统会自动关闭发信，直到重新测试通过。</small></span>
+                <Tag color={emailTransport.verificationStatus === "verified" ? "success" : emailTransport.verificationStatus === "failed" ? "error" : "warning"}>{emailTransport.verificationStatus === "verified" ? "已开放" : "未开放"}</Tag>
+              </div>
+            </section>
+
+            <section className="brand-config-section brand-email-channel-section">
+              <div className="brand-section-heading"><h2>邮件发送通道</h2><p>已由系统邮箱授权的品牌可使用共享通道；需要独立发件身份的品牌使用自己的 SMTP，品牌之间不会串用账户。</p></div>
+              <Segmented
+                block
+                className="brand-email-mode"
+                value={emailTransport.mode}
+                options={[{ value: "shared", label: "共享系统通道" }, { value: "smtp", label: "品牌独立 SMTP" }]}
+                onChange={(value) => patchEmailTransport({ mode: value as PublicBrandEmailTransport["mode"] })}
+              />
+              {emailTransport.mode === "shared" ? (
+                <div className="brand-email-shared-note"><Server size={18} /><div><strong>使用系统默认 SMTP</strong><span>适用于发件域名已由现有系统邮箱授权的品牌；不会显示或复制系统账号密码。</span></div></div>
+              ) : (
+                <div className="brand-email-smtp-grid">
+                  <label className="brand-config-field brand-field-wide"><span>SMTP 服务器</span><Input prefix={<Server size={15} />} value={emailTransport.smtpHost || ""} placeholder="smtp.example.com" onChange={(event) => patchEmailTransport({ smtpHost: event.target.value })} /></label>
+                  <label className="brand-config-field"><span>端口</span><Input type="number" min={1} max={65535} value={String(emailTransport.smtpPort)} onChange={(event) => patchEmailTransport({ smtpPort: Number(event.target.value) || 587 })} /></label>
+                  <label className="brand-config-field"><span>连接加密</span><Select value={emailTransport.smtpSecurity} options={[{ value: "starttls", label: "STARTTLS（推荐）" }, { value: "tls", label: "TLS / SSL" }, { value: "none", label: "不加密" }]} onChange={(smtpSecurity) => patchEmailTransport({ smtpSecurity })} /></label>
+                  <label className="brand-config-field brand-field-wide"><span>SMTP 用户名</span><Input prefix={<MailCheck size={15} />} value={emailTransport.smtpUsername || ""} placeholder="lion.li@cloud-ran.ai" onChange={(event) => patchEmailTransport({ smtpUsername: event.target.value })} /></label>
+                  <label className="brand-config-field brand-field-wide"><span>密码或授权码</span><Input.Password prefix={<KeyRound size={15} />} value={smtpPassword} placeholder={emailTransport.passwordConfigured ? "已安全保存；留空保持不变" : "输入邮箱密码或 SMTP 授权码"} onChange={(event) => { setSmtpPassword(event.target.value); setEmailTransportDirty(true); setEmailTransport((current) => ({ ...current, verificationStatus: "pending", smtpConnected: false, senderAccepted: false, deliveryAccepted: false })); }} /><small>{emailTransport.passwordConfigured ? `凭据已配置${emailTransport.credentialsRotatedAt ? `，更新于 ${localTime(emailTransport.credentialsRotatedAt)}` : ""}` : "保存后密码不会再次显示"}</small></label>
+                </div>
+              )}
+
+              <div className="brand-email-test-panel">
+                <div className="brand-email-test-head"><div><strong>验证并发送测试邮件</strong><span>系统先检查连接和登录，再用上方品牌身份提交一封真实邮件。</span></div><div className="brand-email-test-action"><Input value={emailTestRecipient} placeholder="测试收件邮箱" onChange={(event) => setEmailTestRecipient(event.target.value)} /><Button type="primary" icon={<Send size={15} />} loading={emailTesting} disabled={!selectedId} onClick={() => void testEmailTransport()}>发送测试邮件</Button></div></div>
+                <div className="brand-email-checks">
+                  {[
+                    { ok: emailTransport.smtpConnected, title: "SMTP 连接", detail: "服务器连接和登录成功" },
+                    { ok: emailTransport.senderAccepted, title: "发件人授权", detail: "服务器接受品牌发件地址" },
+                    { ok: emailTransport.deliveryAccepted, title: "投递提交", detail: "测试邮件已由 SMTP 接收" }
+                  ].map((item) => <div className={item.ok ? "is-complete" : ""} key={item.title}>{item.ok ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}<span><strong>{item.title}</strong><small>{item.detail}</small></span></div>)}
+                </div>
+                {emailTransport.lastTestError ? <Alert type="error" showIcon message={emailTransport.lastTestError} /> : null}
+                <div className="brand-email-test-footer"><span>最近测试：{emailTransport.lastTestedAt ? localTime(emailTransport.lastTestedAt) : "尚未测试"}</span><strong>{emailTransport.verificationStatus === "verified" ? "邮件通道已开放" : "邮件通道待验证"}</strong></div>
+              </div>
+              <p className="brand-config-note">测试通过代表 SMTP 已接受邮件；SPF、DKIM 和最终入箱策略仍由邮箱服务商及收件方控制。</p>
+            </section>
+          </Spin> : null}
 
           {tab === "payment" ? <>
             <section className="brand-config-section"><div className="brand-section-heading"><h2>支付商户</h2><p>客户结账页、收据与账单只展示这里绑定的商户身份。</p></div><div className="brand-config-grid"><label className="brand-config-field"><span>客户看到的商户名</span><Input value={draft.billingMerchantName || ""} onChange={(event) => patch({ billingMerchantName: event.target.value })} /></label><label className="brand-config-field"><span>账单支持邮箱</span><Input value={draft.billingSupportEmail || ""} onChange={(event) => patch({ billingSupportEmail: event.target.value })} /></label><label className="brand-config-field"><span>支付账户模式</span><Segmented block value={draft.paymentAccountMode} options={[{ value: "shared", label: "平台共享账户（需确认账单品牌）" }, { value: "connected", label: "独立连接账户" }]} onChange={(value) => patch({ paymentAccountMode: value as PublicBrandInput["paymentAccountMode"], paymentAccountReady: false })} /></label>{draft.paymentAccountMode === "connected" ? <label className="brand-config-field"><span>Stripe Account ID</span><Input value={draft.paymentStripeAccountId || ""} placeholder="acct_..." onChange={(event) => patch({ paymentStripeAccountId: event.target.value, paymentAccountReady: false })} /></label> : null}</div><div className="brand-verification-row"><div>{draft.paymentAccountReady ? <CheckCircle2 size={18} /> : <CircleAlert size={18} />}<span><strong>{draft.paymentAccountReady ? "支付商户已就绪" : "支付商户待配置"}</strong><small>未就绪时客户仍可查看套餐，但付费操作会停止并提示联系支持。</small></span></div><Switch checked={draft.paymentAccountReady} checkedChildren="已就绪" unCheckedChildren="未就绪" onChange={(paymentAccountReady) => patch({ paymentAccountReady })} /></div></section>

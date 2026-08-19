@@ -43,6 +43,7 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   AUTH_EMAIL_FROM: z.string().optional(),
   AUTH_EMAIL_DEBUG: z.string().optional(),
+  BRAND_EMAIL_CREDENTIAL_SECRET: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SIGNING_SECRET: z.string().optional(),
   BILLING_SUCCESS_URL: z.string().optional(),
@@ -246,6 +247,7 @@ export const appConfig = {
     from: (env.AUTH_EMAIL_FROM || "").trim(),
     debug: parseBooleanWithDefault(env.AUTH_EMAIL_DEBUG, false)
   },
+  brandEmailCredentialSecret: (env.BRAND_EMAIL_CREDENTIAL_SECRET || env.SESSION_COOKIE_SECRET || "").trim(),
   billing: {
     stripeSecretKey: (env.STRIPE_SECRET_KEY || "").trim(),
     stripeWebhookSigningSecret: (env.STRIPE_WEBHOOK_SIGNING_SECRET || "").trim(),

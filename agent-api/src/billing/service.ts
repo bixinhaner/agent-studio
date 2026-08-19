@@ -142,6 +142,7 @@ type BillingEmailPlanOption = {
 };
 
 type BillingOrganizationBrand = {
+  id?: string;
   platformName?: string;
   billingPortalUrl?: string;
   subscriptionPlanIds?: string[];
@@ -724,6 +725,7 @@ export class BillingService {
       throw new Error(`${brand.platformName} email delivery is not ready`);
     }
     return {
+      publicBrandId: brand.id,
       from: `${trimOrUndefined(brand.emailFromName) ?? trimOrUndefined(brand.platformName) ?? "AI Assistant"} <${brand.emailFromAddress}>`,
       replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
     };

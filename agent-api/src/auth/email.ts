@@ -1,9 +1,11 @@
 import nodemailer from "nodemailer";
 
-type AuthEmailTransportConfig = {
+export type AuthEmailTransportConfig = {
   host?: string;
   port?: number;
   secure?: boolean;
+  requireTls?: boolean;
+  ignoreTls?: boolean;
   user?: string;
   pass?: string;
   from?: string;
@@ -26,6 +28,7 @@ function normalizeAddressList(value: string | string[] | null | undefined): stri
 
 export type AuthEmailSender = {
   send(input: {
+    publicBrandId?: string;
     to: string | string[];
     cc?: string | string[];
     from?: string;
@@ -43,20 +46,33 @@ export type AuthEmailSender = {
   }): Promise<{ delivered: boolean; mode: "smtp" | "debug" }>;
 };
 
-export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEmailSender {
+function createTransporter(config: AuthEmailTransportConfig) {
   const host = trimOrUndefined(config.host);
   const from = trimOrUndefined(config.from);
   const user = trimOrUndefined(config.user);
   const pass = trimOrUndefined(config.pass);
   const ready = Boolean(host && from);
-  const transporter = ready
+  return ready
     ? nodemailer.createTransport({
         host,
         port: Number.isFinite(config.port) ? config.port : 587,
         secure: Boolean(config.secure),
+        requireTLS: Boolean(config.requireTls),
+        ignoreTLS: Boolean(config.ignoreTls),
         auth: user || pass ? { user, pass } : undefined
       })
     : null;
+}
+
+export async function verifyAuthEmailTransport(config: AuthEmailTransportConfig): Promise<void> {
+  const transporter = createTransporter(config);
+  if (!transporter) throw new Error("SMTP transport is incomplete");
+  await transporter.verify();
+}
+
+export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEmailSender {
+  const from = trimOrUndefined(config.from);
+  const transporter = createTransporter(config);
 
   return {
     async send(input) {
@@ -98,6 +114,21 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
         attachments: input.attachments
       });
       return { delivered: true, mode: "smtp" };
+    }
+  };
+}
+
+export function createBrandAwareEmailSender(
+  fallback: AuthEmailSender,
+  resolveTransport: (publicBrandId: string) => Promise<AuthEmailTransportConfig | undefined>
+): AuthEmailSender {
+  return {
+    async send(input) {
+      const publicBrandId = trimOrUndefined(input.publicBrandId);
+      if (!publicBrandId) return fallback.send(input);
+      const transport = await resolveTransport(publicBrandId);
+      if (!transport) return fallback.send(input);
+      return createAuthEmailSender(transport).send(input);
     }
   };
 }

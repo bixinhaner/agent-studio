@@ -174,7 +174,6 @@ function brandData(input: PublicBrandInput, actorUserId: string) {
     emailFromName: input.emailFromName,
     emailFromAddress: input.emailFromAddress,
     emailReplyTo: input.emailReplyTo,
-    emailSenderVerified: input.emailSenderVerified,
     billingMerchantName: input.billingMerchantName,
     billingSupportEmail: input.billingSupportEmail,
     paymentAccountMode: input.paymentAccountMode,
@@ -276,6 +275,7 @@ export class PublicBrandService {
       const brand = await tx.publicBrand.create({
         data: {
           ...brandData(parsed, actorUserId),
+          emailSenderVerified: false,
           createdByUserId: actorUserId,
           domains: { create: parsed.domains }
         }
@@ -299,7 +299,27 @@ export class PublicBrandService {
       const existing = await tx.publicBrand.findUnique({ where: { id: brandId } });
       if (!existing) throw new Error("Brand does not exist");
       await this.validateBindings(tx, parsed);
-      await tx.publicBrand.update({ where: { id: brandId }, data: brandData(parsed, actorUserId) });
+      const emailAddressChanged = trimOrUndefined(existing.emailFromAddress)?.toLowerCase() !== trimOrUndefined(parsed.emailFromAddress)?.toLowerCase();
+      await tx.publicBrand.update({
+        where: { id: brandId },
+        data: {
+          ...brandData(parsed, actorUserId),
+          emailSenderVerified: emailAddressChanged ? false : existing.emailSenderVerified
+        }
+      });
+      if (emailAddressChanged) {
+        await tx.publicBrandEmailTransport.updateMany({
+          where: { publicBrandId: brandId },
+          data: {
+            verificationStatus: "pending",
+            smtpConnected: false,
+            senderAccepted: false,
+            deliveryAccepted: false,
+            lastTestError: null,
+            updatedByUserId: actorUserId
+          }
+        });
+      }
       await tx.publicBrandDomain.deleteMany({ where: { publicBrandId: brandId } });
       await tx.publicBrandDomain.createMany({
         data: parsed.domains.map((domain) => ({ ...domain, publicBrandId: brandId }))
@@ -354,7 +374,7 @@ export class PublicBrandService {
         ok: brand.subscriptionPlanIds.length > 0 && planCount === brand.subscriptionPlanIds.length,
         detail: "计费套餐"
       },
-      { key: "email", ok: Boolean(brand.emailSenderVerified && brand.emailFromAddress), detail: "邮件发件人" },
+      { key: "email", ok: Boolean(brand.emailSenderVerified && brand.emailFromAddress), detail: "邮件发送通道" },
       { key: "payment", ok: !brand.billingEnabled || Boolean(brand.paymentAccountReady && brand.billingMerchantName), detail: "支付商户" },
       { key: "urls", ok: Boolean(brand.primaryBaseUrl), detail: "公开入口地址" }
     ];

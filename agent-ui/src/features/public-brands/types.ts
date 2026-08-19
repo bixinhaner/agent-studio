@@ -96,3 +96,28 @@ export type PublicBrandLookups = {
   plans: Array<{ id: string; name: string; slug: string; billingStatus: string }>;
   organizations: Array<{ id: string; name: string; slug: string; publicBrandId?: string | null; status: string }>;
 };
+
+export type PublicBrandEmailTransport = {
+  mode: "shared" | "smtp";
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecurity: "starttls" | "tls" | "none";
+  smtpUsername: string | null;
+  passwordConfigured: boolean;
+  verificationStatus: "pending" | "verified" | "failed";
+  smtpConnected: boolean;
+  senderAccepted: boolean;
+  deliveryAccepted: boolean;
+  lastTestedAt: string | null;
+  lastTestError: string | null;
+  credentialsRotatedAt: string | null;
+  updatedAt: string | null;
+};
+
+export type PublicBrandEmailTransportInput = Pick<
+  PublicBrandEmailTransport,
+  "mode" | "smtpHost" | "smtpPort" | "smtpSecurity" | "smtpUsername"
+> & {
+  smtpPassword?: string;
+  clearPassword?: boolean;
+};

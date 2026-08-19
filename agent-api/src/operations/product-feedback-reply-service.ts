@@ -107,7 +107,7 @@ type ReplyInput = {
 
 type FeedbackBrand = Pick<
   PublicBrandRecord,
-  "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
+  "id" | "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
 >;
 
 export class ProductFeedbackReplyService {
@@ -457,6 +457,7 @@ export class ProductFeedbackReplyService {
       throw new Error(`${brand.platformName} email delivery is not ready`);
     }
     return {
+      publicBrandId: brand.id,
       from: `${trimOrUndefined(brand.emailFromName) ?? brand.platformName} <${brand.emailFromAddress}>`,
       replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
     };

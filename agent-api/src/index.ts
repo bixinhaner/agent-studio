@@ -28,7 +28,7 @@ import {
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
-import { createAuthEmailSender } from "./auth/email.js";
+import { createAuthEmailSender, createBrandAwareEmailSender } from "./auth/email.js";
 import {
   ensureInternalOrganization,
   INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
@@ -370,6 +370,7 @@ import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import { createPublicBrandAdminRouter } from "./public-brands/admin-router.js";
+import { PublicBrandEmailTransportService } from "./public-brands/email-transport.js";
 import { createPublicBrandContextMiddleware } from "./public-brands/middleware.js";
 import { PublicBrandService } from "./public-brands/service.js";
 import { PublicBrandKnowledgeProjectionService } from "./public-brands/knowledge-projection.js";
@@ -592,6 +593,10 @@ const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
 const publicBrands = new PublicBrandService(db);
+const publicBrandEmailTransports = new PublicBrandEmailTransportService(db, {
+  credentialSecret: appConfig.brandEmailCredentialSecret,
+  sharedTransport: appConfig.authEmail
+});
 const userWorkspaceStorage = new LocalFsWorkspaceStorage(appConfig.userWorkspaceStorageRoot);
 const portalWorkspaces = new PortalWorkspaceService(db, userWorkspaceStorage, async (thread) => {
   if (thread.workspace && shouldRemoveWorkspaceOnThreadHardDelete(thread.id, thread.workspace)) {
@@ -896,7 +901,11 @@ async function sendActiveDingTalkWorkNotice(input: { userIds?: string[]; message
   return client.sendWorkNotice(input);
 }
 
-const authEmailSender = createAuthEmailSender(appConfig.authEmail);
+const defaultAuthEmailSender = createAuthEmailSender(appConfig.authEmail);
+const authEmailSender = createBrandAwareEmailSender(
+  defaultAuthEmailSender,
+  (publicBrandId) => publicBrandEmailTransports.resolveDedicatedTransport(publicBrandId)
+);
 const billingService = new BillingService({
   db,
   config: appConfig.billing,
@@ -908,6 +917,7 @@ const billingService = new BillingService({
     return brand
       ? {
           platformName: brand.platformName,
+          id: brand.id,
           billingPortalUrl: brand.billingPortalUrl,
           subscriptionPlanIds: brand.subscriptionPlanIds,
           emailFromName: brand.emailFromName,
@@ -11141,7 +11151,7 @@ registerCommonApiRoutes(app, {
     securityDomainAccess,
     conversationSecurityReviewTest: (input) => conversationSecurityReview.testReview(input)
   }),
-  publicBrandAdminRouter: createPublicBrandAdminRouter(publicBrands),
+  publicBrandAdminRouter: createPublicBrandAdminRouter(publicBrands, publicBrandEmailTransports),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
     requirePermission,

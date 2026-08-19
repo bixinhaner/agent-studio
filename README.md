@@ -119,6 +119,7 @@ Backend configuration lives in `agent-api/.env`. The most important settings are
 | `SESSION_COOKIE_SECRET` | Secret for signed session cookies |
 | `APP_BASE_URL` | Public base URL used in links and emails |
 | `SMTP_*` / `AUTH_EMAIL_FROM` | Email delivery settings |
+| `BRAND_EMAIL_CREDENTIAL_SECRET` | Encryption secret for per-brand SMTP passwords; falls back to `SESSION_COOKIE_SECRET` for existing deployments |
 | `DINGTALK_*` | DingTalk OAuth, alerting, and org-sync settings |
 | `ACCESS_REQUEST_*` | Public access request and purchase-proof upload settings |
 | `UPLOAD_TEMP_ROOT` | Temporary uploaded attachment root |

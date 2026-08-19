@@ -1,5 +1,12 @@
 import { api } from "../../lib/api";
-import type { PublicBrandInput, PublicBrandLookups, PublicBrandReadiness, PublicBrandRecord } from "./types";
+import type {
+  PublicBrandEmailTransport,
+  PublicBrandEmailTransportInput,
+  PublicBrandInput,
+  PublicBrandLookups,
+  PublicBrandReadiness,
+  PublicBrandRecord
+} from "./types";
 
 export async function fetchPublicBrands(): Promise<PublicBrandRecord[]> {
   const response = await api<{ brands: PublicBrandRecord[] }>("/api/admin/brands");
@@ -37,4 +44,28 @@ export async function regeneratePublicBrandProjection(id: string): Promise<Publi
     { method: "POST" }
   );
   return response.brand;
+}
+
+export async function fetchPublicBrandEmailTransport(id: string): Promise<PublicBrandEmailTransport> {
+  const response = await api<{ transport: PublicBrandEmailTransport }>(
+    `/api/admin/brands/${encodeURIComponent(id)}/email-transport`
+  );
+  return response.transport;
+}
+
+export async function updatePublicBrandEmailTransport(
+  id: string,
+  input: PublicBrandEmailTransportInput
+): Promise<{ transport: PublicBrandEmailTransport; readiness?: PublicBrandReadiness }> {
+  return api(`/api/admin/brands/${encodeURIComponent(id)}/email-transport`, { method: "PUT", json: input });
+}
+
+export async function testPublicBrandEmailTransport(
+  id: string,
+  recipient: string
+): Promise<{ transport: PublicBrandEmailTransport; readiness?: PublicBrandReadiness }> {
+  return api(`/api/admin/brands/${encodeURIComponent(id)}/email-transport/test`, {
+    method: "POST",
+    json: { recipient }
+  });
 }

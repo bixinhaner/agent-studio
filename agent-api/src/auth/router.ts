@@ -494,6 +494,7 @@ export function createAuthRouter(options: {
       throw new Error(`${brand.platformName} email delivery is not ready`);
     }
     return {
+      publicBrandId: brand.id,
       from: `${brand.emailFromName} <${brand.emailFromAddress}>`,
       replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
     };

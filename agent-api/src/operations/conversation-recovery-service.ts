@@ -224,7 +224,7 @@ type ConversationRecoveryCaseBase = Omit<
 type RecoveryEmailIssueKind = "response_failure" | "experience_report" | "product_feedback_reply";
 type RecoveryBrand = Pick<
   PublicBrandRecord,
-  "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
+  "id" | "platformName" | "primaryBaseUrl" | "primaryColor" | "emailFromName" | "emailFromAddress" | "emailReplyTo" | "supportEmail" | "emailSenderVerified"
 >;
 
 export class ConversationRecoveryService {
@@ -688,6 +688,7 @@ export class ConversationRecoveryService {
       throw new Error(`${brand.platformName} email delivery is not ready`);
     }
     return {
+      publicBrandId: brand.id,
       from: `${trimOrUndefined(brand.emailFromName) ?? brand.platformName} <${brand.emailFromAddress}>`,
       replyTo: trimOrUndefined(brand.emailReplyTo) ?? trimOrUndefined(brand.supportEmail)
     };

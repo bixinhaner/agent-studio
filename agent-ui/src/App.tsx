@@ -342,8 +342,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         ) : null}
 
         {inviteError && <p className="err-text" style={{margin:0,textAlign:'center'}}>{inviteError}</p>}
-        {props.auth.error && <p className="err-text" style={{margin:0,textAlign:'center'}}>{props.auth.error}</p>}
-        {formError && <p className="err-text" style={{margin:0,textAlign:'center'}}>{formError}</p>}
+        {(formError || props.auth.error) && <p className="err-text" style={{margin:0,textAlign:'center'}}>{formError || props.auth.error}</p>}
 
         {!codeRequested && !isInternalMode ? (
           <div className="auth-modern-field auth-modern-fade-enter">

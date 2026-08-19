@@ -170,9 +170,34 @@ model PublicBrand {
   organizations               Organization[]
   accessRequests               AccessRequest[]
   loginChallenges              LoginChallenge[]
+  emailTransport               PublicBrandEmailTransport?
 
   @@index([status, name])
   @@map("public_brands")
+}
+
+model PublicBrandEmailTransport {
+  publicBrandId             String      @id @map("public_brand_id")
+  publicBrand               PublicBrand @relation(fields: [publicBrandId], references: [id], onDelete: Cascade)
+  mode                      String      @default("shared")
+  smtpHost                  String?     @map("smtp_host")
+  smtpPort                  Int         @default(587) @map("smtp_port")
+  smtpSecurity              String      @default("starttls") @map("smtp_security")
+  smtpUsername              String?     @map("smtp_username")
+  smtpPasswordEncrypted     String?     @map("smtp_password_encrypted")
+  verificationStatus        String      @default("pending") @map("verification_status")
+  smtpConnected             Boolean     @default(false) @map("smtp_connected")
+  senderAccepted            Boolean     @default(false) @map("sender_accepted")
+  deliveryAccepted          Boolean     @default(false) @map("delivery_accepted")
+  lastTestedAt              DateTime?   @map("last_tested_at")
+  lastTestError             String?     @map("last_test_error")
+  credentialsRotatedAt      DateTime?   @map("credentials_rotated_at")
+  updatedByUserId           String?     @map("updated_by_user_id")
+  createdAt                 DateTime    @default(now()) @map("created_at")
+  updatedAt                 DateTime    @updatedAt @map("updated_at")
+
+  @@index([mode, verificationStatus])
+  @@map("public_brand_email_transports")
 }
 
 model PublicBrandDomain {
