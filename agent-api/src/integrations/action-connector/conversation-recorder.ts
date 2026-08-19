@@ -20,7 +20,9 @@ export type ActionConnectorTurnStatus = "previewed" | "completed" | "failed";
 type ConversationStore = Pick<
   ConversationRecordService,
   | "appendMessage"
+  | "claimTurnDelivery"
   | "createThread"
+  | "finalizeTurnDelivery"
   | "getExternalConversationBinding"
   | "getMessageRepository"
   | "getThread"
@@ -206,6 +208,7 @@ export class ActionConnectorConversationRecorder {
   ) {}
 
   async recordTurn(input: ActionConnectorRecordTurnInput): Promise<{ threadId: string }> {
+    const acceptedAt = new Date().toISOString();
     const organizationId = trimOrUndefined(input.connector.organizationId ?? undefined);
     const externalConversationKey = connectorConversationKey({
       connectorId: input.connector.id,
@@ -304,37 +307,54 @@ export class ActionConnectorConversationRecorder {
     } else {
       parentId = userMessageId;
     }
-
-    await this.deps.conversations.appendMessage({
+    const claim = await this.deps.conversations.claimTurnDelivery({
       threadId: thread.id,
-      parentId,
-      message: actionConnectorMessage({
-        id: `${ACTION_CONNECTOR_CHANNEL}-assistant-${input.runId}`,
-        role: "assistant",
-        text: assistantText(input),
-        status: input.status === "failed" ? { type: "error", reason: "error" } : { type: "completed" },
-        contentParts: [traceBatchPart(input)],
-        metadata: {
+      userMessageId,
+      runId: input.runId,
+      channel: ACTION_CONNECTOR_CHANNEL,
+      acceptedAt
+    });
+    if (claim.outcome === "superseded") {
+      return { threadId: thread.id };
+    }
+
+    await this.deps.conversations.finalizeTurnDelivery({
+      threadId: thread.id,
+      userMessageId,
+      runId: input.runId,
+      channel: ACTION_CONNECTOR_CHANNEL,
+      acceptedAt,
+      status: input.status === "failed" ? "failed" : "completed",
+      assistant: {
+        parentId,
+        message: actionConnectorMessage({
+          id: `${ACTION_CONNECTOR_CHANNEL}-assistant-${input.runId}`,
+          role: "assistant",
+          text: assistantText(input),
+          status: input.status === "failed" ? { type: "error", reason: "error" } : { type: "completed" },
+          contentParts: [traceBatchPart(input)],
+          metadata: {
+            channel: ACTION_CONNECTOR_CHANNEL,
+            integrationInstanceId: input.connector.id,
+            externalConversationKey,
+            conversationId: input.conversationId,
+            runId: input.runId,
+            callId: input.callId,
+            actionId: input.selectedAction.actionId,
+            actionStatus: input.status,
+            externalUserId,
+            externalUserName
+          }
+        }),
+        runConfig: {
           channel: ACTION_CONNECTOR_CHANNEL,
           integrationInstanceId: input.connector.id,
           externalConversationKey,
-          conversationId: input.conversationId,
+          conversationType: "embedded_agent",
           runId: input.runId,
-          callId: input.callId,
           actionId: input.selectedAction.actionId,
-          actionStatus: input.status,
-          externalUserId,
-          externalUserName
+          status: input.status
         }
-      }),
-      runConfig: {
-        channel: ACTION_CONNECTOR_CHANNEL,
-        integrationInstanceId: input.connector.id,
-        externalConversationKey,
-        conversationType: "embedded_agent",
-        runId: input.runId,
-        actionId: input.selectedAction.actionId,
-        status: input.status
       }
     });
 

@@ -4263,36 +4263,17 @@ type PortalActiveChatRun = {
   userMessageId?: string;
   assistantMessageId?: string;
   assistantMessageWritten?: boolean;
+  acceptedAt: string;
 };
 
 const portalActiveChatRuns = new Map<string, PortalActiveChatRun>();
-const portalLatestRunIds = new Map<string, { runId: string; createdAt: number }>();
-const portalLatestRunIdsByParent = new Map<string, { runId: string; createdAt: number }>();
 const PORTAL_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
-
-function portalRunParentKey(threadId?: string, userMessageId?: string): string | undefined {
-  const normalizedThreadId = trimOrUndefined(threadId);
-  const normalizedUserMessageId = trimOrUndefined(userMessageId);
-  return normalizedThreadId && normalizedUserMessageId
-    ? `${normalizedThreadId}:${normalizedUserMessageId}`
-    : undefined;
-}
 
 function gcPortalActiveChatRuns(): void {
   const cutoff = Date.now() - PORTAL_ACTIVE_CHAT_RUN_TTL_MS;
   for (const [sessionId, entry] of portalActiveChatRuns.entries()) {
     if (entry.createdAt < cutoff) {
       portalActiveChatRuns.delete(sessionId);
-    }
-  }
-  for (const [sessionId, entry] of portalLatestRunIds.entries()) {
-    if (entry.createdAt < cutoff) {
-      portalLatestRunIds.delete(sessionId);
-    }
-  }
-  for (const [parentKey, entry] of portalLatestRunIdsByParent.entries()) {
-    if (entry.createdAt < cutoff) {
-      portalLatestRunIdsByParent.delete(parentKey);
     }
   }
 }
@@ -4381,6 +4362,7 @@ function registerPortalActiveChatRun(input: {
   threadId?: string;
   traceId?: string;
   assistantMessageId?: string;
+  acceptedAt?: string;
 }): () => void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return () => undefined;
@@ -4397,9 +4379,9 @@ function registerPortalActiveChatRun(input: {
     runId: input.runId,
     traceId: trimOrUndefined(input.traceId),
     threadId: trimOrUndefined(input.threadId),
-    assistantMessageId: trimOrUndefined(input.assistantMessageId)
+    assistantMessageId: trimOrUndefined(input.assistantMessageId),
+    acceptedAt: trimOrUndefined(input.acceptedAt) ?? new Date().toISOString()
   });
-  portalLatestRunIds.set(sessionId, { runId: input.runId, createdAt: Date.now() });
   return () => {
     const current = portalActiveChatRuns.get(sessionId);
     if (current?.controller === input.controller) {
@@ -4424,10 +4406,6 @@ function attachPortalActiveChatRun(input: {
   entry.threadId = trimOrUndefined(input.threadId) ?? entry.threadId;
   entry.userMessageId = trimOrUndefined(input.userMessageId) ?? entry.userMessageId;
   entry.assistantMessageId = trimOrUndefined(input.assistantMessageId) ?? entry.assistantMessageId;
-  const parentKey = portalRunParentKey(entry.threadId, entry.userMessageId);
-  if (parentKey) {
-    portalLatestRunIdsByParent.set(parentKey, { runId: entry.runId, createdAt: Date.now() });
-  }
 }
 
 function markPortalActiveChatRunAssistantWritten(input: {
@@ -4439,17 +4417,6 @@ function markPortalActiveChatRunAssistantWritten(input: {
   const entry = portalActiveChatRuns.get(sessionId);
   if (!entry || entry.userId !== input.userId) return;
   entry.assistantMessageWritten = true;
-}
-
-function portalRunMayPersist(input: {
-  sessionId: string;
-  runId: string;
-  threadId: string;
-  userMessageId: string;
-}): boolean {
-  if (portalLatestRunIds.get(input.sessionId)?.runId !== input.runId) return false;
-  const parentKey = portalRunParentKey(input.threadId, input.userMessageId);
-  return Boolean(parentKey && portalLatestRunIdsByParent.get(parentKey)?.runId === input.runId);
 }
 
 type PortalCancelActiveChatRunResult = {
@@ -4571,7 +4538,8 @@ async function cancelPortalActiveChatRun(input: {
       sessionId,
       runId: entry.runId,
       assistantMessageId: entry.assistantMessageId,
-      reason: "explicit_cancel"
+      reason: "explicit_cancel",
+      acceptedAt: entry.acceptedAt
     }).catch((error) => {
       console.warn("portal chat failed to append stopped assistant", {
         threadId,
@@ -5404,6 +5372,7 @@ function emitActionConnectorRuntimeEvent(
 async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
   const startedAt = Date.now();
+  const acceptedAt = new Date(startedAt).toISOString();
   const explicitCancel = new AbortController();
   const mergedAbort = mergeAbortSignals([...(input.signal ? [input.signal] : []), explicitCancel.signal]);
   const attachments = await materializeActionConnectorTurnAttachments({ request: input.request, prepared });
@@ -5452,6 +5421,16 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       runId: prepared.runId
     }
   });
+  const actionConnectorClaim = await conversationRecords.claimTurnDelivery({
+    threadId: prepared.thread.id,
+    userMessageId,
+    runId: prepared.runId,
+    channel: ACTION_CONNECTOR_CHANNEL,
+    acceptedAt
+  });
+  if (actionConnectorClaim.outcome === "superseded") {
+    throw new Error("Action connector run was superseded before runtime execution");
+  }
 
   await runCodexChannelTurn({
     channel: "openai_compatible_api",
@@ -5506,38 +5485,45 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       for (const event of actionConnectorCommentaryEntriesToEvents(finalizedProcess.liveCommentaryEntries)) {
         input.emit(event);
       }
-      await conversationRecords.appendMessage({
+      await conversationRecords.finalizeTurnDelivery({
         threadId: prepared.thread.id,
-        parentId: userMessageId,
-        message: actionConnectorStoredMessage(
-          "assistant",
-          `${ACTION_CONNECTOR_CHANNEL}-assistant-${prepared.runId}`,
-          answerText,
-          {
+        userMessageId,
+        runId: prepared.runId,
+        channel: ACTION_CONNECTOR_CHANNEL,
+        acceptedAt,
+        status: "completed",
+        assistant: {
+          parentId: userMessageId,
+          message: actionConnectorStoredMessage(
+            "assistant",
+            `${ACTION_CONNECTOR_CHANNEL}-assistant-${prepared.runId}`,
+            answerText,
+            {
+              integrationInstanceId: input.connector.id,
+              externalConversationKey: prepared.externalConversationKey,
+              conversationId: prepared.conversationId,
+              runId: prepared.runId,
+              sessionId: sessionForRun.sessionId,
+              runtimeOwnerId: prepared.runtimeOwner.id,
+              artifacts: generatedArtifacts.map((artifact) => ({
+                artifactId: artifact.id,
+                filename: artifact.displayName,
+                mimeType: artifact.mimeType ?? null,
+                sizeBytes: artifact.sizeBytes ?? null,
+                previewStatus: artifact.previewStatus,
+                downloadStatus: artifact.downloadStatus,
+                blockedReason: artifact.blockedReason ?? null
+              }))
+            },
+            artifactContentPart ? [...finalizedProcess.contentParts, artifactContentPart] : finalizedProcess.contentParts
+          ),
+          runConfig: {
+            channel: ACTION_CONNECTOR_CHANNEL,
             integrationInstanceId: input.connector.id,
             externalConversationKey: prepared.externalConversationKey,
-            conversationId: prepared.conversationId,
             runId: prepared.runId,
-            sessionId: sessionForRun.sessionId,
-            runtimeOwnerId: prepared.runtimeOwner.id,
-            artifacts: generatedArtifacts.map((artifact) => ({
-              artifactId: artifact.id,
-              filename: artifact.displayName,
-              mimeType: artifact.mimeType ?? null,
-              sizeBytes: artifact.sizeBytes ?? null,
-              previewStatus: artifact.previewStatus,
-              downloadStatus: artifact.downloadStatus,
-              blockedReason: artifact.blockedReason ?? null
-            }))
-          },
-          artifactContentPart ? [...finalizedProcess.contentParts, artifactContentPart] : finalizedProcess.contentParts
-        ),
-        runConfig: {
-          channel: ACTION_CONNECTOR_CHANNEL,
-          integrationInstanceId: input.connector.id,
-          externalConversationKey: prepared.externalConversationKey,
-          runId: prepared.runId,
-          sessionId: sessionForRun.sessionId
+            sessionId: sessionForRun.sessionId
+          }
         }
       });
       await conversationRecords.touchExternalConversation({
@@ -5584,9 +5570,14 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
   let crestAssistantMessageWritten = false;
   let crestRuntimeSession: SessionRecord | undefined;
   let crestRuntimeFailure: string | undefined;
+  let crestDeliveryRunId: string | undefined;
+  let crestDeliveryAcceptedAt: string | undefined;
   try {
     const input = crestChatStreamSchema.parse(req.body || {});
     crestInput = input;
+    const deliveryRunId = trimOrUndefined(input.clientRunId) ?? randomUUID();
+    crestDeliveryRunId = deliveryRunId;
+    crestDeliveryAcceptedAt = new Date().toISOString();
     const drainReason = await getDeploymentDrainReason();
     if (drainReason) {
       sendSSE(res, "error", { message: drainReason });
@@ -5670,6 +5661,16 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       ),
       runConfig: { channel: "crest", conversationId: input.conversationId }
     });
+    const crestClaim = await conversationRecords.claimTurnDelivery({
+      threadId: thread.id,
+      userMessageId,
+      runId: deliveryRunId,
+      channel: "crest",
+      acceptedAt: crestDeliveryAcceptedAt
+    });
+    if (crestClaim.outcome === "superseded") {
+      throw new Error("Crest chat run was superseded before runtime execution");
+    }
 
     const turnResult = await runCodexChannelTurn({
       channel: "crest",
@@ -5712,22 +5713,34 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         if (explicitCancel.signal.aborted) return;
         emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
         const processContentParts = finalizedProcess.contentParts;
-        await conversationRecords.appendMessage({
+        await conversationRecords.finalizeTurnDelivery({
           threadId: thread.id,
-          parentId: userMessageId,
-          message: crestStoredMessage(
-            "assistant",
-            `crest-assistant-${randomUUID().replace(/-/g, "")}`,
-            answerText,
-            {
+          userMessageId,
+          runId: deliveryRunId,
+          channel: "crest",
+          acceptedAt: crestDeliveryAcceptedAt,
+          status: "completed",
+          assistant: {
+            parentId: userMessageId,
+            message: crestStoredMessage(
+              "assistant",
+              `crest-assistant-${createHash("sha256").update(deliveryRunId).digest("hex").slice(0, 24)}`,
+              answerText,
+              {
+                conversationId: input.conversationId,
+                sessionId: sessionForRun.sessionId,
+                artifacts: generatedArtifacts.map(artifactOut)
+              },
+              [],
+              artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts
+            ),
+            runConfig: {
+              channel: "crest",
               conversationId: input.conversationId,
-              sessionId: sessionForRun.sessionId,
-              artifacts: generatedArtifacts.map(artifactOut)
-            },
-            [],
-            artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts
-          ),
-          runConfig: { channel: "crest", conversationId: input.conversationId }
+              runId: deliveryRunId,
+              sessionId: sessionForRun.sessionId
+            }
+          }
         });
         crestAssistantMessageWritten = true;
         streamAbort.markSettled();
@@ -5790,13 +5803,22 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       });
     }
   } finally {
-    if (explicitCancel.signal.aborted && crestThreadId && crestUserMessageId && !crestAssistantMessageWritten && crestInput) {
+    if (
+      explicitCancel.signal.aborted &&
+      crestThreadId &&
+      crestUserMessageId &&
+      !crestAssistantMessageWritten &&
+      crestInput &&
+      crestDeliveryRunId
+    ) {
       await appendCrestStoppedAssistant({
         threadId: crestThreadId,
         parentId: crestUserMessageId,
         conversationId: crestInput.conversationId,
         context: crestInput.context ?? {},
-        reason: "explicit_cancel"
+        reason: "explicit_cancel",
+        runId: crestDeliveryRunId,
+        acceptedAt: crestDeliveryAcceptedAt
       }).catch((error) => {
         console.warn("crest chat failed to append stopped assistant", {
           threadId: crestThreadId,
@@ -5886,7 +5908,8 @@ async function closeDanglingCrestUserHead(input: {
       parentId: headId,
       conversationId: input.conversationId,
       context: input.context,
-      reason: "dangling_user_head"
+      reason: "dangling_user_head",
+      runId: storedPortalRunId(headMessage.message, headMessage.runConfig)
     });
     return stoppedId;
   } catch (error) {
@@ -5905,18 +5928,28 @@ async function appendCrestStoppedAssistant(input: {
   conversationId: string;
   context: Record<string, unknown>;
   reason: "explicit_cancel" | "dangling_user_head";
+  runId?: string;
+  acceptedAt?: string;
 }): Promise<string> {
-  const assistantId = `crest-assistant-stopped-${randomUUID().replace(/-/g, "")}`;
-  await conversationRecords.appendMessage({
+  const runId = trimOrUndefined(input.runId) ?? `crest-stopped-${randomUUID()}`;
+  const assistantId = `crest-assistant-stopped-${createHash("sha256").update(runId).digest("hex").slice(0, 24)}`;
+  await conversationRecords.finalizeTurnDelivery({
     threadId: input.threadId,
-    parentId: input.parentId,
-    message: crestStoredMessage("assistant", assistantId, "已停止回答。", {
-      conversationId: input.conversationId,
-      context: input.context,
-      stopped: true,
-      stopReason: input.reason
-    }),
-    runConfig: { channel: "crest", conversationId: input.conversationId }
+    userMessageId: input.parentId,
+    runId,
+    channel: "crest",
+    acceptedAt: input.acceptedAt,
+    status: "stopped",
+    assistant: {
+      parentId: input.parentId,
+      message: crestStoredMessage("assistant", assistantId, "已停止回答。", {
+        conversationId: input.conversationId,
+        context: input.context,
+        stopped: true,
+        stopReason: input.reason
+      }),
+      runConfig: { channel: "crest", conversationId: input.conversationId, runId }
+    }
   });
   return assistantId;
 }
@@ -7501,6 +7534,7 @@ type ZendeskAuditState = {
   threadId: string;
   userMessageId?: string;
   externalConversationKey?: string;
+  acceptedAt?: string;
 };
 
 function zendeskConversationKey(input: {
@@ -7952,6 +7986,7 @@ async function syncZendeskConversationBeforeAgentRun(input: {
   const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
   const userMessageId = `zendesk-requester-${preparedComment.id}`;
   const userText = zendeskRequesterMessageText(input);
+  const acceptedAt = new Date().toISOString();
 
   const updated = await conversationRecords.appendMessage({
     threadId: ensured.thread.id,
@@ -7985,11 +8020,22 @@ async function syncZendeskConversationBeforeAgentRun(input: {
       runId: input.runId
     }
   });
+  const zendeskClaim = await conversationRecords.claimTurnDelivery({
+    threadId: updated.id,
+    userMessageId,
+    runId: input.runId,
+    channel: ZENDESK_CHANNEL,
+    acceptedAt
+  });
+  if (zendeskClaim.outcome === "superseded") {
+    throw new Error("Zendesk run was superseded before agent execution");
+  }
 
   return {
     threadId: updated.id,
     userMessageId,
-    externalConversationKey: ensured.externalConversationKey
+    externalConversationKey: ensured.externalConversationKey,
+    acceptedAt
   };
 }
 
@@ -8095,35 +8141,43 @@ async function syncZendeskConversationAfterAgentRun(input: {
     ...(input.processContentParts ?? []),
     ...(tracePart ? [tracePart] : [])
   ];
-  await conversationRecords.appendMessage({
+  if (!audit.userMessageId) return;
+  await conversationRecords.finalizeTurnDelivery({
     threadId: audit.threadId,
-    parentId: audit.userMessageId ?? null,
-    message: zendeskMessage({
-      id: `zendesk-agent-${input.runId}`,
-      role: "assistant",
-      text: zendeskAssistantAuditText(input),
-      contentParts: contentParts.length > 0 ? contentParts : undefined,
-      metadata: {
+    userMessageId: audit.userMessageId,
+    runId: input.runId,
+    channel: ZENDESK_CHANNEL,
+    acceptedAt: audit.acceptedAt,
+    status: "completed",
+    assistant: {
+      parentId: audit.userMessageId,
+      message: zendeskMessage({
+        id: `zendesk-agent-${input.runId}`,
+        role: "assistant",
+        text: zendeskAssistantAuditText(input),
+        contentParts: contentParts.length > 0 ? contentParts : undefined,
+        metadata: {
+          channel: ZENDESK_CHANNEL,
+          integrationInstanceId: input.instanceId,
+          externalConversationKey: audit.externalConversationKey,
+          ticketId: input.ticketId,
+          runId: input.runId,
+          decision: input.decision.decision,
+          publicReplyPreview: input.decision.publicReplyPreview,
+          actionStatus: input.action.status,
+          zendeskCommentId: input.commentId,
+          codexThreadId: input.codexThreadId
+        }
+      }),
+      runConfig: {
         channel: ZENDESK_CHANNEL,
         integrationInstanceId: input.instanceId,
         externalConversationKey: audit.externalConversationKey,
-        ticketId: input.ticketId,
+        conversationType: "ticket",
+        zendeskTicketId: input.ticketId,
         runId: input.runId,
-        decision: input.decision.decision,
-        publicReplyPreview: input.decision.publicReplyPreview,
-        actionStatus: input.action.status,
-        zendeskCommentId: input.commentId,
         codexThreadId: input.codexThreadId
       }
-    }),
-    runConfig: {
-      channel: ZENDESK_CHANNEL,
-      integrationInstanceId: input.instanceId,
-      externalConversationKey: audit.externalConversationKey,
-      conversationType: "ticket",
-      zendeskTicketId: input.ticketId,
-      runId: input.runId,
-      codexThreadId: input.codexThreadId
     }
   });
 
@@ -9081,6 +9135,18 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
       }
     });
   }
+  const dingtalkRunId = `dingtalk:${input.instance.id}:${input.robotMessage.msgId}`;
+  const dingtalkAcceptedAt = new Date().toISOString();
+  const dingtalkClaim = await conversationRecords.claimTurnDelivery({
+    threadId: thread.id,
+    userMessageId: input.robotMessage.msgId,
+    runId: dingtalkRunId,
+    channel: DINGTALK_BOT_CHANNEL,
+    acceptedAt: dingtalkAcceptedAt
+  });
+  if (dingtalkClaim.outcome === "superseded") {
+    throw new Error("DingTalk run was superseded before runtime execution");
+  }
 
   let currentSession = session;
   let streamedAnswerPreview = "";
@@ -9144,26 +9210,35 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           streamingCardFinalized = true;
         }
         const processContentParts = finalizedProcess.contentParts;
-        await conversationRecords.appendMessage({
+        await conversationRecords.finalizeTurnDelivery({
           threadId: thread.id,
-          parentId: input.robotMessage.msgId,
-          message: dingtalkMessage({
-            id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
-            role: "assistant",
-            text: answerText,
-            contentParts: artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts,
-            metadata: {
+          userMessageId: input.robotMessage.msgId,
+          runId: dingtalkRunId,
+          channel: DINGTALK_BOT_CHANNEL,
+          acceptedAt: dingtalkAcceptedAt,
+          status: "completed",
+          assistant: {
+            parentId: input.robotMessage.msgId,
+            message: dingtalkMessage({
+              id: `dingtalk-assistant-${createHash("sha256").update(dingtalkRunId).digest("hex").slice(0, 24)}`,
+              role: "assistant",
+              text: answerText,
+              contentParts: artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts,
+              metadata: {
+                channel: DINGTALK_BOT_CHANNEL,
+                integrationInstanceId: input.instance.id,
+                externalConversationKey,
+                conversationType: scope,
+                runId: dingtalkRunId
+              }
+            }),
+            runConfig: {
               channel: DINGTALK_BOT_CHANNEL,
               integrationInstanceId: input.instance.id,
               externalConversationKey,
-              conversationType: scope
+              conversationType: scope,
+              runId: dingtalkRunId
             }
-          }),
-          runConfig: {
-            channel: DINGTALK_BOT_CHANNEL,
-            integrationInstanceId: input.instance.id,
-            externalConversationKey,
-            conversationType: scope
           }
         });
       },
@@ -9529,42 +9604,38 @@ async function appendPortalStoppedAssistant(input: {
   runId: string;
   assistantMessageId?: string;
   reason: string;
+  acceptedAt?: string;
 }): Promise<boolean> {
-  if (!portalRunMayPersist(input)) return false;
-  const parentId = await requirePortalUserMessageParent({
-    threadId: input.threadId,
-    userMessageId: input.userMessageId
-  });
-  const repository = await conversationRecords.getMessageRepository(input.threadId);
-  const existingAssistant = repository.messages.find((item) => {
-    return item.parentId === parentId &&
-      storedMessageRole(item.message) === "assistant" &&
-      storedPortalRunId(item.message, item.runConfig) === input.runId;
-  });
-  if (existingAssistant) return false;
   const assistantId = trimOrUndefined(input.assistantMessageId) ??
     `portal-assistant-cancelled-${createHash("sha256")
-      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .update(`${input.threadId}:${input.userMessageId}:${input.runId}`)
       .digest("hex")
       .slice(0, 24)}`;
-  await conversationRecords.appendMessage({
+  const result = await conversationRecords.finalizeTurnDelivery({
     threadId: input.threadId,
-    parentId,
-    message: portalStoppedAssistantMessage({
-      id: assistantId,
-      sessionId: input.sessionId,
-      runId: input.runId,
-      reason: input.reason
-    }),
-    runConfig: {
-      channel: "portal",
-      sessionId: input.sessionId,
-      runId: input.runId,
-      serverPersisted: true,
-      stopped: true
+    userMessageId: input.userMessageId,
+    runId: input.runId,
+    channel: "portal",
+    acceptedAt: input.acceptedAt,
+    status: "stopped",
+    assistant: {
+      parentId: input.userMessageId,
+      message: portalStoppedAssistantMessage({
+        id: assistantId,
+        sessionId: input.sessionId,
+        runId: input.runId,
+        reason: input.reason
+      }),
+      runConfig: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        runId: input.runId,
+        serverPersisted: true,
+        stopped: true
+      }
     }
   });
-  return true;
+  return result.outcome !== "superseded";
 }
 
 async function appendPortalFailedAssistant(input: {
@@ -9575,44 +9646,40 @@ async function appendPortalFailedAssistant(input: {
   assistantMessageId?: string;
   presentation: PortalFailurePresentation;
   autoRecoveryAttempted?: boolean;
+  acceptedAt?: string;
 }): Promise<boolean> {
-  if (!portalRunMayPersist(input)) return false;
-  const parentId = await requirePortalUserMessageParent({
-    threadId: input.threadId,
-    userMessageId: input.userMessageId
-  });
-  const repository = await conversationRecords.getMessageRepository(input.threadId);
-  const existingAssistant = repository.messages.find((item) => {
-    return item.parentId === parentId &&
-      storedMessageRole(item.message) === "assistant" &&
-      storedPortalRunId(item.message, item.runConfig) === input.runId;
-  });
-  if (existingAssistant) return false;
   const assistantId = trimOrUndefined(input.assistantMessageId) ??
     `portal-assistant-failed-${createHash("sha256")
-      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .update(`${input.threadId}:${input.userMessageId}:${input.runId}`)
       .digest("hex")
       .slice(0, 24)}`;
-  await conversationRecords.appendMessage({
+  const result = await conversationRecords.finalizeTurnDelivery({
     threadId: input.threadId,
-    parentId,
-    message: portalFailedAssistantMessage({
-      id: assistantId,
-      sessionId: input.sessionId,
-      runId: input.runId,
-      presentation: input.presentation,
-      autoRecoveryAttempted: input.autoRecoveryAttempted
-    }),
-    runConfig: {
-      channel: "portal",
-      sessionId: input.sessionId,
-      runId: input.runId,
-      serverPersisted: true,
-      failed: true,
-      autoRecoveryAttempted: input.autoRecoveryAttempted === true
+    userMessageId: input.userMessageId,
+    runId: input.runId,
+    channel: "portal",
+    acceptedAt: input.acceptedAt,
+    status: "failed",
+    assistant: {
+      parentId: input.userMessageId,
+      message: portalFailedAssistantMessage({
+        id: assistantId,
+        sessionId: input.sessionId,
+        runId: input.runId,
+        presentation: input.presentation,
+        autoRecoveryAttempted: input.autoRecoveryAttempted
+      }),
+      runConfig: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        runId: input.runId,
+        serverPersisted: true,
+        failed: true,
+        autoRecoveryAttempted: input.autoRecoveryAttempted === true
+      }
     }
   });
-  return true;
+  return result.outcome !== "superseded";
 }
 
 async function appendPortalPreflightFailedAssistant(input: {
@@ -9621,56 +9688,39 @@ async function appendPortalPreflightFailedAssistant(input: {
   runId: string;
   assistantMessageId?: string;
   presentation: PortalFailurePresentation;
+  acceptedAt?: string;
 }): Promise<boolean> {
-  const parentId = await requirePortalUserMessageParent({
-    threadId: input.threadId,
-    userMessageId: input.userMessageId
-  });
-  const repository = await conversationRecords.getMessageRepository(input.threadId);
-  const existingAssistant = repository.messages.find((item) =>
-    item.parentId === parentId &&
-    storedMessageRole(item.message) === "assistant" &&
-    storedPortalRunId(item.message, item.runConfig) === input.runId
-  );
-  if (existingAssistant) return false;
   const assistantId = trimOrUndefined(input.assistantMessageId) ??
     `portal-assistant-preflight-failed-${createHash("sha256")
-      .update(`${input.threadId}:${parentId}:${input.runId}`)
+      .update(`${input.threadId}:${input.userMessageId}:${input.runId}`)
       .digest("hex")
       .slice(0, 24)}`;
-  await conversationRecords.appendMessage({
+  const result = await conversationRecords.finalizeTurnDelivery({
     threadId: input.threadId,
-    parentId,
-    message: portalFailedAssistantMessage({
-      id: assistantId,
-      runId: input.runId,
-      presentation: input.presentation
-    }),
-    runConfig: {
-      channel: "portal",
-      runId: input.runId,
-      serverPersisted: true,
-      failed: true,
-      preflightFailed: true,
-      errorCode: input.presentation.code,
-      reasonCode: input.presentation.reasonCode
+    userMessageId: input.userMessageId,
+    runId: input.runId,
+    channel: "portal",
+    acceptedAt: input.acceptedAt,
+    status: "failed",
+    assistant: {
+      parentId: input.userMessageId,
+      message: portalFailedAssistantMessage({
+        id: assistantId,
+        runId: input.runId,
+        presentation: input.presentation
+      }),
+      runConfig: {
+        channel: "portal",
+        runId: input.runId,
+        serverPersisted: true,
+        failed: true,
+        preflightFailed: true,
+        errorCode: input.presentation.code,
+        reasonCode: input.presentation.reasonCode
+      }
     }
   });
-  return true;
-}
-
-async function requirePortalUserMessageParent(input: {
-  threadId: string;
-  userMessageId: string;
-}): Promise<string> {
-  const userMessageId = trimOrUndefined(input.userMessageId);
-  if (!userMessageId) throw new Error("Portal assistant persistence requires a user message id");
-  const repository = await conversationRecords.getMessageRepository(input.threadId);
-  const userMessage = findStoredMessageById(repository, userMessageId);
-  if (!userMessage || storedMessageRole(userMessage.message) !== "user") {
-    throw new Error("Portal assistant persistence requires an existing user message parent");
-  }
-  return userMessageId;
+  return result.outcome !== "superseded";
 }
 
 async function persistPortalAssistantMessageWithRetry(input: {
@@ -9681,20 +9731,15 @@ async function persistPortalAssistantMessageWithRetry(input: {
   assistantMessageId?: string;
   answerText: string;
   contentParts?: Record<string, unknown>[];
+  acceptedAt?: string;
 }): Promise<boolean> {
   const answerText = trimOrUndefined(input.answerText);
   if (!answerText) return false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      if (!portalRunMayPersist(input)) return false;
-      const parentId = await requirePortalUserMessageParent({
-        threadId: input.threadId,
-        userMessageId: input.userMessageId
-      });
-      if (!portalRunMayPersist(input)) return false;
       const assistantId = trimOrUndefined(input.assistantMessageId) ??
         `portal-assistant-${createHash("sha256")
-          .update(`${input.threadId}:${parentId}:${input.runId}`)
+          .update(`${input.threadId}:${input.userMessageId}:${input.runId}`)
           .digest("hex")
           .slice(0, 24)}`;
       const message = portalAssistantMessage({
@@ -9706,31 +9751,41 @@ async function persistPortalAssistantMessageWithRetry(input: {
       });
       const normalizedMessage = await normalizePortalAssistantMessageAppend({
         threadId: input.threadId,
-        parentId,
+        parentId: input.userMessageId,
         message,
         runConfig: { channel: "portal", sessionId: input.sessionId, runId: input.runId, serverPersisted: true }
       });
-      if (!portalRunMayPersist(input)) return false;
-      await conversationRecords.appendMessage({
+      const result = await conversationRecords.finalizeTurnDelivery({
         threadId: input.threadId,
-        parentId,
-        message: normalizedMessage,
-        runConfig: {
-          channel: "portal",
-          sessionId: input.sessionId,
-          runId: input.runId,
-          serverPersisted: true
+        userMessageId: input.userMessageId,
+        runId: input.runId,
+        channel: "portal",
+        acceptedAt: input.acceptedAt,
+        status: "completed",
+        assistant: {
+          parentId: input.userMessageId,
+          message: normalizedMessage,
+          runConfig: {
+            channel: "portal",
+            sessionId: input.sessionId,
+            runId: input.runId,
+            serverPersisted: true
+          }
         }
       });
+      if (result.outcome === "superseded") {
+        console.info("portal assistant persistence skipped for superseded run", {
+          threadId: input.threadId,
+          userMessageId: input.userMessageId,
+          runId: input.runId,
+          latestRunId: result.latestRunId
+        });
+        return false;
+      }
       return true;
     } catch (error) {
       if (attempt >= 3) {
-        console.warn("portal assistant persistence failed", {
-          threadId: input.threadId,
-          sessionId: input.sessionId,
-          detail: error instanceof Error ? error.message : String(error)
-        });
-        return false;
+        throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, attempt * 250));
     }
@@ -13084,6 +13139,7 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
 
 app.post("/api/chat/stream", async (req: Request, res: Response) => {
   const portalStreamTraceId = randomUUID();
+  const portalRunAcceptedAt = new Date().toISOString();
   const timing = createRuntimeStartupTimer({
     traceId: portalStreamTraceId,
     source: "portal",
@@ -13169,6 +13225,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         userMessageId: portalUserMessageId,
         runId: portalRunId,
         assistantMessageId: portalAssistantMessageId,
+        acceptedAt: portalRunAcceptedAt,
         presentation: presentPortalFailure({
           payload: failurePayload,
           rawDetail: failurePayload.detail,
@@ -13272,7 +13329,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       controller: explicitCancel,
       threadId: portalThreadId,
       traceId: portalStreamTraceId,
-      assistantMessageId: portalAssistantMessageId
+      assistantMessageId: portalAssistantMessageId,
+      acceptedAt: portalRunAcceptedAt
     });
     attachPortalActiveChatRun({
       sessionId: currentSession.sessionId,
@@ -13316,6 +13374,18 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       })
     );
     portalUserMessageId = persistedPortalUserMessageId;
+    const deliveryClaim = await timing.time("chat_stream.claim_turn_delivery", () =>
+      conversationRecords.claimTurnDelivery({
+        threadId: currentSession.threadId!,
+        userMessageId: persistedPortalUserMessageId,
+        runId: portalRunId,
+        channel: "portal",
+        acceptedAt: portalRunAcceptedAt
+      })
+    );
+    if (deliveryClaim.outcome === "superseded") {
+      throw new Error("Portal turn was superseded before runtime start");
+    }
     await timing.time("chat_stream.enqueue_security_review", async () => {
       try {
         await conversationSecurityReview.enqueuePortalTurn({
@@ -13570,7 +13640,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
                 runId: portalRunId,
                 assistantMessageId: portalAssistantMessageId,
                 answerText: completedAnswerText,
-                contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined
+                contentParts: persistedContentParts.length > 0 ? persistedContentParts : undefined,
+                acceptedAt: portalRunAcceptedAt
               })
             );
             if (serverPersistedAssistant) {
@@ -13743,7 +13814,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sessionId: portalRuntimeSessionId,
         runId: portalRunId,
         assistantMessageId: portalAssistantMessageId,
-        reason: "explicit_cancel"
+        reason: "explicit_cancel",
+        acceptedAt: portalRunAcceptedAt
       }).catch((error) => {
         console.warn("portal chat failed to append stopped assistant", {
           threadId: portalThreadId,
@@ -13765,7 +13837,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           rawDetail: portalTurnFailure,
           locale: portalLocale
         }),
-        autoRecoveryAttempted: portalAutoRecoveryAttempted
+        autoRecoveryAttempted: portalAutoRecoveryAttempted,
+        acceptedAt: portalRunAcceptedAt
       }).catch((error) => {
         console.warn("portal chat failed to append failed assistant", {
           threadId: portalThreadId,

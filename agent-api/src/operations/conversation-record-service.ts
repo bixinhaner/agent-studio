@@ -4,6 +4,9 @@ import type {
   UpsertExternalConversationBindingInput
 } from "../persistence/external-conversation-binding-repository.js";
 import type {
+  ConversationTurnDeliveryClaim,
+  ConversationTurnDeliveryFinalize,
+  ConversationTurnDeliveryResult,
   StoredMessageItem,
   ThreadRecord,
   ThreadRepository
@@ -12,6 +15,7 @@ import type {
 type ThreadStore = Pick<
   ThreadRepository,
   | "appendMessage"
+  | "claimTurnDelivery"
   | "create"
   | "get"
   | "getByExternalId"
@@ -19,6 +23,7 @@ type ThreadStore = Pick<
   | "list"
   | "listForUser"
   | "replaceMessages"
+  | "finalizeTurnDelivery"
   | "update"
 >;
 
@@ -86,6 +91,14 @@ export class ConversationRecordService {
       createdAt: input.createdAt,
       updatedAt: input.updatedAt
     });
+  }
+
+  async claimTurnDelivery(input: ConversationTurnDeliveryClaim): Promise<ConversationTurnDeliveryResult> {
+    return this.deps.threads.claimTurnDelivery(input);
+  }
+
+  async finalizeTurnDelivery(input: ConversationTurnDeliveryFinalize): Promise<ConversationTurnDeliveryResult> {
+    return this.deps.threads.finalizeTurnDelivery(input);
   }
 
   async replaceMessages(input: ReplaceConversationMessagesInput): Promise<ThreadRecord> {

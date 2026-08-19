@@ -76,6 +76,22 @@ function createConversationStore() {
         thread.headId = input.message.id;
         thread.updatedAt = new Date().toISOString();
         return thread;
+      },
+      async claimTurnDelivery(input: any) {
+        return { outcome: "claimed", runId: input.runId, latestRunId: input.runId };
+      },
+      async finalizeTurnDelivery(input: any) {
+        return this.appendMessage({
+          threadId: input.threadId,
+          parentId: input.userMessageId,
+          message: input.assistant.message,
+          runConfig: input.assistant.runConfig
+        }).then(() => ({
+          outcome: "persisted",
+          runId: input.runId,
+          latestRunId: input.runId,
+          assistantMessageId: input.assistant.message.id
+        }));
       }
     }
   };

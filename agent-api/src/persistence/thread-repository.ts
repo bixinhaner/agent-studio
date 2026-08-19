@@ -14,6 +14,28 @@ export type StoredMessageItem = {
   updatedAt?: string;
 };
 
+export type ConversationTurnDeliveryStatus = "running" | "completed" | "failed" | "stopped";
+
+export type ConversationTurnDeliveryClaim = {
+  threadId: string;
+  userMessageId: string;
+  runId: string;
+  channel: string;
+  acceptedAt?: string;
+};
+
+export type ConversationTurnDeliveryFinalize = ConversationTurnDeliveryClaim & {
+  status: Exclude<ConversationTurnDeliveryStatus, "running">;
+  assistant: StoredMessageItem;
+};
+
+export type ConversationTurnDeliveryResult = {
+  outcome: "claimed" | "already_claimed" | "persisted" | "already_persisted" | "superseded";
+  runId: string;
+  latestRunId: string;
+  assistantMessageId?: string;
+};
+
 export type ThreadFeedback = {
   id: string;
   type: "positive" | "negative";
@@ -175,6 +197,52 @@ async function lockThreadMessages(db: ThreadRepositoryDb, threadId: string): Pro
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+const TURN_DELIVERY_RUN_CONFIG_KEY = "_agentStudioTurnDelivery";
+
+type StoredTurnDelivery = {
+  runId: string;
+  channel: string;
+  acceptedAt: string;
+  status: ConversationTurnDeliveryStatus;
+  assistantMessageId?: string;
+  completedAt?: string;
+};
+
+function storedTurnDelivery(value: unknown): StoredTurnDelivery | undefined {
+  const runConfig = asRecord(value);
+  const delivery = asRecord(runConfig?.[TURN_DELIVERY_RUN_CONFIG_KEY]);
+  const runId = trimOrUndefined(typeof delivery?.runId === "string" ? delivery.runId : undefined);
+  const channel = trimOrUndefined(typeof delivery?.channel === "string" ? delivery.channel : undefined);
+  const acceptedAt = trimOrUndefined(typeof delivery?.acceptedAt === "string" ? delivery.acceptedAt : undefined);
+  const status = trimOrUndefined(
+    typeof delivery?.status === "string" ? delivery.status : undefined
+  ) as ConversationTurnDeliveryStatus | undefined;
+  if (!runId || !channel || !acceptedAt || !status) return undefined;
+  if (!["running", "completed", "failed", "stopped"].includes(status)) return undefined;
+  return {
+    runId,
+    channel,
+    acceptedAt,
+    status,
+    assistantMessageId: trimOrUndefined(
+      typeof delivery?.assistantMessageId === "string" ? delivery.assistantMessageId : undefined
+    ),
+    completedAt: trimOrUndefined(typeof delivery?.completedAt === "string" ? delivery.completedAt : undefined)
+  };
+}
+
+function withStoredTurnDelivery(runConfig: unknown, delivery: StoredTurnDelivery): Record<string, unknown> {
+  return {
+    ...(asRecord(runConfig) ?? {}),
+    [TURN_DELIVERY_RUN_CONFIG_KEY]: delivery
+  };
+}
+
+function acceptedAtMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function messageIdOf(message: unknown): string | null {
@@ -555,6 +623,176 @@ export class ThreadRepository {
       await tx.runtimeSession.deleteMany({ where: { threadId } });
       await tx.message.deleteMany({ where: { threadId } });
       await tx.thread.delete({ where: { id: threadId } });
+    });
+  }
+
+  async claimTurnDelivery(input: ConversationTurnDeliveryClaim): Promise<ConversationTurnDeliveryResult> {
+    return this.db.$transaction(async (tx) => {
+      await lockThreadMessages(tx, input.threadId);
+      const thread = await tx.thread.findUnique({ where: { id: input.threadId } });
+      if (!thread) throw new Error("Thread does not exist");
+      const messages = await tx.message.findMany({
+        where: { threadId: input.threadId },
+        orderBy: { position: "asc" }
+      });
+      const userMessage = messages.find((message) => message.externalId === input.userMessageId);
+      if (!userMessage || normalizeMessageRole(userMessage.content) !== "user") {
+        throw new Error("Turn delivery requires an existing user message");
+      }
+
+      const acceptedAt = trimOrUndefined(input.acceptedAt) ?? new Date().toISOString();
+      const current = storedTurnDelivery(userMessage.runConfig);
+      if (current?.runId === input.runId) {
+        return {
+          outcome: "already_claimed",
+          runId: input.runId,
+          latestRunId: current.runId,
+          assistantMessageId: current.assistantMessageId
+        };
+      }
+      if (current && acceptedAtMs(current.acceptedAt) >= acceptedAtMs(acceptedAt)) {
+        return {
+          outcome: "superseded",
+          runId: input.runId,
+          latestRunId: current.runId,
+          assistantMessageId: current.assistantMessageId
+        };
+      }
+
+      await tx.message.update({
+        where: { id: userMessage.id },
+        data: {
+          runConfig: withStoredTurnDelivery(userMessage.runConfig, {
+            runId: input.runId,
+            channel: input.channel,
+            acceptedAt,
+            status: "running"
+          }),
+          updatedAt: new Date()
+        }
+      });
+      return {
+        outcome: "claimed",
+        runId: input.runId,
+        latestRunId: input.runId
+      };
+    });
+  }
+
+  async finalizeTurnDelivery(input: ConversationTurnDeliveryFinalize): Promise<ConversationTurnDeliveryResult> {
+    return this.db.$transaction(async (tx) => {
+      const normalizedAssistant = {
+        ...input.assistant,
+        parentId: input.userMessageId,
+        message: normalizeAssistantMessageContentOrder(input.assistant.message)
+      };
+      const assistantMessageId = messageIdOf(normalizedAssistant.message);
+      if (!assistantMessageId) throw new Error("Turn delivery assistant requires a message id");
+
+      await lockThreadMessages(tx, input.threadId);
+      const thread = await tx.thread.findUnique({ where: { id: input.threadId } });
+      if (!thread) throw new Error("Thread does not exist");
+      const messages = await tx.message.findMany({
+        where: { threadId: input.threadId },
+        orderBy: { position: "asc" }
+      });
+      const userMessage = messages.find((message) => message.externalId === input.userMessageId);
+      if (!userMessage || normalizeMessageRole(userMessage.content) !== "user") {
+        throw new Error("Turn delivery requires an existing user message");
+      }
+
+      const current = storedTurnDelivery(userMessage.runConfig);
+      const requestedAcceptedAt = trimOrUndefined(input.acceptedAt);
+      if (current && current.runId !== input.runId && !requestedAcceptedAt) {
+        return {
+          outcome: "superseded",
+          runId: input.runId,
+          latestRunId: current.runId,
+          assistantMessageId: current.assistantMessageId
+        };
+      }
+      const acceptedAt = requestedAcceptedAt ?? current?.acceptedAt ?? new Date().toISOString();
+      if (current && current.runId !== input.runId && acceptedAtMs(current.acceptedAt) >= acceptedAtMs(acceptedAt)) {
+        return {
+          outcome: "superseded",
+          runId: input.runId,
+          latestRunId: current.runId,
+          assistantMessageId: current.assistantMessageId
+        };
+      }
+
+      const delivery: StoredTurnDelivery = {
+        runId: input.runId,
+        channel: input.channel,
+        acceptedAt,
+        status: input.status,
+        assistantMessageId,
+        completedAt: new Date().toISOString()
+      };
+      const assistantRunConfig = withStoredTurnDelivery(normalizedAssistant.runConfig, delivery);
+      const existingAssistant = messages.find((message) => {
+        if (message.parentId !== input.userMessageId || normalizeMessageRole(message.content) !== "assistant") return false;
+        const existingDelivery = storedTurnDelivery(message.runConfig);
+        return existingDelivery?.runId === input.runId || message.externalId === assistantMessageId;
+      });
+
+      if (existingAssistant) {
+        await tx.message.update({
+          where: { id: existingAssistant.id },
+          data: {
+            role: normalizeMessageRole(normalizedAssistant.message),
+            content: normalizedAssistant.message,
+            parentId: input.userMessageId,
+            runConfig: assistantRunConfig,
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        const position = messages.reduce((maximum, message) => Math.max(maximum, message.position), -1) + 1;
+        const createdAt = resolvedMessageCreatedAt(normalizedAssistant);
+        await tx.message.create({
+          data: {
+            id: randomUUID(),
+            threadId: input.threadId,
+            externalId: assistantMessageId,
+            role: normalizeMessageRole(normalizedAssistant.message),
+            content: normalizedAssistant.message,
+            parentId: input.userMessageId,
+            runConfig: assistantRunConfig,
+            position,
+            createdAt,
+            updatedAt: resolvedMessageUpdatedAt(normalizedAssistant, createdAt)
+          }
+        });
+      }
+
+      await tx.message.update({
+        where: { id: userMessage.id },
+        data: {
+          runConfig: withStoredTurnDelivery(userMessage.runConfig, delivery),
+          updatedAt: new Date()
+        }
+      });
+      const existingAssistantId = existingAssistant?.externalId ?? assistantMessageId;
+      const currentHead = messages.find((message) => message.externalId === thread.headId);
+      const headIsAssistantForSameTurn =
+        currentHead?.parentId === input.userMessageId && normalizeMessageRole(currentHead.content) === "assistant";
+      const shouldAdvanceHead =
+        thread.headId === input.userMessageId || thread.headId === existingAssistantId || headIsAssistantForSameTurn;
+      await tx.thread.update({
+        where: { id: input.threadId },
+        data: {
+          ...(shouldAdvanceHead ? { headId: existingAssistantId } : {}),
+          updatedAt: new Date()
+        }
+      });
+
+      return {
+        outcome: existingAssistant ? "already_persisted" : "persisted",
+        runId: input.runId,
+        latestRunId: input.runId,
+        assistantMessageId: existingAssistantId
+      };
     });
   }
 
