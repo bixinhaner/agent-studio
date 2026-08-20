@@ -3025,6 +3025,22 @@ button.session-rail-new-btn:active,
   gap: 6px;
 }
 
+.portal-idle-composer-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.portal-composer-keyboard-hint {
+  color: var(--workbench-muted-text);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .portal-running-action,
 .portal-queue-action,
 .portal-steer-event-action {
@@ -4605,6 +4621,10 @@ button.session-rail-new-btn:active,
 }
 
 @media (max-width: 640px) {
+  .portal-composer-keyboard-hint {
+    display: none;
+  }
+
   .portal-steer-event-list {
     padding: 4px 0 8px;
   }

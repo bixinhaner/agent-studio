@@ -204,6 +204,7 @@ import { createPortalAntdTheme } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
+import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
   selectVisibleWorkspaceThreads,
@@ -2450,6 +2451,21 @@ const SelectedSkillContextBar: FC = () => {
   );
 };
 
+function usePortalComposerKeyDown(threadRunning: boolean) {
+  return useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    const action = resolvePortalComposerKeyDownAction({
+      key: event.key,
+      keyCode: event.nativeEvent.keyCode,
+      shiftKey: event.shiftKey,
+      isComposing: event.nativeEvent.isComposing,
+      threadRunning
+    });
+    if (action !== "submit") return;
+    event.preventDefault();
+    event.currentTarget.closest("form")?.requestSubmit();
+  }, [threadRunning]);
+}
+
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const notifyUserSendIntent = usePortalThreadUserSendIntent();
@@ -2460,6 +2476,7 @@ const UploadAwareComposer: FC = () => {
   const accessBlock = useSubscriptionAccessBlock();
   const runtimeReadiness = useContext(RuntimeReadinessContext);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
@@ -2694,6 +2711,8 @@ const UploadAwareComposer: FC = () => {
           <Composer.Input
             autoFocus={!isMobileWorkbench}
             cancelOnEscape={false}
+            submitMode="none"
+            onKeyDown={handleComposerKeyDown}
             unstable_focusOnRunStart={!isMobileWorkbench}
             unstable_focusOnScrollToBottom={!isMobileWorkbench}
             unstable_focusOnThreadSwitched={!isMobileWorkbench}
@@ -2733,16 +2752,21 @@ const UploadAwareComposer: FC = () => {
               </Composer.Cancel>
             </div>
           ) : (
-            <button
-              type="submit"
-              className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
-              disabled={sendDisabled}
-              title={sendTitle}
-              aria-label={sendTitle}
-              onClick={sendCurrentMessage}
-            >
-              <SendHorizontalIcon size={17} />
-            </button>
+            <div className="portal-idle-composer-actions">
+              {!isMobileWorkbench ? (
+                <span className="portal-composer-keyboard-hint">{t("thread.keyboardHint")}</span>
+              ) : null}
+              <button
+                type="submit"
+                className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+                disabled={sendDisabled}
+                title={sendTitle}
+                aria-label={sendTitle}
+                onClick={sendCurrentMessage}
+              >
+                <SendHorizontalIcon size={17} />
+              </button>
+            </div>
           )}
         </div>
       </Composer.Root>
@@ -2760,6 +2784,7 @@ const MobileAwareComposer: FC = () => {
   const accessBlock = useSubscriptionAccessBlock();
   const runtimeReadiness = useContext(RuntimeReadinessContext);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
@@ -2891,6 +2916,8 @@ const MobileAwareComposer: FC = () => {
           <Composer.Input
             autoFocus={!isMobileWorkbench}
             cancelOnEscape={false}
+            submitMode="none"
+            onKeyDown={handleComposerKeyDown}
             unstable_focusOnRunStart={!isMobileWorkbench}
             unstable_focusOnScrollToBottom={!isMobileWorkbench}
             unstable_focusOnThreadSwitched={!isMobileWorkbench}
@@ -2928,16 +2955,21 @@ const MobileAwareComposer: FC = () => {
               </Composer.Cancel>
             </div>
           ) : (
-            <button
-              type="submit"
-              className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
-              disabled={sendDisabled}
-              title={sendTitle}
-              aria-label={sendTitle}
-              onClick={sendCurrentMessage}
-            >
-              <SendHorizontalIcon size={17} />
-            </button>
+            <div className="portal-idle-composer-actions">
+              {!isMobileWorkbench ? (
+                <span className="portal-composer-keyboard-hint">{t("thread.keyboardHint")}</span>
+              ) : null}
+              <button
+                type="submit"
+                className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+                disabled={sendDisabled}
+                title={sendTitle}
+                aria-label={sendTitle}
+                onClick={sendCurrentMessage}
+              >
+                <SendHorizontalIcon size={17} />
+              </button>
+            </div>
           )}
         </div>
       </Composer.Root>
