@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -556,11 +556,11 @@ export class DwsCommandExecutor {
       dwsArgs: input.args
     });
     return new Promise<number>((resolve, reject) => {
-      let child: ChildProcessWithoutNullStreams;
+      let child: ReturnType<typeof spawn>;
       try {
         child = spawn(this.options.bwrapPath, sandboxArgs, {
           stdio: ["ignore", "pipe", "pipe"]
-        }) as ChildProcessWithoutNullStreams;
+        });
       } catch (error) {
         reject(error);
         return;
@@ -579,8 +579,8 @@ export class DwsCommandExecutor {
       const onAbort = () => terminate();
       input.signal?.addEventListener("abort", onAbort, { once: true });
 
-      child.stdout.on("data", (chunk) => input.onOutput({ stream: "stdout", data: String(chunk) }));
-      child.stderr.on("data", (chunk) => input.onOutput({ stream: "stderr", data: String(chunk) }));
+      child.stdout?.on("data", (chunk) => input.onOutput({ stream: "stdout", data: String(chunk) }));
+      child.stderr?.on("data", (chunk) => input.onOutput({ stream: "stderr", data: String(chunk) }));
       child.once("error", (error) => {
         if (settled) return;
         settled = true;
