@@ -1013,6 +1013,7 @@ main() {
   require_repo_checkout
   git_update
   if deploy_restarts_chat; then
+    bash "$script_dir/ensure-dws-runtime.sh"
     ensure_shared_python_runtime
     ensure_shared_plugin_runtime
   fi

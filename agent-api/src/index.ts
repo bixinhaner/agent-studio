@@ -302,6 +302,12 @@ import {
   type MaterializedActionConnectorAttachment
 } from "./integrations/action-connector/attachment-store.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
+import {
+  DWS_OFFICIAL_SKILL_NAMES,
+  DwsCommandExecutor,
+  type DwsUserIdentity
+} from "./integrations/dingtalk/dws-executor.js";
+import { createDwsRouter, issueDwsProxyTokenLease } from "./integrations/dingtalk/dws-router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { DINGTALK_BOT_CHANNEL, isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./integrations/dingtalk/bot-config.js";
@@ -592,6 +598,7 @@ const codexExecution = new CodexExecutionService({
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
+const dwsExecutor = new DwsCommandExecutor(appConfig.dws);
 const publicBrands = new PublicBrandService(db);
 const publicBrandEmailTransports = new PublicBrandEmailTransportService(db, {
   credentialSecret: appConfig.brandEmailCredentialSecret,
@@ -2150,9 +2157,10 @@ type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const crestMcpProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "crest-mcp-proxy.mjs");
+const dwsProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "dws-proxy.mjs");
 const RUNTIME_CAPABILITIES_RUN_CONFIG_KEY = "_agentStudioRuntimeCapabilities";
 const RUNTIME_HINTS_RUN_CONFIG_KEY = "_agentStudioRuntimeHints";
-const CREST_PROXY_TOKEN_REFRESH_SKEW_MS = 15 * 60_000;
+const RUNTIME_PROXY_TOKEN_REFRESH_SKEW_MS = 15 * 60_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -2764,10 +2772,17 @@ type RuntimeCapabilityFingerprint = {
     enabled: true;
     proxyTokenExpiresAt: string;
   };
+  dingtalkDws?: {
+    enabled: true;
+    proxyTokenExpiresAt: string;
+  };
 };
 
 type DesiredRuntimeCapabilities = {
   crestCrm?: {
+    enabled: true;
+  };
+  dingtalkDws?: {
     enabled: true;
   };
 };
@@ -2881,17 +2896,25 @@ function runtimeCapabilitiesFromRunConfig(
 ): RuntimeCapabilityFingerprint {
   const raw = asRecord(codexRunConfig?.[RUNTIME_CAPABILITIES_RUN_CONFIG_KEY]);
   const crestRaw = asRecord(raw?.crestCrm);
-  const proxyTokenExpiresAt =
+  const crestProxyTokenExpiresAt =
     typeof crestRaw?.proxyTokenExpiresAt === "string" ? trimOrUndefined(crestRaw.proxyTokenExpiresAt) : undefined;
-  if (crestRaw?.enabled === true && proxyTokenExpiresAt) {
-    return {
-      crestCrm: {
-        enabled: true,
-        proxyTokenExpiresAt
-      }
+  const dwsRaw = asRecord(raw?.dingtalkDws);
+  const dwsProxyTokenExpiresAt =
+    typeof dwsRaw?.proxyTokenExpiresAt === "string" ? trimOrUndefined(dwsRaw.proxyTokenExpiresAt) : undefined;
+  const capabilities: RuntimeCapabilityFingerprint = {};
+  if (crestRaw?.enabled === true && crestProxyTokenExpiresAt) {
+    capabilities.crestCrm = {
+      enabled: true,
+      proxyTokenExpiresAt: crestProxyTokenExpiresAt
     };
   }
-  return {};
+  if (dwsRaw?.enabled === true && dwsProxyTokenExpiresAt) {
+    capabilities.dingtalkDws = {
+      enabled: true,
+      proxyTokenExpiresAt: dwsProxyTokenExpiresAt
+    };
+  }
+  return capabilities;
 }
 
 function withoutRuntimeCapabilityMetadata(
@@ -2947,7 +2970,7 @@ function withRuntimeCapabilityMetadata(
   capabilities: RuntimeCapabilityFingerprint
 ): Record<string, unknown> | undefined {
   const next = withoutRuntimeCapabilityMetadata(codexRunConfig);
-  if (!capabilities.crestCrm) return next;
+  if (!capabilities.crestCrm && !capabilities.dingtalkDws) return next;
   return {
     ...(next ?? {}),
     [RUNTIME_CAPABILITIES_RUN_CONFIG_KEY]: capabilities
@@ -2994,9 +3017,23 @@ function runtimeCapabilitiesAreCurrent(
     const expiresAt = active.crestCrm?.proxyTokenExpiresAt;
     if (!expiresAt) return false;
     const expiresAtMs = new Date(expiresAt).getTime();
-    return Number.isFinite(expiresAtMs) && expiresAtMs > now + CREST_PROXY_TOKEN_REFRESH_SKEW_MS;
+    if (!(Number.isFinite(expiresAtMs) && expiresAtMs > now + RUNTIME_PROXY_TOKEN_REFRESH_SKEW_MS)) {
+      return false;
+    }
+  } else if (active.crestCrm?.enabled === true) {
+    return false;
   }
-  return active.crestCrm?.enabled !== true;
+  if (desired.dingtalkDws?.enabled) {
+    const expiresAt = active.dingtalkDws?.proxyTokenExpiresAt;
+    if (!expiresAt) return false;
+    const expiresAtMs = new Date(expiresAt).getTime();
+    if (!(Number.isFinite(expiresAtMs) && expiresAtMs > now + RUNTIME_PROXY_TOKEN_REFRESH_SKEW_MS)) {
+      return false;
+    }
+  } else if (active.dingtalkDws?.enabled === true) {
+    return false;
+  }
+  return true;
 }
 
 function sessionOut(session: {
@@ -3257,12 +3294,73 @@ async function canUseCrestMcpForUser(userId: string): Promise<boolean> {
   return proxyScriptExists;
 }
 
-async function desiredRuntimeCapabilitiesForUser(userId?: string): Promise<DesiredRuntimeCapabilities> {
-  if (!userId || !(await canUseCrestMcpForUser(userId))) return {};
-  return {
-    crestCrm: {
-      enabled: true
+async function resolveDwsUserIdentity(userId: string): Promise<DwsUserIdentity | undefined> {
+  if (!appConfig.dws.enabled) return undefined;
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      userType: true,
+      status: true,
+      manualDisabled: true,
+      dingtalkCorpId: true,
+      dingtalkUserId: true
     }
+  });
+  const dingtalkIdentity = (await authIdentities.listForUser(userId)).find((identity) => identity.provider === "dingtalk");
+  const dingtalkProfile = asRecord(dingtalkIdentity?.profileJson);
+  const dingtalkCorpId =
+    trimOrUndefined(user?.dingtalkCorpId) ??
+    trimOrUndefined(typeof dingtalkProfile?.corpId === "string" ? dingtalkProfile.corpId : undefined);
+  const dingtalkUserId =
+    trimOrUndefined(user?.dingtalkUserId) ??
+    trimOrUndefined(typeof dingtalkProfile?.userId === "string" ? dingtalkProfile.userId : undefined) ??
+    trimOrUndefined(
+      typeof dingtalkProfile?.dingtalk_user_id === "string" ? dingtalkProfile.dingtalk_user_id : undefined
+    );
+  if (
+    !user ||
+    user.status !== "active" ||
+    user.manualDisabled ||
+    user.userType === "external_user" ||
+    !dingtalkUserId
+  ) {
+    return undefined;
+  }
+  return {
+    agentStudioUserId: user.id,
+    ...(dingtalkCorpId ? { dingtalkCorpId } : {}),
+    dingtalkUserId
+  };
+}
+
+async function canUseDwsForUser(userId: string): Promise<boolean> {
+  const [identity, executorReady, proxyScriptExists] = await Promise.all([
+    resolveDwsUserIdentity(userId),
+    dwsExecutor.isReady(),
+    fs.access(dwsProxyScriptPath).then(() => true, () => false)
+  ]);
+  return Boolean(identity && executorReady && proxyScriptExists);
+}
+
+async function resolveAutomaticDwsSkillsForUser(
+  userId: string
+): Promise<Array<{ name: string; sourcePath: string }>> {
+  if (!(await canUseDwsForUser(userId))) return [];
+  return (await nativeCodexSkills.list())
+    .filter((skill) => DWS_OFFICIAL_SKILL_NAMES.has(skill.name))
+    .map((skill) => ({ name: skill.name, sourcePath: skill.sourcePath }));
+}
+
+async function desiredRuntimeCapabilitiesForUser(userId?: string): Promise<DesiredRuntimeCapabilities> {
+  if (!userId) return {};
+  const [crestCrm, dingtalkDws] = await Promise.all([
+    canUseCrestMcpForUser(userId),
+    canUseDwsForUser(userId)
+  ]);
+  return {
+    ...(crestCrm ? { crestCrm: { enabled: true as const } } : {}),
+    ...(dingtalkDws ? { dingtalkDws: { enabled: true as const } } : {})
   };
 }
 
@@ -3297,13 +3395,42 @@ async function buildCrestMcpRuntimeConfigForUser(
   };
 }
 
+async function buildDwsRuntimeConfigForUser(
+  userId: string,
+  workspacePath?: string
+): Promise<{
+  proxyBinDir: string;
+  envOverrides: Record<string, string>;
+  capabilities: RuntimeCapabilityFingerprint;
+} | undefined> {
+  const workspace = trimOrUndefined(workspacePath);
+  if (!workspace || !(await canUseDwsForUser(userId))) return undefined;
+  const proxyPath = await materializeDwsProxyScript(workspace);
+  if (!proxyPath) return undefined;
+  const proxyToken = issueDwsProxyTokenLease({ userId, workspacePath: workspace });
+  return {
+    proxyBinDir: path.dirname(proxyPath),
+    envOverrides: {
+      AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
+      AGENT_STUDIO_DWS_PROXY_TOKEN: proxyToken.token
+    },
+    capabilities: {
+      dingtalkDws: {
+        enabled: true,
+        proxyTokenExpiresAt: proxyToken.expiresAt
+      }
+    }
+  };
+}
+
 async function resolveRuntimeLaunchConfig(input: {
   userId?: string;
   workspace?: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<RuntimeLaunchConfig> {
-  const [crestMcp, publishedSystemSettings] = await Promise.all([
+  const [crestMcp, dwsRuntime, publishedSystemSettings] = await Promise.all([
     input.userId ? buildCrestMcpRuntimeConfigForUser(input.userId, input.workspace) : undefined,
+    input.userId ? buildDwsRuntimeConfigForUser(input.userId, input.workspace) : undefined,
     codexProviders.getPublishedSystemSettings()
   ]);
   const pythonRuntimeSettings =
@@ -3329,13 +3456,22 @@ async function resolveRuntimeLaunchConfig(input: {
   const codexRunConfig = withRuntimeHints(
     withRuntimeCapabilityMetadata(
       input.codexRunConfig,
-      crestMcp?.capabilities ?? {}
+      {
+        ...(crestMcp?.capabilities ?? {}),
+        ...(dwsRuntime?.capabilities ?? {})
+      }
     ),
     runtimeHints
   );
   const envOverrides = {
     ...toolEnv,
-    ...pythonEnv
+    ...pythonEnv,
+    ...(dwsRuntime?.envOverrides ?? {}),
+    ...(dwsRuntime
+      ? {
+          PATH: [dwsRuntime.proxyBinDir, toolEnv.PATH || process.env.PATH].filter(Boolean).join(path.delimiter)
+        }
+      : {})
   };
   return {
     configOverrides: crestMcp?.configOverrides,
@@ -3361,6 +3497,25 @@ async function materializeCrestMcpProxyScript(workspacePath: string): Promise<st
     return targetPath;
   } catch (error) {
     console.warn("failed to materialize Crest MCP proxy script", {
+      workspacePath: workspace,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  }
+}
+
+async function materializeDwsProxyScript(workspacePath: string): Promise<string | undefined> {
+  const workspace = trimOrUndefined(workspacePath);
+  if (!workspace) return undefined;
+  const targetDir = path.join(workspace, ".agent-studio", "dws-bin");
+  const targetPath = path.join(targetDir, "dws");
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.copyFile(dwsProxyScriptPath, targetPath);
+    await fs.chmod(targetPath, 0o755);
+    return targetPath;
+  } catch (error) {
+    console.warn("failed to materialize DWS proxy script", {
       workspacePath: workspace,
       detail: error instanceof Error ? error.message : String(error)
     });
@@ -6347,15 +6502,20 @@ async function materializeCodexHomeForRunConfig(input: {
   scopeId?: string;
   scopeSegments?: string[];
   codexRunConfig?: Record<string, unknown>;
+  additionalSkills?: Array<{ name: string; sourcePath?: string }>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
   const enabledSkills = enabledSkillSelectionsFromRunConfig(input.codexRunConfig);
+  const materializedSkills = new Map<string, { name: string; sourcePath?: string }>();
+  for (const skill of enabledSkills) {
+    materializedSkills.set(skill.name, { name: skill.name, sourcePath: skill.sourcePath });
+  }
+  for (const skill of input.additionalSkills ?? []) {
+    if (!materializedSkills.has(skill.name)) materializedSkills.set(skill.name, skill);
+  }
   const codexHome = await nativeCodexSkills.materializeSessionHome({
     scopeId: input.scopeId,
     scopeSegments: input.scopeSegments,
-    enabledSkills: enabledSkills.map((skill) => ({
-      name: skill.name,
-      sourcePath: skill.sourcePath
-    }))
+    enabledSkills: [...materializedSkills.values()]
   });
   await syncAgentStudioMemoryProjection(codexHome);
   return {
@@ -6380,7 +6540,8 @@ async function materializeSharedCodexHomeForRunConfig(input: {
   });
   return materializeCodexHomeForRunConfig({
     scopeSegments: scope.scopeSegments,
-    codexRunConfig: input.codexRunConfig
+    codexRunConfig: input.codexRunConfig,
+    additionalSkills: await resolveAutomaticDwsSkillsForUser(input.currentUser.id)
   });
 }
 
@@ -11165,6 +11326,10 @@ crestIntegrationRouter.post("/chat/cancel", async (req: Request, res: Response) 
 crestIntegrationRouter.post("/artifacts/content", async (req: Request, res: Response) => {
   await handleCrestArtifactContent(req, res);
 });
+const dwsIntegrationRouter = createDwsRouter({
+  executor: dwsExecutor,
+  resolveIdentity: resolveDwsUserIdentity
+});
 
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({
@@ -11305,6 +11470,7 @@ registerCommonApiRoutes(app, {
   }),
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   skillCatalogAdminRouter: createSkillCatalogAdminRouter(skillCatalog),
+  dwsRouter: dwsIntegrationRouter,
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     modelCatalog: codexModelCatalog,

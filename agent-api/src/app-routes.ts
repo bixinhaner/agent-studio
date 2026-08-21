@@ -29,6 +29,7 @@ export function registerCommonApiRoutes(
     serviceTokenMiddleware: RequestHandler;
     zendeskRouter: Router;
     crestRouter?: Router;
+    dwsRouter?: Router;
     actionConnectorProvisionRouter?: Router;
     actionConnectorRuntimeRouter?: Router;
   }
@@ -70,6 +71,7 @@ export function registerCommonApiRoutes(
   );
   app.use("/api/integrations/zendesk", options.serviceTokenMiddleware, options.zendeskRouter);
   app.use("/api/integrations/crest", options.crestRouter ?? Router());
+  app.use("/api/integrations/dingtalk/dws", options.dwsRouter ?? Router());
   app.use(
     "/api/integrations/action-connectors",
     options.serviceTokenMiddleware,

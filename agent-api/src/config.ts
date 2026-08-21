@@ -19,6 +19,11 @@ const schema = z.object({
   DINGTALK_SCOPE: z.string().default("openid"),
   DINGTALK_ALERT_AGENT_ID: z.string().optional(),
   DINGTALK_ALERT_USER_IDS: z.string().optional(),
+  DWS_ENABLED: z.string().optional(),
+  DWS_BINARY_PATH: z.string().optional(),
+  DWS_BWRAP_PATH: z.string().optional(),
+  DWS_USER_HOME_ROOT: z.string().optional(),
+  DWS_EXECUTION_TIMEOUT_MS: z.string().optional(),
   CREST_BASE_URL: z.string().optional(),
   CREST_AGENT_STUDIO_CLIENT_ID: z.string().optional(),
   CREST_AGENT_STUDIO_CLIENT_SECRET: z.string().optional(),
@@ -160,6 +165,11 @@ const sharedCodexRuntimeRoot = resolveRuntimePath(
 const sharedArgosPackageRoot = resolveRuntimePath(env.SHARED_ARGOS_PACKAGE_ROOT, path.join(sharedRoot, "argos", "packages"));
 const sharedArgosDownloadRoot = resolveRuntimePath(env.SHARED_ARGOS_DOWNLOAD_ROOT, path.join(sharedRoot, "argos", "downloads"));
 
+const dwsUserHomeRoot = resolveRuntimePath(
+  env.DWS_USER_HOME_ROOT,
+  env.NODE_ENV === "production" ? "/var/lib/agent-studio/dws-users" : "./temp/dws-users"
+);
+
 const deployDrainFile = path.isAbsolute(env.AGENT_STUDIO_DEPLOY_DRAIN_FILE)
   ? env.AGENT_STUDIO_DEPLOY_DRAIN_FILE
   : path.resolve(process.cwd(), env.AGENT_STUDIO_DEPLOY_DRAIN_FILE);
@@ -211,6 +221,13 @@ export const appConfig = {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean)
+  },
+  dws: {
+    enabled: parseBooleanWithDefault(env.DWS_ENABLED, true),
+    binaryPath: resolveRuntimePath(env.DWS_BINARY_PATH, "/usr/local/bin/dws"),
+    bwrapPath: resolveRuntimePath(env.DWS_BWRAP_PATH, "/usr/bin/bwrap"),
+    userHomeRoot: dwsUserHomeRoot,
+    executionTimeoutMs: parseInteger(env.DWS_EXECUTION_TIMEOUT_MS, 15 * 60_000)
   },
   crest: {
     baseUrl: ((env.CREST_BASE_URL || "").trim() || "https://crest.baicells.com").replace(/\/+$/, ""),

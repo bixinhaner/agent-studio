@@ -121,6 +121,7 @@ Backend configuration lives in `agent-api/.env`. The most important settings are
 | `SMTP_*` / `AUTH_EMAIL_FROM` | Email delivery settings |
 | `BRAND_EMAIL_CREDENTIAL_SECRET` | Encryption secret for per-brand SMTP passwords; falls back to `SESSION_COOKIE_SECRET` for existing deployments |
 | `DINGTALK_*` | DingTalk OAuth, alerting, and org-sync settings |
+| `DWS_*` | Per-user DingTalk Workspace CLI broker, sandbox, credential-home, and timeout settings; deployment installs the pinned official CLI and Multi-Skills automatically |
 | `ACCESS_REQUEST_*` | Public access request and purchase-proof upload settings |
 | `UPLOAD_TEMP_ROOT` | Temporary uploaded attachment root |
 | `BRANDING_ASSET_ROOT` | Runtime branding asset root |
