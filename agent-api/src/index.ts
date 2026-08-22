@@ -307,6 +307,7 @@ import {
   DwsCommandExecutor,
   type DwsUserIdentity
 } from "./integrations/dingtalk/dws-executor.js";
+import { resolveDwsPortalCapabilities } from "./integrations/dingtalk/dws-capability.js";
 import { createDwsRouter, issueDwsProxyTokenLease } from "./integrations/dingtalk/dws-router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
@@ -2087,6 +2088,13 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
   skillPackages,
   nativeCodexSkills,
   installedPlugins,
+  automaticCapabilities: {
+    listForUser: ({ userId, locale }) => resolveDwsPortalCapabilities({
+      userId,
+      locale,
+      isAvailableForUser: canUseDwsForUser
+    })
+  },
   managedSkills: codexSkills,
   skillCatalog,
   recentSkills: {

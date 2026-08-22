@@ -45,6 +45,21 @@ const documentsSkill: Skill = {
   }
 };
 
+const dingtalkSkill: Skill = {
+  ...documentsSkill,
+  id: "system:dingtalk",
+  name: "dingtalk",
+  label: "钉钉",
+  description: "使用当前钉钉账号完成工作",
+  presentation: {
+    ...documentsSkill.presentation,
+    displayName: "钉钉",
+    summary: "使用当前钉钉账号处理联系人、群聊、日程、待办、文档和云盘等工作",
+    examplePrompts: ["查看我今天的日程和待办。"],
+    iconKey: "dingtalk"
+  }
+};
+
 beforeAll(() => {
   const getComputedStyle = window.getComputedStyle.bind(window);
   Object.defineProperty(window, "getComputedStyle", {
@@ -174,6 +189,32 @@ describe("PortalSkillPicker", () => {
     await waitFor(() => expect(fillPrompt).toHaveBeenCalledWith("把这份提纲整理成正式 Word 文档。"));
     expect(setSkills).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeNull());
+  });
+
+  it("presents Dingtalk as one automatic capability without exposing its technical name", async () => {
+    const setSkills = vi.fn();
+    const fillPrompt = vi.fn();
+    render(
+      <PortalSkillPicker
+        availableSkills={[]}
+        automaticSkills={[dingtalkSkill]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={setSkills}
+        onFillPrompt={fillPrompt}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    expect(await screen.findAllByText("钉钉")).not.toHaveLength(0);
+    expect(document.querySelector('[data-icon="dingtalk"]')).toBeTruthy();
+    expect(document.querySelector("code")?.textContent).not.toBe("dingtalk");
+    expect(screen.queryByRole("button", { name: /启用 Skill|Enable Skill/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /复制.*dingtalk|copy.*dingtalk/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /填入示例|Use example/ }));
+    await waitFor(() => expect(fillPrompt).toHaveBeenCalledWith("查看我今天的日程和待办。"));
+    expect(setSkills).not.toHaveBeenCalled();
   });
 
   it("reveals the localized purpose and summary when the composer chip is hovered", async () => {

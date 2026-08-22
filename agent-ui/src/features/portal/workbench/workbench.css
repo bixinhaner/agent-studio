@@ -4019,6 +4019,12 @@ button.session-rail-new-btn:active,
   color: #12815a;
 }
 
+.portal-skill-glyph[data-icon="dingtalk"] {
+  background: color-mix(in srgb, var(--skill-accent) 11%, #ffffff);
+  color: var(--skill-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skill-accent) 18%, transparent);
+}
+
 .portal-skill-detail-title {
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr) 30px;

@@ -82,6 +82,13 @@ type RuntimeOptionServiceDependencies = {
   skillPackages: ListRepository<SkillPackageRecord>;
   nativeCodexSkills?: ListRepository<NativeCodexSkillRecord>;
   installedPlugins?: ListRepository<InstalledPluginRecord>;
+  automaticCapabilities?: {
+    listForUser(input: {
+      organizationId?: string;
+      userId: string;
+      locale?: string;
+    }): Promise<PortalRuntimeOptionSkill[]>;
+  };
   managedSkills?: {
     listManagedSkills(input?: {
       organizationId?: string;
@@ -341,7 +348,7 @@ export class PortalRuntimeOptionService {
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [brand, modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, installedPlugins, recentSkillIds, catalogEntries] = await Promise.all([
+    const [brand, modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, installedPlugins, automaticCapabilityRows, recentSkillIds, catalogEntries] = await Promise.all([
       this.deps.publicBrands?.getForOrganization(input.organizationId) ?? Promise.resolve(undefined),
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
@@ -349,6 +356,11 @@ export class PortalRuntimeOptionService {
       this.deps.nativeCodexSkills?.list() ?? Promise.resolve([]),
       this.deps.managedSkills?.listManagedSkills({ organizationId: input.organizationId }) ?? Promise.resolve([]),
       this.deps.installedPlugins?.list() ?? Promise.resolve([]),
+      this.deps.automaticCapabilities?.listForUser({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        locale: input.locale
+      }) ?? Promise.resolve([]),
       this.deps.recentSkills?.listRecentSkillIds({ organizationId: input.organizationId, userId: input.userId, take: 30 }) ??
         Promise.resolve([]),
       this.deps.skillCatalog?.listPublished({ organizationId: input.organizationId }) ?? Promise.resolve([])
@@ -383,9 +395,17 @@ export class PortalRuntimeOptionService {
     );
     const activePrivateSkillNames = new Set(activePrivateSkills.map((skill) => skillNameKey(skill.skillName)));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
-    const automaticSkills = installedPlugins
+    const automaticPluginSkills = installedPlugins
       .map((plugin) => toAutomaticPluginRuntimeSkill(plugin, catalogEntries, input.locale))
-      .filter((skill): skill is PortalRuntimeOptionSkill => Boolean(skill))
+      .filter((skill): skill is PortalRuntimeOptionSkill => Boolean(skill));
+    const automaticSkills = Array.from(
+      new Map(
+        [...automaticPluginSkills, ...automaticCapabilityRows].map((skill) => [
+          skill.id,
+          { ...skill, automatic: true as const }
+        ])
+      ).values()
+    )
       .sort((left, right) => left.presentation.sortOrder - right.presentation.sortOrder || left.label.localeCompare(right.label));
 
     const resolvedModes = [];

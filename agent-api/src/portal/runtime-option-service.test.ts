@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PortalRuntimeOptionService } from "./runtime-option-service.js";
+import { PortalRuntimeOptionService, type PortalRuntimeOptionSkill } from "./runtime-option-service.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
 import type { InstalledPluginRecord } from "../codex-plugins/installed-plugin-service.js";
 import type { AgentModeRecord } from "../persistence/agent-mode-repository.js";
@@ -175,6 +175,7 @@ function createService(input: {
   catalogEntries?: SkillCatalogEntryRecord[];
   managedSkills?: CodexManagedSkillRecord[];
   installedPlugins?: InstalledPluginRecord[];
+  automaticCapabilities?: PortalRuntimeOptionSkill[];
   publicBrandAgentModeId?: string;
 }) {
   const allowedByType = input.allowedByType ?? {};
@@ -190,6 +191,9 @@ function createService(input: {
     },
     installedPlugins: {
       list: async () => input.installedPlugins ?? []
+    },
+    automaticCapabilities: {
+      listForUser: async () => input.automaticCapabilities ?? []
     },
     managedSkills: {
       listManagedSkills: async () => input.managedSkills ?? []
@@ -219,6 +223,28 @@ function createService(input: {
       : undefined
   } as never);
 }
+
+const automaticDingtalkCapability: PortalRuntimeOptionSkill = {
+  id: "system:dingtalk",
+  name: "dingtalk",
+  label: "钉钉",
+  description: "使用当前钉钉账号完成工作",
+  system: true,
+  automatic: true,
+  scope: "platform",
+  presentation: {
+    displayName: "钉钉",
+    summary: "使用当前钉钉账号完成工作",
+    useCases: ["查看日程和待办"],
+    usageSteps: ["直接描述需要完成的事情"],
+    examplePrompts: ["查看我今天的日程和待办。"],
+    dataScope: "当前用户授权的钉钉账号",
+    iconKey: "dingtalk",
+    sortOrder: 35,
+    requestedLocale: "zh-CN",
+    resolvedLocale: "zh-CN"
+  }
+};
 
 describe("PortalRuntimeOptionService", () => {
   it("only exposes the agent mode assigned to a public brand", async () => {
@@ -389,6 +415,35 @@ describe("PortalRuntimeOptionService", () => {
     });
 
     expect(result.modes[0]?.automaticSkills).toEqual([]);
+  });
+
+  it("includes a user-scoped system capability in automatic Skills", async () => {
+    const service = createService({
+      automaticCapabilities: [automaticDingtalkCapability],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: []
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: [],
+      locale: "zh-CN"
+    });
+
+    expect(result.modes[0]?.automaticSkills).toEqual([
+      expect.objectContaining({
+        id: "system:dingtalk",
+        label: "钉钉",
+        automatic: true,
+        presentation: expect.objectContaining({ iconKey: "dingtalk" })
+      })
+    ]);
+    expect(result.modes[0]?.availableSkills).toEqual([]);
   });
 
   it("inherits a published native presentation for an unpublished managed catalog placeholder", async () => {
