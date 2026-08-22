@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ThreadRepository, type ThreadRepositoryDb } from "./thread-repository.js";
 
@@ -104,6 +104,94 @@ function assistant(id: string, text = "answer") {
 }
 
 describe("thread turn delivery", () => {
+  it("sanitizes ordinary message and feedback writes at the same repository boundary", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = createFakeDb();
+    const repository = new ThreadRepository(state.db);
+
+    await repository.appendMessage("thread-1", {
+      parentId: "user-1",
+      message: {
+        id: "assistant-appended",
+        role: "assistant",
+        content: [{ type: "text", text: "append\u0000safe" }]
+      },
+      runConfig: { checkpoint: "one\u0000two" }
+    });
+    const feedback = await repository.addFeedback("thread-1", {
+      type: "negative",
+      messageId: "assistant-appended",
+      comment: "bad\u0000response"
+    });
+
+    const appended = state.messages.find((item) => item.externalId === "assistant-appended");
+    expect(appended?.content).toMatchObject({ content: [{ text: "append\\u0000safe" }] });
+    expect(appended?.runConfig).toMatchObject({ checkpoint: "one\\u0000two" });
+    expect(feedback.comment).toBe("bad\\u0000response");
+    expect((state.thread as FakeThread & { feedback?: unknown }).feedback).toEqual([
+      expect.objectContaining({ comment: "bad\\u0000response" })
+    ]);
+    expect(warning).toHaveBeenCalledTimes(3);
+    warning.mockRestore();
+  });
+
+  it.each(["portal", "crest", "dingtalk_bot", "zendesk", "openai_compatible_api", "action_connector"])(
+    "sanitizes terminal content for the shared %s persistence path",
+    async (channel) => {
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const state = createFakeDb();
+      const repository = new ThreadRepository(state.db);
+
+      await repository.claimTurnDelivery({
+        threadId: "thread-1",
+        userMessageId: "user-1",
+        runId: `run-${channel}`,
+        channel,
+        acceptedAt: "2026-08-20T00:00:01.000Z"
+      });
+      await repository.finalizeTurnDelivery({
+        threadId: "thread-1",
+        userMessageId: "user-1",
+        runId: `run-${channel}`,
+        channel,
+        acceptedAt: "2026-08-20T00:00:01.000Z",
+        status: "completed",
+        assistant: {
+          parentId: "user-1",
+          message: {
+            id: `assistant-${channel}`,
+            role: "assistant",
+            content: [
+              { type: "text", text: "before\u0000after" },
+              { type: "tool-result", output: { stdout: "log\u0000tail" } }
+            ]
+          },
+          runConfig: { channel, toolState: "safe\u0000state" }
+        }
+      });
+
+      const stored = state.messages.find((item) => item.externalId === `assistant-${channel}`);
+      const storedContent = (stored?.content as { content?: Array<Record<string, unknown>> } | undefined)?.content ?? [];
+      expect(storedContent.find((item) => item.type === "text")).toMatchObject({
+        text: "before\\u0000after"
+      });
+      expect(storedContent.find((item) => item.type === "tool-result")).toMatchObject({
+        output: { stdout: "log\\u0000tail" }
+      });
+      expect(stored?.runConfig).toMatchObject({ channel, toolState: "safe\\u0000state" });
+      expect(warning).toHaveBeenCalledWith(
+        "agent_studio_conversation_json_sanitized",
+        expect.objectContaining({
+          threadId: "thread-1",
+          operation: "finalizeTurnDelivery",
+          channel,
+          replacementCount: expect.any(Number)
+        })
+      );
+      warning.mockRestore();
+    }
+  );
+
   it("persists one terminal assistant idempotently", async () => {
     const state = createFakeDb();
     const repository = new ThreadRepository(state.db);

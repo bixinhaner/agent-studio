@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { normalizeAssistantMessageContentOrder } from "../messages/assistant-content-order.js";
 import type { ReasoningEffort } from "../model-config.js";
+import { sanitizeJsonForPostgres } from "./postgres-json-sanitizer.js";
 
 export type ThreadStatus = "regular" | "archived";
 export type { ReasoningEffort } from "../model-config.js";
@@ -417,6 +418,43 @@ function persistedExternalIds(items: StoredMessageItem[]): Array<string | null> 
   });
 }
 
+type ConversationJsonSanitizeContext = {
+  threadId: string;
+  operation: string;
+  field: string;
+  channel?: string;
+  runId?: string;
+};
+
+function sanitizeConversationJson<T>(value: T, context: ConversationJsonSanitizeContext): T {
+  const sanitized = sanitizeJsonForPostgres(value);
+  if (sanitized.replacementCount > 0) {
+    console.warn("agent_studio_conversation_json_sanitized", {
+      threadId: context.threadId,
+      operation: context.operation,
+      field: context.field,
+      channel: context.channel,
+      runId: context.runId,
+      replacementCount: sanitized.replacementCount
+    });
+  }
+  return sanitized.value;
+}
+
+function sanitizeStoredMessageItem(
+  item: StoredMessageItem,
+  context: Omit<ConversationJsonSanitizeContext, "field">
+): StoredMessageItem {
+  const message = sanitizeConversationJson(item.message, { ...context, field: "message.content" });
+  const runConfig = sanitizeConversationJson(item.runConfig, { ...context, field: "message.runConfig" });
+  if (message === item.message && runConfig === item.runConfig) return item;
+  return {
+    ...item,
+    message,
+    runConfig
+  };
+}
+
 export class ThreadRepository {
   constructor(private readonly db: ThreadRepositoryDb) {}
 
@@ -472,6 +510,18 @@ export class ThreadRepository {
 
   async create(payload: CreateThreadPayload): Promise<ThreadRecord> {
     const title = trimOrUndefined(payload.title);
+    const codexRunConfig = sanitizeConversationJson(payload.codexRunConfig, {
+      threadId: payload.id ?? "pending",
+      operation: "createThread",
+      field: "thread.codexRunConfig",
+      channel: payload.channel
+    });
+    const feedback = sanitizeConversationJson(payload.feedback ?? [], {
+      threadId: payload.id ?? "pending",
+      operation: "createThread",
+      field: "thread.feedback",
+      channel: payload.channel
+    });
     const created = await this.db.thread.create({
       data: {
         id: payload.id,
@@ -487,10 +537,10 @@ export class ThreadRepository {
         model: payload.model,
         reasoningEffort: payload.reasoningEffort,
         workspace: payload.workspace,
-        codexRunConfig: payload.codexRunConfig ?? null,
+        codexRunConfig: codexRunConfig ?? null,
         codexThreadId: trimOrUndefined(payload.codexThreadId) ?? null,
         headId: payload.headId ?? null,
-        feedback: payload.feedback ?? [],
+        feedback,
         createdAt: toDate(payload.createdAt),
         updatedAt: toDate(payload.updatedAt)
       }
@@ -505,11 +555,32 @@ export class ThreadRepository {
     }
 
     return this.db.$transaction(async (tx) => {
-      const normalizedMessages = record.messages.map((item) => ({
-        ...item,
-        message: normalizeAssistantMessageContentOrder(item.message)
-      }));
+      const normalizedMessages = record.messages.map((item) =>
+        sanitizeStoredMessageItem(
+          {
+            ...item,
+            message: normalizeAssistantMessageContentOrder(item.message)
+          },
+          {
+            threadId: record.id,
+            operation: "importThread",
+            channel: record.channel
+          }
+        )
+      );
       const externalIds = persistedExternalIds(normalizedMessages);
+      const codexRunConfig = sanitizeConversationJson(record.codexRunConfig, {
+        threadId: record.id,
+        operation: "importThread",
+        field: "thread.codexRunConfig",
+        channel: record.channel
+      });
+      const feedback = sanitizeConversationJson(record.feedback, {
+        threadId: record.id,
+        operation: "importThread",
+        field: "thread.feedback",
+        channel: record.channel
+      });
       const created = await tx.thread.create({
         data: {
           id: record.id,
@@ -525,10 +596,10 @@ export class ThreadRepository {
           model: record.model,
           reasoningEffort: record.reasoningEffort,
           workspace: record.workspace,
-          codexRunConfig: record.codexRunConfig ?? null,
+          codexRunConfig: codexRunConfig ?? null,
           codexThreadId: trimOrUndefined(record.codexThreadId) ?? null,
           headId: record.headId ?? null,
-          feedback: record.feedback,
+          feedback,
           createdAt: toDate(record.createdAt),
           updatedAt: toDate(record.updatedAt)
         }
@@ -601,7 +672,14 @@ export class ThreadRepository {
     if (patch.workspaceFolderId !== undefined) {
       data.workspaceFolderId = trimOrUndefined(patch.workspaceFolderId ?? undefined) ?? null;
     }
-    if (patch.codexRunConfig !== undefined) data.codexRunConfig = patch.codexRunConfig ?? null;
+    if (patch.codexRunConfig !== undefined) {
+      data.codexRunConfig =
+        sanitizeConversationJson(patch.codexRunConfig, {
+          threadId,
+          operation: "updateThread",
+          field: "thread.codexRunConfig"
+        }) ?? null;
+    }
     if (patch.codexThreadId !== undefined) data.codexThreadId = trimOrUndefined(patch.codexThreadId) ?? null;
     if (patch.headId !== undefined) data.headId = patch.headId;
     data.updatedAt = new Date();
@@ -659,15 +737,25 @@ export class ThreadRepository {
         };
       }
 
+      const runConfig = sanitizeConversationJson(
+        withStoredTurnDelivery(userMessage.runConfig, {
+          runId: input.runId,
+          channel: input.channel,
+          acceptedAt,
+          status: "running"
+        }),
+        {
+          threadId: input.threadId,
+          operation: "claimTurnDelivery",
+          field: "message.runConfig",
+          channel: input.channel,
+          runId: input.runId
+        }
+      );
       await tx.message.update({
         where: { id: userMessage.id },
         data: {
-          runConfig: withStoredTurnDelivery(userMessage.runConfig, {
-            runId: input.runId,
-            channel: input.channel,
-            acceptedAt,
-            status: "running"
-          }),
+          runConfig,
           updatedAt: new Date()
         }
       });
@@ -681,11 +769,19 @@ export class ThreadRepository {
 
   async finalizeTurnDelivery(input: ConversationTurnDeliveryFinalize): Promise<ConversationTurnDeliveryResult> {
     return this.db.$transaction(async (tx) => {
-      const normalizedAssistant = {
-        ...input.assistant,
-        parentId: input.userMessageId,
-        message: normalizeAssistantMessageContentOrder(input.assistant.message)
-      };
+      const normalizedAssistant = sanitizeStoredMessageItem(
+        {
+          ...input.assistant,
+          parentId: input.userMessageId,
+          message: normalizeAssistantMessageContentOrder(input.assistant.message)
+        },
+        {
+          threadId: input.threadId,
+          operation: "finalizeTurnDelivery",
+          channel: input.channel,
+          runId: input.runId
+        }
+      );
       const assistantMessageId = messageIdOf(normalizedAssistant.message);
       if (!assistantMessageId) throw new Error("Turn delivery assistant requires a message id");
 
@@ -729,7 +825,16 @@ export class ThreadRepository {
         assistantMessageId,
         completedAt: new Date().toISOString()
       };
-      const assistantRunConfig = withStoredTurnDelivery(normalizedAssistant.runConfig, delivery);
+      const assistantRunConfig = sanitizeConversationJson(
+        withStoredTurnDelivery(normalizedAssistant.runConfig, delivery),
+        {
+          threadId: input.threadId,
+          operation: "finalizeTurnDelivery",
+          field: "message.runConfig",
+          channel: input.channel,
+          runId: input.runId
+        }
+      );
       const existingAssistant = messages.find((message) => {
         if (message.parentId !== input.userMessageId || normalizeMessageRole(message.content) !== "assistant") return false;
         const existingDelivery = storedTurnDelivery(message.runConfig);
@@ -766,10 +871,17 @@ export class ThreadRepository {
         });
       }
 
+      const userRunConfig = sanitizeConversationJson(withStoredTurnDelivery(userMessage.runConfig, delivery), {
+        threadId: input.threadId,
+        operation: "finalizeTurnDelivery",
+        field: "message.runConfig",
+        channel: input.channel,
+        runId: input.runId
+      });
       await tx.message.update({
         where: { id: userMessage.id },
         data: {
-          runConfig: withStoredTurnDelivery(userMessage.runConfig, delivery),
+          runConfig: userRunConfig,
           updatedAt: new Date()
         }
       });
@@ -798,10 +910,16 @@ export class ThreadRepository {
 
   async appendMessage(threadId: string, item: StoredMessageItem): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
-      const normalizedItem = {
-        ...item,
-        message: normalizeAssistantMessageContentOrder(item.message)
-      };
+      const normalizedItem = sanitizeStoredMessageItem(
+        {
+          ...item,
+          message: normalizeAssistantMessageContentOrder(item.message)
+        },
+        {
+          threadId,
+          operation: "appendMessage"
+        }
+      );
       await lockThreadMessages(tx, threadId);
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
@@ -888,10 +1006,18 @@ export class ThreadRepository {
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
       if (!thread) throw new Error("Thread does not exist");
 
-      const normalizedMessages = repository.messages.map((item) => ({
-        ...item,
-        message: normalizeAssistantMessageContentOrder(item.message)
-      }));
+      const normalizedMessages = repository.messages.map((item) =>
+        sanitizeStoredMessageItem(
+          {
+            ...item,
+            message: normalizeAssistantMessageContentOrder(item.message)
+          },
+          {
+            threadId,
+            operation: "replaceMessages"
+          }
+        )
+      );
       assertMessageGraphForPersistence(normalizedMessages);
       await tx.message.deleteMany({ where: { threadId } });
       const externalIds = persistedExternalIds(normalizedMessages);
@@ -964,15 +1090,20 @@ export class ThreadRepository {
     };
     const nextFeedback = currentFeedback.filter((item) => !matchesFeedbackTarget(item, payload));
 
+    const sanitizedFeedback = sanitizeConversationJson([...nextFeedback, feedback], {
+      threadId,
+      operation: "addFeedback",
+      field: "thread.feedback"
+    });
     await this.db.thread.update({
       where: { id: threadId },
       data: {
-        feedback: [...nextFeedback, feedback],
+        feedback: sanitizedFeedback,
         updatedAt: new Date()
       }
     });
 
-    return feedback;
+    return sanitizedFeedback[sanitizedFeedback.length - 1] ?? feedback;
   }
 
   private async requireThread(threadId: string, db: ThreadRepositoryDb = this.db): Promise<ThreadRecord> {
