@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { AuthEmailSender } from "../auth/email.js";
+import type { AdminEmailNotificationInput } from "../notifications/admin-email-notification-service.js";
 import type {
   AccessRequestAttachmentRecord,
   AccessRequestAttachmentRepository
@@ -240,6 +241,9 @@ type AccessRequestServiceOptions = {
   subscriptionGrants: SubscriptionGrantRepository;
   policies?: AccessRequestPolicyRepository;
   emailSender: AuthEmailSender;
+  adminNotifier: {
+    notify(input: AdminEmailNotificationInput): Promise<unknown>;
+  };
   appBaseUrl?: string;
   publicBrands?: Pick<PublicBrandService, "getById">;
   accessRequestConfig: {
@@ -816,30 +820,23 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     return new Map(users.map((user) => [user.id, user] as const));
   }
 
-  async function listAdminNotificationRecipients(request: AccessRequestRecord): Promise<string[]> {
-    const [internalUsers, policy] = await Promise.all([options.findInternalUsers(), loadPolicy()]);
-    const adminEmails = internalUsers
-      .filter((user) => user.role === "admin" || user.role === "super_admin")
-      .map((user) => user.email);
-    const ownerEmail = request.ownerUserId ? internalUsers.find((user) => user.id === request.ownerUserId)?.email : undefined;
-    const salesContactEmail = optionalInternalEmail(request.salesContactEmail, policy.internalEmailDomains);
-    return dedupeStrings([...adminEmails, ownerEmail, salesContactEmail]);
-  }
-
   async function notifyAdmins(
     request: AccessRequestRecord,
-    subject: string,
-    text: string,
-    debugLabel: string
+    event: AdminEmailNotificationInput["event"],
+    variables: AdminEmailNotificationInput["variables"],
+    dedupeKey?: string
   ): Promise<void> {
-    const recipients = await listAdminNotificationRecipients(request);
-    if (!recipients.length) return;
-    await options.emailSender.send({
-      to: recipients,
-      ...await requestEmailEnvelope(request),
-      subject,
-      text,
-      debugLabel
+    const [internalUsers, policy] = await Promise.all([options.findInternalUsers(), loadPolicy()]);
+    const ownerEmail = request.ownerUserId ? internalUsers.find((user) => user.id === request.ownerUserId)?.email : undefined;
+    await options.adminNotifier.notify({
+      event,
+      accessRequestId: request.id,
+      organizationId: request.targetOrganizationId,
+      ownerEmail,
+      salesContactEmail: optionalInternalEmail(request.salesContactEmail, policy.internalEmailDomains),
+      variables,
+      envelope: await requestEmailEnvelope(request),
+      dedupeKey: dedupeKey ?? request.updatedAt
     });
   }
 
@@ -1111,18 +1108,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
 
       await notifyAdmins(
         request,
-        `New access request: ${companyName}`,
-        [
-          `${companyName} submitted a new access request.`,
-          `Applicant: ${applicantEmail}`,
-          `SN: ${snNumber}`,
-          `Sales contact: ${salesContact}`,
-          poNumber ? `PO: ${poNumber}` : undefined,
-          publicLink ? `Public view: ${publicLink}` : undefined
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        "access-request-admin-submitted"
+        "access_request.submitted",
+        {
+          company_name: companyName,
+          applicant_email: applicantEmail,
+          sn_number: snNumber,
+          sales_contact_email: salesContact,
+          po_line: poNumber ? `PO: ${poNumber}` : "",
+          public_link_line: publicLink ? `Public view: ${publicLink}` : ""
+        }
       );
 
       return {
@@ -1217,14 +1211,13 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       await notifyAdmins(
         updated,
-        `Access request updated: ${updated.companyName}`,
-        [
-          `${updated.companyName} resubmitted the access request.`,
-          `Applicant: ${updated.applicantEmail}`,
-          `SN: ${updated.snNumber ?? "—"}`,
-          `Sales contact: ${updated.salesContactEmail}`
-        ].join("\n"),
-        "access-request-admin-resubmitted"
+        "access_request.resubmitted",
+        {
+          company_name: updated.companyName,
+          applicant_email: updated.applicantEmail,
+          sn_number: updated.snNumber ?? "—",
+          sales_contact_email: updated.salesContactEmail
+        }
       );
       const targetOrganization = updated.targetOrganizationId
         ? (await options.organizations.getById(updated.targetOrganizationId)) ?? null
@@ -1450,15 +1443,12 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       await notifyAdmins(
         updated,
-        `Review requested: ${updated.companyName}`,
-        [
-          `Review request sent for ${updated.companyName}.`,
-          `To: ${recipients.to.join(", ")}`,
-          recipients.cc.length ? `Cc: ${recipients.cc.join(", ")}` : undefined
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        "access-request-admin-review-requested"
+        "access_request.review_requested",
+        {
+          company_name: updated.companyName,
+          review_to: recipients.to.join(", "),
+          review_cc_line: recipients.cc.length ? `Cc: ${recipients.cc.join(", ")}` : ""
+        }
       );
       return buildAdminDetail(updated);
     },
@@ -1491,9 +1481,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       await addEvent(updated.id, "needs_info", actor, "More information requested", message);
       await notifyAdmins(
         updated,
-        `Needs info: ${updated.companyName}`,
-        [`More information was requested for ${updated.companyName}.`, message].join("\n"),
-        "access-request-admin-needs-info"
+        "access_request.needs_info",
+        { company_name: updated.companyName, message }
       );
       return buildAdminDetail(updated);
     },
@@ -1519,9 +1508,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       await addEvent(updated.id, "rejected", actor, "Request rejected", reason);
       await notifyAdmins(
         updated,
-        `Rejected: ${updated.companyName}`,
-        [`${updated.companyName} was rejected.`, reason].join("\n"),
-        "access-request-admin-rejected"
+        "access_request.rejected",
+        { company_name: updated.companyName, rejection_reason: reason }
       );
       return buildAdminDetail(updated);
     },
@@ -1596,15 +1584,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       await notifyAdmins(
         nextRequest,
-        `Review updated: ${nextRequest.companyName}`,
-        [
-          `${currentUser.displayName ?? currentUser.email ?? currentUser.id} marked the request as ${updatedReviewer.decision}.`,
-          updatedReviewer.comment ?? undefined,
-          `Current status: ${nextRequest.status}`
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        "access-request-admin-review-decision"
+        "access_request.review_decision",
+        {
+          company_name: nextRequest.companyName,
+          reviewer_name: currentUser.displayName ?? currentUser.email ?? currentUser.id,
+          reviewer_decision: updatedReviewer.decision,
+          reviewer_comment: updatedReviewer.comment,
+          current_status: nextRequest.status
+        },
+        `${nextRequest.updatedAt}:${updatedReviewer.id}`
       );
       return {
         reviewer: updatedReviewer,
@@ -1725,9 +1713,12 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       await notifyAdmins(
         updated,
-        `Provisioned: ${updated.companyName}`,
-        [`${updated.companyName} was provisioned for ${organization.name}.`, `Package: ${plan.name}`].join("\n"),
-        "access-request-admin-provisioned"
+        "access_request.provisioned",
+        {
+          company_name: updated.companyName,
+          organization_name: organization.name,
+          plan_name: plan.name
+        }
       );
       return buildAdminDetail(updated);
     },
@@ -1756,9 +1747,11 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       await notifyAdmins(
         updated,
-        `Activated: ${updated.companyName}`,
-        `${updated.applicantEmail} completed activation.`,
-        "access-request-admin-activated"
+        "access_request.activated",
+        {
+          company_name: updated.companyName,
+          applicant_email: updated.applicantEmail
+        }
       );
     }
   };

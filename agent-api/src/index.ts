@@ -398,6 +398,7 @@ import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-kn
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
+import { AdminEmailNotificationService } from "./notifications/admin-email-notification-service.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
 import {
   resolveBrandPublicBranding,
@@ -913,6 +914,31 @@ const authEmailSender = createBrandAwareEmailSender(
   defaultAuthEmailSender,
   (publicBrandId) => publicBrandEmailTransports.resolveDedicatedTransport(publicBrandId)
 );
+async function findActiveInternalUsersForNotifications() {
+  const rows = await db.user.findMany({
+    where: {
+      status: "active",
+      userType: "internal_employee",
+      email: { not: null }
+    },
+    orderBy: [{ role: "asc" }, { createdAt: "asc" }]
+  });
+  return rows
+    .filter((row) => row.email)
+    .map((row) => ({
+      id: row.id,
+      email: String(row.email).trim().toLowerCase(),
+      displayName: typeof row.displayName === "string" ? row.displayName.trim() || undefined : undefined,
+      role: typeof row.role === "string" ? row.role : "employee",
+      userType: typeof row.userType === "string" ? row.userType : "internal_employee"
+    }));
+}
+const adminEmailNotifications = new AdminEmailNotificationService({
+  settings: systemSettings,
+  notifications: notificationRecords,
+  emailSender: authEmailSender,
+  findInternalUsers: findActiveInternalUsersForNotifications
+});
 const billingService = new BillingService({
   db,
   config: appConfig.billing,
@@ -986,28 +1012,11 @@ const accessRequestService = createAccessRequestService({
   subscriptionGrants,
   policies: accessRequestPolicies,
   emailSender: authEmailSender,
+  adminNotifier: adminEmailNotifications,
   appBaseUrl: appConfig.appBaseUrl,
   accessRequestConfig: appConfig.accessRequests,
   publicBrands,
-  findInternalUsers: async () => {
-    const rows = await db.user.findMany({
-      where: {
-        status: "active",
-        userType: "internal_employee",
-        email: { not: null }
-      },
-      orderBy: [{ role: "asc" }, { createdAt: "asc" }]
-    });
-    return rows
-      .filter((row) => row.email)
-      .map((row) => ({
-        id: row.id,
-        email: String(row.email).trim().toLowerCase(),
-        displayName: typeof row.displayName === "string" ? row.displayName.trim() || undefined : undefined,
-        role: typeof row.role === "string" ? row.role : "employee",
-        userType: typeof row.userType === "string" ? row.userType : "internal_employee"
-      }));
-  }
+  findInternalUsers: findActiveInternalUsersForNotifications
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 publicBrands.setProjectionService(new PublicBrandKnowledgeProjectionService(db, knowledgeSetStorage));

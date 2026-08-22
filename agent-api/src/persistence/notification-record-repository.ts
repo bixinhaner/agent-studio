@@ -38,6 +38,7 @@ export type ListNotificationRecordsInput = {
   eventType?: string;
   status?: NotificationStatus;
   take?: number;
+  order?: "asc" | "desc";
 };
 
 type NotificationRecordRow = {
@@ -153,7 +154,7 @@ export class NotificationRecordRepository {
         ...(trimOrUndefined(input.eventType) ? { eventType: trimOrUndefined(input.eventType) } : {}),
         ...(input.status ? { status: input.status } : {})
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: input.order ?? "asc" },
       take: input.take
     });
     return rows.map(mapNotificationRecord);

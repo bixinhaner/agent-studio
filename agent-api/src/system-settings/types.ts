@@ -315,6 +315,44 @@ export const systemSettingsBehaviorSchema = z.object({
   })
 });
 
+export const ADMIN_EMAIL_NOTIFICATION_EVENT_KEYS = [
+  "access_request.submitted",
+  "access_request.resubmitted",
+  "access_request.review_requested",
+  "access_request.needs_info",
+  "access_request.rejected",
+  "access_request.review_decision",
+  "access_request.provisioned",
+  "access_request.activated"
+] as const;
+
+export const adminEmailNotificationEventKeySchema = z.enum(ADMIN_EMAIL_NOTIFICATION_EVENT_KEYS);
+
+const systemSettingsAdminEmailNotificationEventSchema = z
+  .object({
+    enabled: z.boolean(),
+    subject: z.string().trim().min(1).max(240),
+    bodyText: z.string().trim().min(1).max(12000)
+  })
+  .strict();
+
+export const systemSettingsAdminEmailNotificationsSchema = z
+  .object({
+    enabled: z.boolean(),
+    recipientMode: z.enum(["all_admins", "all_super_admins", "specified_users"]),
+    recipientEmails: z.array(z.string().trim().email().transform((value) => value.toLowerCase())).max(100),
+    includeOwner: z.boolean(),
+    includeSalesContact: z.boolean(),
+    recordDelivery: z.boolean(),
+    maxAttempts: z.number().int().min(1).max(3),
+    events: z.record(adminEmailNotificationEventKeySchema, systemSettingsAdminEmailNotificationEventSchema)
+  })
+  .strict()
+  .refine((value) => value.recipientMode !== "specified_users" || value.recipientEmails.length > 0, {
+    message: "at least one recipient is required when recipientMode is specified_users",
+    path: ["recipientEmails"]
+  });
+
 export const systemSettingsPayloadSchema = z
   .object({
     branding: systemSettingsBrandingSchema,
@@ -328,6 +366,7 @@ export const systemSettingsPayloadSchema = z
     codexMemory: systemSettingsCodexMemorySchema,
     enterpriseContext: systemSettingsEnterpriseContextSchema,
     pythonRuntime: systemSettingsPythonRuntimeSchema,
+    adminEmailNotifications: systemSettingsAdminEmailNotificationsSchema,
     behavior: systemSettingsBehaviorSchema
   })
   .strict();
@@ -358,6 +397,12 @@ export const systemSettingsEnterpriseContextPatchSchema = systemSettingsEnterpri
   })
   .partial();
 export const systemSettingsPythonRuntimePatchSchema = systemSettingsPythonRuntimeSchema.partial();
+export const systemSettingsAdminEmailNotificationsPatchSchema = systemSettingsAdminEmailNotificationsSchema
+  .innerType()
+  .extend({
+    events: z.record(adminEmailNotificationEventKeySchema, systemSettingsAdminEmailNotificationEventSchema.partial()).optional()
+  })
+  .partial();
 export const systemSettingsBehaviorPatchSchema = systemSettingsBehaviorSchema.partial();
 
 export const systemSettingsPayloadPatchSchema = z
@@ -373,6 +418,7 @@ export const systemSettingsPayloadPatchSchema = z
     codexMemory: systemSettingsCodexMemoryPatchSchema.optional(),
     enterpriseContext: systemSettingsEnterpriseContextPatchSchema.optional(),
     pythonRuntime: systemSettingsPythonRuntimePatchSchema.optional(),
+    adminEmailNotifications: systemSettingsAdminEmailNotificationsPatchSchema.optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
   })
   .strict();
@@ -391,6 +437,8 @@ export type SystemSettingsEnterpriseContext = z.infer<typeof systemSettingsEnter
 export type SystemSettingsEnterpriseContextChannels = z.infer<typeof systemSettingsEnterpriseContextChannelsSchema>;
 export type SystemSettingsEnterpriseContextFields = z.infer<typeof systemSettingsEnterpriseContextFieldsSchema>;
 export type SystemSettingsPythonRuntime = z.infer<typeof systemSettingsPythonRuntimeSchema>;
+export type AdminEmailNotificationEventKey = z.infer<typeof adminEmailNotificationEventKeySchema>;
+export type SystemSettingsAdminEmailNotifications = z.infer<typeof systemSettingsAdminEmailNotificationsSchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
@@ -593,6 +641,57 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     preferSharedPackages: true,
     sessionTmpEnabled: true,
     cleanupSessionArtifactsOlderThanDays: 14
+  },
+  adminEmailNotifications: {
+    enabled: true,
+    recipientMode: "all_admins",
+    recipientEmails: [],
+    includeOwner: true,
+    includeSalesContact: true,
+    recordDelivery: true,
+    maxAttempts: 2,
+    events: {
+      "access_request.submitted": {
+        enabled: true,
+        subject: "New access request: {{company_name}}",
+        bodyText: "{{company_name}} submitted a new access request.\nApplicant: {{applicant_email}}\nSN: {{sn_number}}\nSales contact: {{sales_contact_email}}\n{{po_line}}\n{{public_link_line}}"
+      },
+      "access_request.resubmitted": {
+        enabled: true,
+        subject: "Access request updated: {{company_name}}",
+        bodyText: "{{company_name}} resubmitted the access request.\nApplicant: {{applicant_email}}\nSN: {{sn_number}}\nSales contact: {{sales_contact_email}}"
+      },
+      "access_request.review_requested": {
+        enabled: true,
+        subject: "Review requested: {{company_name}}",
+        bodyText: "Review request sent for {{company_name}}.\nTo: {{review_to}}\n{{review_cc_line}}"
+      },
+      "access_request.needs_info": {
+        enabled: true,
+        subject: "Needs info: {{company_name}}",
+        bodyText: "More information was requested for {{company_name}}.\n{{message}}"
+      },
+      "access_request.rejected": {
+        enabled: true,
+        subject: "Rejected: {{company_name}}",
+        bodyText: "{{company_name}} was rejected.\n{{rejection_reason}}"
+      },
+      "access_request.review_decision": {
+        enabled: true,
+        subject: "Review updated: {{company_name}}",
+        bodyText: "{{reviewer_name}} marked the request as {{reviewer_decision}}.\n{{reviewer_comment}}\nCurrent status: {{current_status}}"
+      },
+      "access_request.provisioned": {
+        enabled: true,
+        subject: "Provisioned: {{company_name}}",
+        bodyText: "{{company_name}} was provisioned for {{organization_name}}.\nPackage: {{plan_name}}"
+      },
+      "access_request.activated": {
+        enabled: true,
+        subject: "Activated: {{company_name}}",
+        bodyText: "{{applicant_email}} completed activation."
+      }
+    }
   },
   behavior: {
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",

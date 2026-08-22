@@ -30,6 +30,7 @@ import type { SecurityDomainService } from "../security-domains/service.js";
 import type { SecurityDomainAccessControl } from "../security-domains/access-control.js";
 import type { SystemSettingsConversationSecurityReview } from "../system-settings/types.js";
 import type { ProductFeedbackReplyService } from "../operations/product-feedback-reply-service.js";
+import { NotificationRecordRepository } from "../persistence/notification-record-repository.js";
 
 type AdminDb =
   UserRepositoryDb &
@@ -787,6 +788,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
               db as never,
               new AdminAuditLogRepository(db as never)
             ),
+            notificationRecords: new NotificationRecordRepository(db as never),
             conversationSecurityReviewTest: options.conversationSecurityReviewTest
           });
         }

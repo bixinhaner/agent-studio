@@ -9,12 +9,14 @@ import {
 } from "./types.js";
 import type { SystemSettingsState, SystemSettingsService } from "./service.js";
 import type { ExternalWebAccessService } from "../external-web-access.js";
+import type { NotificationRecordRepository } from "../persistence/notification-record-repository.js";
 
 type SystemSettingsRouterOptions = {
   service: Pick<SystemSettingsService, "read" | "updateDraft" | "publish">;
   requirePermission(permissionKey: string): RequestHandler;
   assetStorage?: Pick<BrandingAssetStorage, "save">;
   externalWebAccess?: Pick<ExternalWebAccessService, "getState" | "setMaintenanceEnabled">;
+  notificationRecords?: Pick<NotificationRecordRepository, "list">;
   conversationSecurityReviewTest?: (input: {
     settings: z.infer<typeof systemSettingsConversationSecurityReviewSchema>;
     question: string;
@@ -124,6 +126,37 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
     try {
       sendState(res, await options.service.read());
     } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/admin-email-notifications/records", requireRead, async (req: Request, res: Response) => {
+    if (!options.notificationRecords) {
+      res.json({ records: [] });
+      return;
+    }
+    try {
+      const query = z.object({
+        status: z.enum(["pending", "sent", "failed"]).optional(),
+        take: z.coerce.number().int().min(1).max(250).default(100)
+      }).parse(req.query);
+      const records = await options.notificationRecords.list({
+        channelType: "email",
+        status: query.status,
+        take: 250,
+        order: "desc"
+      });
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        records: records
+          .filter((record) => record.eventType.startsWith("access_request."))
+          .slice(0, query.take)
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        sendValidationError(res, error);
+        return;
+      }
       res.status(500).json({ detail: detailFromError(error) });
     }
   });

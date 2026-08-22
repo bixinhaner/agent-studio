@@ -4055,6 +4055,225 @@ body.access-request-route #root {
   border-top: 1px solid #e2e8f0;
 }
 
+.admin-notification-settings {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-notification-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-notification-summary-grid > div,
+.admin-notification-panel {
+  border: 1px solid var(--admin-border-color, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.admin-notification-summary-grid > div {
+  display: grid;
+  min-height: 98px;
+  align-content: center;
+  gap: 3px;
+  padding: 16px 18px;
+}
+
+.admin-notification-summary-grid span,
+.admin-notification-summary-grid small {
+  color: var(--admin-color-subtle, #667085);
+  font-size: 12px;
+}
+
+.admin-notification-summary-grid strong {
+  overflow-wrap: anywhere;
+  color: var(--admin-color-text, #101828);
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.admin-notification-summary-grid strong.danger {
+  color: #d92d20;
+}
+
+.admin-notification-tabs .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
+.admin-notification-policy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin-notification-panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.admin-notification-event-panel {
+  overflow: hidden;
+}
+
+.admin-notification-event-panel .ant-table-wrapper,
+.admin-notification-panel .ant-table-wrapper {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.admin-notification-panel-heading,
+.admin-notification-panel-heading > div {
+  display: flex;
+  align-items: flex-start;
+}
+
+.admin-notification-panel-heading {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-notification-panel-heading > div {
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-notification-panel-heading h3,
+.admin-notification-panel-heading p {
+  margin: 0;
+}
+
+.admin-notification-panel-heading h3 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.admin-notification-panel-heading p {
+  margin-top: 2px;
+  color: var(--admin-color-subtle, #667085);
+  font-size: 12px;
+}
+
+.admin-notification-panel-heading.compact {
+  margin-bottom: 14px;
+}
+
+.admin-notification-event-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-notification-event-cell span {
+  color: var(--admin-color-subtle, #667085);
+  font-size: 12px;
+}
+
+.admin-notification-side-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin-notification-field,
+.admin-notification-template-editor label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  color: var(--admin-color-text, #101828);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-notification-field.inline {
+  grid-template-columns: minmax(0, 1fr) 92px;
+  align-items: center;
+  margin: 12px 0 0;
+}
+
+.admin-notification-field.inline .ant-input-number {
+  width: 100%;
+}
+
+.admin-notification-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid #eef1f5;
+}
+
+.admin-notification-switch-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-notification-switch-row span {
+  color: var(--admin-color-subtle, #667085);
+  font-size: 12px;
+}
+
+.admin-notification-template-editor {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-notification-variable-help {
+  padding: 14px;
+  border: 1px solid #d7e3f6;
+  border-radius: 8px;
+  background: #f7faff;
+}
+
+.admin-notification-variable-help .ant-typography {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .admin-notification-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-notification-policy-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-notification-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-notification-panel-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-notification-panel {
+    padding: 14px;
+  }
+
+  .admin-notification-event-panel .ant-table-cell:nth-child(3) {
+    display: none;
+  }
+
+  .admin-notification-event-panel col:nth-child(3) {
+    display: none;
+  }
+
+  .admin-notification-event-panel .ant-table-cell:nth-child(2),
+  .admin-notification-event-panel .ant-table-cell:nth-child(4) {
+    width: 68px !important;
+    min-width: 68px;
+  }
+}
+
 .branding-preview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin, Switch } from "antd";
-import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge, ScanSearch } from "lucide-react";
+import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge, ScanSearch, BellRing } from "lucide-react";
 
 import { useBranding } from "../branding/BrandingProvider";
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
@@ -13,6 +13,7 @@ import { RetentionUploadView } from "./RetentionUploadView";
 import { SafetySettingsView } from "./SafetySettingsView";
 import { ConversationSecurityReviewSettingsView } from "./ConversationSecurityReviewSettingsView";
 import { UsageGovernanceSettingsView } from "./UsageGovernanceSettingsView";
+import { AdminEmailNotificationSettingsView } from "./AdminEmailNotificationSettingsView";
 import type {
   SystemSettingsFieldErrors,
   SystemSettingsPayload,
@@ -31,6 +32,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; gro
   { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
   { id: "conversation-security-review", label: "对话安全审查", icon: ScanSearch, group: 'Security & Data' },
   { id: "usage-governance", label: "用量治理", icon: Gauge, group: 'Operations' },
+  { id: "admin-email-notifications", label: "通知策略", icon: BellRing, group: 'Operations' },
   { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
 ];
 
@@ -72,6 +74,13 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
       agentOverrides: payload.enterpriseContext.agentOverrides.map((item) => ({ ...item }))
     },
     pythonRuntime: { ...payload.pythonRuntime },
+    adminEmailNotifications: {
+      ...payload.adminEmailNotifications,
+      recipientEmails: [...payload.adminEmailNotifications.recipientEmails],
+      events: Object.fromEntries(
+        Object.entries(payload.adminEmailNotifications.events).map(([key, event]) => [key, { ...event }])
+      ) as SystemSettingsPayload["adminEmailNotifications"]["events"]
+    },
     behavior: {
       ...payload.behavior,
       portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item })),
@@ -252,6 +261,19 @@ export function SystemSettingsShell() {
     updateDraft(c => ({ ...c, payload: { ...c.payload, organizationDefaults: { ...c.payload.organizationDefaults, ...patch } } }), fieldPaths("organizationDefaults", patch));
   }
 
+  function updateDraftAdminEmailNotifications(patch: Partial<SystemSettingsPayload["adminEmailNotifications"]>) {
+    updateDraft(
+      c => ({
+        ...c,
+        payload: {
+          ...c.payload,
+          adminEmailNotifications: { ...c.payload.adminEmailNotifications, ...patch }
+        }
+      }),
+      fieldPaths("adminEmailNotifications", patch)
+    );
+  }
+
   function updateDraftBehavior(patch: Partial<SystemSettingsPayload["behavior"]>) {
     updateDraft(c => ({ ...c, payload: { ...c.payload, behavior: { ...c.payload.behavior, ...patch } } }), fieldPaths("behavior", patch));
   }
@@ -351,6 +373,7 @@ export function SystemSettingsShell() {
       publishedPayload?.conversationSecurityReview
     ),
     isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults),
+    isPayloadSectionChanged(draftPayload.adminEmailNotifications, publishedPayload?.adminEmailNotifications),
     isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior)
   ].filter(Boolean).length;
 
@@ -475,6 +498,13 @@ export function SystemSettingsShell() {
             <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />
           )}
           {section === "usage-governance" && <UsageGovernanceSettingsView />}
+          {section === "admin-email-notifications" && (
+            <AdminEmailNotificationSettingsView
+              value={draftPayload.adminEmailNotifications}
+              disabled={saving || publishing}
+              onChange={updateDraftAdminEmailNotifications}
+            />
+          )}
           {section === "publish-history" && (
             <PublishHistoryView draftMeta={draftMeta} publishedMeta={publishedMeta} />
           )}

@@ -26,8 +26,37 @@ export type ExternalWebAccessState = {
   updatedByUserId: string | null;
 };
 
+export type AdminEmailNotificationRecord = {
+  id: string;
+  channelType: "email";
+  targetRef: string;
+  eventType: string;
+  status: "pending" | "sent" | "failed";
+  payload?: {
+    recipients?: string[];
+    subject?: string;
+    attempts?: number;
+    maxAttempts?: number;
+    delivery?: { delivered?: boolean; mode?: string };
+  };
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export async function fetchSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings");
+}
+
+export async function fetchAdminEmailNotificationRecords(input?: {
+  status?: "pending" | "sent" | "failed";
+  take?: number;
+}): Promise<{ records: AdminEmailNotificationRecord[] }> {
+  const params = new URLSearchParams();
+  if (input?.status) params.set("status", input.status);
+  if (input?.take) params.set("take", String(input.take));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return api(`/api/admin/system-settings/admin-email-notifications/records${suffix}`);
 }
 
 export async function saveSystemSettingsDraft(payload: SystemSettingsPayload): Promise<SystemSettingsResponse> {

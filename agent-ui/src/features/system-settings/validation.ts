@@ -51,6 +51,7 @@ export function sectionForFieldPath(path: string): SystemSettingsSection {
   if (path.startsWith("safety.")) return "safety";
   if (path.startsWith("conversationSecurityReview.")) return "conversation-security-review";
   if (path.startsWith("organizationDefaults.")) return "organization-defaults";
+  if (path.startsWith("adminEmailNotifications.")) return "admin-email-notifications";
   return "publish-history";
 }
 

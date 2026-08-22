@@ -98,6 +98,7 @@ function createServiceHarness() {
   const reviewers = new Map<string, AccessRequestReviewerRecord[]>();
   const attachments = new Map<string, AccessRequestAttachmentRecord[]>();
   const emailSender = { send: vi.fn(async () => ({ delivered: true, mode: "smtp" as const })) };
+  const adminNotifier = { notify: vi.fn(async () => null) };
   let policy = {
     id: "policy_1",
     policyKey: "global",
@@ -308,6 +309,7 @@ function createServiceHarness() {
       })
     } as never,
     emailSender,
+    adminNotifier,
     appBaseUrl: "https://example.com",
     accessRequestConfig: {
       internalEmailDomains: ["baicells.com"],
@@ -332,7 +334,7 @@ function createServiceHarness() {
     ])
   });
 
-  return { service, requests, reviewers, attachments, emailSender };
+  return { service, requests, reviewers, attachments, emailSender, adminNotifier };
 }
 
 function randomId(): string {

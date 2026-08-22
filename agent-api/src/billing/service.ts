@@ -2682,7 +2682,7 @@ export class BillingService {
     }
     if (audience.organizationAdmins) {
       const memberships = await this.db.organizationMembership.findMany({
-        where: { organizationId, status: "active" },
+        where: { organizationId, status: "active", membershipType: "customer_admin" },
         include: { user: true },
         take: 20
       });

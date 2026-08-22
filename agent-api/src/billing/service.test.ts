@@ -218,6 +218,40 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
   return { db: db as unknown as PrismaClient, raw: db };
 }
 
+describe("BillingService notification audiences", () => {
+  it("only resolves active customer admins for organization-admin reminders", async () => {
+    const { db, raw } = createDbMock();
+    raw.organizationMembership.findMany.mockResolvedValueOnce([
+      { user: { email: "admin@example.com" } }
+    ]);
+    const service = new BillingService({ db, config: createBillingConfig() });
+    const resolveRecipients = (
+      service as unknown as {
+        resolveReminderRecipients(
+          organizationId: string,
+          customer: Record<string, unknown> | null,
+          audience: Record<string, unknown>
+        ): Promise<string[]>;
+      }
+    ).resolveReminderRecipients.bind(service);
+
+    await expect(resolveRecipients("org-1", null, {
+      billingContacts: false,
+      salesContact: false,
+      organizationAdmins: true
+    })).resolves.toEqual(["admin@example.com"]);
+    expect(raw.organizationMembership.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        status: "active",
+        membershipType: "customer_admin"
+      },
+      include: { user: true },
+      take: 20
+    });
+  });
+});
+
 describe("BillingService Stripe admin settings", () => {
   it("uses environment billing config until admin settings are saved", async () => {
     const { db } = createDbMock();

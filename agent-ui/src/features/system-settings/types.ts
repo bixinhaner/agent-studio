@@ -5,6 +5,7 @@ export type SystemSettingsSection =
   | "artifact-access"
   | "safety"
   | "conversation-security-review"
+  | "admin-email-notifications"
   | "organization-defaults"
   | "usage-governance"
   | "publish-history";
@@ -189,6 +190,31 @@ export type SystemSettingsPythonRuntime = {
   cleanupSessionArtifactsOlderThanDays: number;
 };
 
+export type AdminEmailNotificationEventKey =
+  | "access_request.submitted"
+  | "access_request.resubmitted"
+  | "access_request.review_requested"
+  | "access_request.needs_info"
+  | "access_request.rejected"
+  | "access_request.review_decision"
+  | "access_request.provisioned"
+  | "access_request.activated";
+
+export type SystemSettingsAdminEmailNotifications = {
+  enabled: boolean;
+  recipientMode: "all_admins" | "all_super_admins" | "specified_users";
+  recipientEmails: string[];
+  includeOwner: boolean;
+  includeSalesContact: boolean;
+  recordDelivery: boolean;
+  maxAttempts: number;
+  events: Record<AdminEmailNotificationEventKey, {
+    enabled: boolean;
+    subject: string;
+    bodyText: string;
+  }>;
+};
+
 export type SystemSettingsBehavior = {
   markdown: string;
   portalWelcomeMessageDesktop: string;
@@ -230,6 +256,7 @@ export type SystemSettingsPayload = {
   codexMemory: SystemSettingsCodexMemory;
   enterpriseContext: SystemSettingsEnterpriseContext;
   pythonRuntime: SystemSettingsPythonRuntime;
+  adminEmailNotifications: SystemSettingsAdminEmailNotifications;
   behavior: SystemSettingsBehavior;
 };
 
