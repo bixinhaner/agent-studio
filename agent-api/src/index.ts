@@ -59,7 +59,11 @@ import {
   ARTIFACT_PUBLICATION_HINT,
   collectPublishedArtifactChanges
 } from "./artifacts/artifact-publication.js";
-import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
+import {
+  NativeCodexSkillService,
+  type CodexHomeCapabilityReconciliation,
+  type MaterializedCodexSkillInput
+} from "./codex-skills/native-codex-skill-service.js";
 import { InstalledPluginService } from "./codex-plugins/installed-plugin-service.js";
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
@@ -2297,15 +2301,21 @@ async function restoreLiveRuntimeThread(
             codexRunConfig: sourceCodexRunConfig
           })
         );
-    const automaticPluginReconciliation = await time(
-      "restore_runtime.reconcile_automatic_plugins",
-      () => nativeCodexSkills.reconcileSharedPluginCaches(materializedCodexHome.codexHome)
+    const capabilityReconciliation = await time(
+      "restore_runtime.reconcile_capabilities",
+      () => reconcileRuntimeHomeCapabilities({
+        codexHome: materializedCodexHome.codexHome,
+        codexRunConfig: materializedCodexHome.codexRunConfig,
+        userId: session.userId
+      })
     );
-    if (automaticPluginReconciliation.changed) {
-      console.info("automatic plugin caches reconciled", {
+    if (capabilityReconciliation.changed) {
+      console.info("runtime capabilities reconciled", {
         sessionId: session.sessionId,
-        expectedPluginCount: automaticPluginReconciliation.expectedPlugins.length,
-        mountedPluginCount: automaticPluginReconciliation.mountedPlugins.length
+        expectedSkillCount: capabilityReconciliation.expectedSkills.length,
+        mountedSkillCount: capabilityReconciliation.mountedSkills.length,
+        expectedPluginCount: capabilityReconciliation.expectedPlugins.length,
+        mountedPluginCount: capabilityReconciliation.mountedPlugins.length
       });
     }
     if (existingCodexHome) {
@@ -2338,13 +2348,11 @@ async function restoreLiveRuntimeThread(
         model: session.model,
         reasoningEffort: session.reasoningEffort,
         workspace: session.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
-      })
-    );
-    await time("restore_runtime.refresh_skills", () =>
-      sessionRuntime.refreshSkills(liveThread, {
-        cwds: [session.workspace],
-        fingerprint: automaticPluginReconciliation.fingerprint
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
+        skillRefresh: {
+          cwds: [session.workspace],
+          fingerprint: capabilityReconciliation.fingerprint
+        }
       })
     );
     if (stableJson(session.codexRunConfig) !== stableJson(runtimeLaunch.codexRunConfig)) {
@@ -3367,6 +3375,18 @@ async function resolveAutomaticDwsSkillsForUser(
   return (await nativeCodexSkills.list())
     .filter((skill) => DWS_OFFICIAL_SKILL_NAMES.has(skill.name))
     .map((skill) => ({ name: skill.name, sourcePath: skill.sourcePath }));
+}
+
+async function resolveAutomaticRuntimeSkillsForUser(
+  userId: string
+): Promise<Array<{ name: string; sourcePath: string }>> {
+  const providers = [resolveAutomaticDwsSkillsForUser] as const;
+  const resolved = await Promise.all(providers.map((provider) => provider(userId)));
+  const byName = new Map<string, { name: string; sourcePath: string }>();
+  for (const skills of resolved) {
+    for (const skill of skills) byName.set(skill.name, skill);
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function desiredRuntimeCapabilitiesForUser(userId?: string): Promise<DesiredRuntimeCapabilities> {
@@ -4749,6 +4769,7 @@ type ActionConnectorRuntimeOptions = {
   workspace: string;
   codexRunConfig: Record<string, unknown>;
   codexHome: string;
+  capabilityFingerprint: string;
   providerSnapshot: ManagedCodexProviderSnapshot;
   configOverrides?: Record<string, unknown>;
   envOverrides: Record<string, string>;
@@ -5096,6 +5117,10 @@ async function resolveActionConnectorRuntimeOptions(
     modeId: agentModeId,
     codexRunConfig: baseCodexRunConfig
   });
+  const capabilityReconciliation = await reconcileRuntimeHomeCapabilities({
+    codexHome: materializedCodexHome.codexHome,
+    codexRunConfig: materializedCodexHome.codexRunConfig
+  });
   const runtimeLaunch = await resolveRuntimeLaunchConfig({
     workspace,
     codexRunConfig: materializedCodexHome.codexRunConfig
@@ -5108,6 +5133,7 @@ async function resolveActionConnectorRuntimeOptions(
     workspace,
     codexRunConfig: runtimeLaunch.codexRunConfig ?? {},
     codexHome: materializedCodexHome.codexHome,
+    capabilityFingerprint: capabilityReconciliation.fingerprint,
     providerSnapshot: await resolveProviderSnapshot(),
     configOverrides: runtimeLaunch.configOverrides,
     envOverrides: {
@@ -5199,7 +5225,11 @@ async function startActionConnectorRuntimeSession(input: {
         model: input.runtime.model,
         reasoningEffort: input.runtime.reasoningEffort,
         workspace: input.runtime.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(input.runtime.codexRunConfig)
+        codexRunConfig: stripInternalRunConfigMetadata(input.runtime.codexRunConfig),
+        skillRefresh: {
+          cwds: [input.runtime.workspace],
+          fingerprint: input.runtime.capabilityFingerprint
+        }
       }).then((liveThread) => {
         const codexThreadId =
           typeof (liveThread as { id?: unknown })?.id === "string"
@@ -5216,7 +5246,11 @@ async function startActionConnectorRuntimeSession(input: {
         model: input.runtime.model,
         reasoningEffort: input.runtime.reasoningEffort,
         workspace: input.runtime.workspace,
-        codexRunConfig: input.runtime.codexRunConfig
+        codexRunConfig: input.runtime.codexRunConfig,
+        skillRefresh: {
+          cwds: [input.runtime.workspace],
+          fingerprint: input.runtime.capabilityFingerprint
+        }
       });
 
   const session = await sessions.create({
@@ -5252,6 +5286,10 @@ async function ensureActionConnectorRuntimeSession(input: {
     stableJson(active.codexRunConfig) !== stableJson(input.runtime.codexRunConfig);
 
   if (!changed && active && liveThread) {
+    await runtime.refreshSkills(liveThread, {
+      cwds: [input.runtime.workspace],
+      fingerprint: input.runtime.capabilityFingerprint
+    });
     return { session: active, liveThread };
   }
 
@@ -6541,6 +6579,45 @@ async function materializeCodexHomeForRunConfig(input: {
   };
 }
 
+async function resolveRuntimeHomeSkills(input: {
+  codexRunConfig?: Record<string, unknown>;
+  userId?: string | null;
+  additionalSkills?: Array<{ name: string; sourcePath?: string }>;
+}): Promise<MaterializedCodexSkillInput[]> {
+  // Portal presentation (localized labels, summaries, icons, examples and card
+  // styling) lives in SkillCatalog and must never participate in this runtime
+  // fingerprint. Only executable Skill identity and source paths belong here.
+  const materializedSkills = new Map<string, MaterializedCodexSkillInput>();
+  for (const skill of enabledSkillSelectionsFromRunConfig(input.codexRunConfig)) {
+    materializedSkills.set(skill.name, { name: skill.name, sourcePath: skill.sourcePath });
+  }
+  const userId = trimOrUndefined(input.userId ?? undefined);
+  const automaticSkills = [
+    ...(input.additionalSkills ?? []),
+    ...(userId
+      ? await resolveAutomaticRuntimeSkillsForUser(userId)
+      : [])
+  ];
+  for (const skill of automaticSkills) {
+    if (!materializedSkills.has(skill.name)) {
+      materializedSkills.set(skill.name, skill);
+    }
+  }
+  return [...materializedSkills.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function reconcileRuntimeHomeCapabilities(input: {
+  codexHome: string;
+  codexRunConfig?: Record<string, unknown>;
+  userId?: string | null;
+  additionalSkills?: Array<{ name: string; sourcePath?: string }>;
+}): Promise<CodexHomeCapabilityReconciliation> {
+  return await nativeCodexSkills.reconcileSessionHomeCapabilities({
+    sessionHome: input.codexHome,
+    enabledSkills: await resolveRuntimeHomeSkills(input)
+  });
+}
+
 async function materializeSharedCodexHomeForRunConfig(input: {
   currentUser: CurrentActor;
   modeId: string;
@@ -6558,7 +6635,7 @@ async function materializeSharedCodexHomeForRunConfig(input: {
   return materializeCodexHomeForRunConfig({
     scopeSegments: scope.scopeSegments,
     codexRunConfig: input.codexRunConfig,
-    additionalSkills: await resolveAutomaticDwsSkillsForUser(input.currentUser.id)
+    additionalSkills: await resolveAutomaticRuntimeSkillsForUser(input.currentUser.id)
   });
 }
 
@@ -6727,6 +6804,13 @@ async function createSession(
             codexRunConfig: sessionCodexRunConfig
           })
         );
+  const capabilityReconciliation = await time("create_session.reconcile_capabilities", () =>
+    reconcileRuntimeHomeCapabilities({
+      codexHome: materializedCodexHome.codexHome,
+      codexRunConfig: materializedCodexHome.codexRunConfig,
+      userId: options.userId
+    })
+  );
   if (existingCodexHome) {
     timing?.mark("create_session.reuse_codex_home", { threadId });
   }
@@ -6759,7 +6843,11 @@ async function createSession(
           reasoningEffort: options.reasoningEffort,
           workspace: options.workspace,
           codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
-          skills: initialTurnSkillInputs
+          skills: initialTurnSkillInputs,
+          skillRefresh: {
+            cwds: [options.workspace],
+            fingerprint: capabilityReconciliation.fingerprint
+          }
         });
         const codexThreadId =
           typeof (liveThread as { id?: unknown })?.id === "string"
@@ -6778,7 +6866,11 @@ async function createSession(
           reasoningEffort: options.reasoningEffort,
           workspace: options.workspace,
           codexRunConfig: runtimeLaunch.codexRunConfig,
-          skills: initialTurnSkillInputs
+          skills: initialTurnSkillInputs,
+          skillRefresh: {
+            cwds: [options.workspace],
+            fingerprint: capabilityReconciliation.fingerprint
+          }
         })
       );
   const codexRunConfig = started.codexRunConfig;
@@ -7267,9 +7359,13 @@ async function ensureThreadSession(
         }),
         { enabledSkillCount: enabledSkills.length }
       );
-  const automaticPluginReconciliation = await time(
-    "ensure_thread_session.reconcile_automatic_plugins",
-    () => nativeCodexSkills.reconcileSharedPluginCaches(materializedCodexHome.codexHome)
+  const capabilityReconciliation = await time(
+    "ensure_thread_session.reconcile_capabilities",
+    () => reconcileRuntimeHomeCapabilities({
+      codexHome: materializedCodexHome.codexHome,
+      codexRunConfig: materializedCodexHome.codexRunConfig,
+      userId: currentUser.id
+    })
   );
   const sessionCodexRunConfig = withRunConfigCodexHome(
     desiredCodexRunConfig,
@@ -7322,7 +7418,7 @@ async function ensureThreadSession(
       await time("ensure_thread_session.refresh_automatic_skills", () =>
         runtime.refreshSkills(liveRuntimeThreads.get(active.sessionId)!, {
           cwds: [workspacePath],
-          fingerprint: automaticPluginReconciliation.fingerprint
+          fingerprint: capabilityReconciliation.fingerprint
         })
       );
       timing?.mark("ensure_thread_session.live_runtime_cache_hit", { sessionId: active.sessionId });
@@ -8433,15 +8529,25 @@ function zendeskDesiredRuntimeConfig(input: ZendeskRuntimeSessionInput, thread: 
 async function materializeZendeskRuntimeConfig(input: ZendeskRuntimeSessionInput, thread: ThreadRecord): Promise<{
   codexHome: string;
   codexRunConfig?: Record<string, unknown>;
+  capabilityFingerprint: string;
 }> {
   await fs.mkdir(getThreadWorkspaceUploadDir(input.runtimeOptions.workspace, thread.id), { recursive: true });
   const codexRunConfig = zendeskDesiredRuntimeConfig(input, thread);
-  return await materializeSharedIntegrationCodexHomeForRunConfig({
+  const materialized = await materializeSharedIntegrationCodexHomeForRunConfig({
     provider: ZENDESK_CHANNEL,
     integrationInstanceId: input.instanceId || "legacy",
     modeId: modeIdFromRunConfig(codexRunConfig) ?? "default",
     codexRunConfig
   });
+  const capabilities = await reconcileRuntimeHomeCapabilities({
+    codexHome: materialized.codexHome,
+    codexRunConfig: materialized.codexRunConfig,
+    userId: thread.userId
+  });
+  return {
+    ...materialized,
+    capabilityFingerprint: capabilities.fingerprint
+  };
 }
 
 async function startZendeskRuntimeSession(
@@ -8474,7 +8580,11 @@ async function startZendeskRuntimeSession(
         model: input.runtimeOptions.model,
         reasoningEffort: input.runtimeOptions.reasoningEffort,
         workspace: input.runtimeOptions.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
+        skillRefresh: {
+          cwds: [input.runtimeOptions.workspace],
+          fingerprint: materializedCodexHome.capabilityFingerprint
+        }
       }).then((liveThread) => ({
         liveThread,
         codexRunConfig: runtimeLaunch.codexRunConfig,
@@ -8485,7 +8595,11 @@ async function startZendeskRuntimeSession(
         model: input.runtimeOptions.model,
         reasoningEffort: input.runtimeOptions.reasoningEffort,
         workspace: input.runtimeOptions.workspace,
-        codexRunConfig: runtimeLaunch.codexRunConfig
+        codexRunConfig: runtimeLaunch.codexRunConfig,
+        skillRefresh: {
+          cwds: [input.runtimeOptions.workspace],
+          fingerprint: materializedCodexHome.capabilityFingerprint
+        }
       });
   const session = await sessions.create({
     organizationId: thread.organizationId,
@@ -8515,6 +8629,12 @@ async function ensureZendeskRuntimeSession(input: ZendeskRuntimeSessionInput): P
   const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
   const liveThread = active ? liveRuntimeThreads.get(active.sessionId) || await restoreLiveRuntimeThread(active) : undefined;
   const materializedCodexHome = await materializeZendeskRuntimeConfig(input, thread);
+  if (liveThread) {
+    await runtime.refreshSkills(liveThread, {
+      cwds: [input.runtimeOptions.workspace],
+      fingerprint: materializedCodexHome.capabilityFingerprint
+    });
+  }
   const changed =
     !active ||
     !liveThread ||
@@ -8875,6 +8995,11 @@ async function ensureDingTalkBotThreadSession(input: {
     modeId: agentModeId,
     codexRunConfig: desiredCodexRunConfig
   });
+  const capabilityReconciliation = await reconcileRuntimeHomeCapabilities({
+    codexHome: materializedCodexHome.codexHome,
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    userId: input.currentUser.id
+  });
   const persistedThreadCodexRunConfig = withRunConfigCodexHome(
     desired.baseCodexRunConfig,
     materializedCodexHome.codexHome
@@ -8901,9 +9026,16 @@ async function ensureDingTalkBotThreadSession(input: {
   };
 
   const active = input.thread.sessionId ? await sessions.get(input.thread.sessionId) : undefined;
-  const hasLiveRuntime = active
-    ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
-    : false;
+  const activeLiveThread = active
+    ? liveRuntimeThreads.get(active.sessionId) ?? await restoreLiveRuntimeThread(active)
+    : undefined;
+  if (activeLiveThread) {
+    await runtime.refreshSkills(activeLiveThread, {
+      cwds: [workspacePath],
+      fingerprint: capabilityReconciliation.fingerprint
+    });
+  }
+  const hasLiveRuntime = Boolean(activeLiveThread);
   const changed =
     !active ||
     !hasLiveRuntime ||

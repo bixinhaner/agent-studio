@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -24,6 +25,17 @@ export type MaterializedCodexSkillInput = {
 export type SharedPluginReconciliation = {
   changed: boolean;
   fingerprint: string;
+  expectedPlugins: string[];
+  mountedPlugins: string[];
+};
+
+export type CodexHomeCapabilityReconciliation = {
+  changed: boolean;
+  fingerprint: string;
+  skillFingerprint: string;
+  pluginFingerprint: string;
+  expectedSkills: string[];
+  mountedSkills: string[];
   expectedPlugins: string[];
   mountedPlugins: string[];
 };
@@ -79,6 +91,10 @@ function stableJson(value: unknown): string {
   }
 }
 
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function parseFrontmatterValue(raw: string | undefined): string | undefined {
   const value = trimOrUndefined(raw);
   if (!value) return undefined;
@@ -124,6 +140,21 @@ async function replaceSymlinkOrCopy(sourcePath: string, destinationPath: string)
   } catch {
     await fs.cp(sourcePath, destinationPath, { recursive: true });
   }
+}
+
+type ResolvedMaterializedSkill = {
+  name: string;
+  sourcePath?: string;
+  relativePath: string;
+  visibleRelativePath: string;
+  system: boolean;
+  instructionDigest: string;
+};
+
+async function instructionDigestForSkill(sourcePath: string | undefined): Promise<string> {
+  if (!sourcePath) return "missing";
+  const content = await fs.readFile(path.join(sourcePath, "SKILL.md"), "utf8").catch(() => undefined);
+  return content === undefined ? "missing" : sha256(content);
 }
 
 async function chmodDirectories(rootPath: string, mode: number): Promise<void> {
@@ -188,6 +219,13 @@ async function withDirectoryLock<T>(lockPath: string, run: () => Promise<T>): Pr
 
 async function linkFileIfPresent(sourcePath: string, destinationPath: string): Promise<void> {
   if (!(await pathExists(sourcePath))) return;
+  const destinationStat = await fs.lstat(destinationPath).catch(() => undefined);
+  if (destinationStat?.isSymbolicLink()) {
+    const target = await fs.readlink(destinationPath).catch(() => undefined);
+    if (target && path.resolve(path.dirname(destinationPath), target) === path.resolve(sourcePath)) {
+      return;
+    }
+  }
   await fs.rm(destinationPath, { recursive: true, force: true });
   await fs.mkdir(path.dirname(destinationPath), { recursive: true });
   try {
@@ -265,78 +303,149 @@ export class NativeCodexSkillService {
       ? input.scopeSegments.map((segment, index) => sanitizePathSegment(segment, index === 0 ? "scope" : "segment"))
       : [sanitizePathSegment(input.scopeId ?? "", "session")];
     const sessionHome = path.join(this.sessionHomeRoot, ...scopeSegments);
-    const sessionSkillsRoot = path.join(sessionHome, "skills");
-    const enabled: Array<{ name: string; sourcePath?: string; relativePath?: string; system: boolean }> = [];
+    await fs.mkdir(sessionHome, { recursive: true });
+    await this.reconcileSessionHomeCapabilities({
+      sessionHome,
+      scopeSegments,
+      enabledSkills: input.enabledSkills
+    });
+    return sessionHome;
+  }
+
+  async reconcileSessionHomeCapabilities(input: {
+    sessionHome: string;
+    scopeSegments?: string[];
+    enabledSkills: MaterializedCodexSkillInput[];
+  }): Promise<CodexHomeCapabilityReconciliation> {
+    const sessionHome = path.resolve(input.sessionHome);
+    await fs.mkdir(sessionHome, { recursive: true });
+    return await withDirectoryLock(path.join(sessionHome, ".materialize.lock"), () =>
+      this.reconcileSessionHomeCapabilitiesUnlocked({
+        sessionHome,
+        scopeSegments: input.scopeSegments,
+        enabledSkills: input.enabledSkills
+      })
+    );
+  }
+
+  private async reconcileSessionHomeCapabilitiesUnlocked(input: {
+    sessionHome: string;
+    scopeSegments?: string[];
+    enabledSkills: MaterializedCodexSkillInput[];
+  }): Promise<CodexHomeCapabilityReconciliation> {
+    const catalog = await this.list();
+    const byName = new Map(catalog.map((skill) => [skill.name, skill] as const));
+    const byRequestedName = new Map<string, MaterializedCodexSkillInput>();
     for (const skill of input.enabledSkills) {
       const name = trimOrUndefined(skill.name);
-      if (!name) continue;
-      enabled.push({
-        name,
-        sourcePath: trimOrUndefined(skill.sourcePath),
-        relativePath: trimOrUndefined(skill.relativePath),
-        system: skill.system === true
-      });
+      if (name) byRequestedName.set(name, skill);
     }
 
-    await fs.mkdir(sessionHome, { recursive: true });
-    await withDirectoryLock(path.join(sessionHome, ".materialize.lock"), async () => {
-      const catalog = await this.list();
-      const byName = new Map(catalog.map((skill) => [skill.name, skill] as const));
-      const manifest = {
-        version: 1,
-        scopeSegments,
-        enabledSkills: enabled
-          .map((skill) => ({
-            name: skill.name,
-            sourcePath: skill.sourcePath,
-            relativePath: skill.relativePath,
-            system: skill.system
-          }))
-          .sort((left, right) => left.name.localeCompare(right.name))
-      };
-      const metadataDir = path.join(sessionHome, ".agent-studio");
-      const manifestPath = path.join(metadataDir, "manifest.json");
-      const currentManifest = await readJsonFile(manifestPath);
+    const resolvedSkills: ResolvedMaterializedSkill[] = [];
+    for (const [name, requestedSkill] of byRequestedName) {
+      const catalogSkill = byName.get(name);
+      const sourcePath = trimOrUndefined(requestedSkill.sourcePath) ?? catalogSkill?.sourcePath;
+      const system = requestedSkill.system === true || catalogSkill?.system === true;
+      const relativePath =
+        trimOrUndefined(requestedSkill.relativePath) ??
+        catalogSkill?.relativePath ??
+        sanitizePathSegment(name, "skill");
+      resolvedSkills.push({
+        name,
+        sourcePath,
+        relativePath,
+        visibleRelativePath: system ? sanitizePathSegment(name, "skill") : relativePath,
+        system,
+        instructionDigest: await instructionDigestForSkill(sourcePath)
+      });
+    }
+    resolvedSkills.sort((left, right) => left.name.localeCompare(right.name));
 
-      await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
-      await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
-      await this.reconcileSharedPluginCachesUnlocked(sessionHome);
-      if (stableJson(currentManifest) === stableJson(manifest) && (await pathExists(sessionSkillsRoot))) {
-        await ensureRuntimeSkillDirectories(sessionSkillsRoot);
-        return;
-      }
+    const sessionSkillsRoot = path.join(input.sessionHome, "skills");
+    const metadataDir = path.join(input.sessionHome, ".agent-studio");
+    const manifestPath = path.join(metadataDir, "manifest.json");
+    const currentManifest = await readJsonFile(manifestPath);
+    const currentManifestRecord =
+      currentManifest && typeof currentManifest === "object" && !Array.isArray(currentManifest)
+        ? currentManifest as Record<string, unknown>
+        : undefined;
+    const pluginReconciliation = await this.reconcileSharedPluginCachesUnlocked(input.sessionHome);
+    const skillSnapshot = resolvedSkills.map((skill) => ({
+      name: skill.name,
+      sourcePath: skill.sourcePath,
+      relativePath: skill.relativePath,
+      visibleRelativePath: skill.visibleRelativePath,
+      system: skill.system,
+      instructionDigest: skill.instructionDigest
+    }));
+    const skillFingerprint = sha256(stableJson(skillSnapshot));
+    const fingerprint = sha256(stableJson({
+      skills: skillFingerprint,
+      plugins: pluginReconciliation.fingerprint
+    }));
+    const scopeSegments = input.scopeSegments?.length
+      ? input.scopeSegments
+      : Array.isArray(currentManifestRecord?.scopeSegments)
+        ? currentManifestRecord.scopeSegments.filter((item): item is string => typeof item === "string")
+        : [];
+    const manifest = {
+      version: 2,
+      scopeSegments,
+      enabledSkills: skillSnapshot,
+      capabilityFingerprint: fingerprint,
+      pluginFingerprint: pluginReconciliation.fingerprint
+    };
+    const previousSkillFingerprint =
+      typeof currentManifestRecord?.capabilityFingerprint === "string"
+        ? typeof currentManifestRecord?.enabledSkills === "object"
+          ? sha256(stableJson(currentManifestRecord.enabledSkills))
+          : undefined
+        : undefined;
+    const skillsChanged =
+      previousSkillFingerprint !== skillFingerprint ||
+      !(await pathExists(sessionSkillsRoot));
 
+    await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(input.sessionHome, "auth.json"));
+    await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(input.sessionHome, "config.toml"));
+
+    if (skillsChanged) {
       await chmodDirectories(sessionSkillsRoot, 0o755);
-      await fs.rm(sessionSkillsRoot, { recursive: true, force: true });
       await fs.mkdir(sessionSkillsRoot, { recursive: true });
-
-      for (const requestedSkill of enabled) {
-        if (requestedSkill.sourcePath) {
-          const relativePath = requestedSkill.relativePath ?? sanitizePathSegment(requestedSkill.name, "skill");
-          const visibleRelativePath = requestedSkill.system ? sanitizePathSegment(requestedSkill.name, "skill") : relativePath;
-          await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
-          if (requestedSkill.system && relativePath !== visibleRelativePath) {
-            await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, relativePath));
-          }
-          continue;
-        }
-
-        const skill = byName.get(requestedSkill.name);
-        if (!skill) continue;
-        const visibleRelativePath = skill.system ? sanitizePathSegment(skill.name, "skill") : skill.relativePath;
-        await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
-        if (skill.system && skill.relativePath !== visibleRelativePath) {
+      for (const entry of await fs.readdir(sessionSkillsRoot, { withFileTypes: true }).catch(() => [])) {
+        if (entry.name === ".system") continue;
+        await fs.rm(path.join(sessionSkillsRoot, entry.name), { recursive: true, force: true });
+      }
+      for (const skill of resolvedSkills) {
+        if (!skill.sourcePath || skill.instructionDigest === "missing") continue;
+        await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, skill.visibleRelativePath));
+        if (skill.system && skill.relativePath !== skill.visibleRelativePath) {
           await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, skill.relativePath));
         }
       }
+    }
 
-      // Codex 0.139+ may delete and rebuild skills/.system during bootstrap.
-      // Deleting that child directory requires the skills parent to stay writable.
-      await ensureRuntimeSkillDirectories(sessionSkillsRoot);
+    // Codex 0.139+ may delete and rebuild skills/.system during bootstrap.
+    // Keep the parent writable and never remove the runtime-owned .system cache
+    // while reconciling Agent Studio-managed capabilities.
+    await ensureRuntimeSkillDirectories(sessionSkillsRoot);
+    const manifestChanged = stableJson(currentManifest) !== stableJson(manifest);
+    if (manifestChanged) {
       await fs.mkdir(metadataDir, { recursive: true });
       await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    });
-    return sessionHome;
+    }
+
+    return {
+      changed: skillsChanged || pluginReconciliation.changed || manifestChanged,
+      fingerprint,
+      skillFingerprint,
+      pluginFingerprint: pluginReconciliation.fingerprint,
+      expectedSkills: resolvedSkills.map((skill) => skill.name),
+      mountedSkills: resolvedSkills
+        .filter((skill) => skill.sourcePath && skill.instructionDigest !== "missing")
+        .map((skill) => skill.name),
+      expectedPlugins: pluginReconciliation.expectedPlugins,
+      mountedPlugins: pluginReconciliation.mountedPlugins
+    };
   }
 
   async reconcileSharedPluginCaches(sessionHome: string): Promise<SharedPluginReconciliation> {
@@ -353,6 +462,7 @@ export class NativeCodexSkillService {
     let changed = false;
     const expectedPlugins: string[] = [];
     const mountedPlugins: string[] = [];
+    const pluginGenerations: Array<{ plugin: string; versions: string[] }> = [];
     for (const marketplace of this.sharedPluginMarketplaces) {
       const sourcePath = path.join(basePluginCacheRoot, marketplace);
       if (!(await pathExists(sourcePath))) continue;
@@ -379,8 +489,14 @@ export class NativeCodexSkillService {
         }
       }
       for (const entry of sourceEntries) {
-        expectedPlugins.push(`${marketplace}/${entry.name}`);
+        const pluginId = `${marketplace}/${entry.name}`;
+        expectedPlugins.push(pluginId);
         const pluginSourcePath = path.join(sourcePath, entry.name);
+        const versions = (await fs.readdir(pluginSourcePath, { withFileTypes: true }).catch(() => []))
+          .filter((version) => version.isDirectory() || version.isSymbolicLink())
+          .map((version) => version.name)
+          .sort((left, right) => left.localeCompare(right));
+        pluginGenerations.push({ plugin: pluginId, versions });
         const pluginDestinationPath = path.join(destinationPath, entry.name);
         const pluginDestinationStat = await fs.lstat(pluginDestinationPath).catch(() => undefined);
         if (pluginDestinationStat?.isSymbolicLink()) {
@@ -389,7 +505,7 @@ export class NativeCodexSkillService {
             target &&
             path.resolve(path.dirname(pluginDestinationPath), target) === pluginSourcePath
           ) {
-            mountedPlugins.push(`${marketplace}/${entry.name}`);
+            mountedPlugins.push(pluginId);
             continue;
           }
         }
@@ -398,14 +514,15 @@ export class NativeCodexSkillService {
           pluginDestinationPath
         );
         changed = true;
-        mountedPlugins.push(`${marketplace}/${entry.name}`);
+        mountedPlugins.push(pluginId);
       }
     }
     expectedPlugins.sort((left, right) => left.localeCompare(right));
     mountedPlugins.sort((left, right) => left.localeCompare(right));
+    pluginGenerations.sort((left, right) => left.plugin.localeCompare(right.plugin));
     return {
       changed,
-      fingerprint: stableJson({ expectedPlugins, mountedPlugins }),
+      fingerprint: sha256(stableJson({ expectedPlugins, mountedPlugins, pluginGenerations })),
       expectedPlugins,
       mountedPlugins
     };

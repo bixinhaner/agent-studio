@@ -143,4 +143,110 @@ describe("NativeCodexSkillService", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("converges legacy homes to the current Skill set without rebuilding unchanged capabilities", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-capability-convergence-"));
+    try {
+      const baseHome = path.join(tempRoot, "base-home");
+      const sessionHomeRoot = path.join(tempRoot, "session-homes");
+      const skillRoot = path.join(baseHome, "skills", "dingtalk-calendar");
+      const sessionHome = path.join(sessionHomeRoot, "legacy-home");
+      await fs.mkdir(skillRoot, { recursive: true });
+      await fs.mkdir(path.join(sessionHome, "skills", ".system"), { recursive: true });
+      await fs.writeFile(
+        path.join(skillRoot, "SKILL.md"),
+        "---\nname: dingtalk-calendar\n---\n\n# Calendar v1\n",
+        "utf8"
+      );
+      const runtimeCacheFile = path.join(sessionHome, "skills", ".system", "runtime-cache.txt");
+      await fs.writeFile(runtimeCacheFile, "kept", "utf8");
+
+      const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot });
+      const first = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [{ name: "dingtalk-calendar", sourcePath: skillRoot }]
+      });
+      expect(first).toMatchObject({
+        changed: true,
+        expectedSkills: ["dingtalk-calendar"],
+        mountedSkills: ["dingtalk-calendar"]
+      });
+      expect((await fs.lstat(path.join(sessionHome, "skills", "dingtalk-calendar"))).isSymbolicLink()).toBe(true);
+      await expect(fs.readFile(runtimeCacheFile, "utf8")).resolves.toBe("kept");
+
+      const unchanged = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [{ name: "dingtalk-calendar", sourcePath: skillRoot }]
+      });
+      expect(unchanged.changed).toBe(false);
+      expect(unchanged.fingerprint).toBe(first.fingerprint);
+
+      const presentationOnlyChange = {
+        name: "dingtalk-calendar",
+        sourcePath: skillRoot,
+        presentation: { displayName: "DingTalk", iconKey: "dingtalk" }
+      };
+      const afterPresentationChange = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [presentationOnlyChange]
+      });
+      expect(afterPresentationChange.changed).toBe(false);
+      expect(afterPresentationChange.fingerprint).toBe(first.fingerprint);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates the catalog fingerprint for Skill and Plugin generations, then removes revoked Skills", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-capability-generation-"));
+    try {
+      const baseHome = path.join(tempRoot, "base-home");
+      const sessionHomeRoot = path.join(tempRoot, "session-homes");
+      const skillRoot = path.join(baseHome, "skills", "shared-skill");
+      const pluginRoot = path.join(baseHome, "plugins", "cache", "agentstudio-office", "documents");
+      await fs.mkdir(skillRoot, { recursive: true });
+      await fs.mkdir(path.join(pluginRoot, "1.0.0"), { recursive: true });
+      await fs.writeFile(path.join(skillRoot, "SKILL.md"), "---\nname: shared-skill\n---\n\n# v1\n", "utf8");
+
+      const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot });
+      const sessionHome = await service.materializeSessionHome({
+        scopeId: "user-1",
+        enabledSkills: [{ name: "shared-skill", sourcePath: skillRoot }]
+      });
+      const baseline = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [{ name: "shared-skill", sourcePath: skillRoot }]
+      });
+      expect(baseline.changed).toBe(false);
+
+      await fs.writeFile(path.join(skillRoot, "SKILL.md"), "---\nname: shared-skill\n---\n\n# v2\n", "utf8");
+      const skillUpdate = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [{ name: "shared-skill", sourcePath: skillRoot }]
+      });
+      expect(skillUpdate.changed).toBe(true);
+      expect(skillUpdate.fingerprint).not.toBe(baseline.fingerprint);
+
+      await fs.mkdir(path.join(pluginRoot, "2.0.0"), { recursive: true });
+      const pluginUpdate = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: [{ name: "shared-skill", sourcePath: skillRoot }]
+      });
+      expect(pluginUpdate.changed).toBe(true);
+      expect(pluginUpdate.fingerprint).not.toBe(skillUpdate.fingerprint);
+
+      const revoked = await service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: []
+      });
+      expect(revoked).toMatchObject({ changed: true, expectedSkills: [], mountedSkills: [] });
+      await expect(fs.access(path.join(sessionHome, "skills", "shared-skill"))).rejects.toThrow();
+      await expect(service.reconcileSessionHomeCapabilities({
+        sessionHome,
+        enabledSkills: []
+      })).resolves.toMatchObject({ changed: false });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

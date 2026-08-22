@@ -38,6 +38,7 @@ const threads = new Set();
 const pendingServerRequests = new Map();
 const overloadRecoveryModeByThread = new Map();
 const configByThread = new Map();
+const skillRefreshCountAtThreadLoad = new Map();
 const activeTurnByThread = new Map();
 let extraSkillRoots = [];
 let skillsListCount = 0;
@@ -128,6 +129,7 @@ rl.on("line", (line) => {
     const threadId = "thread-" + nextThreadId++;
     threads.add(threadId);
     configByThread.set(threadId, params.config || {});
+    skillRefreshCountAtThreadLoad.set(threadId, skillsListCount);
     respond(id, { thread: { id: threadId } });
     return;
   }
@@ -210,6 +212,7 @@ rl.on("line", (line) => {
   }
   if (message.method === "thread/resume") {
     threads.add(params.threadId);
+    skillRefreshCountAtThreadLoad.set(params.threadId, skillsListCount);
     respond(id, { thread: { id: params.threadId } });
     return;
   }
@@ -436,6 +439,18 @@ rl.on("line", (line) => {
           threadId,
           turnId,
           item: { id: "refresh-msg", type: "agentMessage", text },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
+      if (inputText === "skill-refresh-count-at-load") {
+        const text = String(skillRefreshCountAtThreadLoad.get(threadId) || 0);
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "refresh-load-msg", delta: text });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "refresh-load-msg", type: "agentMessage", text },
           completedAtMs: Date.now()
         });
         notify("turn/completed", { threadId, turn: { id: turnId } });
@@ -792,6 +807,66 @@ describe("Codex app-server runtime", () => {
       if (event.delta) answer += event.delta;
     }
     expect(answer).toBe("2");
+  });
+
+  it("refreshes a changed capability catalog before resuming an existing thread", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-pre-resume-refresh")
+      }
+    });
+    const thread = await runtime.resumeThreadWithOptions({
+      threadId: "persisted-thread-1",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir,
+      skillRefresh: {
+        cwds: [testTempDir],
+        fingerprint: "capabilities-v1"
+      }
+    });
+
+    let atLoad = "";
+    for await (const event of runtime.runStreamed(thread, "skill-refresh-count-at-load")) {
+      if (event.delta) atLoad += event.delta;
+    }
+    expect(atLoad).toBe("1");
+
+    await runtime.refreshSkills(thread, { cwds: [testTempDir], fingerprint: "capabilities-v1" });
+    let afterCacheHit = "";
+    for await (const event of runtime.runStreamed(thread, "skill-refresh-count")) {
+      if (event.delta) afterCacheHit += event.delta;
+    }
+    expect(afterCacheHit).toBe("1");
+  });
+
+  it("detects capability manifest changes on live threads without reloading unchanged turns", async () => {
+    const codexHome = path.join(testTempDir, "codex-home-live-capability-refresh");
+    await fs.rm(codexHome, { recursive: true, force: true });
+    const manifestDir = path.join(codexHome, ".agent-studio");
+    const manifestPath = path.join(manifestDir, "manifest.json");
+    await fs.mkdir(manifestDir, { recursive: true });
+    const runtime = new CodexRuntime({ envOverrides: { CODEX_HOME: codexHome } });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir
+    });
+
+    await fs.writeFile(manifestPath, JSON.stringify({ capabilityFingerprint: "catalog-v1" }), "utf8");
+    const refreshCount = async () => {
+      let answer = "";
+      for await (const event of runtime.runStreamed(thread, "skill-refresh-count")) {
+        if (event.delta) answer += event.delta;
+      }
+      return answer;
+    };
+    await expect(refreshCount()).resolves.toBe("1");
+    await expect(refreshCount()).resolves.toBe("1");
+
+    await fs.writeFile(manifestPath, JSON.stringify({ capabilityFingerprint: "catalog-v2-expanded" }), "utf8");
+    await expect(refreshCount()).resolves.toBe("2");
+    await expect(refreshCount()).resolves.toBe("2");
   });
 
   it("disables the Codex Apps MCP channel for Agent Studio threads", async () => {

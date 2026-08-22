@@ -1,5 +1,5 @@
 import type { ReasoningEffort } from "./model-config.js";
-import type { CodexTurnSkill } from "./codex-runtime.js";
+import type { CodexSkillRefresh, CodexTurnSkill } from "./codex-runtime.js";
 
 export type RuntimeUsageSnapshot = {
   inputTokens: number;
@@ -396,6 +396,7 @@ export async function startLiveRuntimeSession<TThread>(input: {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
     skills?: CodexTurnSkill[];
+    skillRefresh?: CodexSkillRefresh;
   }): Promise<TThread>;
   };
   model: string;
@@ -403,6 +404,7 @@ export async function startLiveRuntimeSession<TThread>(input: {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   skills?: CodexTurnSkill[];
+  skillRefresh?: CodexSkillRefresh;
   threadId?: string;
   getThreadUploadDir?: (threadId: string) => string;
 }): Promise<{ liveThread: TThread; codexRunConfig?: Record<string, unknown>; codexThreadId?: string }> {
@@ -416,7 +418,8 @@ export async function startLiveRuntimeSession<TThread>(input: {
     reasoningEffort: input.reasoningEffort,
     workspace: input.workspace,
     codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig),
-    skills: input.skills
+    skills: input.skills,
+    skillRefresh: input.skillRefresh
   });
 
   const codexThreadId =
@@ -439,6 +442,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
     skills?: CodexTurnSkill[];
+    skillRefresh?: CodexSkillRefresh;
   }): Promise<TThread>;
   };
   liveRuntimeThreads: Map<string, TThread>;
@@ -448,6 +452,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   skills?: CodexTurnSkill[];
+  skillRefresh?: CodexSkillRefresh;
   threadId?: string;
   getThreadUploadDir?: (threadId: string) => string;
   persist(payload: {
@@ -465,6 +470,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     workspace: input.workspace,
     codexRunConfig: input.codexRunConfig,
     skills: input.skills,
+    skillRefresh: input.skillRefresh,
     threadId: input.threadId,
     getThreadUploadDir: input.getThreadUploadDir
   });

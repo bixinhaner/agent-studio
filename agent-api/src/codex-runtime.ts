@@ -15,6 +15,11 @@ export type CodexTurnSkill = {
   path: string;
 };
 
+export type CodexSkillRefresh = {
+  cwds: string[];
+  fingerprint: string;
+};
+
 export type CodexRunStreamOptions = {
   signal?: AbortSignal;
   model?: string;
@@ -151,6 +156,7 @@ export class CodexRuntime {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
     skills?: CodexTurnSkill[];
+    skillRefresh?: CodexSkillRefresh;
   }): Promise<any> {
     if (this.appServerRuntime) {
       return await this.appServerRuntime.startThreadWithOptions(options);
@@ -165,6 +171,7 @@ export class CodexRuntime {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
     skills?: CodexTurnSkill[];
+    skillRefresh?: CodexSkillRefresh;
   }): Promise<any> {
     if (this.appServerRuntime) {
       return await this.appServerRuntime.resumeThreadWithOptions(options);

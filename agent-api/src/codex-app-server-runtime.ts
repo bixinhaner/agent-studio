@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 import os from "node:os";
@@ -19,6 +20,7 @@ import {
 import type {
   CodexRunStreamOptions,
   CodexRuntimeOptions,
+  CodexSkillRefresh,
   CodexStreamEvent,
   CodexTurnSkill
 } from "./codex-runtime.js";
@@ -32,6 +34,7 @@ type AppServerThreadOptions = {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   skills?: CodexTurnSkill[];
+  skillRefresh?: CodexSkillRefresh;
 };
 
 export type CodexAppServerThread = {
@@ -1135,6 +1138,7 @@ class CodexAppServerProcess {
 class CodexAppServerManager {
   private readonly processes = new Map<string, CodexAppServerProcess>();
   private readonly skillRefreshFingerprints = new Map<string, string>();
+  private readonly capabilityManifestCache = new Map<string, { mtimeMs: number; size: number; fingerprint?: string }>();
   private readonly threadProcessScopes = new Map<string, string>();
   private readonly lockedThreads = new Set<string>();
   private readonly threadWaiters = new Map<string, Array<() => void>>();
@@ -1168,6 +1172,11 @@ class CodexAppServerManager {
     const baseScope = runtimeScope(options);
     const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
     const process = await this.getProcess(turnSkillScope.scope);
+    await this.refreshSkillsForProcess(
+      process,
+      turnSkillScope.scope.key,
+      threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
+    );
     if (turnSkillScope.skillRoots.length > 0) {
       await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
       const skillsResult = await process.request("skills/list", {
@@ -1198,6 +1207,11 @@ class CodexAppServerManager {
     const baseScope = runtimeScope(options);
     const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
     const process = await this.getProcess(turnSkillScope.scope);
+    await this.refreshSkillsForProcess(
+      process,
+      turnSkillScope.scope.key,
+      threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
+    );
     if (turnSkillScope.skillRoots.length > 0) {
       await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
       const skillsResult = await process.request("skills/list", {
@@ -1225,17 +1239,54 @@ class CodexAppServerManager {
     thread: CodexAppServerThread,
     input: { cwds: string[]; fingerprint: string }
   ): Promise<void> {
+    const process = await this.getProcess(thread.scope);
+    await this.refreshSkillsForProcess(process, thread.scopeKey, input);
+  }
+
+  private async refreshSkillsForProcess(
+    process: CodexAppServerProcess,
+    scopeKey: string,
+    input?: CodexSkillRefresh
+  ): Promise<void> {
+    if (!input) return;
     const cwds = [...new Set(input.cwds.map((cwd) => trimOrUndefined(cwd)).filter((cwd): cwd is string => Boolean(cwd)))];
     const fingerprint = trimOrUndefined(input.fingerprint);
     if (cwds.length === 0 || !fingerprint) return;
-    const refreshKey = `${thread.scopeKey}\u0000${cwds.slice().sort().join("\u0000")}`;
-    const process = await this.getProcess(thread.scope);
+    const refreshKey = `${scopeKey}\u0000${cwds.slice().sort().join("\u0000")}`;
     if (this.skillRefreshFingerprints.get(refreshKey) === fingerprint) return;
     await process.request("skills/list", {
       cwds,
       forceReload: true
     });
     this.skillRefreshFingerprints.set(refreshKey, fingerprint);
+  }
+
+  private async skillRefreshFromCapabilityManifest(
+    scope: RuntimeScope,
+    workspace: string
+  ): Promise<CodexSkillRefresh | undefined> {
+    const codexHome = trimOrUndefined(scope.env.CODEX_HOME);
+    if (!codexHome) return undefined;
+    const manifestPath = path.join(codexHome, ".agent-studio", "manifest.json");
+    const stat = await fs.stat(manifestPath).catch(() => undefined);
+    if (!stat?.isFile()) return undefined;
+    const cached = this.capabilityManifestCache.get(manifestPath);
+    let fingerprint = cached?.fingerprint;
+    if (!cached || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
+      const raw = await fs.readFile(manifestPath, "utf8").catch(() => undefined);
+      if (!raw) return undefined;
+      try {
+        fingerprint = trimOrUndefined(asRecord(JSON.parse(raw))?.capabilityFingerprint);
+      } catch {
+        fingerprint = undefined;
+      }
+      this.capabilityManifestCache.set(manifestPath, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        fingerprint
+      });
+    }
+    return fingerprint ? { cwds: [workspace], fingerprint } : undefined;
   }
 
   async *runTurn(
@@ -1384,6 +1435,12 @@ class CodexAppServerManager {
       maxTimer.unref();
       resetIdleTimer();
 
+      await this.refreshSkillsForProcess(
+        process,
+        scope.key,
+        await this.skillRefreshFromCapabilityManifest(scope, turnOptions.workspace)
+      );
+
       if (turnSkillScope.skillRoots.length > 0) {
         await process.request("skills/extraRoots/set", {
           extraRoots: turnSkillScope.skillRoots
@@ -1527,6 +1584,7 @@ class CodexAppServerManager {
     this.processes.clear();
     this.activeTurnsByThread.clear();
     this.skillRefreshFingerprints.clear();
+    this.capabilityManifestCache.clear();
     this.threadProcessScopes.clear();
   }
 
