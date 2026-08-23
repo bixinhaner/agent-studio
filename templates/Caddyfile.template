@@ -45,3 +45,7 @@
     file_server
   }
 }
+
+# Independent site definitions, such as explicit deny rules for a server IP,
+# are kept outside Agent Studio and must survive generated config refreshes.
+import /etc/caddy/sites/*
