@@ -2,6 +2,11 @@
   encode zstd gzip
   root * {$UI_DIST_ROOT}
 
+  # Host-specific route extensions live outside Agent Studio's generated
+  # configuration. An empty glob is valid, so fresh installations need no
+  # additional setup while co-hosted applications survive future deploys.
+  import /etc/caddy/includes/*.routes
+
   @chat_api path /api/chat/* /api/session /api/threads /api/threads/* /api/portal/* /api/fs/* /api/ai-response-reviews /api/ai-response-reviews/* /api/integrations/crest/* /api/integrations/zendesk/* /api/action-connectors/* /openai/* /public-api/thread-shares/* /public-api/thread-shares
   handle @chat_api {
     reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT}
