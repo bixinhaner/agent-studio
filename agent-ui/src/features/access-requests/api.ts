@@ -170,9 +170,13 @@ function reviewerQuery(reviewToken?: string): string {
   return reviewToken ? `?token=${encodeURIComponent(reviewToken)}` : "";
 }
 
+function reviewerApiBase(reviewToken?: string): string {
+  return reviewToken ? "/public-api/access-request-reviews" : "/api/access-requests-review";
+}
+
 export async function fetchReviewerAccessRequest(requestId: string, reviewToken?: string): Promise<ReviewerAccessRequestView> {
   return api<ReviewerAccessRequestView>(
-    `/api/access-requests-review/${encodeURIComponent(requestId)}${reviewerQuery(reviewToken)}`
+    `${reviewerApiBase(reviewToken)}/${encodeURIComponent(requestId)}${reviewerQuery(reviewToken)}`
   );
 }
 
@@ -182,7 +186,7 @@ export async function submitReviewerAccessRequestDecision(
   reviewToken?: string
 ): Promise<ReviewerAccessRequestView> {
   const payload = await api<{ reviewer: unknown; request: AdminAccessRequestDetail }>(
-    `/api/access-requests-review/${encodeURIComponent(requestId)}/decision${reviewerQuery(reviewToken)}`,
+    `${reviewerApiBase(reviewToken)}/${encodeURIComponent(requestId)}/decision${reviewerQuery(reviewToken)}`,
     {
       method: "POST",
       json: input

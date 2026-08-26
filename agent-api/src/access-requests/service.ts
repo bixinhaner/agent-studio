@@ -1006,7 +1006,10 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         ? purchaseProofAttachments.map((attachment) => ({
             ...attachment,
             contentUrl: attachment.contentUrl
-              ? `${attachment.contentUrl}?token=${encodeURIComponent(reviewToken)}`
+              ? `${attachment.contentUrl.replace(
+                  "/api/access-requests-review/",
+                  "/public-api/access-request-reviews/"
+                )}?token=${encodeURIComponent(reviewToken)}`
               : attachment.contentUrl
           }))
         : purchaseProofAttachments,

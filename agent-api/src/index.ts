@@ -11438,6 +11438,12 @@ app.use(
   createPublicAccessRequestRouter(accessRequestService)
 );
 
+app.use(
+  "/public-api/access-request-reviews",
+  createPublicExternalWebGate(externalWebAccess),
+  createAccessRequestReviewRouter(accessRequestService)
+);
+
 app.locals.resolveCodexSkillThreadPath = async (input: {
   req: Request;
   threadId: string;
