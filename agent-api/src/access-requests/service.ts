@@ -407,6 +407,8 @@ const PROVISIONED_TRIAL_STATUSES = new Set<AccessRequestStatus>([
   "activated"
 ]);
 
+const EXTERNAL_REVIEW_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 function normalizedTrialFingerprint(value: string | null | undefined): string {
   return trimOrUndefined(value)?.toLowerCase() ?? "";
 }
@@ -457,8 +459,18 @@ async function ensureTrialNotRepeated(options: {
 function ensureInternalReviewerEmail(email: string, allowedDomains: string[]): void {
   const domain = emailDomain(email).toLowerCase();
   if (!domain || !allowedDomains.includes(domain)) {
-    throw new Error("Reviewer email must use an approved internal company domain");
+    throw new Error("Reviewer email must use an approved internal or brand domain");
   }
+}
+
+function brandReviewerDomains(brand: Awaited<ReturnType<NonNullable<AccessRequestServiceOptions["publicBrands"]>["getById"]>>): string[] {
+  if (!brand) return [];
+  return dedupeStrings([
+    brand.emailFromAddress ? emailDomain(brand.emailFromAddress) : undefined,
+    brand.emailReplyTo ? emailDomain(brand.emailReplyTo) : undefined,
+    brand.supportEmail ? emailDomain(brand.supportEmail) : undefined,
+    brand.billingSupportEmail ? emailDomain(brand.billingSupportEmail) : undefined
+  ]);
 }
 
 function optionalInternalEmail(value: unknown, allowedDomains: string[]): string | undefined {
@@ -848,9 +860,75 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     return request;
   }
 
+  async function reviewerFromToken(rawToken: string, requestId?: string): Promise<AccessRequestReviewerRecord> {
+    const normalized = trimOrUndefined(rawToken);
+    if (!normalized) throw new Error("Review link is invalid or expired");
+    const reviewer = await options.reviewers.getByReviewTokenHash(hashToken(normalized));
+    const expiresAt = toDateOrUndefined(reviewer?.reviewTokenExpiresAt);
+    if (
+      !reviewer ||
+      reviewer.deliveryType !== "to" ||
+      !expiresAt ||
+      expiresAt.getTime() <= Date.now() ||
+      (requestId && reviewer.accessRequestId !== requestId)
+    ) {
+      throw new Error("Review link is invalid or expired");
+    }
+    return reviewer;
+  }
+
+  async function submitDecisionForReviewer(
+    request: AccessRequestRecord,
+    reviewer: AccessRequestReviewerRecord,
+    actor: AccessRequestActor,
+    input: { decision: AccessRequestDecision; comment?: string | null },
+    reviewToken?: string
+  ): Promise<AccessRequestReviewDecisionResult> {
+    const updatedReviewer = await options.reviewers.decide({
+      reviewerId: reviewer.id,
+      decision: normalizeDecision(input.decision),
+      comment: trimOrUndefined(input.comment ?? undefined) ?? null
+    });
+    const nextReviewers = await options.reviewers.listForRequest(request.id);
+    const outcome = evaluateReviewOutcome(request, nextReviewers);
+    const nextRequest = await options.requests.update(request.id, {
+      status: outcome.status,
+      reviewSummary: outcome.reviewSummary === undefined ? undefined : outcome.reviewSummary,
+      rejectionReason: outcome.rejectionReason === undefined ? undefined : outcome.rejectionReason,
+      approvedAt: outcome.status === "approved_pending_provision" ? new Date() : undefined,
+      rejectedAt: outcome.status === "rejected" ? new Date() : undefined
+    });
+    await addEvent(
+      nextRequest.id,
+      "review_decision",
+      actor,
+      `Reviewer marked ${updatedReviewer.decision}`,
+      updatedReviewer.comment
+    );
+    await notifyAdmins(
+      nextRequest,
+      "access_request.review_decision",
+      {
+        company_name: nextRequest.companyName,
+        reviewer_name: actor.actorName ?? actor.actorEmail ?? reviewer.reviewerEmail,
+        reviewer_decision: updatedReviewer.decision,
+        reviewer_comment: updatedReviewer.comment,
+        current_status: nextRequest.status
+      },
+      `${nextRequest.updatedAt}:${updatedReviewer.id}`
+    );
+    return {
+      reviewer: updatedReviewer,
+      request: reviewToken
+        ? await buildExternalReviewerDetail(nextRequest, updatedReviewer, reviewToken)
+        : await buildAdminDetail(nextRequest, "reviewer")
+    };
+  }
+
   async function buildAdminDetail(
     request: AccessRequestRecord,
-    attachmentRoute: "admin" | "reviewer" = "admin"
+    attachmentRoute: "admin" | "reviewer" = "admin",
+    reviewToken?: string
   ): Promise<AdminAccessRequestDetail> {
     const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand] = await Promise.all([
       options.reviewers.listForRequest(request.id),
@@ -924,7 +1002,14 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       createdAt: request.createdAt,
       updatedAt: request.updatedAt,
       deviceInfoText: request.deviceInfoText,
-      purchaseProofAttachments,
+      purchaseProofAttachments: reviewToken
+        ? purchaseProofAttachments.map((attachment) => ({
+            ...attachment,
+            contentUrl: attachment.contentUrl
+              ? `${attachment.contentUrl}?token=${encodeURIComponent(reviewToken)}`
+              : attachment.contentUrl
+          }))
+        : purchaseProofAttachments,
       customerNote: request.customerNote,
       adminNote: request.adminNote,
       reviewSummary: request.reviewSummary,
@@ -945,6 +1030,22 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         decidedAt: reviewer.decidedAt
       })),
       events
+    };
+  }
+
+  async function buildExternalReviewerDetail(
+    request: AccessRequestRecord,
+    reviewer: AccessRequestReviewerRecord,
+    reviewToken: string
+  ): Promise<AdminAccessRequestDetail> {
+    const detail = await buildAdminDetail(request, "reviewer", reviewToken);
+    return {
+      ...detail,
+      owner: null,
+      adminNote: undefined,
+      publicAccessUrl: undefined,
+      events: [],
+      reviewersList: detail.reviewersList.filter((item) => item.id === reviewer.id)
     };
   }
 
@@ -1357,11 +1458,16 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     async updateAdminRequest(requestId: string, input: AccessRequestAdminUpdateInput, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {
       const existing = await ensureRequestExists(requestId);
       const policy = await loadPolicy();
+      const brand = await requestBrand(existing);
+      const allowedReviewerDomains = dedupeStrings([
+        ...policy.internalEmailDomains,
+        ...brandReviewerDomains(brand)
+      ]);
       const internalUsers = await options.findInternalUsers();
       const internalUserByEmail = new Map(internalUsers.map((user) => [user.email.toLowerCase(), user] as const));
       const reviewers = (input.reviewers ?? []).map((reviewer) => {
         const reviewerEmail = ensureEmail(reviewer.reviewerEmail, "Reviewer email");
-        ensureInternalReviewerEmail(reviewerEmail, policy.internalEmailDomains);
+        ensureInternalReviewerEmail(reviewerEmail, allowedReviewerDomains);
         const matchedUser = reviewer.reviewerUserId
           ? internalUsers.find((user) => user.id === reviewer.reviewerUserId)
           : internalUserByEmail.get(reviewerEmail);
@@ -1403,7 +1509,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     async sendReviewRequest(requestId: string, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {
       const request = await ensureRequestExists(requestId);
       const reviewers = await options.reviewers.listForRequest(request.id);
-      const recipients = formatReviewRecipients(reviewers, await loadInternalDirectory());
+      const directory = await loadInternalDirectory();
+      const recipients = formatReviewRecipients(reviewers, directory);
       if (!recipients.to.length) {
         throw new Error("At least one primary reviewer is required");
       }
@@ -1415,25 +1522,57 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         rejectionReason: null
       });
       await options.reviewers.resetDecisions(request.id);
+      const emailEnvelope = await requestEmailEnvelope(updated);
+      const reviewLines = [
+        `${updated.companyName} submitted an access request.`,
+        `Applicant: ${updated.applicantEmail}`,
+        `SN: ${updated.snNumber ?? "—"}`,
+        `Sales contact: ${updated.salesContactEmail}`,
+        updated.poNumber ? `PO: ${updated.poNumber}` : undefined
+      ].filter(Boolean);
+      const externalPrimaryReviewers = reviewers.filter(
+        (reviewer) => reviewer.deliveryType === "to" && !reviewer.reviewerUserId
+      );
+      const internalPrimaryEmails = reviewers
+        .filter((reviewer) => reviewer.deliveryType === "to" && reviewer.reviewerUserId)
+        .map((reviewer) => directory.get(reviewer.reviewerUserId!)?.email ?? reviewer.reviewerEmail);
+
+      if (internalPrimaryEmails.length) {
+        const reviewUrl = buildUrl(options.appBaseUrl, `/review/access-requests/${request.id}`);
+        await options.emailSender.send({
+          to: dedupeStrings(internalPrimaryEmails),
+          cc: recipients.cc,
+          ...emailEnvelope,
+          subject: `Review access request: ${updated.companyName}`,
+          text: [...reviewLines, reviewUrl ? `Review in system: ${reviewUrl}` : undefined].filter(Boolean).join("\n"),
+          debugLabel: "access-request-review-requested"
+        });
+      }
+
+      for (const reviewer of externalPrimaryReviewers) {
+        const rawToken = issuePublicToken();
+        await options.reviewers.setReviewToken(
+          reviewer.id,
+          hashToken(rawToken),
+          new Date(Date.now() + EXTERNAL_REVIEW_TOKEN_TTL_MS)
+        );
+        const reviewUrl = buildUrl(
+          await requestBaseUrl(updated),
+          `/review/access-requests/${request.id}?token=${encodeURIComponent(rawToken)}`
+        );
+        await options.emailSender.send({
+          to: reviewer.reviewerEmail,
+          ...emailEnvelope,
+          subject: `Review access request: ${updated.companyName}`,
+          text: [
+            ...reviewLines,
+            reviewUrl ? `Review this request: ${reviewUrl}` : undefined,
+            "This secure review link expires in 7 days and only grants access to this request."
+          ].filter(Boolean).join("\n"),
+          debugLabel: "access-request-external-review-requested"
+        });
+      }
       await options.reviewers.markNotified(request.id);
-      const reviewUrl = buildUrl(options.appBaseUrl, `/review/access-requests/${request.id}`);
-      await options.emailSender.send({
-        to: recipients.to,
-        cc: recipients.cc,
-        ...await requestEmailEnvelope(updated),
-        subject: `Review access request: ${updated.companyName}`,
-        text: [
-          `${updated.companyName} submitted an access request.`,
-          `Applicant: ${updated.applicantEmail}`,
-          `SN: ${updated.snNumber ?? "—"}`,
-          `Sales contact: ${updated.salesContactEmail}`,
-          updated.poNumber ? `PO: ${updated.poNumber}` : undefined,
-          reviewUrl ? `Review in system: ${reviewUrl}` : undefined
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        debugLabel: "access-request-review-requested"
-      });
       await addEvent(
         updated.id,
         "review_requested",
@@ -1532,6 +1671,20 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       };
     },
 
+    async getExternalReviewerView(requestId: string, rawToken: string): Promise<ReviewerAccessRequestView> {
+      const reviewer = await reviewerFromToken(rawToken, requestId);
+      const request = await ensureRequestExists(requestId);
+      return {
+        request: await buildExternalReviewerDetail(request, reviewer, rawToken),
+        viewer: {
+          reviewerId: reviewer.id,
+          reviewerEmail: reviewer.reviewerEmail,
+          deliveryType: reviewer.deliveryType,
+          decision: reviewer.decision
+        }
+      };
+    },
+
     async getReviewerPurchaseProofFile(requestId: string, attachmentId: string, currentUser: AuthenticatedUser): Promise<{
       attachment: AccessRequestAttachmentRecord;
       content: Buffer;
@@ -1542,6 +1695,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!reviewer) {
         throw new Error("You are not assigned to review this request");
       }
+      return readAttachmentFile(request, attachmentId);
+    },
+
+    async getExternalReviewerPurchaseProofFile(requestId: string, attachmentId: string, rawToken: string): Promise<{
+      attachment: AccessRequestAttachmentRecord;
+      content: Buffer;
+    }> {
+      await reviewerFromToken(rawToken, requestId);
+      const request = await ensureRequestExists(requestId);
       return readAttachmentFile(request, attachmentId);
     },
 
@@ -1556,48 +1718,26 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!reviewer) {
         throw new Error("You are not assigned to review this request");
       }
-      const updatedReviewer = await options.reviewers.decide({
-        reviewerId: reviewer.id,
-        decision: normalizeDecision(input.decision),
-        comment: trimOrUndefined(input.comment ?? undefined) ?? null
-      });
-      const nextReviewers = await options.reviewers.listForRequest(request.id);
-      const outcome = evaluateReviewOutcome(request, nextReviewers);
-      const nextRequest = await options.requests.update(request.id, {
-        status: outcome.status,
-        reviewSummary: outcome.reviewSummary === undefined ? undefined : outcome.reviewSummary,
-        rejectionReason: outcome.rejectionReason === undefined ? undefined : outcome.rejectionReason,
-        approvedAt: outcome.status === "approved_pending_provision" ? new Date() : undefined,
-        rejectedAt: outcome.status === "rejected" ? new Date() : undefined
-      });
-      await addEvent(
-        nextRequest.id,
-        "review_decision",
-        {
-          actorType: "reviewer",
-          actorUserId: currentUser.id,
-          actorEmail: currentUser.email ?? null,
-          actorName: currentUser.displayName ?? currentUser.email ?? null
-        },
-        `Reviewer marked ${updatedReviewer.decision}`,
-        updatedReviewer.comment
-      );
-      await notifyAdmins(
-        nextRequest,
-        "access_request.review_decision",
-        {
-          company_name: nextRequest.companyName,
-          reviewer_name: currentUser.displayName ?? currentUser.email ?? currentUser.id,
-          reviewer_decision: updatedReviewer.decision,
-          reviewer_comment: updatedReviewer.comment,
-          current_status: nextRequest.status
-        },
-        `${nextRequest.updatedAt}:${updatedReviewer.id}`
-      );
-      return {
-        reviewer: updatedReviewer,
-        request: await buildAdminDetail(nextRequest, "reviewer")
-      };
+      return submitDecisionForReviewer(request, reviewer, {
+        actorType: "reviewer",
+        actorUserId: currentUser.id,
+        actorEmail: currentUser.email ?? null,
+        actorName: currentUser.displayName ?? currentUser.email ?? null
+      }, input);
+    },
+
+    async submitExternalReviewerDecision(
+      requestId: string,
+      rawToken: string,
+      input: { decision: AccessRequestDecision; comment?: string | null }
+    ): Promise<AccessRequestReviewDecisionResult> {
+      const reviewer = await reviewerFromToken(rawToken, requestId);
+      const request = await ensureRequestExists(requestId);
+      return submitDecisionForReviewer(request, reviewer, {
+        actorType: "reviewer",
+        actorEmail: reviewer.reviewerEmail,
+        actorName: reviewer.reviewerEmail
+      }, input, rawToken);
     },
 
     async provisionRequest(requestId: string, input: AccessRequestProvisionInput, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {

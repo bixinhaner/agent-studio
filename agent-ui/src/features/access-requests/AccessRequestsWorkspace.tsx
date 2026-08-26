@@ -1,5 +1,6 @@
 import {
   Alert,
+  AutoComplete,
   Button,
   Drawer,
   Empty,
@@ -757,7 +758,7 @@ export function AccessRequestsWorkspace() {
                       </div>
                       {reviewDraft.reviewers.map((reviewer, index) => (
                         <div className="access-admin-edit-row" key={`${reviewer.reviewerEmail}-${index}`}>
-                          <Select
+                          <AutoComplete
                             showSearch
                             value={reviewer.reviewerEmail || undefined}
                             onChange={(value) => setReviewDraft((current) => ({
@@ -768,6 +769,7 @@ export function AccessRequestsWorkspace() {
                               value: candidate.email,
                               label: `${candidate.displayName} · ${candidate.email}`
                             }))}
+                            placeholder="内部账号或品牌邮箱"
                           />
                           <Select
                             value={reviewer.deliveryType}
@@ -789,6 +791,7 @@ export function AccessRequestsWorkspace() {
                         </div>
                       ))}
                     </div>
+                    <p className="access-admin-muted">品牌邮箱审核人会收到仅限当前申请、7 天有效的安全审核链接，无需管理后台账号。</p>
 
                     <div className="access-admin-section-head">
                       <strong>Decision Feed</strong>

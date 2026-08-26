@@ -21,6 +21,7 @@ type ReviewAccessRequestPageProps = {
 };
 
 export function ReviewAccessRequestPage(props: ReviewAccessRequestPageProps) {
+  const reviewToken = useMemo(() => new URLSearchParams(window.location.search).get("token")?.trim() || undefined, []);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"approved" | "rejected" | "needs_info" | null>(null);
   const [view, setView] = useState<ReviewerAccessRequestView | null>(null);
@@ -32,7 +33,7 @@ export function ReviewAccessRequestPage(props: ReviewAccessRequestPageProps) {
     setLoading(true);
     setErrorText("");
     try {
-      const next = await fetchReviewerAccessRequest(props.requestId);
+      const next = await fetchReviewerAccessRequest(props.requestId, reviewToken);
       setView(next);
       setComment("");
     } catch (error) {
@@ -54,7 +55,7 @@ export function ReviewAccessRequestPage(props: ReviewAccessRequestPageProps) {
       const next = await submitReviewerAccessRequestDecision(props.requestId, {
         decision,
         comment: comment.trim() || null
-      });
+      }, reviewToken);
       setView(next);
       setSuccessText("审核结果已提交。");
       setComment("");

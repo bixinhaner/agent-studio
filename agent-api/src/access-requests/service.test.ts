@@ -97,7 +97,9 @@ function createServiceHarness() {
   const requests = new Map<string, AccessRequestRecord>();
   const reviewers = new Map<string, AccessRequestReviewerRecord[]>();
   const attachments = new Map<string, AccessRequestAttachmentRecord[]>();
-  const emailSender = { send: vi.fn(async () => ({ delivered: true, mode: "smtp" as const })) };
+  const emailSender = {
+    send: vi.fn(async (_input: { text?: string; [key: string]: unknown }) => ({ delivered: true, mode: "smtp" as const }))
+  };
   const adminNotifier = { notify: vi.fn(async () => null) };
   let policy = {
     id: "policy_1",
@@ -232,6 +234,20 @@ function createServiceHarness() {
         return next;
       }),
       markNotified: vi.fn(async (requestId) => reviewers.get(requestId) ?? []),
+      setReviewToken: vi.fn(async (reviewerId: string, reviewTokenHash: string, expiresAt: Date) => {
+        for (const [requestId, bucket] of reviewers.entries()) {
+          const next = bucket.map((reviewer) => reviewer.id === reviewerId
+            ? { ...reviewer, reviewTokenHash, reviewTokenExpiresAt: expiresAt.toISOString() }
+            : reviewer);
+          reviewers.set(requestId, next);
+          const matched = next.find((reviewer) => reviewer.id === reviewerId);
+          if (matched) return matched;
+        }
+        throw new Error("missing reviewer");
+      }),
+      getByReviewTokenHash: vi.fn(async (reviewTokenHash: string) =>
+        [...reviewers.values()].flat().find((reviewer) => reviewer.reviewTokenHash === reviewTokenHash) ?? null
+      ),
       decide: vi.fn(async ({ reviewerId, decision, comment }) => {
         const bucket = reviewers.get("request_1") ?? [];
         const next = bucket.map((reviewer) =>
@@ -311,6 +327,21 @@ function createServiceHarness() {
     emailSender,
     adminNotifier,
     appBaseUrl: "https://example.com",
+    publicBrands: {
+      getById: vi.fn(async (brandId: string) => brandId === "brand_ranley" ? {
+        id: "brand_ranley",
+        key: "ranley",
+        name: "Ranley",
+        platformName: "Ranley",
+        primaryBaseUrl: "https://ranley.cloud-ran.ai",
+        emailFromName: "ranley",
+        emailFromAddress: "ranley@cloud-ran.ai",
+        emailReplyTo: "lion.li@cloud-ran.ai",
+        emailSenderVerified: true,
+        supportEmail: "lion.li@cloud-ran.ai",
+        billingSupportEmail: "lion.li@cloud-ran.ai"
+      } : null)
+    } as never,
     accessRequestConfig: {
       internalEmailDomains: ["baicells.com"],
       publicEmailBlocklistExtra: [],
@@ -408,6 +439,43 @@ describe("createAccessRequestService", () => {
     expect(result.reviewer.decision).toBe("approved");
     expect(result.request.status).toBe("approved_pending_provision");
     expect(requests.get("request_1")?.status).toBe("approved_pending_provision");
+  });
+
+  it("routes a Ranley request to a brand-domain reviewer with a scoped token", async () => {
+    const { service, requests, reviewers, emailSender } = createServiceHarness();
+    requests.set("request_1", buildRequest({ publicBrandId: "brand_ranley", status: "submitted" }));
+
+    await service.updateAdminRequest("request_1", {
+      reviewers: [{ reviewerEmail: "lion.li@cloud-ran.ai", deliveryType: "to" }]
+    }, { actorType: "admin", actorUserId: "admin_1", actorEmail: "admin@baicells.com" });
+    await service.sendReviewRequest(
+      "request_1",
+      { actorType: "admin", actorUserId: "admin_1", actorEmail: "admin@baicells.com" }
+    );
+
+    const reviewer = reviewers.get("request_1")?.[0];
+    expect(reviewer?.reviewTokenHash).toBeTruthy();
+    expect(reviewer?.reviewTokenExpiresAt).toBeTruthy();
+    expect(emailSender.send).toHaveBeenCalledWith(expect.objectContaining({
+      to: "lion.li@cloud-ran.ai",
+      publicBrandId: "brand_ranley",
+      from: "ranley <ranley@cloud-ran.ai>",
+      debugLabel: "access-request-external-review-requested",
+      text: expect.stringContaining("https://ranley.cloud-ran.ai/review/access-requests/request_1?token=")
+    }));
+
+    const rawToken = String(emailSender.send.mock.calls.at(-1)?.[0]?.text).match(/[?&]token=([a-z0-9]+)/i)?.[1];
+    expect(rawToken).toBeTruthy();
+    const view = await service.getExternalReviewerView("request_1", rawToken!);
+    expect(view.viewer.reviewerEmail).toBe("lion.li@cloud-ran.ai");
+    await expect(service.getExternalReviewerView("request_1", "invalid-token")).rejects.toThrow("invalid or expired");
+
+    const result = await service.submitExternalReviewerDecision(
+      "request_1",
+      rawToken!,
+      { decision: "approved", comment: "Approved" }
+    );
+    expect(result.request.status).toBe("approved_pending_provision");
   });
 
   it("reads and updates access request policy", async () => {

@@ -24,8 +24,17 @@ function sendAttachmentFile(res: Response, file: Awaited<ReturnType<AccessReques
 export function createAccessRequestReviewRouter(service: AccessRequestService): Router {
   const router = Router();
 
+  function reviewToken(req: Request): string | undefined {
+    return typeof req.query.token === "string" ? req.query.token.trim() || undefined : undefined;
+  }
+
   router.get("/:requestId", async (req: Request, res: Response) => {
     try {
+      const token = reviewToken(req);
+      if (token) {
+        res.json(await service.getExternalReviewerView(String(req.params.requestId || ""), token));
+        return;
+      }
       if (!req.currentUser || req.currentOrganization?.type !== "internal") {
         res.status(403).json({ detail: "Internal reviewer access is required" });
         return;
@@ -38,6 +47,18 @@ export function createAccessRequestReviewRouter(service: AccessRequestService): 
 
   router.get("/:requestId/proofs/:attachmentId/content", async (req: Request, res: Response) => {
     try {
+      const token = reviewToken(req);
+      if (token) {
+        sendAttachmentFile(
+          res,
+          await service.getExternalReviewerPurchaseProofFile(
+            String(req.params.requestId || ""),
+            String(req.params.attachmentId || ""),
+            token
+          )
+        );
+        return;
+      }
       if (!req.currentUser || req.currentOrganization?.type !== "internal") {
         res.status(403).json({ detail: "Internal reviewer access is required" });
         return;
@@ -57,11 +78,16 @@ export function createAccessRequestReviewRouter(service: AccessRequestService): 
 
   router.post("/:requestId/decision", async (req: Request, res: Response) => {
     try {
+      const token = reviewToken(req);
+      const input = decisionSchema.parse(req.body ?? {});
+      if (token) {
+        res.json(await service.submitExternalReviewerDecision(String(req.params.requestId || ""), token, input));
+        return;
+      }
       if (!req.currentUser || req.currentOrganization?.type !== "internal") {
         res.status(403).json({ detail: "Internal reviewer access is required" });
         return;
       }
-      const input = decisionSchema.parse(req.body ?? {});
       res.json(await service.submitReviewerDecision(String(req.params.requestId || ""), req.currentUser, input));
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });

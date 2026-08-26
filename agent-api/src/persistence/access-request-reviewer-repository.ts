@@ -6,6 +6,8 @@ export type AccessRequestReviewerRecord = {
   deliveryType: string;
   decision: string;
   comment?: string;
+  reviewTokenHash?: string;
+  reviewTokenExpiresAt?: string;
   notifiedAt?: string;
   decidedAt?: string;
   createdAt: string;
@@ -20,6 +22,8 @@ type AccessRequestReviewerRow = {
   deliveryType: string | null;
   decision: string | null;
   comment: string | null;
+  reviewTokenHash: string | null;
+  reviewTokenExpiresAt: Date | string | null;
   notifiedAt: Date | string | null;
   decidedAt: Date | string | null;
   createdAt: Date | string;
@@ -32,6 +36,7 @@ type AccessRequestReviewerTable = {
       accessRequestId?: string | { in: string[] };
       reviewerEmail?: string;
       reviewerUserId?: string;
+      reviewTokenHash?: string;
     };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<AccessRequestReviewerRow[]>;
@@ -41,6 +46,7 @@ type AccessRequestReviewerTable = {
   }): Promise<{ count: number }>;
   deleteMany(args: { where?: { accessRequestId?: string } }): Promise<{ count: number }>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<AccessRequestReviewerRow>;
+  findUnique(args: { where: { reviewTokenHash: string } }): Promise<AccessRequestReviewerRow | null>;
 };
 
 export type AccessRequestReviewerRepositoryDb = {
@@ -69,6 +75,8 @@ function mapReviewer(row: AccessRequestReviewerRow): AccessRequestReviewerRecord
     deliveryType: trimOrUndefined(row.deliveryType) ?? "to",
     decision: trimOrUndefined(row.decision) ?? "pending",
     comment: trimOrUndefined(row.comment),
+    reviewTokenHash: trimOrUndefined(row.reviewTokenHash),
+    reviewTokenExpiresAt: toIsoString(row.reviewTokenExpiresAt),
     notifiedAt: toIsoString(row.notifiedAt),
     decidedAt: toIsoString(row.decidedAt),
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString(),
@@ -154,6 +162,23 @@ export class AccessRequestReviewerRepository {
       });
     }
     return this.listForRequest(accessRequestId);
+  }
+
+  async setReviewToken(reviewerId: string, tokenHash: string, expiresAt: Date): Promise<AccessRequestReviewerRecord> {
+    const row = await this.db.accessRequestReviewer.update({
+      where: { id: reviewerId },
+      data: {
+        reviewTokenHash: tokenHash,
+        reviewTokenExpiresAt: expiresAt,
+        updatedAt: new Date()
+      }
+    });
+    return mapReviewer(row);
+  }
+
+  async getByReviewTokenHash(tokenHash: string): Promise<AccessRequestReviewerRecord | null> {
+    const row = await this.db.accessRequestReviewer.findUnique({ where: { reviewTokenHash: tokenHash } });
+    return row ? mapReviewer(row) : null;
   }
 
   async decide(input: { reviewerId: string; decision: string; comment?: string | null }): Promise<AccessRequestReviewerRecord> {

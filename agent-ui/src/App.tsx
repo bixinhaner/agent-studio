@@ -712,9 +712,12 @@ function AppRoutes() {
   const inviteToken = extractInviteToken(pathname);
   const accessRequestToken = extractAccessRequestToken(pathname);
   const reviewRequestId = extractAccessRequestReviewId(pathname);
+  const externalReviewToken = reviewRequestId
+    ? new URLSearchParams(window.location.search).get("token")?.trim() || undefined
+    : undefined;
   const aiResponseReviewId = extractAiResponseReviewId(pathname);
   const authMode: AuthEntryMode =
-    reviewRequestId ||
+    (reviewRequestId && !externalReviewToken) ||
     aiResponseReviewId ||
     isInternalLoginPath(pathname) ||
     isTrainingPath(pathname) ||
@@ -746,6 +749,16 @@ function AppRoutes() {
     return (
       <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading access request...</p></div></div>}>
         <PublicAccessRequestPageLazy token={accessRequestToken ?? undefined} />
+      </Suspense>
+    );
+  }
+
+  if (externalReviewToken && reviewRequestId) {
+    if (externalWebAccessLoading) return <AccessStateLoadingFallback />;
+    if (externalWebMaintenanceEnabled) return <MaintenancePage />;
+    return (
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading review...</p></div></div>}>
+        <ReviewAccessRequestPageLazy requestId={reviewRequestId} />
       </Suspense>
     );
   }

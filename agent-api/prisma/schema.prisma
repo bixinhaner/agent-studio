@@ -523,6 +523,8 @@ model AccessRequestReviewer {
   deliveryType    String        @default("to") @map("delivery_type")
   decision        String        @default("pending")
   comment         String?
+  reviewTokenHash String?        @unique @map("review_token_hash")
+  reviewTokenExpiresAt DateTime? @map("review_token_expires_at")
   notifiedAt      DateTime?     @map("notified_at")
   decidedAt       DateTime?     @map("decided_at")
   createdAt       DateTime      @default(now()) @map("created_at")

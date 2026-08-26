@@ -166,20 +166,27 @@ export async function provisionAdminAccessRequest(
   return payload.request;
 }
 
-export async function fetchReviewerAccessRequest(requestId: string): Promise<ReviewerAccessRequestView> {
-  return api<ReviewerAccessRequestView>(`/api/access-requests-review/${encodeURIComponent(requestId)}`);
+function reviewerQuery(reviewToken?: string): string {
+  return reviewToken ? `?token=${encodeURIComponent(reviewToken)}` : "";
+}
+
+export async function fetchReviewerAccessRequest(requestId: string, reviewToken?: string): Promise<ReviewerAccessRequestView> {
+  return api<ReviewerAccessRequestView>(
+    `/api/access-requests-review/${encodeURIComponent(requestId)}${reviewerQuery(reviewToken)}`
+  );
 }
 
 export async function submitReviewerAccessRequestDecision(
   requestId: string,
-  input: { decision: "approved" | "rejected" | "needs_info"; comment?: string | null }
+  input: { decision: "approved" | "rejected" | "needs_info"; comment?: string | null },
+  reviewToken?: string
 ): Promise<ReviewerAccessRequestView> {
   const payload = await api<{ reviewer: unknown; request: AdminAccessRequestDetail }>(
-    `/api/access-requests-review/${encodeURIComponent(requestId)}/decision`,
+    `/api/access-requests-review/${encodeURIComponent(requestId)}/decision${reviewerQuery(reviewToken)}`,
     {
       method: "POST",
       json: input
     }
   );
-  return fetchReviewerAccessRequest(requestId);
+  return fetchReviewerAccessRequest(requestId, reviewToken);
 }
