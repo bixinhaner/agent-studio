@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { actionConnectorConfigSchema, type ActionConnectorConfig } from "../center/action-connector-adapter.js";
 import type { ActionConnectorRuntimeInstance } from "./conversation-recorder.js";
-import type { ActionConnectorToolBridge } from "./tool-bridge.js";
+import type { ActionConnectorToolBridgeLike } from "./tool-bridge.js";
 import type { IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
 
 export const actionConnectorChatRequestSchema = z.object({
@@ -113,7 +113,7 @@ type FetchLike = typeof fetch;
 export type ActionConnectorCodexRunnerInput = {
   connector: ActionConnectorRuntimeInstance;
   config: ActionConnectorConfig;
-  bridge?: ActionConnectorToolBridge;
+  bridge?: ActionConnectorToolBridgeLike;
   delegationHeaderValue: string;
   request: ActionConnectorChatRequest;
   signal?: AbortSignal;
@@ -158,7 +158,7 @@ export class ActionConnectorRuntimeService {
     private readonly db: IntegrationInstanceRepositoryDb,
     fetchImpl: FetchLike = fetch,
     private readonly codexRunner?: ActionConnectorCodexRunner,
-    private readonly bridge?: ActionConnectorToolBridge
+    private readonly bridge?: ActionConnectorToolBridgeLike
   ) {
     void fetchImpl;
   }

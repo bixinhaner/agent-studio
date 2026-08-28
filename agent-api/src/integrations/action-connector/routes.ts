@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from "express";
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 
 import { presentCodexRuntimeError } from "../../codex-runtime-user-error.js";
 import { createSseAbortLifecycle, initSSE, sendSSE } from "../../sse.js";
@@ -9,7 +9,9 @@ import {
   type ActionConnectorCodexRunner,
   type AgentStreamEvent
 } from "./runtime.js";
-import { ActionConnectorToolBridge, type ExternalToolRequestInput, type ExternalToolResultInput } from "./tool-bridge.js";
+import { ActionConnectorToolBridge, type ActionConnectorToolBridgeLike, type ExternalToolRequestInput, type ExternalToolResultInput } from "./tool-bridge.js";
+import type { ProactiveLeaseService } from "./proactive/lease-service.js";
+import type { ProactiveActionConnectorService } from "./proactive/service.js";
 
 function bearerHeader(req: Request): string | undefined {
   const header = req.header("authorization");
@@ -25,10 +27,74 @@ export function createActionConnectorRuntimeRouter(options: {
   db: IntegrationInstanceRepositoryDb;
   fetchImpl?: typeof fetch;
   codexRunner?: ActionConnectorCodexRunner;
+  bridge?: ActionConnectorToolBridgeLike;
+  proactive?: ProactiveActionConnectorService;
+  proactiveLeases?: ProactiveLeaseService;
+  serviceTokenMiddleware?: RequestHandler;
 }) {
   const router = express.Router();
-  const bridge = new ActionConnectorToolBridge();
+  const bridge = options.bridge ?? new ActionConnectorToolBridge();
   const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, options.codexRunner, bridge);
+  const requireService = options.serviceTokenMiddleware ?? ((_req: Request, _res: Response, next: NextFunction) => next());
+
+  router.post("/:connectorId/events", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try {
+      res.status(202).json(await options.proactive.receiveEvent(req.params.connectorId, req.body));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Event was rejected.";
+      res.status(message.includes("NOT_INSTALLED") || message.includes("NOT_ACTIVE") ? 409 : 400)
+        .json({ error: { code: message, message } });
+    }
+  });
+
+  router.post("/:connectorId/tool-invocations/lease", requireService, async (req: Request, res: Response) => {
+    if (!options.proactiveLeases) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    const body = (req.body || {}) as Record<string, unknown>;
+    try {
+      const items = await options.proactiveLeases.leaseTools(
+        req.params.connectorId, typeof body.workerId === "string" ? body.workerId : "unknown",
+        Number(body.maxItems), Number(body.leaseSeconds)
+      );
+      res.json({ items });
+    } catch (error) {
+      res.status(409).json({ error: { code: "TOOL_LEASE_FAILED", message: error instanceof Error ? error.message : "Tool lease failed." } });
+    }
+  });
+
+  router.post("/:connectorId/tool-invocations/:invocationId/result", requireService, async (req: Request, res: Response) => {
+    if (!options.proactiveLeases) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try {
+      await options.proactiveLeases.submitToolResult(req.params.connectorId, req.params.invocationId, req.body || {});
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(409).json({ error: { code: "TOOL_RESULT_REJECTED", message: error instanceof Error ? error.message : "Tool result rejected." } });
+    }
+  });
+
+  router.post("/:connectorId/findings/lease", requireService, async (req: Request, res: Response) => {
+    if (!options.proactiveLeases) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    const body = (req.body || {}) as Record<string, unknown>;
+    try {
+      const items = await options.proactiveLeases.leaseFindings(
+        req.params.connectorId, typeof body.workerId === "string" ? body.workerId : "unknown",
+        Number(body.maxItems), Number(body.leaseSeconds)
+      );
+      res.json({ items });
+    } catch (error) {
+      res.status(409).json({ error: { code: "FINDING_LEASE_FAILED", message: error instanceof Error ? error.message : "Finding lease failed." } });
+    }
+  });
+
+  router.post("/:connectorId/findings/:deliveryId/ack", requireService, async (req: Request, res: Response) => {
+    if (!options.proactiveLeases) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try {
+      await options.proactiveLeases.acknowledgeFinding(req.params.connectorId, req.params.deliveryId, req.body || {});
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(409).json({ error: { code: "FINDING_ACK_REJECTED", message: error instanceof Error ? error.message : "Finding acknowledgement rejected." } });
+    }
+  });
 
   router.post("/:connectorId/chat/stream", async (req: Request, res: Response) => {
     initSSE(res);

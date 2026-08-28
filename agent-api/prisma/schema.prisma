@@ -2,6 +2,159 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum ProactiveRunStatus {
+  QUEUED
+  RUNNING
+  WAITING_TOOL
+  VALIDATING
+  COMPLETED
+  FAILED
+  CANCELLED
+  SUPPRESSED
+}
+
+enum ConnectorToolInvocationStatus {
+  PENDING
+  LEASED
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+enum ProactiveFindingDeliveryStatus {
+  PENDING
+  LEASED
+  DELIVERED
+  FAILED
+  REJECTED
+  EXPIRED
+}
+
+model ConnectorEventReceipt {
+  id             String   @id @default(cuid())
+  connectorId    String   @map("connector_id")
+  eventId        String   @map("event_id")
+  eventType      String   @map("event_type")
+  source         String
+  occurredAt     DateTime @map("occurred_at")
+  traceId        String   @map("trace_id")
+  packageKey     String   @map("package_key")
+  packageVersion String   @map("package_version")
+  packageDigest  String   @map("package_digest")
+  handbookDigest String   @map("handbook_digest")
+  envelope       Json
+  outcome        Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([connectorId, eventId])
+  @@index([connectorId, eventType, occurredAt])
+  @@map("connector_event_receipts")
+}
+
+model ProactiveAgentRun {
+  id                   String             @id @default(cuid())
+  connectorId          String             @map("connector_id")
+  sourceEventReceiptId String?            @unique @map("source_event_receipt_id")
+  scenarioKey          String             @map("scenario_key")
+  scenarioVersion      Int                @default(1) @map("scenario_version")
+  status               ProactiveRunStatus @default(QUEUED)
+  packageDigest        String             @map("package_digest")
+  handbookDigest       String             @map("handbook_digest")
+  resourceScope        Json               @map("resource_scope")
+  input                Json
+  output               Json?
+  error                Json?
+  traceId              String             @map("trace_id")
+  runAttempt           Int                @default(0) @map("run_attempt")
+  queuedAt             DateTime           @default(now()) @map("queued_at")
+  startedAt            DateTime?          @map("started_at")
+  completedAt          DateTime?          @map("completed_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  @@index([status, queuedAt])
+  @@index([connectorId, scenarioKey, createdAt])
+  @@map("proactive_agent_runs")
+}
+
+model ConnectorToolInvocation {
+  id             String                        @id @default(cuid())
+  runId          String                        @map("run_id")
+  connectorId    String                        @map("connector_id")
+  scenarioKey    String                        @map("scenario_key")
+  packageDigest  String                        @map("package_digest")
+  handbookDigest String                        @map("handbook_digest")
+  operationId    String                        @map("operation_id")
+  method         String
+  path           String
+  arguments      Json
+  resourceScope  Json                          @map("resource_scope")
+  status         ConnectorToolInvocationStatus @default(PENDING)
+  attempt        Int                           @default(0)
+  leaseTokenHash String?                       @map("lease_token_hash")
+  leaseOwner     String?                       @map("lease_owner")
+  leaseExpiresAt DateTime?                     @map("lease_expires_at")
+  deadlineAt     DateTime                      @map("deadline_at")
+  result         Json?
+  error          Json?
+  traceId        String                        @map("trace_id")
+  createdAt      DateTime                      @default(now()) @map("created_at")
+  updatedAt      DateTime                      @updatedAt @map("updated_at")
+
+  @@unique([runId, id])
+  @@index([connectorId, status, createdAt])
+  @@index([runId, status])
+  @@map("connector_tool_invocations")
+}
+
+model ProactiveAgentFinding {
+  id               String                     @id @default(cuid())
+  runId            String                     @map("run_id")
+  connectorId      String                     @map("connector_id")
+  scenarioKey      String                     @map("scenario_key")
+  scenarioVersion  Int                        @map("scenario_version")
+  packageDigest    String                     @map("package_digest")
+  handbookDigest   String                     @map("handbook_digest")
+  title            String
+  summary          String
+  severity         String
+  confidence       Float
+  resourceRefs     Json                       @map("resource_refs")
+  facts            Json
+  hypotheses       Json
+  details          Json
+  suggestedActions Json                       @map("suggested_actions")
+  presentation     Json
+  expiresAt        DateTime?                  @map("expires_at")
+  createdAt        DateTime                   @default(now()) @map("created_at")
+  updatedAt        DateTime                   @updatedAt @map("updated_at")
+  deliveries       ProactiveFindingDelivery[]
+
+  @@index([connectorId, createdAt])
+  @@index([runId])
+  @@map("proactive_agent_findings")
+}
+
+model ProactiveFindingDelivery {
+  id             String                           @id @default(cuid())
+  findingId      String                           @map("finding_id")
+  connectorId    String                           @map("connector_id")
+  status         ProactiveFindingDeliveryStatus   @default(PENDING)
+  attempt        Int                              @default(0)
+  leaseTokenHash String?                          @map("lease_token_hash")
+  leaseOwner     String?                          @map("lease_owner")
+  leaseExpiresAt DateTime?                        @map("lease_expires_at")
+  localFindingId String?                          @map("local_finding_id")
+  error          Json?
+  createdAt      DateTime                         @default(now()) @map("created_at")
+  updatedAt      DateTime                         @updatedAt @map("updated_at")
+  finding        ProactiveAgentFinding            @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([connectorId, status, createdAt])
+  @@unique([connectorId, findingId])
+  @@map("proactive_finding_deliveries")
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")

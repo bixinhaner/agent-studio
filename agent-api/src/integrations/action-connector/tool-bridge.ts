@@ -50,6 +50,34 @@ type RegisteredRun = {
   materializeFiles?: (files: ExternalToolResultFileInput[]) => Promise<ExternalToolResultFile[]>;
 };
 
+export type ActionConnectorBridgeRegistration = {
+  bridgeToken: string;
+  setFileMaterializer: (materialize: NonNullable<RegisteredRun["materializeFiles"]>) => void;
+  dispose: () => void;
+};
+
+export interface ActionConnectorToolBridgeLike {
+  registerRun(input: {
+    connectorId: string;
+    runId: string;
+    delegationHeaderValue: string;
+    emit(event: AgentStreamEvent): void;
+  }): ActionConnectorBridgeRegistration;
+  request(input: {
+    connectorId: string;
+    runId: string;
+    bridgeToken: string;
+    toolCallId?: string;
+    request: ExternalToolRequestInput;
+  }): Promise<ExternalToolResultInput>;
+  resolve(input: {
+    connectorId: string;
+    delegationHeaderValue: string;
+    result: ExternalToolResultInput;
+  }): Promise<void>;
+  disposeRun(connectorId: string, runId: string): void;
+}
+
 type PendingToolRequest = RegisteredRun & {
   toolCallId: string;
   resolve(value: ExternalToolResultInput): void;
@@ -78,7 +106,7 @@ function toolTitle(input: ExternalToolRequestInput): string {
   return `${method} ${path || "REST request"}`;
 }
 
-export class ActionConnectorToolBridge {
+export class ActionConnectorToolBridge implements ActionConnectorToolBridgeLike {
   private readonly runs = new Map<string, RegisteredRun>();
   private readonly pending = new Map<string, PendingToolRequest>();
 
@@ -89,11 +117,7 @@ export class ActionConnectorToolBridge {
     runId: string;
     delegationHeaderValue: string;
     emit(event: AgentStreamEvent): void;
-  }): {
-    bridgeToken: string;
-    setFileMaterializer: (materialize: NonNullable<RegisteredRun["materializeFiles"]>) => void;
-    dispose: () => void;
-  } {
+  }): ActionConnectorBridgeRegistration {
     const bridgeToken = randomUUID();
     const key = this.runKey(input.connectorId, input.runId);
     this.runs.set(key, {

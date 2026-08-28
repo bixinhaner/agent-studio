@@ -292,6 +292,9 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
+import { DurableActionConnectorToolBridge } from "./integrations/action-connector/proactive/durable-tool-bridge.js";
+import { ProactiveLeaseService } from "./integrations/action-connector/proactive/lease-service.js";
+import { ProactiveActionConnectorService } from "./integrations/action-connector/proactive/service.js";
 import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
@@ -11485,6 +11488,13 @@ const dwsIntegrationRouter = createDwsRouter({
   executor: dwsExecutor,
   resolveIdentity: resolveDwsUserIdentity
 });
+const proactiveActionConnectorBridge = new DurableActionConnectorToolBridge(db);
+const proactiveActionConnectorLeases = new ProactiveLeaseService(db);
+const proactiveActionConnectors = new ProactiveActionConnectorService(
+  db,
+  proactiveActionConnectorBridge,
+  runActionConnectorCodexChat
+);
 
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({
@@ -11655,7 +11665,11 @@ registerCommonApiRoutes(app, {
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
     db: db as unknown as IntegrationInstanceRepositoryDb,
-    codexRunner: runActionConnectorCodexChat
+    codexRunner: runActionConnectorCodexChat,
+    bridge: runsChatService ? proactiveActionConnectorBridge : undefined,
+    proactive: runsChatService ? proactiveActionConnectors : undefined,
+    proactiveLeases: runsChatService ? proactiveActionConnectorLeases : undefined,
+    serviceTokenMiddleware: requireServiceToken
   })
 });
 
@@ -14279,6 +14293,9 @@ if (runsChatService && isAppServerRuntimeEnabled()) {
 
 async function bootstrap() {
   await db.$connect();
+  if (runsChatService) {
+    await proactiveActionConnectors.start();
+  }
   if (runsAdminService) {
     await portalWorkspaces.purgeExpiredTrash().catch((error) => {
       console.warn("workspace trash cleanup failed", error instanceof Error ? error.message : String(error));
