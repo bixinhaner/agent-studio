@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorEventSchema, findingSchema, XOMC_PACKAGE } from "./contracts.js";
+import { connectorEventSchema, findingSchema, TASK_FAILURE_SCENARIO, XOMC_PACKAGE } from "./contracts.js";
 
 describe("proactive action connector contracts", () => {
   it("accepts the pinned xOMC task failure event", () => {
@@ -23,5 +23,13 @@ describe("proactive action connector contracts", () => {
     };
     const result = findingSchema.safeParse(base);
     expect(result.success).toBe(false);
+  });
+
+  it("pins evidence collection and the complete finding contract in the task failure prompt", () => {
+    expect(TASK_FAILURE_SCENARIO.prompt).toContain("get.devices.tasks.by_task_id");
+    const template = TASK_FAILURE_SCENARIO.prompt.slice(TASK_FAILURE_SCENARIO.prompt.indexOf("{"));
+    expect(findingSchema.parse(JSON.parse(template))).toMatchObject({
+      schemaVersion: "1.0", scenarioKey: "task-failure-analysis", scenarioVersion: 1
+    });
   });
 });

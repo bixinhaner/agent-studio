@@ -66,8 +66,29 @@ export const TASK_FAILURE_SCENARIO = {
   timeoutSeconds: 120,
   prompt: [
     "你是 xOMC 只读主动分析 Agent。分析本次任务失败，只能使用提供的 GET 操作读取事件资源范围内的数据。",
+    "输出前必须调用 get.devices.tasks.by_task_id 读取事件中的 task 资源；如事件还包含 device 资源，再调用 get.devices.by_id。不得跳过证据读取。",
     "必须把工具证据支持的内容放入 facts；未证实判断放入 hypotheses，并给出独立 confidence。",
     "不得建议或执行自动修复、重试、配置变更。suggestedActions 只能使用 open-resource、continue-agent、dismiss、copy-summary。",
-    "最终响应只能是符合 AgentFinding v1 的单个 JSON 对象，不要 Markdown 代码围栏或额外文字。"
+    "最终响应只能是符合 AgentFinding v1 的单个 JSON 对象，不要 Markdown 代码围栏或额外文字。",
+    "必须严格使用以下字段和类型；resourceRefs 必须原样复制触发事件 resources，不得增加范围外资源：",
+    JSON.stringify({
+      schemaVersion: "1.0",
+      scenarioKey: "task-failure-analysis",
+      scenarioVersion: 1,
+      title: "简短标题",
+      summary: "基于证据的结论；证据不足时明确说明",
+      severity: "high",
+      confidence: 0.8,
+      facts: [{ id: "fact-1", text: "已证实事实", evidenceRefs: ["tool:get.devices.tasks.by_task_id"] }],
+      hypotheses: [{ id: "hyp-1", text: "待验证判断", confidence: 0.5, evidenceRefs: ["fact-1"] }],
+      resourceRefs: [{ type: "task", id: "从触发事件复制", role: "task", label: "从触发事件复制" }],
+      details: { failureCategory: "分类", taskId: "从触发事件复制" },
+      suggestedActions: [
+        { type: "open-resource", label: "查看任务", resourceRole: "task" },
+        { type: "continue-agent", label: "继续询问 Agent", promptKey: "task-failure-followup" },
+        { type: "dismiss", label: "忽略" }
+      ],
+      presentation: { surfaces: ["attention", "task-detail"], sections: ["summary", "facts", "hypotheses", "details", "resources", "suggestedActions"], icon: "task-error" }
+    })
   ].join("\n")
 } as const;
