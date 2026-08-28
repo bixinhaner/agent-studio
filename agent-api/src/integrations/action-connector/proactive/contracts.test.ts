@@ -28,6 +28,7 @@ describe("proactive action connector contracts", () => {
 
   it("pins evidence collection and the complete finding contract in the task failure prompt", () => {
     expect(TASK_FAILURE_SCENARIO.prompt).toContain("get.devices.tasks.by_task_id");
+    expect(TASK_FAILURE_SCENARIO.prompt).toContain("当前设备状态不能证明任务执行时状态");
     const template = TASK_FAILURE_SCENARIO.prompt.slice(TASK_FAILURE_SCENARIO.prompt.indexOf("{"));
     expect(findingSchema.parse(JSON.parse(template))).toMatchObject({
       schemaVersion: "1.0", scenarioKey: "task-failure-analysis", scenarioVersion: 1
