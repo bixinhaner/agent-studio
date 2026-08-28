@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { connectorEventSchema, findingSchema, TASK_FAILURE_SCENARIO, XOMC_PACKAGE } from "./contracts.js";
+import { BACKGROUND_HANDBOOK_OPERATIONS } from "./durable-tool-bridge.js";
 
 describe("proactive action connector contracts", () => {
   it("accepts the pinned xOMC task failure event", () => {
@@ -31,5 +32,12 @@ describe("proactive action connector contracts", () => {
     expect(findingSchema.parse(JSON.parse(template))).toMatchObject({
       schemaVersion: "1.0", scenarioKey: "task-failure-analysis", scenarioVersion: 1
     });
+  });
+
+  it("limits background handbook bootstrap to the two immutable GET operations", () => {
+    expect([...BACKGROUND_HANDBOOK_OPERATIONS]).toEqual([
+      "get.agent.handbook.manifest",
+      "get.agent.handbook.chunks.by_index"
+    ]);
   });
 });

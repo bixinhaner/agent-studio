@@ -12,6 +12,14 @@ import {
 import type { ResourceRef } from "./contracts.js";
 import { TASK_FAILURE_SCENARIO } from "./contracts.js";
 
+// Background agents may bootstrap the immutable API handbook before using a
+// scenario's business operations. These two GET-only operations are transport
+// infrastructure, not an expansion of the scenario's data-access allowlist.
+export const BACKGROUND_HANDBOOK_OPERATIONS = new Set([
+  "get.agent.handbook.manifest",
+  "get.agent.handbook.chunks.by_index"
+]);
+
 type BackgroundRegistration = {
   connectorId: string;
   runId: string;
@@ -69,7 +77,9 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
       throw new Error("External tool bridge run is not active.");
     }
     const operationId = input.request.operationId?.trim() ?? "";
-    if (input.request.method.toUpperCase() !== "GET" || !TASK_FAILURE_SCENARIO.allowedOperations.has(operationId)) {
+    const allowedOperation = TASK_FAILURE_SCENARIO.allowedOperations.has(operationId) ||
+      BACKGROUND_HANDBOOK_OPERATIONS.has(operationId);
+    if (input.request.method.toUpperCase() !== "GET" || !allowedOperation) {
       throw new Error("Background tool operation is outside the installed scenario policy.");
     }
     const toolCallId = input.toolCallId?.trim() || `rest-${randomUUID()}`;

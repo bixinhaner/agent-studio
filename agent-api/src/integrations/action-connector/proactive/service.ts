@@ -124,6 +124,9 @@ export class ProactiveActionConnectorService {
         if (event.type === "error") runtimeError = new Error(`${event.error.code}: ${event.error.message}`);
       };
       const sourceEvent = connectorEventSchema.parse(run.input);
+      const apiHandbook = record(sourceEvent.data).apiHandbook;
+      const externalIdentityMetadata: Record<string, unknown> = { sourceSystem: "omc" };
+      if (Object.keys(record(apiHandbook)).length > 0) externalIdentityMetadata.apiHandbook = apiHandbook;
       await this.runtime.streamChat({
         connectorId: run.connectorId,
         delegationHeaderValue: `Bearer proactive:${run.id}`,
@@ -132,7 +135,13 @@ export class ProactiveActionConnectorService {
           clientRunId: run.id,
           conversationId: `proactive-${run.id}`,
           mode: "execute", locale: "zh-CN", timezone: "Asia/Shanghai", attachments: [],
-          context: { proactive: true, scenarioKey: run.scenarioKey, sourceEvent, externalIdentity: { externalUserId: "xomc-proactive-service" } }
+          context: {
+            proactive: true, scenarioKey: run.scenarioKey, sourceEvent,
+            externalIdentity: {
+              externalUserId: "xomc-proactive-service",
+              metadata: externalIdentityMetadata
+            }
+          }
         }, emit
       });
       if (runtimeError) throw runtimeError;
