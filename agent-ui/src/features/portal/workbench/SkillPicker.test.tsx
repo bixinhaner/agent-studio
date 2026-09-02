@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeModeSnapshot } from "../../modes/types";
@@ -84,6 +86,16 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe("PortalSkillPicker", () => {
+  it("keeps a brand-color fallback when the picker is rendered in a document-level portal", () => {
+    const workbenchCss = readFileSync(
+      resolve(process.cwd(), "src/features/portal/workbench/workbench.css"),
+      "utf8"
+    );
+    expect(workbenchCss).toContain(
+      "--skill-accent: var(--workbench-accent, var(--brand-primary, #FF4614));"
+    );
+  });
+
   it("opens the direct catalog and enables the selected Skill", async () => {
     const setSkills = vi.fn().mockResolvedValue(undefined);
     const fillPrompt = vi.fn();

@@ -3655,7 +3655,7 @@ button.session-rail-new-btn:active,
 /* Skill catalog — centered task surface on desktop, two-step drawer on mobile. */
 .portal-skill-desktop-modal,
 .portal-skill-mobile-drawer {
-  --skill-accent: var(--workbench-accent);
+  --skill-accent: var(--workbench-accent, var(--brand-primary, #FF4614));
   --skill-accent-soft: color-mix(in srgb, var(--skill-accent) 8%, #ffffff);
   --skill-border: #e6e8ed;
   --skill-muted: #667085;
