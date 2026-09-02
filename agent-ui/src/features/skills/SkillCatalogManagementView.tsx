@@ -109,7 +109,10 @@ function actorSecondary(actor?: SkillCatalogActor): string | undefined {
 }
 
 function accessSummary(entry: SkillCatalogEntry): string {
-  if (entry.scope === "private") return "仅本人";
+  if (entry.scope === "private") {
+    const sharedCount = entry.access?.subjects.filter((subject) => subject.effect === "allow").length ?? 0;
+    return sharedCount > 0 ? `本人及 ${sharedCount} 位成员` : "仅本人";
+  }
   if (entry.scope === "agent_mode") {
     const allowed = entry.access?.subjects.filter((subject) => subject.effect === "allow") ?? [];
     const denied = entry.access?.subjects.filter((subject) => subject.effect === "deny") ?? [];
@@ -125,7 +128,12 @@ function accessSummary(entry: SkillCatalogEntry): string {
 
 function attribution(entry: SkillCatalogEntry): { title: string; secondary?: string; icon: ReactNode } {
   if (entry.scope === "private") {
-    return { title: actorName(entry.owner), secondary: actorSecondary(entry.owner), icon: <UserRound size={15} /> };
+    const sharedCount = entry.access?.subjects.filter((subject) => subject.effect === "allow").length ?? 0;
+    return {
+      title: actorName(entry.owner),
+      secondary: sharedCount > 0 ? `已共享给 ${sharedCount} 人` : actorSecondary(entry.owner),
+      icon: <UserRound size={15} />
+    };
   }
   if (entry.scope === "agent_mode") {
     const first = entry.audiences[0];
@@ -154,7 +162,11 @@ function attribution(entry: SkillCatalogEntry): { title: string; secondary?: str
 }
 
 function visibilityText(entry: SkillCatalogEntry): string {
-  if (entry.scope === "private") return entry.owner ? `仅 ${actorName(entry.owner)}` : "仅所有者";
+  if (entry.scope === "private") {
+    const sharedCount = entry.access?.subjects.filter((subject) => subject.effect === "allow").length ?? 0;
+    const owner = entry.owner ? actorName(entry.owner) : "所有者";
+    return sharedCount > 0 ? `${owner}及 ${sharedCount} 位成员` : `仅 ${owner}`;
+  }
   if (entry.scope === "agent_mode") return entry.audiences.length
     ? entry.audiences.map((item) => item.name).join("、")
     : "尚未检测到智能体绑定";
@@ -381,7 +393,7 @@ function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; on
           <div><dt>创建人</dt><dd><ActorDetail actor={entry.createdBy} emptyLabel={entry.system ? "系统" : "未记录创建人"} /></dd></div>
           <div><dt>原始范围</dt><dd><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span><code>{entry.rawScope || entry.scope}</code></dd></div>
           <div><dt>{entry.scope === "agent_mode" ? "生效智能体" : "可见对象"}</dt><dd className="skill-admin-audience-list">{visibilityText(entry)}</dd></div>
-          {entry.scope === "agent_mode" ? <div><dt>授权范围</dt><dd className="skill-admin-access-detail"><strong>{accessSummary(entry)}</strong>{entry.access?.subjects.length ? <ul>{entry.access.subjects.map((subject) => <li key={`${subject.subjectType}:${subject.subjectId}:${subject.effect}`} className={subject.effect === "deny" ? "is-denied" : ""}><span>{subject.displayName || subject.subjectId}</span>{subject.secondaryLabel ? <small>{subject.secondaryLabel}</small> : null}<em>{subject.effect === "allow" ? "允许" : "拒绝"}</em></li>)}</ul> : <small>请在对应技能包中添加用户、部门或角色规则。</small>}</dd></div> : null}
+          {entry.scope === "agent_mode" || entry.scope === "private" ? <div><dt>{entry.scope === "private" ? "共享成员" : "授权范围"}</dt><dd className="skill-admin-access-detail"><strong>{accessSummary(entry)}</strong>{entry.access?.subjects.length ? <ul>{entry.access.subjects.map((subject) => <li key={`${subject.subjectType}:${subject.subjectId}:${subject.effect}`} className={subject.effect === "deny" ? "is-denied" : ""}><span>{subject.displayName || subject.subjectId}</span>{subject.secondaryLabel ? <small>{subject.secondaryLabel}</small> : null}<em>{entry.scope === "private" ? "可使用" : subject.effect === "allow" ? "允许" : "拒绝"}</em></li>)}</ul> : <small>{entry.scope === "private" ? "未共享给其他成员。" : "请在对应技能包中添加用户、部门或角色规则。"}</small>}</dd></div> : null}
         </dl>
       </section>
       <section className="skill-admin-detail-section">

@@ -45,6 +45,13 @@ export type PortalRuntimeOptionSkill = {
   scope?: string;
   sourcePath?: string;
   automatic?: boolean;
+  sharing?: {
+    isOwner: boolean;
+    sharedWithCount: number;
+    ownerUserId?: string;
+    ownerDisplayName?: string;
+    ownerEmail?: string;
+  };
   presentation: PortalSkillPresentation;
 };
 
@@ -248,6 +255,8 @@ function toManagedRuntimeSkill(
   managedSkill: CodexManagedSkillRecord,
   catalogEntries: SkillCatalogEntryRecord[],
   locale: string | undefined,
+  viewerUserId: string,
+  sharedWithCount: number,
   activationPrompt?: string,
 ): PortalRuntimeOptionSkill {
   const managedCatalogEntry = selectCatalogEntry({
@@ -272,6 +281,7 @@ function toManagedRuntimeSkill(
     canonicalName: managedSkill.skillName,
     sourceDescription: managedSkill.description
   });
+  const isOwner = managedSkill.ownerUserId === viewerUserId;
   return {
     id: selectionIdForManagedSkill(managedSkill.id),
     name: managedSkill.skillName,
@@ -280,8 +290,17 @@ function toManagedRuntimeSkill(
     system: false,
     activationPrompt,
     managedSkillId: managedSkill.id,
-    scope: managedSkill.scope === "private" ? "private" : "team",
+    scope: managedSkill.scope === "private" ? (isOwner ? "private" : "team") : "team",
     sourcePath: managedSkill.publishedPath,
+    ...(managedSkill.scope === "private" ? {
+      sharing: {
+        isOwner,
+        sharedWithCount,
+        ownerUserId: managedSkill.ownerUserId,
+        ownerDisplayName: managedSkill.createdByDisplayName,
+        ownerEmail: managedSkill.createdByEmail
+      }
+    } : {}),
     presentation
   };
 }
@@ -393,9 +412,31 @@ export class PortalRuntimeOptionService {
     const skillPackageMap = new Map(skillPackageRows.map((skillPackage) => [skillPackage.id, skillPackage] as const));
     const nativeSkillMap = new Map(nativeSkillRows.map((skill) => [skill.name, skill] as const));
     const managedSkillMap = new Map(managedSkillRows.map((skill) => [skill.id, skill] as const));
-    const activePrivateSkills = managedSkillRows.filter(
-      (skill) => skill.status === "active" && skill.scope === "private" && skill.ownerUserId === input.userId
+    const activePrivateSkillCandidates = managedSkillRows.filter(
+      (skill) => skill.status === "active" && skill.scope === "private"
     );
+    const sharedPrivateSkillIds = new Set(await this.deps.policies.filterAllowedResources({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      roleIds: input.roleIds,
+      departmentIds: input.departmentIds,
+      resourceType: "managed_skill",
+      candidateIds: activePrivateSkillCandidates.map((skill) => skill.id)
+    }));
+    const activePrivateSkills = activePrivateSkillCandidates.filter(
+      (skill) => skill.ownerUserId === input.userId || sharedPrivateSkillIds.has(skill.id)
+    );
+    const accessiblePrivateSkillIds = new Set(activePrivateSkills.map((skill) => skill.id));
+    const privateSkillShareCounts = new Map<string, number>();
+    const privateSkillPolicies = await this.deps.policies.listResourcePoliciesForIds({
+      organizationId: input.organizationId,
+      resourceType: "managed_skill",
+      resourceIds: activePrivateSkillCandidates.map((skill) => skill.id)
+    });
+    for (const policy of privateSkillPolicies) {
+      if (policy.subjectType !== "user" || policy.effect !== "allow") continue;
+      privateSkillShareCounts.set(policy.resourceId, (privateSkillShareCounts.get(policy.resourceId) ?? 0) + 1);
+    }
     const activePrivateSkillNames = new Set(activePrivateSkills.map((skill) => skillNameKey(skill.skillName)));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
     const automaticPluginSkills = installedPlugins
@@ -476,6 +517,7 @@ export class PortalRuntimeOptionService {
           if (skillBinding.managedSkillId) {
             const managedSkill = managedSkillMap.get(skillBinding.managedSkillId);
             if (!managedSkill || managedSkill.status !== "active") continue;
+            if (managedSkill.scope === "private" && !accessiblePrivateSkillIds.has(managedSkill.id)) continue;
             const nameKey = skillNameKey(managedSkill.skillName);
             if (managedSkill.scope !== "private" && activePrivateSkillNames.has(nameKey)) {
               continue;
@@ -484,6 +526,8 @@ export class PortalRuntimeOptionService {
               managedSkill,
               catalogEntries,
               input.locale,
+              input.userId,
+              privateSkillShareCounts.get(managedSkill.id) ?? 0,
               skillBinding.activationPrompt
             );
             if (!availableSkillIds.has(runtimeSkill.id)) {
@@ -506,7 +550,13 @@ export class PortalRuntimeOptionService {
       }
 
       for (const privateSkill of activePrivateSkills) {
-        const runtimeSkill = toManagedRuntimeSkill(privateSkill, catalogEntries, input.locale);
+        const runtimeSkill = toManagedRuntimeSkill(
+          privateSkill,
+          catalogEntries,
+          input.locale,
+          input.userId,
+          privateSkillShareCounts.get(privateSkill.id) ?? 0
+        );
         const nameKey = skillNameKey(runtimeSkill.name);
         if (!availableSkillIds.has(runtimeSkill.id) && !availableSkillNames.has(nameKey)) {
           availableSkillIds.add(runtimeSkill.id);

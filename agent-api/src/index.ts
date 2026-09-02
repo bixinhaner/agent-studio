@@ -708,6 +708,30 @@ const codexSkillService = new CodexSkillService(
     repository: codexSkills,
     skillPackages,
     agentModes,
+    resourcePolicies,
+    memberDirectory: {
+      async listActiveForOrganization(organizationId) {
+        const rows = await db.user.findMany({
+          where: {
+            status: "active",
+            organizationMemberships: {
+              some: { organizationId, status: "active" }
+            }
+          },
+          select: {
+            id: true,
+            displayName: true,
+            email: true
+          },
+          orderBy: [{ displayName: "asc" }, { email: "asc" }]
+        });
+        return rows.map((row) => ({
+          userId: row.id,
+          ...(row.displayName ? { displayName: row.displayName } : {}),
+          ...(row.email ? { email: row.email } : {})
+        }));
+      }
+    },
     skillCatalog
   },
   {

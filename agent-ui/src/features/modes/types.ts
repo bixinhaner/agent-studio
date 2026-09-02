@@ -31,6 +31,13 @@ export type RuntimeModeSnapshot = {
     automatic?: boolean;
     managedSkillId?: string;
     scope?: string;
+    sharing?: {
+      isOwner: boolean;
+      sharedWithCount: number;
+      ownerUserId?: string;
+      ownerDisplayName?: string;
+      ownerEmail?: string;
+    };
     presentation: {
       displayName: string;
       summary: string;

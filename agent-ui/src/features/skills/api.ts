@@ -1,6 +1,20 @@
 import { api } from "../../lib/api";
 import type { CodexManagedSkill, CodexSkillDraft } from "./types";
 
+export type ManagedSkillShareMember = {
+  userId: string;
+  displayName?: string;
+  email?: string;
+};
+
+export type ManagedSkillSharingState = {
+  skillId: string;
+  ownerUserId: string;
+  owner?: ManagedSkillShareMember;
+  members: ManagedSkillShareMember[];
+  availableMembers: ManagedSkillShareMember[];
+};
+
 export async function createPortalSkillDraft(input: {
   prompt: string;
   threadId?: string;
@@ -61,6 +75,20 @@ export async function uninstallPortalManagedSkill(input: {
   return api<{ skill: CodexManagedSkill }>(`/api/portal/codex-managed-skills/${encodeURIComponent(input.id)}/uninstall`, {
     method: "POST",
     json: { reason: input.reason }
+  });
+}
+
+export async function fetchPortalManagedSkillSharing(id: string): Promise<ManagedSkillSharingState> {
+  return api<ManagedSkillSharingState>(`/api/portal/codex-managed-skills/${encodeURIComponent(id)}/sharing`);
+}
+
+export async function updatePortalManagedSkillSharing(input: {
+  id: string;
+  userIds: string[];
+}): Promise<ManagedSkillSharingState> {
+  return api<ManagedSkillSharingState>(`/api/portal/codex-managed-skills/${encodeURIComponent(input.id)}/sharing`, {
+    method: "PUT",
+    json: { user_ids: input.userIds }
   });
 }
 

@@ -83,3 +83,52 @@ No actionable P0, P1, or P2 findings remain.
 - [P3] If Admin Console gains a global locale switch later, move the modal's administrative labels into that shared i18n layer. The recipient-facing email content is already bilingual.
 
 final result: passed
+
+---
+
+# Design QA: 私有 Skill 成员共享
+
+## Source of truth
+
+- 所有者入口：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-000f4d32-e6b8-4a25-bb89-3ffd191618ff.png`（1486×1059）
+- 成员选择：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-4bcbcb3e-701f-4c90-a9e8-d36682634cd2.png`（1485×1059）
+- 保存结果：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-8b92a30d-ecb4-4ea6-bd0f-82fbc68258b4.png`（1485×1059）
+
+## Implementation captures
+
+- Portal 所有者入口：`tmp/skill-sharing-preview/picker-final2.png`（1440×1000）
+- Portal 成员选择：`tmp/skill-sharing-preview/saved-final2.png`（1440×1000）
+- Portal 保存后持久状态：`tmp/skill-sharing-preview/postsave-final.png`（1440×1000）
+- Admin 归属与共享成员：`tmp/skill-sharing-preview/admin-final2.png`（1440×1000）
+- 同屏对照：`tmp/skill-sharing-preview/comparison.png`
+
+本地验证页直接渲染生产组件 `PortalSkillPicker` 和 `SkillCatalogManagementView`，仅替换网络响应为本地固定数据。截图使用真实 Chrome 1440×1000 视口；同屏对照将效果图与实现按状态并列。
+
+## Iteration history
+
+### Pass 1
+
+- P1：成员弹窗信息密度低于效果图，缺少所有者、共享不复制的说明和已选成员标签。
+- P2：保存后的临时反馈和持久状态未分开取证。
+
+处理：补齐所有者与邮箱、无副本说明、可移除的已选成员标签；分别捕获操作弹窗和刷新后的持久状态。
+
+### Pass 2
+
+- P0：无。
+- P1：无。
+- P2：实现验证数据只有 3 个 Skill，而效果图展示 6 个；这是验证夹具的数据量差异，不影响布局、交互或信息层级。
+
+Portal 的分栏比例、范围标签、成员入口、二级弹窗、品牌色按钮、成员勾选态和保存后“已共享给 N 人 / 管理共享”状态与效果图一致。Admin 使用原有高密度表格与右侧详情，不引入审批层级。
+
+## Interaction and accessibility checks
+
+- 实际浏览器完成：打开 Picker → 打开“共享给成员” → 选择成员 → 保存共享。
+- 保存后弹窗关闭，卡片和详情更新为“已共享给 1 人”，入口更新为“管理共享”。
+- 成员项使用完整按钮命中区，选中状态有边框、底色与勾选图标；按钮及搜索框均可从可访问性树识别。
+- 关闭弹窗、取消、删除已选成员和保存均有独立可访问按钮。
+- 本地浏览器执行未发现页面脚本错误；Chrome 仅输出无头显示环境的系统级 `CVDisplayLink` 警告。
+
+## Final result
+
+passed

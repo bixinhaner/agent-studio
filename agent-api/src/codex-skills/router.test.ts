@@ -7,8 +7,10 @@ import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./rou
 
 function appFor(router: express.Router) {
   const app = express();
+  app.use(express.json());
   app.use((req, _res, next) => {
     req.currentOrganization = { id: "org-1" } as Request["currentOrganization"];
+    req.currentUser = { id: "owner-1", displayName: "Owner" } as Request["currentUser"];
     next();
   });
   app.use(router);
@@ -32,5 +34,30 @@ describe("managed Codex Skill content route", () => {
     await request(appFor(createPortalCodexSkillRouter(service)))
       .get("/codex-managed-skills/skill-1/content")
       .expect(404);
+  });
+});
+
+describe("managed Codex Skill member sharing routes", () => {
+  it("loads and replaces members without exposing an approval flow", async () => {
+    const state = {
+      skillId: "skill-1",
+      ownerUserId: "owner-1",
+      owner: { userId: "owner-1", displayName: "Owner" },
+      members: [{ userId: "member-1", displayName: "Member" }],
+      availableMembers: [{ userId: "member-1", displayName: "Member" }]
+    };
+    const service = {
+      getManagedSkillSharing: vi.fn(async () => state),
+      updateManagedSkillSharing: vi.fn(async () => state)
+    } as unknown as CodexSkillService;
+    const app = appFor(createPortalCodexSkillRouter(service));
+
+    await request(app).get("/codex-managed-skills/skill-1/sharing").expect(200, state);
+    await request(app).put("/codex-managed-skills/skill-1/sharing").send({ user_ids: ["member-1"] }).expect(200, state);
+    expect(service.updateManagedSkillSharing).toHaveBeenCalledWith({
+      actor: expect.objectContaining({ id: "owner-1", organizationId: "org-1" }),
+      skillId: "skill-1",
+      userIds: ["member-1"]
+    });
   });
 });

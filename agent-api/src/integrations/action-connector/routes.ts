@@ -48,6 +48,64 @@ export function createActionConnectorRuntimeRouter(options: {
     }
   });
 
+  router.get("/:connectorId/proactive/overview", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try {
+      res.json(await options.proactive.overview(req.params.connectorId));
+    } catch (error) {
+      res.status(409).json({ error: { code: "PROACTIVE_OVERVIEW_FAILED", message: error instanceof Error ? error.message : "Unable to load proactive overview." } });
+    }
+  });
+
+  router.patch("/:connectorId/proactive/scenarios/:scenarioKey", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    const body = (req.body || {}) as Record<string, unknown>;
+    try {
+	  const requestedMode = body.status === "DISABLED" ? "disabled" : body.rolloutMode === "SHADOW" ? "shadow" : body.rolloutMode === "FULL" || body.rolloutMode === "PERCENTAGE" ? "active" : undefined;
+      await options.proactive.updateScenario(req.params.connectorId, req.params.scenarioKey, {
+        rolloutMode: requestedMode,
+        rolloutPercentage: typeof body.rolloutPercentage === "number" ? body.rolloutPercentage : undefined,
+        maxConcurrentRuns: typeof body.maxConcurrentRuns === "number" ? body.maxConcurrentRuns : undefined,
+        maxRunsPerHour: typeof body.maxRunsPerHour === "number" ? body.maxRunsPerHour : undefined
+      });
+	  const overview = await options.proactive.overview(req.params.connectorId);
+	  res.json(overview.scenarios.find((scenario) => scenario.key === req.params.scenarioKey));
+    } catch (error) {
+      res.status(400).json({ error: { code: "SCENARIO_UPDATE_REJECTED", message: error instanceof Error ? error.message : "Scenario update was rejected." } });
+    }
+  });
+
+  router.post("/:connectorId/proactive/runs/:runId/cancel", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try {
+      res.json(await options.proactive.cancelRun(req.params.connectorId, req.params.runId));
+    } catch (error) {
+      res.status(409).json({ error: { code: "RUN_CANCEL_REJECTED", message: error instanceof Error ? error.message : "Run cannot be cancelled." } });
+    }
+  });
+
+  router.post("/:connectorId/proactive/heartbeat", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    const body = (req.body || {}) as Record<string, unknown>;
+    if (typeof body.workerId !== "string" || typeof body.handbookDigest !== "string") {
+      return void res.status(400).json({ error: { code: "INVALID_HEARTBEAT", message: "workerId and handbookDigest are required." } });
+    }
+    try {
+      const details = body.details && typeof body.details === "object" && !Array.isArray(body.details)
+        ? body.details as Record<string, unknown>
+        : undefined;
+      await options.proactive.heartbeat(req.params.connectorId, {
+        workerId: body.workerId,
+        handbookDigest: body.handbookDigest,
+        queueDepth: typeof body.queueDepth === "number" ? body.queueDepth : 0,
+        details
+      });
+      res.json({ ok: true, receivedAt: new Date().toISOString() });
+    } catch (error) {
+      res.status(409).json({ error: { code: "HEARTBEAT_REJECTED", message: error instanceof Error ? error.message : "Heartbeat was rejected." } });
+    }
+  });
+
   router.post("/:connectorId/tool-invocations/lease", requireService, async (req: Request, res: Response) => {
     if (!options.proactiveLeases) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
     const body = (req.body || {}) as Record<string, unknown>;

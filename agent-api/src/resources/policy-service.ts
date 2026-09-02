@@ -15,6 +15,42 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 export class PolicyService {
   constructor(private readonly policies: ResourcePolicyRepository) {}
 
+  async listResourcePolicies(input: {
+    organizationId?: string;
+    resourceType: ResourcePolicyResourceType;
+    resourceId: string;
+  }): Promise<ResourcePolicyRecord[]> {
+    const resourceId = input.resourceId.trim();
+    if (!resourceId) return [];
+    const organizationId = trimOrUndefined(input.organizationId);
+    const rows = await this.policies.listAll();
+    return rows.filter((row) => {
+      const rowOrganizationId = trimOrUndefined(row.organizationId);
+      if (organizationId ? rowOrganizationId && rowOrganizationId !== organizationId : rowOrganizationId) {
+        return false;
+      }
+      return row.resourceType === input.resourceType && row.resourceId === resourceId;
+    });
+  }
+
+  async listResourcePoliciesForIds(input: {
+    organizationId?: string;
+    resourceType: ResourcePolicyResourceType;
+    resourceIds: string[];
+  }): Promise<ResourcePolicyRecord[]> {
+    const resourceIds = new Set(input.resourceIds.map((id) => id.trim()).filter(Boolean));
+    if (resourceIds.size === 0) return [];
+    const organizationId = trimOrUndefined(input.organizationId);
+    const rows = await this.policies.listAll();
+    return rows.filter((row) => {
+      const rowOrganizationId = trimOrUndefined(row.organizationId);
+      if (organizationId ? rowOrganizationId && rowOrganizationId !== organizationId : rowOrganizationId) {
+        return false;
+      }
+      return row.resourceType === input.resourceType && resourceIds.has(row.resourceId);
+    });
+  }
+
   async listSubjectPolicies(input: {
     organizationId?: string;
     subjectType: ResourcePolicySubjectType;

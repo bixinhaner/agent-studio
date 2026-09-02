@@ -122,10 +122,12 @@ function accessForManagedSkill(input: {
   policies: CatalogResourcePolicy[];
   userIdentities: Map<string, UserIdentity>;
 }): SkillCatalogAccess | undefined {
-  if (input.skill.scope !== "agent_mode") return undefined;
+  if (input.skill.scope !== "agent_mode" && input.skill.scope !== "private") return undefined;
   const packageIds = managedSkillPackageIds(input.skill, input.packages);
   const subjects = input.policies
-    .filter((policy) => policy.resourceType === "skill_package" && packageIds.has(policy.resourceId))
+    .filter((policy) => input.skill.scope === "private"
+      ? policy.resourceType === "managed_skill" && policy.resourceId === input.skill.id
+      : policy.resourceType === "skill_package" && packageIds.has(policy.resourceId))
     .map((policy) => {
       const identity = policy.subjectType === "user" ? input.userIdentities.get(policy.subjectId) : undefined;
       return {
@@ -151,14 +153,33 @@ function audiencesForManagedSkill(input: {
   organizationName?: string;
   packages: CatalogSkillPackage[];
   agentModes: CatalogAgentMode[];
+  policies: CatalogResourcePolicy[];
+  userIdentities: Map<string, UserIdentity>;
 }): SkillCatalogAudience[] {
   if (input.scope === "private") {
-    return input.owner ? [{
+    const ownerAudience: SkillCatalogAudience[] = input.owner ? [{
       type: "user",
       id: input.owner.userId,
       name: input.owner.displayName ?? input.owner.email ?? input.owner.userId,
       secondaryLabel: input.owner.displayName ? input.owner.email : undefined
     }] : [];
+    const sharedAudiences = input.policies
+      .filter((policy) =>
+        policy.resourceType === "managed_skill" &&
+        policy.resourceId === input.skill.id &&
+        policy.subjectType === "user" &&
+        policy.effect === "allow"
+      )
+      .map((policy) => {
+        const identity = input.userIdentities.get(policy.subjectId);
+        return {
+          type: "user" as const,
+          id: policy.subjectId,
+          name: identity?.displayName ?? identity?.email ?? policy.subjectId,
+          secondaryLabel: identity?.displayName ? identity.email : undefined
+        };
+      });
+    return [...ownerAudience, ...sharedAudiences];
   }
   if (input.scope === "agent_mode") {
     const packageIds = managedSkillPackageIds(input.skill, input.packages);
@@ -249,12 +270,12 @@ export class SkillCatalogService {
       this.sources.resourcePolicies?.listAll() ?? Promise.resolve([])
     ]);
     const managedPackageIds = new Set(managedSkills.flatMap((skill) => [...managedSkillPackageIds(skill, packages)]));
+    const managedSkillIds = new Set(managedSkills.map((skill) => skill.id));
     const policyUserIds = policies
-      .filter((policy) =>
-        policy.resourceType === "skill_package" &&
-        policy.subjectType === "user" &&
-        managedPackageIds.has(policy.resourceId)
-      )
+      .filter((policy) => policy.subjectType === "user" && (
+        (policy.resourceType === "skill_package" && managedPackageIds.has(policy.resourceId)) ||
+        (policy.resourceType === "managed_skill" && managedSkillIds.has(policy.resourceId))
+      ))
       .map((policy) => policy.subjectId);
     const userIds = Array.from(new Set([
       ...managedSkills.flatMap((skill) => [skill.ownerUserId, skill.createdByUserId]).map(text).filter(Boolean),
@@ -321,7 +342,9 @@ export class SkillCatalogService {
           owner,
           organizationName: text(input.organizationName),
           packages,
-          agentModes
+          agentModes,
+          policies,
+          userIdentities
         }),
         access: accessForManagedSkill({ skill, packages, policies, userIdentities }),
         system: false

@@ -9,6 +9,7 @@ import type {
   CodexSkillRepository
 } from "../persistence/codex-skill-repository.js";
 import type { SkillPackageRepository, SkillPackageRecord } from "../persistence/skill-package-repository.js";
+import type { ResourcePolicyRepository } from "../persistence/resource-policy-repository.js";
 import type { SkillCatalogLocalizedContent } from "../skill-catalog/types.js";
 
 type Actor = {
@@ -75,6 +76,20 @@ type RemoveManagedSkillInput = {
   actor: Actor;
   skillId: string;
   reason?: string;
+};
+
+export type ManagedSkillShareMember = {
+  userId: string;
+  displayName?: string;
+  email?: string;
+};
+
+export type ManagedSkillSharingState = {
+  skillId: string;
+  ownerUserId: string;
+  owner: ManagedSkillShareMember;
+  members: ManagedSkillShareMember[];
+  availableMembers: ManagedSkillShareMember[];
 };
 
 export type CodexSkillValidationResult = {
@@ -451,6 +466,10 @@ export class CodexSkillService {
       repository: CodexSkillRepository;
       skillPackages: SkillPackageRepository;
       agentModes: AgentModeRepository;
+      resourcePolicies?: Pick<ResourcePolicyRepository, "listAll" | "replacePoliciesForResource">;
+      memberDirectory?: {
+        listActiveForOrganization(organizationId: string): Promise<ManagedSkillShareMember[]>;
+      };
       skillCatalog?: {
         ensureManagedSkillEntry(input: {
           skill: CodexManagedSkillRecord;
@@ -753,6 +772,46 @@ export class CodexSkillService {
     });
   }
 
+  async getManagedSkillSharing(input: { actor: Actor; skillId: string }): Promise<ManagedSkillSharingState> {
+    const skill = await this.requireOwnedPrivateSkill(input.actor, input.skillId);
+    return this.buildManagedSkillSharingState(skill);
+  }
+
+  async updateManagedSkillSharing(input: {
+    actor: Actor;
+    skillId: string;
+    userIds: string[];
+  }): Promise<ManagedSkillSharingState> {
+    const skill = await this.requireOwnedPrivateSkill(input.actor, input.skillId);
+    if (!this.dependencies.resourcePolicies || !this.dependencies.memberDirectory) {
+      throw new Error("Skill 成员共享暂不可用");
+    }
+    const organizationId = trimOrUndefined(skill.organizationId);
+    if (!organizationId) throw new Error("该 Skill 未归属组织，不能共享给成员");
+    const availableMembers = await this.dependencies.memberDirectory.listActiveForOrganization(organizationId);
+    const allowedUserIds = new Set(availableMembers.map((member) => member.userId));
+    const ownerUserId = skill.ownerUserId as string;
+    const userIds = Array.from(new Set(input.userIds.map((id) => trimOrUndefined(id)).filter(Boolean) as string[]))
+      .filter((id) => id !== ownerUserId);
+    const invalidUserIds = userIds.filter((id) => !allowedUserIds.has(id));
+    if (invalidUserIds.length > 0) {
+      throw new Error("只能共享给当前组织的有效成员");
+    }
+    await this.dependencies.resourcePolicies.replacePoliciesForResource({
+      resourceType: "managed_skill",
+      resourceId: skill.id,
+      policies: userIds.map((userId) => ({
+        organizationId,
+        subjectType: "user",
+        subjectId: userId,
+        resourceType: "managed_skill",
+        resourceId: skill.id,
+        effect: "allow"
+      }))
+    });
+    return this.buildManagedSkillSharingState(skill, availableMembers);
+  }
+
   async readManagedSkillMdForAdmin(input: {
     skillId: string;
     organizationId?: string;
@@ -954,6 +1013,12 @@ export class CodexSkillService {
 
     if (input.current.scope !== "private") {
       await this.removeManagedSkillFromSkillPackages(input.current);
+    } else if (this.dependencies.resourcePolicies) {
+      await this.dependencies.resourcePolicies.replacePoliciesForResource({
+        resourceType: "managed_skill",
+        resourceId: input.current.id,
+        policies: []
+      });
     }
 
     return this.dependencies.repository.updateManagedSkill(input.current.id, {
@@ -972,6 +1037,56 @@ export class CodexSkillService {
         archivedPath
       }
     });
+  }
+
+  private async requireOwnedPrivateSkill(actor: Actor, skillId: string): Promise<CodexManagedSkillRecord> {
+    const skill = await this.dependencies.repository.getManagedSkill(skillId);
+    if (!skill || skill.status !== "active") throw new Error("Skill 不存在或未发布");
+    if (skill.scope !== "private" || !skill.ownerUserId) throw new Error("只有私有 Skill 可以共享给成员");
+    if (skill.ownerUserId !== actor.id) throw new Error("只有 Skill 持有人可以管理共享成员");
+    if (actor.organizationId && skill.organizationId && actor.organizationId !== skill.organizationId) {
+      throw new Error("不能管理其他组织的 Skill");
+    }
+    return skill;
+  }
+
+  private async buildManagedSkillSharingState(
+    skill: CodexManagedSkillRecord,
+    prefetchedMembers?: ManagedSkillShareMember[]
+  ): Promise<ManagedSkillSharingState> {
+    if (!this.dependencies.resourcePolicies || !this.dependencies.memberDirectory || !skill.ownerUserId) {
+      throw new Error("Skill 成员共享暂不可用");
+    }
+    const organizationId = trimOrUndefined(skill.organizationId);
+    if (!organizationId) throw new Error("该 Skill 未归属组织，不能共享给成员");
+    const directoryMembers = prefetchedMembers ?? await this.dependencies.memberDirectory.listActiveForOrganization(organizationId);
+    const owner = directoryMembers.find((member) => member.userId === skill.ownerUserId) ?? {
+      userId: skill.ownerUserId,
+      ...(trimOrUndefined(skill.createdByDisplayName) ? { displayName: trimOrUndefined(skill.createdByDisplayName) } : {}),
+      ...(trimOrUndefined(skill.createdByEmail) ? { email: trimOrUndefined(skill.createdByEmail) } : {})
+    };
+    const availableMembers = directoryMembers
+      .filter((member) => member.userId !== skill.ownerUserId)
+      .sort((left, right) => (left.displayName ?? left.email ?? left.userId).localeCompare(right.displayName ?? right.email ?? right.userId));
+    const memberById = new Map(availableMembers.map((member) => [member.userId, member] as const));
+    const policies = await this.dependencies.resourcePolicies.listAll();
+    const members = policies
+      .filter((policy) =>
+        policy.organizationId === organizationId &&
+        policy.resourceType === "managed_skill" &&
+        policy.resourceId === skill.id &&
+        policy.subjectType === "user" &&
+        policy.effect === "allow"
+      )
+      .map((policy) => memberById.get(policy.subjectId))
+      .filter((member): member is ManagedSkillShareMember => Boolean(member));
+    return {
+      skillId: skill.id,
+      ownerUserId: skill.ownerUserId,
+      owner,
+      members,
+      availableMembers
+    };
   }
 
   private async removeManagedSkillFromSkillPackages(managedSkill: CodexManagedSkillRecord): Promise<void> {

@@ -10,7 +10,6 @@ import {
   type ExternalToolResultInput
 } from "../tool-bridge.js";
 import type { ResourceRef } from "./contracts.js";
-import { TASK_FAILURE_SCENARIO } from "./contracts.js";
 
 // Background agents may bootstrap the immutable API handbook before using a
 // scenario's business operations. These two GET-only operations are transport
@@ -28,6 +27,8 @@ type BackgroundRegistration = {
   handbookDigest: string;
   resourceScope: ResourceRef[];
   traceId: string;
+  allowedOperations: string[];
+  timeoutSeconds: number;
   bridgeToken?: string;
   emit?: (event: AgentStreamEvent) => void;
 };
@@ -77,13 +78,13 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
       throw new Error("External tool bridge run is not active.");
     }
     const operationId = input.request.operationId?.trim() ?? "";
-    const allowedOperation = TASK_FAILURE_SCENARIO.allowedOperations.has(operationId) ||
+    const allowedOperation = registration.allowedOperations.includes(operationId) ||
       BACKGROUND_HANDBOOK_OPERATIONS.has(operationId);
     if (input.request.method.toUpperCase() !== "GET" || !allowedOperation) {
       throw new Error("Background tool operation is outside the installed scenario policy.");
     }
     const toolCallId = input.toolCallId?.trim() || `rest-${randomUUID()}`;
-    const deadlineAt = new Date(Date.now() + TASK_FAILURE_SCENARIO.timeoutSeconds * 1000);
+    const deadlineAt = new Date(Date.now() + registration.timeoutSeconds * 1000);
     await this.db.connectorToolInvocation.create({
       data: {
         id: toolCallId, runId: input.runId, connectorId: input.connectorId,

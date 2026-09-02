@@ -30,6 +30,10 @@ const removeManagedSkillSchema = z.object({
   reason: z.string().trim().max(4000).optional().nullable()
 });
 
+const updateManagedSkillSharingSchema = z.object({
+  user_ids: z.array(z.string().trim().min(1)).max(500)
+});
+
 const reviseDraftSchema = z.object({
   instruction: z.string().trim().min(1).max(8000)
 });
@@ -179,6 +183,34 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
         reason: parsed.data.reason || undefined
       });
       res.json({ skill });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/codex-managed-skills/:id/sharing", async (req: Request, res: Response) => {
+    try {
+      res.json(await service.getManagedSkillSharing({
+        actor: actorFromRequest(req),
+        skillId: req.params.id
+      }));
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/codex-managed-skills/:id/sharing", async (req: Request, res: Response) => {
+    const parsed = updateManagedSkillSharingSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      res.json(await service.updateManagedSkillSharing({
+        actor: actorFromRequest(req),
+        skillId: req.params.id,
+        userIds: parsed.data.user_ids
+      }));
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }

@@ -30,6 +30,102 @@ enum ProactiveFindingDeliveryStatus {
   EXPIRED
 }
 
+enum ProactivePackageStatus {
+  VALIDATED
+  ACTIVE
+  RETIRED
+  REJECTED
+}
+
+enum ProactiveScenarioRolloutMode {
+  DISABLED
+  SHADOW
+  ACTIVE
+}
+
+model ProactiveIntegrationPackage {
+  id          String                   @id @default(cuid())
+  packageKey  String                   @map("package_key")
+  version     String
+  digest      String                   @unique
+  manifest    Json
+  status      ProactivePackageStatus   @default(VALIDATED)
+  validatedAt DateTime?                @map("validated_at")
+  activatedAt DateTime?                @map("activated_at")
+  createdAt   DateTime                 @default(now()) @map("created_at")
+  updatedAt   DateTime                 @updatedAt @map("updated_at")
+  scenarios   ProactiveAgentScenario[]
+
+  @@unique([packageKey, version])
+  @@index([packageKey, status])
+  @@map("proactive_integration_packages")
+}
+
+model ProactiveAgentScenario {
+  id               String                               @id @default(cuid())
+  packageId        String                               @map("package_id")
+  scenarioKey      String                               @map("scenario_key")
+  version          Int
+  name             String
+  description      String
+  eventType        String                               @map("event_type")
+  compiledSpec     Json                                 @map("compiled_spec")
+  defaultMode      ProactiveScenarioRolloutMode         @default(DISABLED) @map("default_mode")
+  defaultPercentage Int                                 @default(0) @map("default_percentage")
+  createdAt        DateTime                             @default(now()) @map("created_at")
+  updatedAt        DateTime                             @updatedAt @map("updated_at")
+  package          ProactiveIntegrationPackage          @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  connectorSettings ProactiveConnectorScenarioSetting[]
+
+  @@unique([packageId, scenarioKey])
+  @@index([eventType])
+  @@map("proactive_agent_scenarios")
+}
+
+model ProactiveConnectorScenarioSetting {
+  id                String                        @id @default(cuid())
+  connectorId       String                        @map("connector_id")
+  scenarioId        String                        @map("scenario_id")
+  rolloutMode       ProactiveScenarioRolloutMode  @default(DISABLED) @map("rollout_mode")
+  rolloutPercentage Int                           @default(0) @map("rollout_percentage")
+  maxConcurrentRuns Int                           @map("max_concurrent_runs")
+  maxRunsPerHour    Int                           @map("max_runs_per_hour")
+  createdAt         DateTime                      @default(now()) @map("created_at")
+  updatedAt         DateTime                      @updatedAt @map("updated_at")
+  scenario          ProactiveAgentScenario        @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorId, scenarioId])
+  @@index([connectorId, rolloutMode])
+  @@map("proactive_connector_scenario_settings")
+}
+
+model ProactiveScenarioDedupeLock {
+  connectorId String   @map("connector_id")
+  scenarioKey String   @map("scenario_key")
+  dedupeKey   String   @map("dedupe_key")
+  expiresAt   DateTime @map("expires_at")
+  runId       String?  @map("run_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@id([connectorId, scenarioKey, dedupeKey])
+  @@index([expiresAt])
+  @@map("proactive_scenario_dedupe_locks")
+}
+
+model ProactiveConnectorHeartbeat {
+  connectorId    String   @id @map("connector_id")
+  workerId       String   @map("worker_id")
+  handbookDigest String   @map("handbook_digest")
+  queueDepth     Int      @default(0) @map("queue_depth")
+  details        Json
+  lastSeenAt     DateTime @map("last_seen_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([lastSeenAt])
+  @@map("proactive_connector_heartbeats")
+}
+
 model ConnectorEventReceipt {
   id             String   @id @default(cuid())
   connectorId    String   @map("connector_id")
@@ -54,13 +150,17 @@ model ConnectorEventReceipt {
 model ProactiveAgentRun {
   id                   String             @id @default(cuid())
   connectorId          String             @map("connector_id")
-  sourceEventReceiptId String?            @unique @map("source_event_receipt_id")
+  sourceEventReceiptId String?            @map("source_event_receipt_id")
   scenarioKey          String             @map("scenario_key")
   scenarioVersion      Int                @default(1) @map("scenario_version")
   status               ProactiveRunStatus @default(QUEUED)
   packageDigest        String             @map("package_digest")
   handbookDigest       String             @map("handbook_digest")
   resourceScope        Json               @map("resource_scope")
+  scenarioSnapshot     Json?              @map("scenario_snapshot")
+  rolloutMode          String?            @map("rollout_mode")
+  rolloutPercentage    Int                @default(0) @map("rollout_percentage")
+  dedupeKey            String?            @map("dedupe_key")
   input                Json
   output               Json?
   error                Json?
@@ -74,6 +174,7 @@ model ProactiveAgentRun {
 
   @@index([status, queuedAt])
   @@index([connectorId, scenarioKey, createdAt])
+  @@unique([sourceEventReceiptId, scenarioKey])
   @@map("proactive_agent_runs")
 }
 

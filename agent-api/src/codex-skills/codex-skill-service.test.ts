@@ -116,3 +116,83 @@ describe("CodexSkillService validation", () => {
     });
   });
 });
+
+describe("CodexSkillService member sharing", () => {
+  it("replaces direct member grants for the owned private Skill", async () => {
+    const skill = {
+      id: "managed-private",
+      organizationId: "org-1",
+      ownerUserId: "owner-1",
+      scope: "private",
+      skillName: "private-report",
+      slug: "private-report",
+      displayName: "Private report",
+      status: "active",
+      version: "1.0.0",
+      publishedPath: "/managed/private-report",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      updatedAt: "2026-09-02T00:00:00.000Z"
+    };
+    let policies: Array<Record<string, unknown>> = [];
+    const replacePoliciesForResource = vi.fn(async ({ policies: next }: { policies: Array<Record<string, unknown>> }) => {
+      policies = next;
+      return next;
+    });
+    const service = new CodexSkillService({
+      repository: { getManagedSkill: vi.fn().mockResolvedValue(skill) },
+      skillPackages: {} as never,
+      agentModes: {} as never,
+      resourcePolicies: {
+        listAll: vi.fn(async () => policies),
+        replacePoliciesForResource
+      },
+      memberDirectory: {
+        listActiveForOrganization: vi.fn(async () => [
+          { userId: "owner-1", displayName: "Owner" },
+          { userId: "member-1", displayName: "Member One", email: "member1@example.com" }
+        ])
+      }
+    } as never, {
+      draftRoot: "/drafts",
+      publishedSkillsRoot: "/published"
+    });
+
+    const result = await service.updateManagedSkillSharing({
+      actor: { id: "owner-1", organizationId: "org-1" },
+      skillId: skill.id,
+      userIds: ["member-1", "member-1", "owner-1"]
+    });
+
+    expect(replacePoliciesForResource).toHaveBeenCalledWith({
+      resourceType: "managed_skill",
+      resourceId: skill.id,
+      policies: [expect.objectContaining({ subjectId: "member-1", effect: "allow" })]
+    });
+    expect(result.members).toEqual([{ userId: "member-1", displayName: "Member One", email: "member1@example.com" }]);
+    expect(result.owner).toEqual({ userId: "owner-1", displayName: "Owner" });
+    expect(result.availableMembers).toHaveLength(1);
+  });
+
+  it("rejects recipients outside the current organization", async () => {
+    const service = new CodexSkillService({
+      repository: { getManagedSkill: vi.fn().mockResolvedValue({
+        id: "managed-private",
+        organizationId: "org-1",
+        ownerUserId: "owner-1",
+        scope: "private",
+        skillName: "private-report",
+        status: "active"
+      }) },
+      skillPackages: {} as never,
+      agentModes: {} as never,
+      resourcePolicies: { listAll: vi.fn(), replacePoliciesForResource: vi.fn() },
+      memberDirectory: { listActiveForOrganization: vi.fn(async () => []) }
+    } as never, { draftRoot: "/drafts", publishedSkillsRoot: "/published" });
+
+    await expect(service.updateManagedSkillSharing({
+      actor: { id: "owner-1", organizationId: "org-1" },
+      skillId: "managed-private",
+      userIds: ["other-org-user"]
+    })).rejects.toThrow("只能共享给当前组织的有效成员");
+  });
+});

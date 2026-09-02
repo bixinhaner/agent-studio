@@ -1159,6 +1159,7 @@ main() {
   ensure_caddy_config
   run_first_deploy
   ensure_pm2_start
+  bash "$script_dir/ensure-host-memory-guard.sh"
   ensure_codex_verification
   render_phase_summary
   print_follow_up_actions

@@ -4,6 +4,7 @@ export type ResourcePolicyResourceType =
   | "knowledge_set"
   | "agent_mode"
   | "skill_package"
+  | "managed_skill"
   | "run_profile"
   | "integration_instance";
 export type ResourcePolicyEffect = "allow" | "deny";

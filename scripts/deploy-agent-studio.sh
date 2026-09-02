@@ -1012,6 +1012,9 @@ main() {
   fi
   require_repo_checkout
   git_update
+  if deploy_restarts_admin || deploy_restarts_chat; then
+    bash "$script_dir/ensure-host-memory-guard.sh" --allow-missing-service
+  fi
   if deploy_restarts_chat; then
     bash "$script_dir/ensure-dws-runtime.sh"
     ensure_shared_python_runtime

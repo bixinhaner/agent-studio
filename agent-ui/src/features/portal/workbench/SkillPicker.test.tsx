@@ -4,7 +4,13 @@ import { resolve } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeModeSnapshot } from "../../modes/types";
+import { fetchPortalManagedSkillSharing, updatePortalManagedSkillSharing } from "../../skills/api";
 import { PortalSelectedSkillBar, PortalSkillPicker } from "./SkillPicker";
+
+vi.mock("../../skills/api", () => ({
+  fetchPortalManagedSkillSharing: vi.fn(),
+  updatePortalManagedSkillSharing: vi.fn()
+}));
 
 type Skill = RuntimeModeSnapshot["availableSkills"][number];
 
@@ -62,6 +68,26 @@ const dingtalkSkill: Skill = {
   }
 };
 
+const privateSkill: Skill = {
+  ...outageSkill,
+  id: "managed:private-report",
+  managedSkillId: "private-report",
+  name: "private-report",
+  label: "个人报告",
+  scope: "private",
+  sharing: {
+    isOwner: true,
+    sharedWithCount: 0,
+    ownerUserId: "owner-1",
+    ownerDisplayName: "Owner"
+  },
+  presentation: {
+    ...outageSkill.presentation,
+    displayName: "个人报告",
+    summary: "生成个人定制报告"
+  }
+};
+
 beforeAll(() => {
   const getComputedStyle = window.getComputedStyle.bind(window);
   Object.defineProperty(window, "getComputedStyle", {
@@ -83,7 +109,10 @@ beforeAll(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("PortalSkillPicker", () => {
   it("keeps a brand-color fallback when the picker is rendered in a document-level portal", () => {
@@ -270,5 +299,52 @@ describe("PortalSkillPicker", () => {
 
     expect(await screen.findByText("停电分析报告")).toBeTruthy();
     expect(screen.getByText("生成停电时长和次数的综合分析报告")).toBeTruthy();
+  });
+
+  it("lets the owner directly share one private Skill with selected members", async () => {
+    vi.mocked(fetchPortalManagedSkillSharing).mockResolvedValue({
+      skillId: "private-report",
+      ownerUserId: "owner-1",
+      owner: { userId: "owner-1", displayName: "Skill Owner", email: "owner@example.com" },
+      members: [],
+      availableMembers: [
+        { userId: "member-1", displayName: "Member One", email: "member1@example.com" },
+        { userId: "member-2", displayName: "Member Two", email: "member2@example.com" }
+      ]
+    });
+    vi.mocked(updatePortalManagedSkillSharing).mockResolvedValue({
+      skillId: "private-report",
+      ownerUserId: "owner-1",
+      owner: { userId: "owner-1", displayName: "Skill Owner", email: "owner@example.com" },
+      members: [{ userId: "member-1", displayName: "Member One", email: "member1@example.com" }],
+      availableMembers: [
+        { userId: "member-1", displayName: "Member One", email: "member1@example.com" },
+        { userId: "member-2", displayName: "Member Two", email: "member2@example.com" }
+      ]
+    });
+    render(
+      <PortalSkillPicker
+        availableSkills={[privateSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={vi.fn()}
+        onFillPrompt={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /个人报告/ }));
+    fireEvent.click(screen.getByRole("button", { name: /共享给成员|Share with members/ }));
+    expect(await screen.findByText("Skill Owner")).toBeTruthy();
+    expect(await screen.findByText("Member One")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Member One/ }));
+    fireEvent.click(screen.getByRole("button", { name: /保存共享|Save sharing/ }));
+
+    await waitFor(() => expect(updatePortalManagedSkillSharing).toHaveBeenCalledWith({
+      id: "private-report",
+      userIds: ["member-1"]
+    }));
+    expect(await screen.findByText(/已保存，Skill 已共享给 1 人|Saved\. Skill shared with 1 people/)).toBeTruthy();
   });
 });

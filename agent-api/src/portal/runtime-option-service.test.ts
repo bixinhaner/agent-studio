@@ -115,6 +115,17 @@ function managedSkill(id: string, skillName: string): CodexManagedSkillRecord {
   };
 }
 
+function privateManagedSkill(id: string, skillName: string, ownerUserId = "user-owner"): CodexManagedSkillRecord {
+  return {
+    ...managedSkill(id, skillName),
+    ownerUserId,
+    scope: "private",
+    createdByUserId: ownerUserId,
+    createdByDisplayName: "Skill Owner",
+    createdByEmail: "owner@example.com"
+  };
+}
+
 function managedSkillPackage(id: string, skillName: string, managedSkillId: string): SkillPackageRecord {
   const record = skillPackage(id, skillName);
   return {
@@ -177,6 +188,7 @@ function createService(input: {
   installedPlugins?: InstalledPluginRecord[];
   automaticCapabilities?: PortalRuntimeOptionSkill[];
   publicBrandAgentModeId?: string;
+  policiesByManagedSkillId?: Record<string, string[]>;
 }) {
   const allowedByType = input.allowedByType ?? {};
   return new PortalRuntimeOptionService({
@@ -202,7 +214,21 @@ function createService(input: {
       filterAllowedResources: async ({ resourceType, candidateIds }: { resourceType: string; candidateIds: string[] }) => {
         const allowed = new Set(allowedByType[resourceType] ?? []);
         return candidateIds.filter((candidateId) => allowed.has(candidateId));
-      }
+      },
+      listResourcePoliciesForIds: async ({ resourceIds }: { resourceIds: string[] }) =>
+        resourceIds.flatMap((resourceId) =>
+          (input.policiesByManagedSkillId?.[resourceId] ?? []).map((userId, index) => ({
+            id: `policy-${resourceId}-${index}`,
+            organizationId: "org_internal",
+            subjectType: "user" as const,
+            subjectId: userId,
+            resourceType: "managed_skill" as const,
+            resourceId,
+            effect: "allow" as const,
+            createdAt: now,
+            updatedAt: now
+          }))
+        )
     },
     systemSettings: {
       getCurrentPublished: async () => undefined
@@ -609,5 +635,68 @@ describe("PortalRuntimeOptionService", () => {
     });
 
     expect(result.modes).toEqual([]);
+  });
+
+  it("exposes one private Skill to its owner and authorized members without duplicating it", async () => {
+    const privateSkill = privateManagedSkill("managed-private", "private-report");
+    const common = {
+      managedSkills: [privateSkill],
+      policiesByManagedSkillId: { "managed-private": ["user-member"] },
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: [],
+        managed_skill: ["managed-private"]
+      }
+    };
+    const ownerResult = await createService(common).resolve({
+      organizationId: "org_internal",
+      userId: "user-owner",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+    const memberResult = await createService(common).resolve({
+      organizationId: "org_internal",
+      userId: "user-member",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(ownerResult.modes[0]?.availableSkills).toEqual([
+      expect.objectContaining({
+        id: "managed:managed-private",
+        scope: "private",
+        sharing: expect.objectContaining({ isOwner: true, sharedWithCount: 1 })
+      })
+    ]);
+    expect(memberResult.modes[0]?.availableSkills).toEqual([
+      expect.objectContaining({
+        id: "managed:managed-private",
+        scope: "team",
+        sharing: expect.objectContaining({ isOwner: false, ownerDisplayName: "Skill Owner" })
+      })
+    ]);
+  });
+
+  it("does not expose a private managed Skill through a package to an unauthorized user", async () => {
+    const privateSkill = privateManagedSkill("managed-private", "private-report");
+    const service = createService({
+      skillPackages: [managedSkillPackage("package-allowed", "private-report", "managed-private")],
+      managedSkills: [privateSkill],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-allowed"],
+        managed_skill: []
+      }
+    });
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-other",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(result.modes[0]?.availableSkills).toEqual([]);
   });
 });
