@@ -566,6 +566,7 @@ function SkillDetail({
   const { locale } = usePortalI18n();
   const copy = currentCopy(locale);
   const automatic = isAutomaticSkill(skill);
+  const hasExamples = skill.presentation.examplePrompts.length > 0;
   return (
     <section className="portal-skill-detail-column" aria-label={`${skillTitle(skill)}${locale === "zh-CN" ? "详情" : " details"}`}>
       <div className="portal-skill-detail-scroll">
@@ -623,20 +624,20 @@ function SkillDetail({
         ) : null}
         {errorText ? <p className="portal-skill-error" role="alert">{errorText}</p> : null}
       </div>
-      <div className="portal-skill-detail-actions">
+      {onToggle || hasExamples ? <div className="portal-skill-detail-actions">
         {onToggle ? (
           <>
-            <Button onClick={() => onFill()} disabled={!skill.presentation.examplePrompts.length}>{copy.fill}</Button>
+            {hasExamples ? <Button onClick={() => onFill()}>{copy.fill}</Button> : null}
             <Button type="primary" loading={saving} onClick={onToggle}>
               {selected ? copy.disable : copy.enable}
             </Button>
           </>
         ) : (
-          <Button type="primary" onClick={() => onFill()} disabled={!skill.presentation.examplePrompts.length}>
+          <Button type="primary" onClick={() => onFill()}>
             {copy.fill}
           </Button>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

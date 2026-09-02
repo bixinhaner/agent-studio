@@ -131,6 +131,33 @@ describe("PortalSkillPicker", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeNull());
   });
 
+  it("keeps the enable action available when a selectable Skill has no examples", async () => {
+    const setSkills = vi.fn().mockResolvedValue(undefined);
+    const skillWithoutExamples: Skill = {
+      ...outageSkill,
+      id: "managed:tp-generator",
+      name: "tp-generator",
+      presentation: { ...outageSkill.presentation, displayName: "TP Generator", examplePrompts: [] }
+    };
+    render(
+      <PortalSkillPicker
+        availableSkills={[skillWithoutExamples]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={setSkills}
+        onFillPrompt={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /TP Generator/ }));
+    expect(screen.queryByRole("button", { name: /填入示例|Use example/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /启用 Skill|Enable Skill/ }));
+
+    await waitFor(() => expect(setSkills).toHaveBeenCalledWith(["managed:tp-generator"]));
+  });
+
   it("keeps the picker open and does not fill the prompt when enabling fails", async () => {
     const setSkills = vi.fn().mockRejectedValue(new Error("保存失败"));
     const fillPrompt = vi.fn();

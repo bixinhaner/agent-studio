@@ -216,6 +216,29 @@ export class SkillCatalogService {
     }
   ) {}
 
+  async ensureManagedSkillEntry(input: {
+    skill: CodexManagedSkillRecord;
+    defaultLocale?: string;
+    initialTranslation?: SkillCatalogLocalizedContent;
+  }): Promise<SkillCatalogEntryRecord> {
+    return this.repository.ensureEntry({
+      catalogKey: managedCatalogKey(input.skill),
+      organizationId: input.skill.organizationId,
+      sourceType: "managed",
+      sourceRef: input.skill.id,
+      canonicalName: input.skill.skillName,
+      defaultLocale: input.defaultLocale,
+      initialTranslation: input.initialTranslation ?? {
+        displayName: text(input.skill.displayName) ?? input.skill.skillName,
+        summary: text(input.skill.description),
+        useCases: [],
+        usageSteps: [],
+        examplePrompts: [],
+        dataScope: undefined
+      }
+    });
+  }
+
   async syncAndList(input: { organizationId?: string; organizationName?: string }): Promise<SkillCatalogAdminRecord[]> {
     const [nativeSkills, managedSkills, plugins, packages, agentModes, policies] = await Promise.all([
       this.sources.nativeSkills.list(),

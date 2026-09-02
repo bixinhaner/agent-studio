@@ -9,6 +9,7 @@ import type {
   CodexSkillRepository
 } from "../persistence/codex-skill-repository.js";
 import type { SkillPackageRepository, SkillPackageRecord } from "../persistence/skill-package-repository.js";
+import type { SkillCatalogLocalizedContent } from "../skill-catalog/types.js";
 
 type Actor = {
   id: string;
@@ -198,6 +199,80 @@ function parseSkillMetadata(content: string): { name?: string; description?: str
   };
 }
 
+type SkillInterfaceMetadata = {
+  displayName?: string;
+  shortDescription?: string;
+  defaultPrompt?: string;
+};
+
+function parseYamlScalar(raw: string): string | undefined {
+  const value = trimOrUndefined(raw);
+  if (!value || value === ">" || value === "|") return undefined;
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "string" ? trimOrUndefined(parsed) : undefined;
+    } catch {
+      return parseFrontmatterValue(value);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return trimOrUndefined(value.slice(1, -1).replace(/''/g, "'"));
+  }
+  return value.replace(/\s+#.*$/, "").trim() || undefined;
+}
+
+function parseSkillInterfaceMetadata(content: string): SkillInterfaceMetadata {
+  const output: SkillInterfaceMetadata = {};
+  let interfaceIndent: number | undefined;
+  for (const line of content.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    if (/^interface\s*:\s*$/.test(line.trim())) {
+      interfaceIndent = indent;
+      continue;
+    }
+    if (interfaceIndent === undefined) continue;
+    if (indent <= interfaceIndent) break;
+    const match = line.trim().match(/^(display_name|short_description|default_prompt)\s*:\s*(.*)$/);
+    if (!match) continue;
+    const value = parseYamlScalar(match[2]);
+    if (match[1] === "display_name") output.displayName = value;
+    if (match[1] === "short_description") output.shortDescription = value;
+    if (match[1] === "default_prompt") output.defaultPrompt = value;
+  }
+  return output;
+}
+
+async function readInitialSkillPresentation(input: {
+  directoryPath: string;
+  skillName: string;
+  displayName?: string;
+  description?: string;
+}): Promise<{ defaultLocale: string; content: SkillCatalogLocalizedContent }> {
+  const openAiYamlPath = path.join(input.directoryPath, "agents", "openai.yaml");
+  const interfaceMetadata = await fs.readFile(openAiYamlPath, "utf8")
+    .then(parseSkillInterfaceMetadata)
+    .catch(() => ({} as SkillInterfaceMetadata));
+  const displayName = interfaceMetadata.displayName ?? trimOrUndefined(input.displayName) ?? input.skillName;
+  const summary = interfaceMetadata.shortDescription ?? trimOrUndefined(input.description) ?? input.skillName;
+  const examplePrompts = interfaceMetadata.defaultPrompt ? [interfaceMetadata.defaultPrompt] : [];
+  const defaultLocale = /[\u3400-\u9fff]/u.test(`${displayName}\n${summary}\n${examplePrompts.join("\n")}`)
+    ? "zh-CN"
+    : "en-US";
+  return {
+    defaultLocale,
+    content: {
+      displayName,
+      summary,
+      useCases: [],
+      usageSteps: [],
+      examplePrompts,
+      dataScope: undefined
+    }
+  };
+}
+
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fs.lstat(filePath);
@@ -376,6 +451,13 @@ export class CodexSkillService {
       repository: CodexSkillRepository;
       skillPackages: SkillPackageRepository;
       agentModes: AgentModeRepository;
+      skillCatalog?: {
+        ensureManagedSkillEntry(input: {
+          skill: CodexManagedSkillRecord;
+          defaultLocale?: string;
+          initialTranslation?: SkillCatalogLocalizedContent;
+        }): Promise<unknown>;
+      };
     },
     options: CodexSkillServiceOptions
   ) {
@@ -510,7 +592,7 @@ export class CodexSkillService {
     const publishedAt = new Date();
     const requestedPrompt =
       trimOrUndefined(input.requestedPrompt) ?? `Installed Codex skill generated from ${sourceFolderName}`;
-    return this.dependencies.repository.upsertManagedSkill({
+    const managedSkill = await this.dependencies.repository.upsertManagedSkill({
       organizationId: input.actor.organizationId,
       ownerUserId: input.actor.id,
       scope: "private",
@@ -542,6 +624,8 @@ export class CodexSkillService {
       },
       publishedAt
     });
+    await this.ensureManagedSkillCatalogEntry(managedSkill, destinationPath);
+    return managedSkill;
   }
 
   async reviseDraft(input: ReviseDraftInput): Promise<CodexSkillDraftRecord> {
@@ -828,6 +912,7 @@ export class CodexSkillService {
       },
       publishedAt
     });
+    await this.ensureManagedSkillCatalogEntry(managedSkill, destinationPath);
 
     const skillPackage = await this.ensureSkillPackageBinding({
       organizationId: managedSkill.organizationId,
@@ -1033,6 +1118,7 @@ export class CodexSkillService {
       },
       publishedAt
     });
+    await this.ensureManagedSkillCatalogEntry(managedSkill, destinationPath);
 
     const draftMetadata = asRecord(draft.metadata);
     const skillPackage = await this.ensureSkillPackageBinding({
@@ -1156,6 +1242,21 @@ export class CodexSkillService {
     const draft = await this.dependencies.repository.getDraft(draftId);
     if (!draft) throw new Error("skill 草稿不存在");
     return draft;
+  }
+
+  private async ensureManagedSkillCatalogEntry(skill: CodexManagedSkillRecord, directoryPath: string): Promise<void> {
+    if (!this.dependencies.skillCatalog) return;
+    const presentation = await readInitialSkillPresentation({
+      directoryPath,
+      skillName: skill.skillName,
+      displayName: skill.displayName,
+      description: skill.description
+    });
+    await this.dependencies.skillCatalog.ensureManagedSkillEntry({
+      skill,
+      defaultLocale: presentation.defaultLocale,
+      initialTranslation: presentation.content
+    });
   }
 
   private async ensureSkillPackageBinding(input: {

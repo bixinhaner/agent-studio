@@ -691,17 +691,6 @@ const enterpriseContext = new EnterpriseContextService({
     createDefaultSystemSettingsPayload().enterpriseContext,
   logger: console
 });
-const codexSkillService = new CodexSkillService(
-  {
-    repository: codexSkills,
-    skillPackages,
-    agentModes
-  },
-  {
-    draftRoot: appConfig.codex.skillDraftRoot,
-    publishedSkillsRoot: nativeCodexSkills.getSkillsRoot()
-  }
-);
 const skillCatalog = new SkillCatalogService(
   new SkillCatalogRepository(db as unknown as SkillCatalogRepositoryDb),
   {
@@ -712,6 +701,18 @@ const skillCatalog = new SkillCatalogService(
     skillPackages,
     agentModes,
     resourcePolicies
+  }
+);
+const codexSkillService = new CodexSkillService(
+  {
+    repository: codexSkills,
+    skillPackages,
+    agentModes,
+    skillCatalog
+  },
+  {
+    draftRoot: appConfig.codex.skillDraftRoot,
+    publishedSkillsRoot: nativeCodexSkills.getSkillsRoot()
   }
 );
 const codexProviders = new ManagedCodexProviderResolver({
