@@ -18,6 +18,7 @@
     "messages:backfill-image-only-tail": "node dist/ops/backfill-image-only-tail.js",
     "skills:backfill-instruction-reads": "tsx src/ops/backfill-historical-instruction-reads.ts",
     "skills:backfill-presentations": "tsx src/ops/backfill-skill-catalog-presentations.ts",
+    "skills:backfill-shared-references": "tsx src/ops/backfill-managed-skill-references.ts",
     "skills:migrate-package-shares": "tsx src/ops/migrate-package-shared-skills-to-private.ts",
     "usage:backfill-long-context": "tsx src/ops/backfill-codex-long-context-costs.ts",
     "usage:backfill-cumulative": "tsx src/ops/backfill-codex-cumulative-usage.ts",

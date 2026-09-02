@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planPackageSharingMigration } from "./package-sharing-migration.js";
+import { planPackageSharingMigration, rewriteManagedSkillReferences } from "./package-sharing-migration.js";
 
 const skills = ["alarm", "bss", "power"].map((skillName) => ({
   id: `skill-${skillName}`,
@@ -134,5 +134,75 @@ describe("planPackageSharingMigration", () => {
     expect(plan.skills).toEqual([]);
     expect(plan.packagePolicyIdsToDelete).toEqual([]);
     expect(plan.skippedPackages).toHaveLength(1);
+  });
+});
+
+describe("rewriteManagedSkillReferences", () => {
+  const mappings = [{
+    sourceManagedSkillId: "shared-old",
+    targetManagedSkillId: "private-current",
+    targetSourcePath: "/skills/user/owner/report"
+  }];
+
+  it("rewrites the selected Skill id, managed id and materialization path", () => {
+    const result = rewriteManagedSkillReferences({
+      mode: "tech-support",
+      enabledSkills: [{
+        id: "managed:shared-old",
+        name: "report",
+        managedSkillId: "shared-old",
+        sourcePath: "/skills/managed/report"
+      }],
+      _agentStudioSkillActivationPrompts: [{ name: "report", prompt: "Use it" }]
+    }, mappings);
+
+    expect(result).toEqual({
+      changed: true,
+      rewrittenSkillIds: ["shared-old"],
+      runConfig: {
+        mode: "tech-support",
+        enabledSkills: [{
+          id: "managed:private-current",
+          name: "report",
+          managedSkillId: "private-current",
+          sourcePath: "/skills/user/owner/report"
+        }],
+        _agentStudioSkillActivationPrompts: [{ name: "report", prompt: "Use it" }]
+      }
+    });
+  });
+
+  it("also repairs a legacy id-only selection and leaves unrelated Skills unchanged", () => {
+    const result = rewriteManagedSkillReferences({
+      enabledSkills: [
+        { id: "shared-old", name: "report" },
+        { id: "managed:other", name: "other", managedSkillId: "other" }
+      ]
+    }, mappings);
+
+    expect(result.changed).toBe(true);
+    expect(result.runConfig.enabledSkills).toEqual([
+      {
+        id: "managed:private-current",
+        name: "report",
+        managedSkillId: "private-current",
+        sourcePath: "/skills/user/owner/report"
+      },
+      { id: "managed:other", name: "other", managedSkillId: "other" }
+    ]);
+  });
+
+  it("is idempotent after references have been migrated", () => {
+    const result = rewriteManagedSkillReferences({
+      enabledSkills: [{
+        id: "managed:private-current",
+        name: "report",
+        managedSkillId: "private-current",
+        sourcePath: "/skills/user/owner/report"
+      }]
+    }, mappings);
+
+    expect(result.changed).toBe(false);
+    expect(result.rewrittenSkillIds).toEqual([]);
   });
 });

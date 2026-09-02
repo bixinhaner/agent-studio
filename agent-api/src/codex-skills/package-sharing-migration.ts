@@ -50,6 +50,18 @@ export type PackageSharingMigrationPlan = {
   blockers: string[];
 };
 
+export type ManagedSkillReferenceMapping = {
+  sourceManagedSkillId: string;
+  targetManagedSkillId: string;
+  targetSourcePath: string;
+};
+
+export type ManagedSkillReferenceRewrite = {
+  runConfig: Record<string, unknown>;
+  changed: boolean;
+  rewrittenSkillIds: string[];
+};
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -64,6 +76,39 @@ function boundManagedSkillId(binding: PackageSharingPackage["bindings"][number])
 
 function policyKey(input: { subjectId: string; resourceId: string }): string {
   return `${input.subjectId}:${input.resourceId}`;
+}
+
+export function rewriteManagedSkillReferences(
+  value: unknown,
+  mappings: ManagedSkillReferenceMapping[]
+): ManagedSkillReferenceRewrite {
+  const runConfig = record(value) ? { ...record(value)! } : {};
+  if (!Array.isArray(runConfig.enabledSkills) || mappings.length === 0) {
+    return { runConfig, changed: false, rewrittenSkillIds: [] };
+  }
+  const mappingBySourceId = new Map(mappings.map((mapping) => [mapping.sourceManagedSkillId, mapping] as const));
+  const rewrittenSkillIds = new Set<string>();
+  let changed = false;
+  runConfig.enabledSkills = runConfig.enabledSkills.map((item) => {
+    const payload = record(item);
+    if (!payload) return item;
+    const managedSkillId = typeof payload.managedSkillId === "string" ? payload.managedSkillId.trim() : "";
+    const selectionId = typeof payload.id === "string" ? payload.id.trim() : "";
+    const selectionManagedSkillId = selectionId.startsWith("managed:")
+      ? selectionId.slice("managed:".length)
+      : selectionId;
+    const mapping = mappingBySourceId.get(managedSkillId) ?? mappingBySourceId.get(selectionManagedSkillId);
+    if (!mapping) return item;
+    changed = true;
+    rewrittenSkillIds.add(mapping.sourceManagedSkillId);
+    return {
+      ...payload,
+      id: `managed:${mapping.targetManagedSkillId}`,
+      managedSkillId: mapping.targetManagedSkillId,
+      sourcePath: mapping.targetSourcePath
+    };
+  });
+  return { runConfig, changed, rewrittenSkillIds: [...rewrittenSkillIds].sort() };
 }
 
 export function planPackageSharingMigration(input: {
