@@ -10,10 +10,10 @@ const ARTIFACT_PUBLICATION_LIMIT = 50;
 const ARTIFACT_PUBLICATION_ROLES = new Set(["final", "preview", "intermediate", "source"]);
 
 export const ARTIFACT_PUBLICATION_HINT = [
-  "内部产物发布要求：当用户要求创建、编辑、转换或导出文件时，完成内容与版式校验后，必须显式发布最终交付文件。",
-  "在会话工作区使用 `node .agent-studio/artifact-cli.mjs publish --path <文件路径> [--name <用户看到的文件名>]` 发布。",
-  "只发布用户应下载的最终文件；不要发布构建脚本、临时文件、预览图、检查报告或中间产物，除非用户明确要求这些文件。",
-  "发布成功后再在最终回答中引用该文件。不要向用户解释发布工具、清单或内部路径。"
+  "Internal artifact publication requirement: when the user asks to create, edit, convert, or export a file, explicitly publish the final deliverable after validating its content and layout.",
+  "Publish from the session workspace with `node .agent-studio/artifact-cli.mjs publish --path <file-path> [--name <user-visible-file-name>]`.",
+  "Publish only final files the user should download. Do not publish build scripts, temporary files, preview images, validation reports, or intermediate artifacts unless the user explicitly requests them.",
+  "Reference the file in the final response only after publication succeeds. Do not explain the publication tool, manifest, or internal paths to the user."
 ].join("\n");
 
 export type ArtifactPublicationPaths = {

@@ -76,7 +76,7 @@ describe("shared python runtime", () => {
   });
 
   it("generates a hidden runtime hint only when package preference is enabled", () => {
-    expect(sharedPythonRuntimeHint(enabledSettings)).toContain("共享 Python Runtime");
+    expect(sharedPythonRuntimeHint(enabledSettings)).toContain("shared Python runtime");
     expect(sharedPythonRuntimeHint({ ...enabledSettings, injectRuntimeHint: false })).toBeUndefined();
     expect(sharedPythonRuntimeHint({ ...enabledSettings, preferSharedPackages: false })).toBeUndefined();
   });

@@ -23,11 +23,11 @@ export type ToolRuntimeEnvPaths = {
 };
 
 export const TOOL_RUNTIME_FRESHNESS_HINT = [
-  "内部运行提示：当前请求使用的已安装 Skill 和插件运行时已在请求开始前重新校验并映射。",
-  "不要沿用本对话中过去关于组件缺失、依赖不可用或编辑环境未恢复的结论。",
-  "当用户再次请求创建、编辑、转换或解析文件时，必须重新读取对应的已安装 Skill，并基于当前运行时实际尝试。",
-  "编辑已有文件时优先复用对话中已知的原文件路径或附件；只有本次尝试返回错误后，才能说明当前能力不可用。",
-  "这些是内部执行要求，不要向用户解释运行时、依赖、Skill 或插件状态。"
+  "Internal runtime guidance: installed Skills and plugin runtimes for this request were revalidated and mapped before the request started.",
+  "Do not reuse earlier conclusions from this conversation that a component is missing, a dependency is unavailable, or the editing environment has not recovered.",
+  "When the user asks again to create, edit, convert, or parse a file, reread the relevant installed Skill and make a real attempt using the current runtime.",
+  "When editing an existing file, prefer the original file path or attachment already known from the conversation. State that the capability is unavailable only after the current attempt returns an error.",
+  "These are internal execution requirements. Do not explain runtime, dependency, Skill, or plugin status to the user."
 ].join("\n");
 
 export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | undefined {

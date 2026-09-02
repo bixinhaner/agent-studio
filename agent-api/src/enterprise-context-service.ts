@@ -141,46 +141,46 @@ function buildMarkdown(snapshot: EnterpriseContextSnapshot, fields: SystemSettin
   const user = snapshot.user;
   const lines = [
     "<enterprise_context>",
-    "你正在为企业用户提供帮助。以下信息来自 Agent Studio 企业目录，仅用于理解当前用户的身份、部门和工作背景。",
-    "使用规则：",
-    "- 可以用这些信息理解问题场景、称谓和职责范围。",
-    "- 不要主动复述完整企业上下文，除非用户明确询问。",
-    "- 不要把这些动态企业资料写入长期记忆。",
+    "You are assisting an enterprise user. The following information comes from the Agent Studio enterprise directory and is provided only to help you understand the current user's identity, department, and work context.",
+    "Usage rules:",
+    "- You may use this information to understand the scenario, appropriate form of address, and scope of responsibility.",
+    "- Do not proactively repeat the full enterprise context unless the user explicitly asks for it.",
+    "- Do not write this dynamic enterprise information to long-term memory.",
     "",
-    "当前用户："
+    "Current user:"
   ];
 
   if (!user) {
-    lines.push("- 未匹配到具体企业用户。");
+    lines.push("- No matching enterprise user was found.");
   } else {
     if (fields.identity) {
-      if (user.name) lines.push(`- 姓名：${user.name}`);
-      if (user.email) lines.push(`- 邮箱：${user.email}`);
+      if (user.name) lines.push(`- Name: ${user.name}`);
+      if (user.email) lines.push(`- Email: ${user.email}`);
     }
-    if (fields.organization && user.organization) lines.push(`- 组织：${user.organization}`);
-    if (fields.departmentPosition && user.title) lines.push(`- 岗位：${user.title}`);
-    if (fields.employeeNo && user.employeeNo) lines.push(`- 工号：${user.employeeNo}`);
-    if (fields.workPlace && user.workPlace) lines.push(`- 工作地：${user.workPlace}`);
-    if (fields.manager && user.manager) lines.push(`- 直属主管：${user.manager}`);
+    if (fields.organization && user.organization) lines.push(`- Organization: ${user.organization}`);
+    if (fields.departmentPosition && user.title) lines.push(`- Job title: ${user.title}`);
+    if (fields.employeeNo && user.employeeNo) lines.push(`- Employee number: ${user.employeeNo}`);
+    if (fields.workPlace && user.workPlace) lines.push(`- Work location: ${user.workPlace}`);
+    if (fields.manager && user.manager) lines.push(`- Direct manager: ${user.manager}`);
     if (fields.departmentPosition && user.departments?.length) {
       const departmentText = user.departments
         .slice(0, 6)
         .map((department) => {
           const tags = [
-            department.position ? `职位 ${department.position}` : undefined,
-            department.isPrimary ? "主部门" : undefined,
-            department.isLeader ? "部门负责人" : undefined
+            department.position ? `Position: ${department.position}` : undefined,
+            department.isPrimary ? "Primary department" : undefined,
+            department.isLeader ? "Department leader" : undefined
           ].filter(Boolean);
-          return tags.length ? `${department.name}（${tags.join("，")}）` : department.name;
+          return tags.length ? `${department.name} (${tags.join(", ")})` : department.name;
         })
-        .join("；");
-      lines.push(`- 部门：${departmentText}`);
+        .join("; ");
+      lines.push(`- Departments: ${departmentText}`);
     }
     if (fields.contact) {
-      if (user.mobile) lines.push(`- 手机：${user.mobile}`);
-      if (user.telephone) lines.push(`- 电话：${user.telephone}`);
+      if (user.mobile) lines.push(`- Mobile: ${user.mobile}`);
+      if (user.telephone) lines.push(`- Telephone: ${user.telephone}`);
     }
-    if (user.lastSyncedAt) lines.push(`- 企业资料同步时间：${user.lastSyncedAt}`);
+    if (user.lastSyncedAt) lines.push(`- Enterprise profile last synchronized at: ${user.lastSyncedAt}`);
   }
 
   lines.push("</enterprise_context>");

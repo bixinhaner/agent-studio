@@ -37,9 +37,9 @@ afterEach(async () => {
 
 describe("tool runtime env", () => {
   it("requires retrial after a historical plugin runtime failure", () => {
-    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("不要沿用本对话中过去");
-    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("必须重新读取对应的已安装 Skill");
-    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("只有本次尝试返回错误后");
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("Do not reuse earlier conclusions");
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("reread the relevant installed Skill");
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("only after the current attempt returns an error");
   });
 
   it("creates writable home and XDG directories under workspace temp", async () => {

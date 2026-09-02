@@ -70,6 +70,10 @@ describe("EnterpriseContextService", () => {
 
     expect(result.enabled).toBe(true);
     expect(result.markdown).toContain("<enterprise_context>");
+    expect(result.markdown).toContain("Current user:");
+    expect(result.markdown).toContain("- Name: Yong Ding");
+    expect(result.markdown).toContain("- Direct manager: Manager Li");
+    expect(result.markdown).toContain("Primary department");
     expect(result.markdown).toContain("Yong Ding");
     expect(result.markdown).toContain("Technical Support");
     expect(result.markdown).toContain("Manager Li");

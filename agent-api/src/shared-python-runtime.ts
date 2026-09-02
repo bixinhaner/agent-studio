@@ -158,9 +158,9 @@ export function sharedPythonRuntimeHint(settings: SystemSettingsPythonRuntime | 
   if (!effective.enabled || !effective.injectRuntimeHint) return undefined;
   if (!effective.preferSharedPackages) return undefined;
   return [
-    "内部运行提示：共享 Python Runtime 已通过环境变量注入。",
-    "执行 Python、文档、表格、图片或翻译任务时，优先直接使用已可 import 的共享包。",
-    "不要为常见库创建会话级 virtualenv 或重复 pip install；只有共享运行时缺少任务必需依赖时才创建临时隔离环境。"
+    "Internal runtime guidance: the shared Python runtime is available through environment variables.",
+    "For Python, document, spreadsheet, image, or translation tasks, prefer packages that are already importable from the shared runtime.",
+    "Do not create a session-specific virtual environment or repeat pip installations for common libraries. Create a temporary isolated environment only when a dependency required for the task is missing from the shared runtime."
   ].join("\n");
 }
 

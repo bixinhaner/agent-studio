@@ -152,7 +152,7 @@ describe("artifact publication", () => {
 
   it("gives the model a concise final-only publishing contract", () => {
     expect(ARTIFACT_PUBLICATION_HINT).toContain(".agent-studio/artifact-cli.mjs");
-    expect(ARTIFACT_PUBLICATION_HINT).toContain("只发布用户应下载的最终文件");
-    expect(ARTIFACT_PUBLICATION_HINT).toContain("不要向用户解释");
+    expect(ARTIFACT_PUBLICATION_HINT).toContain("Publish only final files the user should download");
+    expect(ARTIFACT_PUBLICATION_HINT).toContain("Do not explain the publication tool");
   });
 });
