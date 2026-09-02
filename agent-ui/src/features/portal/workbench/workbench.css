@@ -4275,6 +4275,156 @@ button.session-rail-new-btn:active,
   font-weight: 630;
 }
 
+.portal-skill-conflict-modal {
+  --skill-accent: var(--brand-primary, #FF4614);
+  --skill-border: #e6e8ed;
+  --skill-surface: #ffffff;
+  --skill-surface-muted: #f7f8fa;
+  --skill-text: #182230;
+  --skill-muted: #667085;
+  --skill-danger: #b42318;
+}
+
+.portal-skill-conflict-modal .ant-modal-content {
+  border: 1px solid var(--skill-border);
+  border-radius: 18px;
+  box-shadow: 0 24px 64px rgba(16, 24, 40, 0.18);
+  padding: 24px;
+}
+
+.portal-skill-conflict-modal .ant-modal {
+  width: min(520px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px);
+}
+
+.portal-skill-conflict-modal .ant-modal-header {
+  margin-bottom: 16px;
+}
+
+.portal-skill-conflict-modal .ant-modal-title {
+  color: var(--skill-text);
+  font-size: 19px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+}
+
+.portal-skill-conflict-modal .ant-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.portal-skill-conflict-content {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding-left: 52px;
+  color: var(--skill-text);
+}
+
+.portal-skill-conflict-content > p {
+  margin: 0;
+  color: var(--skill-text);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.portal-skill-conflict-icon {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--skill-accent) 20%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--skill-accent) 8%, var(--skill-surface));
+  color: var(--skill-accent);
+}
+
+.portal-skill-conflict-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--skill-border);
+  border-radius: 12px;
+  background: var(--skill-surface-muted);
+  color: var(--skill-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.portal-skill-conflict-copy svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--skill-accent);
+}
+
+.portal-skill-conflict-names {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--skill-muted);
+}
+
+.portal-skill-conflict-names code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--skill-border);
+  border-radius: 7px;
+  background: var(--skill-surface);
+  color: var(--skill-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-conflict-names code:last-child {
+  border-color: color-mix(in srgb, var(--skill-accent) 28%, var(--skill-border));
+  background: color-mix(in srgb, var(--skill-accent) 7%, var(--skill-surface));
+  color: var(--skill-accent);
+}
+
+.portal-skill-conflict-error {
+  margin: 0;
+  color: var(--skill-danger);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .portal-skill-conflict-modal .ant-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px);
+    margin-inline: auto;
+  }
+
+  .portal-skill-conflict-modal .ant-modal-content {
+    padding: 20px;
+  }
+
+  .portal-skill-conflict-content {
+    padding-left: 0;
+    padding-top: 50px;
+  }
+
+  .portal-skill-conflict-modal .ant-modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .portal-skill-conflict-modal .ant-modal-footer .ant-btn {
+    width: 100%;
+    min-height: 44px;
+    margin-inline-start: 0;
+  }
+}
+
 .portal-skill-sharing-modal .ant-modal-content {
   overflow: hidden;
   padding: 0;

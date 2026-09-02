@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
-import type { CodexSkillService } from "./codex-skill-service.js";
+import { ManagedSkillNameConflictError, type CodexSkillService } from "./codex-skill-service.js";
 
 const createDraftSchema = z.object({
   prompt: z.string().trim().min(1).max(8000),
@@ -13,7 +13,8 @@ const createDraftFromThreadPathSchema = z.object({
   thread_id: z.string().trim().min(1),
   path: z.string().trim().min(1).max(2000),
   prompt: z.string().trim().max(8000).optional().nullable(),
-  mode_id: z.string().trim().optional().nullable()
+  mode_id: z.string().trim().optional().nullable(),
+  conflict_action: z.enum(["fork"]).optional()
 });
 
 const updateManagedSkillStatusSchema = z.object({
@@ -162,10 +163,19 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
         sourceRelativePath: parsed.data.path,
         requestedPrompt: parsed.data.prompt || undefined,
         sourceThreadId: parsed.data.thread_id,
-        modeId: parsed.data.mode_id || undefined
+        modeId: parsed.data.mode_id || undefined,
+        conflictAction: parsed.data.conflict_action
       });
       res.status(201).json({ skill });
     } catch (error) {
+      if (error instanceof ManagedSkillNameConflictError) {
+        res.status(409).json({
+          detail: error.message,
+          code: error.code,
+          conflict: error.conflict
+        });
+        return;
+      }
       res.status(400).json({ detail: detailFromError(error) });
     }
   });

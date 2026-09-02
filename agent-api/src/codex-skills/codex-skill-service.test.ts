@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CodexSkillService } from "./codex-skill-service.js";
+import { CodexSkillService, ManagedSkillNameConflictError } from "./codex-skill-service.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -194,5 +194,160 @@ describe("CodexSkillService member sharing", () => {
       skillId: "managed-private",
       userIds: ["other-org-user"]
     })).rejects.toThrow("只能共享给当前组织的有效成员");
+  });
+});
+
+describe("CodexSkillService shared Skill update conflicts", () => {
+  it("blocks silent overwrite and creates an explicitly named personal copy on confirmation", async () => {
+    const root = await createTemporaryDirectory();
+    const skillDirectory = path.join(root, "tp-generator");
+    await fs.mkdir(path.join(skillDirectory, "agents"), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDirectory, "SKILL.md"),
+      "---\nname: tp-generator\ndescription: Build proposals.\n---\n\nUse $tp-generator for proposals.\n"
+    );
+    await fs.writeFile(
+      path.join(skillDirectory, "agents", "openai.yaml"),
+      "interface:\n  default_prompt: \"Use $tp-generator for a proposal.\"\n"
+    );
+    const sharedSkill = {
+      id: "shared-tp",
+      organizationId: "org-1",
+      ownerUserId: "owner-1",
+      scope: "private",
+      skillName: "tp-generator",
+      slug: "tp-generator",
+      displayName: "TP Generator",
+      description: "Build proposals.",
+      status: "active",
+      version: "1.2.0",
+      publishedPath: "/published/owner/tp-generator",
+      createdByUserId: "owner-1",
+      createdByDisplayName: "Owner",
+      createdByEmail: "owner@example.com",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z"
+    };
+    const upsertManagedSkill = vi.fn(async (input: Record<string, unknown>) => ({
+      ...input,
+      id: "personal-tp",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      updatedAt: "2026-09-02T00:00:00.000Z"
+    }));
+    const repository = {
+      findManagedSkillByName: vi.fn().mockResolvedValue(undefined),
+      listManagedSkills: vi.fn().mockResolvedValue([sharedSkill]),
+      upsertManagedSkill
+    };
+    const service = new CodexSkillService({
+      repository,
+      skillPackages: {} as never,
+      agentModes: {} as never,
+      resourcePolicies: {
+        listAll: vi.fn(async () => [{
+          id: "policy-1",
+          organizationId: "org-1",
+          subjectType: "user",
+          subjectId: "member-1",
+          resourceType: "managed_skill",
+          resourceId: "shared-tp",
+          effect: "allow",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-01T00:00:00.000Z"
+        }]),
+        replacePoliciesForResource: vi.fn()
+      }
+    } as never, {
+      draftRoot: path.join(root, "drafts"),
+      publishedSkillsRoot: path.join(root, "published")
+    });
+    const input = {
+      actor: { id: "member-1", organizationId: "org-1", displayName: "Member" },
+      sourceDirectoryPath: skillDirectory
+    };
+
+    await expect(service.installSkillFromDirectory(input)).rejects.toMatchObject({
+      code: "SKILL_NAME_SHARED_CONFLICT",
+      conflict: expect.objectContaining({
+        skillId: "shared-tp",
+        skillName: "tp-generator",
+        suggestedName: "tp-generator-personal"
+      })
+    } satisfies Partial<ManagedSkillNameConflictError>);
+    expect(upsertManagedSkill).not.toHaveBeenCalled();
+
+    const installed = await service.installSkillFromDirectory({ ...input, conflictAction: "fork" });
+
+    expect(installed).toMatchObject({ id: "personal-tp", skillName: "tp-generator-personal", ownerUserId: "member-1" });
+    expect(upsertManagedSkill).toHaveBeenCalledWith(expect.objectContaining({
+      skillName: "tp-generator-personal",
+      metadata: expect.objectContaining({
+        forkedFromSkillId: "shared-tp",
+        forkedFromOwnerUserId: "owner-1"
+      })
+    }));
+    const copiedSkillMd = await fs.readFile(path.join(installed.publishedPath, "SKILL.md"), "utf8");
+    const copiedInterface = await fs.readFile(path.join(installed.publishedPath, "agents", "openai.yaml"), "utf8");
+    expect(copiedSkillMd).toContain("name: tp-generator-personal");
+    expect(copiedSkillMd).toContain("$tp-generator-personal");
+    expect(copiedInterface).toContain("$tp-generator-personal");
+    expect(await fs.readFile(path.join(skillDirectory, "SKILL.md"), "utf8")).toContain("name: tp-generator\n");
+  });
+
+  it("updates the owner's same-name record without consulting or replacing sharing grants", async () => {
+    const root = await createTemporaryDirectory();
+    const skillDirectory = path.join(root, "owner-skill");
+    await fs.mkdir(skillDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDirectory, "SKILL.md"),
+      "---\nname: owner-skill\ndescription: Updated workflow.\n---\n\n# Owner Skill\n"
+    );
+    const existing = {
+      id: "owned-1",
+      organizationId: "org-1",
+      ownerUserId: "owner-1",
+      scope: "private",
+      skillName: "owner-skill",
+      slug: "owner-skill",
+      displayName: "Owner Skill",
+      description: "Old workflow.",
+      status: "active",
+      version: "1.0.0",
+      checksum: "old-checksum",
+      publishedPath: path.join(root, "published", "user", "org-1", "owner-1", "owner-skill"),
+      createdByUserId: "owner-1",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z"
+    };
+    const listAll = vi.fn();
+    const replacePoliciesForResource = vi.fn();
+    const repository = {
+      findManagedSkillByName: vi.fn().mockResolvedValue(existing),
+      upsertManagedSkill: vi.fn(async (input: Record<string, unknown>) => ({
+        ...existing,
+        ...input,
+        id: existing.id,
+        updatedAt: "2026-09-02T00:00:00.000Z"
+      }))
+    };
+    const service = new CodexSkillService({
+      repository,
+      skillPackages: {} as never,
+      agentModes: {} as never,
+      resourcePolicies: { listAll, replacePoliciesForResource }
+    } as never, {
+      draftRoot: path.join(root, "drafts"),
+      publishedSkillsRoot: path.join(root, "published")
+    });
+
+    const installed = await service.installSkillFromDirectory({
+      actor: { id: "owner-1", organizationId: "org-1" },
+      sourceDirectoryPath: skillDirectory
+    });
+
+    expect(installed.id).toBe("owned-1");
+    expect(installed.version).toBe("1.0.1");
+    expect(listAll).not.toHaveBeenCalled();
+    expect(replacePoliciesForResource).not.toHaveBeenCalled();
   });
 });

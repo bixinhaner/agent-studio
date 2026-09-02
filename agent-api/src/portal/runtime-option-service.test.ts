@@ -699,4 +699,36 @@ describe("PortalRuntimeOptionService", () => {
 
     expect(result.modes[0]?.availableSkills).toEqual([]);
   });
+
+  it("deterministically prefers the viewer's own Skill over a newer shared Skill with the same name", async () => {
+    const sharedSkill = {
+      ...privateManagedSkill("managed-shared", "duplicate-report", "user-owner"),
+      updatedAt: "2026-09-02T12:00:00.000Z"
+    };
+    const ownSkill = {
+      ...privateManagedSkill("managed-own", "duplicate-report", "user-member"),
+      updatedAt: "2026-09-01T12:00:00.000Z"
+    };
+    const service = createService({
+      managedSkills: [sharedSkill, ownSkill],
+      policiesByManagedSkillId: { "managed-shared": ["user-member"] },
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: [],
+        managed_skill: ["managed-shared"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-member",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(result.modes[0]?.availableSkills).toEqual([
+      expect.objectContaining({ id: "managed:managed-own", name: "duplicate-report", scope: "private" })
+    ]);
+  });
 });

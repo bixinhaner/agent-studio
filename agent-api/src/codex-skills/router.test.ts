@@ -2,7 +2,7 @@ import express, { type Request } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CodexSkillService } from "./codex-skill-service.js";
+import { ManagedSkillNameConflictError, type CodexSkillService } from "./codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./router.js";
 
 function appFor(router: express.Router) {
@@ -59,5 +59,39 @@ describe("managed Codex Skill member sharing routes", () => {
       skillId: "skill-1",
       userIds: ["member-1"]
     });
+  });
+});
+
+describe("managed Codex Skill install conflict route", () => {
+  it("returns a structured 409 and forwards an explicit fork confirmation", async () => {
+    const conflict = {
+      skillId: "shared-1",
+      skillName: "tp-generator",
+      ownerUserId: "owner-2",
+      ownerDisplayName: "Shared Owner",
+      suggestedName: "tp-generator-personal"
+    };
+    const installSkillFromDirectory = vi.fn()
+      .mockRejectedValueOnce(new ManagedSkillNameConflictError(conflict))
+      .mockResolvedValueOnce({ id: "personal-1", skillName: "tp-generator-personal" });
+    const service = { installSkillFromDirectory } as unknown as CodexSkillService;
+    const app = appFor(createPortalCodexSkillRouter(service));
+    app.locals.resolveCodexSkillThreadPath = vi.fn(async () => "/threads/thread-1/tp-generator");
+
+    const blocked = await request(app)
+      .post("/codex-managed-skills/install-from-thread-path")
+      .send({ thread_id: "thread-1", path: "tp-generator" })
+      .expect(409);
+    expect(blocked.body).toEqual({
+      detail: "Skill tp-generator 由其他成员共享，不能直接覆盖",
+      code: "SKILL_NAME_SHARED_CONFLICT",
+      conflict
+    });
+
+    await request(app)
+      .post("/codex-managed-skills/install-from-thread-path")
+      .send({ thread_id: "thread-1", path: "tp-generator", conflict_action: "fork" })
+      .expect(201);
+    expect(installSkillFromDirectory).toHaveBeenLastCalledWith(expect.objectContaining({ conflictAction: "fork" }));
   });
 });

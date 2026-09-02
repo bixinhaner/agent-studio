@@ -15,6 +15,15 @@ export type ManagedSkillSharingState = {
   availableMembers: ManagedSkillShareMember[];
 };
 
+export type ManagedSkillInstallConflict = {
+  skillId: string;
+  skillName: string;
+  ownerUserId: string;
+  ownerDisplayName?: string;
+  ownerEmail?: string;
+  suggestedName: string;
+};
+
 export async function createPortalSkillDraft(input: {
   prompt: string;
   threadId?: string;
@@ -52,6 +61,7 @@ export async function installPortalSkillFromThreadPath(input: {
   path: string;
   prompt?: string;
   modeId?: string;
+  conflictAction?: "fork";
 }): Promise<{ skill: CodexManagedSkill }> {
   return api<{ skill: CodexManagedSkill }>("/api/portal/codex-managed-skills/install-from-thread-path", {
     method: "POST",
@@ -59,7 +69,8 @@ export async function installPortalSkillFromThreadPath(input: {
       thread_id: input.threadId,
       path: input.path,
       prompt: input.prompt,
-      mode_id: input.modeId
+      mode_id: input.modeId,
+      conflict_action: input.conflictAction
     }
   });
 }

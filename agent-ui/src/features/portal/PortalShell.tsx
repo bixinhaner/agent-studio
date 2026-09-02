@@ -147,6 +147,10 @@ import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
+import {
+  managedSkillInstallConflictFromError,
+  SkillInstallConflictDialog
+} from "./workbench/SkillInstallConflictDialog";
 import { resolvePortalChatRecoveryActive } from "./chat-recovery";
 import { completedAssistantContentForParent, isPortalTransportDisconnect } from "./background-run-recovery";
 import { PortalBillingPanel } from "./PortalBillingPanel";
@@ -169,7 +173,8 @@ import {
   fetchPortalSkillDraft,
   installPortalSkillFromThreadPath,
   revisePortalSkillDraft,
-  uninstallPortalManagedSkill
+  uninstallPortalManagedSkill,
+  type ManagedSkillInstallConflict
 } from "../skills/api";
 import type { CodexManagedSkill, CodexSkillDraft } from "../skills/types";
 import { getBrandInitials } from "../branding/BrandMark";
@@ -569,6 +574,7 @@ const SkillDraftActionContext = createContext<{
     threadId: string;
     path: string;
     prompt?: string;
+    conflictAction?: "fork";
   }) => Promise<CodexManagedSkill | null>;
   uninstallSkill: (input: { skillId: string }) => Promise<CodexManagedSkill | null>;
 }>({
@@ -4549,6 +4555,10 @@ const ProcessDataFallback: FC<any> = ({
   const [uninstallingSkillId, setUninstallingSkillId] = useState("");
   const [installedSkillsByPath, setInstalledSkillsByPath] = useState<Record<string, CodexManagedSkill>>({});
   const [skillInstallError, setSkillInstallError] = useState("");
+  const [skillInstallConflict, setSkillInstallConflict] = useState<{
+    skillPath: string;
+    conflict: ManagedSkillInstallConflict;
+  }>();
 
   if (name === "codex_connection_recovery") {
     return <PortalChatRecoveryNotice state="recovering" />;
@@ -4774,15 +4784,16 @@ const ProcessDataFallback: FC<any> = ({
     const skillRootPaths = isExternalPortalUser ? [] : collectSkillRootPathsFromChanges(changes);
     if (artifactChanges.length === 0 && skillRootPaths.length === 0) return null;
     const activeThreadRunning = Boolean(activeThreadId.trim() && runningThreadIds[activeThreadId.trim()]);
-    const installSkillPath = async (skillPath: string) => {
+    const installSkillPath = async (skillPath: string, conflictAction?: "fork"): Promise<boolean> => {
       const threadId = activeThreadId.trim();
-      if (!threadId) return;
+      if (!threadId) return false;
       setInstallingSkillPath(skillPath);
       setSkillInstallError("");
       try {
         const skill = await skillDraftActions.installSkillFromPath({
           threadId,
-          path: skillPath
+          path: skillPath,
+          conflictAction
         });
         if (skill) {
           setInstalledSkillsByPath((current) => ({
@@ -4790,9 +4801,18 @@ const ProcessDataFallback: FC<any> = ({
             [skillPath]: skill
           }));
           await skillDraftActions.refreshRuntimeOptions();
+          setSkillInstallConflict(undefined);
+          return true;
         }
+        return false;
       } catch (error) {
+        const conflict = managedSkillInstallConflictFromError(error);
+        if (!conflictAction && conflict) {
+          setSkillInstallConflict({ skillPath, conflict });
+          return false;
+        }
         setSkillInstallError(error instanceof Error ? error.message : t("skill.saveError"));
+        return false;
       } finally {
         setInstallingSkillPath("");
       }
@@ -4953,6 +4973,20 @@ const ProcessDataFallback: FC<any> = ({
               );
             })}
             {skillInstallError ? <p className="skill-draft-error">{skillInstallError}</p> : null}
+            <SkillInstallConflictDialog
+              open={Boolean(skillInstallConflict)}
+              conflict={skillInstallConflict?.conflict}
+              loading={Boolean(skillInstallConflict && installingSkillPath === skillInstallConflict.skillPath)}
+              errorText={skillInstallError}
+              onKeepShared={() => {
+                setSkillInstallConflict(undefined);
+                setSkillInstallError("");
+              }}
+              onCreateCopy={() => {
+                if (!skillInstallConflict) return;
+                void installSkillPath(skillInstallConflict.skillPath, "fork");
+              }}
+            />
           </div>
         ) : null}
       </>
@@ -10231,7 +10265,7 @@ export function PortalShell(props: {
         if (!started) return;
         setStatusText(`New chat ready with ${targetSkill.label || targetSkill.name}`);
       },
-      async installSkillFromPath(input: { threadId: string; path: string; prompt?: string }) {
+      async installSkillFromPath(input: { threadId: string; path: string; prompt?: string; conflictAction?: "fork" }) {
         const threadId = input.threadId.trim();
         const skillPath = input.path.trim();
         if (!threadId || !skillPath) return null;
@@ -10239,7 +10273,8 @@ export function PortalShell(props: {
           threadId,
           path: skillPath,
           prompt: input.prompt,
-          modeId: runtimeModeRef.current
+          modeId: runtimeModeRef.current,
+          conflictAction: input.conflictAction
         });
         setStatusText(`Skill installed: ${response.skill.displayName || response.skill.skillName || response.skill.id}`);
         return response.skill;

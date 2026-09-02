@@ -8,14 +8,16 @@ export class ApiError extends Error {
   readonly detail: string;
   readonly code?: string;
   readonly reasonCode?: string;
+  readonly payload?: unknown;
 
-  constructor(input: { message: string; status: number; detail: string; code?: string; reasonCode?: string }) {
+  constructor(input: { message: string; status: number; detail: string; code?: string; reasonCode?: string; payload?: unknown }) {
     super(input.message);
     this.name = "ApiError";
     this.status = input.status;
     this.detail = input.detail;
     this.code = input.code;
     this.reasonCode = input.reasonCode;
+    this.payload = input.payload;
   }
 }
 
@@ -87,7 +89,8 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
       status: res.status,
       detail: msg,
       code: typeof code === "string" && code.trim() ? code.trim() : undefined,
-      reasonCode: typeof reasonCode === "string" && reasonCode.trim() ? reasonCode.trim() : undefined
+      reasonCode: typeof reasonCode === "string" && reasonCode.trim() ? reasonCode.trim() : undefined,
+      payload: data
     });
   }
   return data as T;

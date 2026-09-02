@@ -41,7 +41,26 @@ type InstallSkillFromDirectoryInput = {
   requestedPrompt?: string;
   sourceThreadId?: string;
   modeId?: string;
+  conflictAction?: "fork";
 };
+
+export type ManagedSkillNameConflict = {
+  skillId: string;
+  skillName: string;
+  ownerUserId: string;
+  ownerDisplayName?: string;
+  ownerEmail?: string;
+  suggestedName: string;
+};
+
+export class ManagedSkillNameConflictError extends Error {
+  readonly code = "SKILL_NAME_SHARED_CONFLICT";
+
+  constructor(readonly conflict: ManagedSkillNameConflict) {
+    super(`Skill ${conflict.skillName} 由其他成员共享，不能直接覆盖`);
+    this.name = "ManagedSkillNameConflictError";
+  }
+}
 
 type ReviseDraftInput = {
   actor: Actor;
@@ -212,6 +231,31 @@ function parseSkillMetadata(content: string): { name?: string; description?: str
     name: parseFrontmatterValue(metadata.name),
     description: parseFrontmatterValue(metadata.description)
   };
+}
+
+function replaceSkillInvocationName(content: string, currentName: string, nextName: string): string {
+  const escapedName = currentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content.replace(new RegExp(`\\$${escapedName}(?![a-zA-Z0-9._-])`, "g"), () => `$${nextName}`);
+}
+
+function replaceSkillCanonicalName(content: string, currentName: string, nextName: string): string {
+  const frontmatter = content.match(FRONTMATTER_RE);
+  if (!frontmatter) throw new Error("Skill 缺少 YAML frontmatter");
+  const nextFrontmatter = frontmatter[1].replace(
+    /^(\s*name\s*:)\s*.*$/m,
+    (_line, prefix: string) => `${prefix} ${nextName}`
+  );
+  if (nextFrontmatter === frontmatter[1]) throw new Error("Skill 缺少 name");
+  const nextContent = content.replace(frontmatter[0], `---\n${nextFrontmatter}\n---`);
+  return replaceSkillInvocationName(nextContent, currentName, nextName);
+}
+
+function personalCopySkillName(skillName: string, sequence = 1): string {
+  const suffix = sequence === 1 ? "-personal" : `-personal-${sequence}`;
+  const base = skillName
+    .slice(0, Math.max(1, 64 - suffix.length))
+    .replace(/[._-]+$/g, "") || "skill";
+  return `${base}${suffix}`;
 }
 
 type SkillInterfaceMetadata = {
@@ -579,16 +623,41 @@ export class CodexSkillService {
     const skillMd = await fs.readFile(path.join(sourceDirectoryPath, "SKILL.md"), "utf8");
     const metadata = parseSkillMetadata(skillMd);
     const sourceFolderName = path.basename(sourceDirectoryPath);
-    const skillName = trimOrUndefined(validation.metadata?.name) ?? metadata.name ?? sourceFolderName;
-    if (!skillName) throw new Error("Skill 缺少 name");
+    const sourceSkillName = trimOrUndefined(validation.metadata?.name) ?? metadata.name ?? sourceFolderName;
+    if (!sourceSkillName) throw new Error("Skill 缺少 name");
 
-    const checksum = await hashSkillDirectory(sourceDirectoryPath);
-    const existing = await this.dependencies.repository.findManagedSkillByName({
+    let skillName = sourceSkillName;
+    let existing = await this.dependencies.repository.findManagedSkillByName({
       organizationId: input.actor.organizationId,
       ownerUserId: input.actor.id,
       scope: "private",
       skillName
     });
+    let forkedFrom: CodexManagedSkillRecord | undefined;
+    if (!existing) {
+      const sharedConflict = await this.findSharedPrivateSkillConflict(input.actor, skillName);
+      if (sharedConflict) {
+        const suggestedName = await this.nextAvailablePersonalSkillName(input.actor, skillName);
+        if (input.conflictAction !== "fork") {
+          throw new ManagedSkillNameConflictError({
+            skillId: sharedConflict.id,
+            skillName,
+            ownerUserId: sharedConflict.ownerUserId as string,
+            ownerDisplayName: sharedConflict.createdByDisplayName,
+            ownerEmail: sharedConflict.createdByEmail,
+            suggestedName
+          });
+        }
+        skillName = suggestedName;
+        forkedFrom = sharedConflict;
+        existing = await this.dependencies.repository.findManagedSkillByName({
+          organizationId: input.actor.organizationId,
+          ownerUserId: input.actor.id,
+          scope: "private",
+          skillName
+        });
+      }
+    }
     const slug = slugify(skillName);
     const destinationPath = path.join(
       this.publishedSkillsRoot,
@@ -600,6 +669,30 @@ export class CodexSkillService {
     const tempPath = `${destinationPath}.tmp-${Date.now()}`;
     await fs.rm(tempPath, { recursive: true, force: true });
     await copyDirectoryNoSymlinks(sourceDirectoryPath, tempPath);
+    if (forkedFrom) {
+      const skillMdPath = path.join(tempPath, "SKILL.md");
+      const currentSkillMd = await fs.readFile(skillMdPath, "utf8");
+      await fs.writeFile(
+        skillMdPath,
+        replaceSkillCanonicalName(currentSkillMd, sourceSkillName, skillName),
+        "utf8"
+      );
+      const interfacePath = path.join(tempPath, "agents", "openai.yaml");
+      const interfaceContent = await fs.readFile(interfacePath, "utf8").catch(() => undefined);
+      if (interfaceContent !== undefined) {
+        await fs.writeFile(
+          interfacePath,
+          replaceSkillInvocationName(interfaceContent, sourceSkillName, skillName),
+          "utf8"
+        );
+      }
+      const forkValidation = await this.validateSkillDirectory(tempPath);
+      if (!forkValidation.ok) {
+        await fs.rm(tempPath, { recursive: true, force: true });
+        throw new Error(`个人副本校验失败：${forkValidation.errors.join("; ")}`);
+      }
+    }
+    const checksum = await hashSkillDirectory(tempPath);
     await fs.rm(destinationPath, { recursive: true, force: true });
     await fs.mkdir(path.dirname(destinationPath), { recursive: true });
     await fs.rename(tempPath, destinationPath);
@@ -639,12 +732,54 @@ export class CodexSkillService {
         sourceDirectoryPath,
         sourceThreadRelativePath: trimOrUndefined(input.sourceRelativePath),
         modeId: trimOrUndefined(input.modeId),
-        installedAt: publishedAt.toISOString()
+        installedAt: publishedAt.toISOString(),
+        ...(forkedFrom ? {
+          forkedFromSkillId: forkedFrom.id,
+          forkedFromOwnerUserId: forkedFrom.ownerUserId,
+          forkedAt: publishedAt.toISOString()
+        } : {})
       },
       publishedAt
     });
     await this.ensureManagedSkillCatalogEntry(managedSkill, destinationPath);
     return managedSkill;
+  }
+
+  private async findSharedPrivateSkillConflict(actor: Actor, skillName: string): Promise<CodexManagedSkillRecord | undefined> {
+    if (!this.dependencies.resourcePolicies) return undefined;
+    const candidates = await this.dependencies.repository.listManagedSkills({
+      organizationId: actor.organizationId,
+      scope: "private",
+      status: "active",
+      skillName
+    });
+    const sharedCandidates = candidates.filter((skill) => skill.ownerUserId && skill.ownerUserId !== actor.id);
+    if (sharedCandidates.length === 0) return undefined;
+    const candidateIds = new Set(sharedCandidates.map((skill) => skill.id));
+    const policies = (await this.dependencies.resourcePolicies.listAll()).filter((policy) =>
+      policy.resourceType === "managed_skill" &&
+      candidateIds.has(policy.resourceId) &&
+      policy.subjectType === "user" &&
+      policy.subjectId === actor.id &&
+      (!policy.organizationId || !actor.organizationId || policy.organizationId === actor.organizationId)
+    );
+    const deniedIds = new Set(policies.filter((policy) => policy.effect === "deny").map((policy) => policy.resourceId));
+    const allowedIds = new Set(policies.filter((policy) => policy.effect === "allow").map((policy) => policy.resourceId));
+    return sharedCandidates.find((skill) => allowedIds.has(skill.id) && !deniedIds.has(skill.id));
+  }
+
+  private async nextAvailablePersonalSkillName(actor: Actor, skillName: string): Promise<string> {
+    for (let sequence = 1; sequence <= 999; sequence += 1) {
+      const candidate = personalCopySkillName(skillName, sequence);
+      const existing = await this.dependencies.repository.findManagedSkillByName({
+        organizationId: actor.organizationId,
+        ownerUserId: actor.id,
+        scope: "private",
+        skillName: candidate
+      });
+      if (!existing) return candidate;
+    }
+    throw new Error("无法为个人副本生成唯一名称，请修改 Skill name 后重试");
   }
 
   async reviseDraft(input: ReviseDraftInput): Promise<CodexSkillDraftRecord> {

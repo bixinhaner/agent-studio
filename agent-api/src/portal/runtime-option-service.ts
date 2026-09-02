@@ -423,9 +423,12 @@ export class PortalRuntimeOptionService {
       resourceType: "managed_skill",
       candidateIds: activePrivateSkillCandidates.map((skill) => skill.id)
     }));
-    const activePrivateSkills = activePrivateSkillCandidates.filter(
-      (skill) => skill.ownerUserId === input.userId || sharedPrivateSkillIds.has(skill.id)
-    );
+    const activePrivateSkills = [
+      ...activePrivateSkillCandidates.filter((skill) => skill.ownerUserId === input.userId),
+      ...activePrivateSkillCandidates.filter(
+        (skill) => skill.ownerUserId !== input.userId && sharedPrivateSkillIds.has(skill.id)
+      )
+    ];
     const accessiblePrivateSkillIds = new Set(activePrivateSkills.map((skill) => skill.id));
     const privateSkillShareCounts = new Map<string, number>();
     const privateSkillPolicies = await this.deps.policies.listResourcePoliciesForIds({
