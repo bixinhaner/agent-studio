@@ -115,7 +115,7 @@ import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
-import { isInternalPortalExperience } from "../auth/portal-experience";
+import { isInternalOrganization, isInternalPortalExperience } from "../auth/portal-experience";
 import {
   createThreadPublicShare,
   fetchThreadPublicShareStatus,
@@ -2433,8 +2433,11 @@ function useLargeTextPasteAttachmentGuard(input: {
 
 const SkillComposerControls: FC = () => {
   const aui = useAui();
+  const auth = useAuth();
   const { availableSkills, automaticSkills, enabledSkillIds, recentSkillIds, setSkills } = useContext(SkillComposerContext);
   if (availableSkills.length === 0 && automaticSkills.length === 0) return null;
+  const dismissedFeatureAnnouncementIds = auth.user?.portalPreferences?.dismissedFeatureAnnouncements ?? [];
+  const featureAnnouncementsEnabled = isInternalOrganization(auth.activeOrganization?.type);
   return (
     <PortalSkillPicker
       availableSkills={availableSkills}
@@ -2443,6 +2446,16 @@ const SkillComposerControls: FC = () => {
       recentSkillIds={recentSkillIds}
       onEnabledSkillIdsChange={setSkills}
       onFillPrompt={(prompt) => aui.composer().setText(prompt)}
+      featureAnnouncements={{
+        enabled: featureAnnouncementsEnabled,
+        dismissedIds: dismissedFeatureAnnouncementIds,
+        onDismiss: async (id) => {
+          if (dismissedFeatureAnnouncementIds.includes(id)) return;
+          await auth.updatePortalPreferences({
+            dismissedFeatureAnnouncements: [...dismissedFeatureAnnouncementIds, id].slice(-50)
+          });
+        }
+      }}
     />
   );
 };

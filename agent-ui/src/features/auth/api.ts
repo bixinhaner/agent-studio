@@ -6,6 +6,7 @@ export type AuthUserType = "internal_employee" | "external_user" | string;
 export type AuthUserPortalPreferences = {
   showProcessTrace?: boolean;
   collapseFinalTraceOnDone?: boolean;
+  dismissedFeatureAnnouncements?: string[];
 };
 
 export type AuthUser = {
@@ -66,6 +67,7 @@ type AuthUserPayload = {
   portal_preferences?: {
     show_process_trace?: boolean | null;
     collapse_final_trace_on_done?: boolean | null;
+    dismissed_feature_announcements?: string[] | null;
   } | null;
 };
 
@@ -176,13 +178,24 @@ function normalizeAuthUser(user: AuthUserPayload): AuthUser {
   const portalPreferences =
     user.portal_preferences &&
     (typeof user.portal_preferences.show_process_trace === "boolean" ||
-      typeof user.portal_preferences.collapse_final_trace_on_done === "boolean")
+      typeof user.portal_preferences.collapse_final_trace_on_done === "boolean" ||
+      Array.isArray(user.portal_preferences.dismissed_feature_announcements))
       ? {
           ...(typeof user.portal_preferences.show_process_trace === "boolean"
             ? { showProcessTrace: user.portal_preferences.show_process_trace }
             : {}),
           ...(typeof user.portal_preferences.collapse_final_trace_on_done === "boolean"
             ? { collapseFinalTraceOnDone: user.portal_preferences.collapse_final_trace_on_done }
+            : {}),
+          ...(Array.isArray(user.portal_preferences.dismissed_feature_announcements)
+            ? {
+                dismissedFeatureAnnouncements: Array.from(new Set(
+                  user.portal_preferences.dismissed_feature_announcements
+                    .filter((item): item is string => typeof item === "string")
+                    .map((item) => item.trim())
+                    .filter(Boolean)
+                ))
+              }
             : {})
         }
       : undefined;
@@ -349,6 +362,7 @@ export async function selectActiveOrganization(organizationId: string): Promise<
 export async function updateCurrentUserPortalPreferences(input: {
   showProcessTrace?: boolean;
   collapseFinalTraceOnDone?: boolean;
+  dismissedFeatureAnnouncements?: string[];
 }): Promise<WhoAmIResponse> {
   const payload = await api<WhoAmIPayload>("/api/auth/portal-preferences", {
     method: "PATCH",
@@ -357,6 +371,9 @@ export async function updateCurrentUserPortalPreferences(input: {
         ...(typeof input.showProcessTrace === "boolean" ? { show_process_trace: input.showProcessTrace } : {}),
         ...(typeof input.collapseFinalTraceOnDone === "boolean"
           ? { collapse_final_trace_on_done: input.collapseFinalTraceOnDone }
+          : {}),
+        ...(Array.isArray(input.dismissedFeatureAnnouncements)
+          ? { dismissed_feature_announcements: input.dismissedFeatureAnnouncements }
           : {})
       }
     }

@@ -5,7 +5,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeModeSnapshot } from "../../modes/types";
 import { fetchPortalManagedSkillSharing, updatePortalManagedSkillSharing } from "../../skills/api";
-import { PortalSelectedSkillBar, PortalSkillPicker } from "./SkillPicker";
+import {
+  PortalSelectedSkillBar,
+  PortalSkillPicker,
+  SKILL_SHARING_ANNOUNCEMENT_ID
+} from "./SkillPicker";
 
 vi.mock("../../skills/api", () => ({
   fetchPortalManagedSkillSharing: vi.fn(),
@@ -85,6 +89,22 @@ const privateSkill: Skill = {
     ...outageSkill.presentation,
     displayName: "个人报告",
     summary: "生成个人定制报告"
+  }
+};
+
+const createSkill: Skill = {
+  ...outageSkill,
+  id: "managed:skill-creator",
+  managedSkillId: "skill-creator",
+  name: "skill-creator",
+  label: "Skill 创建与优化",
+  scope: "platform",
+  sharing: undefined,
+  presentation: {
+    ...outageSkill.presentation,
+    displayName: "Skill 创建与优化",
+    summary: "创建或更新可复用 Skill",
+    shortcutKey: "create_skill"
   }
 };
 
@@ -346,5 +366,89 @@ describe("PortalSkillPicker", () => {
       userIds: ["member-1"]
     }));
     expect(await screen.findByText(/已保存，Skill 已共享给 1 人|Saved\. Skill shared with 1 people/)).toBeTruthy();
+  });
+
+  it("announces Skill sharing once and opens the owner sharing flow from the feature action", async () => {
+    const dismissAnnouncement = vi.fn();
+    vi.mocked(fetchPortalManagedSkillSharing).mockResolvedValue({
+      skillId: "private-report",
+      ownerUserId: "owner-1",
+      owner: { userId: "owner-1", displayName: "Skill Owner", email: "owner@example.com" },
+      members: [],
+      availableMembers: []
+    });
+    render(
+      <PortalSkillPicker
+        availableSkills={[privateSkill, createSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={vi.fn()}
+        onFillPrompt={vi.fn()}
+        featureAnnouncements={{
+          enabled: true,
+          dismissedIds: [],
+          onDismiss: dismissAnnouncement
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    expect(await screen.findByText(/现在可以共享 Skill 了|You can now share Skills/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /我的|Mine/ }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /去看看|Take a look/ }));
+
+    expect(dismissAnnouncement).toHaveBeenCalledWith(SKILL_SHARING_ANNOUNCEMENT_ID);
+    await waitFor(() => expect(fetchPortalManagedSkillSharing).toHaveBeenCalledWith("private-report"));
+    expect(await screen.findByText("Skill Owner")).toBeTruthy();
+  });
+
+  it("shows the announcement to an eligible user without a private Skill and leads to Skill creation", async () => {
+    const dismissAnnouncement = vi.fn();
+    render(
+      <PortalSkillPicker
+        availableSkills={[createSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={vi.fn()}
+        onFillPrompt={vi.fn()}
+        featureAnnouncements={{
+          enabled: true,
+          dismissedIds: [],
+          onDismiss: dismissAnnouncement
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    expect(await screen.findByText(/现在可以共享 Skill 了|You can now share Skills/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /去看看|Take a look/ }));
+
+    expect(dismissAnnouncement).toHaveBeenCalledWith(SKILL_SHARING_ANNOUNCEMENT_ID);
+    expect(screen.getAllByText("skill-creator").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/现在可以共享 Skill 了|You can now share Skills/)).toBeNull();
+  });
+
+  it("does not repeat a dismissed feature announcement", async () => {
+    render(
+      <PortalSkillPicker
+        availableSkills={[privateSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={vi.fn()}
+        onFillPrompt={vi.fn()}
+        featureAnnouncements={{
+          enabled: true,
+          dismissedIds: [SKILL_SHARING_ANNOUNCEMENT_ID],
+          onDismiss: vi.fn()
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    expect(await screen.findByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeTruthy();
+    expect(screen.queryByText(/现在可以共享 Skill 了|You can now share Skills/)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 
-import { requireInternalOrganizationMember } from "./current-user.js";
+import { requireInternalOrganizationMember, userOut } from "./current-user.js";
 
 function responseDouble() {
   const json = vi.fn();
@@ -65,5 +65,23 @@ describe("requireInternalOrganizationMember", () => {
 
     expect(status).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledOnce();
+  });
+});
+
+describe("userOut", () => {
+  it("returns dismissed feature announcements in the portal preferences payload", () => {
+    expect(userOut({
+      id: "employee",
+      email: "employee@example.com",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      updatedAt: "2026-09-02T00:00:00.000Z",
+      portalPreferences: {
+        dismissedFeatureAnnouncements: ["skill-sharing-v1"]
+      }
+    })).toMatchObject({
+      portal_preferences: {
+        dismissed_feature_announcements: ["skill-sharing-v1"]
+      }
+    });
   });
 });

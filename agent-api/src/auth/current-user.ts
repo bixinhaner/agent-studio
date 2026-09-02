@@ -32,7 +32,8 @@ export function userOut(user: AuthenticatedUser) {
           collapse_final_trace_on_done:
             typeof user.portalPreferences.collapseFinalTraceOnDone === "boolean"
               ? user.portalPreferences.collapseFinalTraceOnDone
-              : null
+              : null,
+          dismissed_feature_announcements: user.portalPreferences.dismissedFeatureAnnouncements ?? []
         }
       : null
   };

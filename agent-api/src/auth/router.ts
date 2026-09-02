@@ -90,10 +90,14 @@ const updatePortalPreferencesSchema = z.object({
   portal_preferences: z
     .object({
       show_process_trace: z.boolean().optional(),
-      collapse_final_trace_on_done: z.boolean().optional()
+      collapse_final_trace_on_done: z.boolean().optional(),
+      dismissed_feature_announcements: z.array(z.string().trim().min(1).max(100)).max(50).optional()
     })
     .refine(
-      (value) => value.show_process_trace !== undefined || value.collapse_final_trace_on_done !== undefined,
+      (value) =>
+        value.show_process_trace !== undefined ||
+        value.collapse_final_trace_on_done !== undefined ||
+        value.dismissed_feature_announcements !== undefined,
       "portal_preferences must include at least one field"
     )
 });
@@ -714,7 +718,8 @@ export function createAuthRouter(options: {
         userId: currentUser.id,
         portalPreferences: {
           showProcessTrace: input.portal_preferences.show_process_trace,
-          collapseFinalTraceOnDone: input.portal_preferences.collapse_final_trace_on_done
+          collapseFinalTraceOnDone: input.portal_preferences.collapse_final_trace_on_done,
+          dismissedFeatureAnnouncements: input.portal_preferences.dismissed_feature_announcements
         }
       });
       req.currentUser = updatedUser;

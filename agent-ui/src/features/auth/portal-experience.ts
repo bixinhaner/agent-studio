@@ -8,11 +8,15 @@ export function isBrandEmployeeMembership(membershipType: string | null | undefi
   return normalized(membershipType) === BRAND_EMPLOYEE_MEMBERSHIP_TYPE;
 }
 
+export function isInternalOrganization(organizationType: string | null | undefined): boolean {
+  return normalized(organizationType) === "internal";
+}
+
 export function isInternalPortalExperience(input: {
   userType?: string | null;
   organizationType?: string | null;
   membershipType?: string | null;
 }): boolean {
   if (isBrandEmployeeMembership(input.membershipType)) return true;
-  return normalized(input.userType) !== "external_user" && normalized(input.organizationType) === "internal";
+  return normalized(input.userType) !== "external_user" && isInternalOrganization(input.organizationType);
 }

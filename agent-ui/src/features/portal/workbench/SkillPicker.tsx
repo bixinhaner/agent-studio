@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Avatar, Button, Drawer, Input, Modal, Spin, Tooltip } from "antd";
+import { Avatar, Button, Drawer, Input, Modal, Popover, Spin, Tooltip } from "antd";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -45,6 +45,9 @@ type SkillOption = RuntimeModeSnapshot["availableSkills"][number];
 type SkillScope = "private" | "team" | "platform";
 type ScopeFilter = "all" | SkillScope | "automatic";
 type MobilePickerStep = "list" | "detail";
+type SharingAnnouncementTarget = "create" | "share";
+
+export const SKILL_SHARING_ANNOUNCEMENT_ID = "skill-sharing-v1";
 
 const ICON_BY_KEY: Record<string, LucideIcon> = {
   image: ImageIcon,
@@ -126,7 +129,13 @@ const COPY = {
     saveShare: "保存共享",
     shareSaved: "已保存，Skill 已共享给 {count} 人",
     shareLoadError: "共享成员加载失败，请重试",
-    shareSaveError: "共享设置保存失败，请重试"
+    shareSaveError: "共享设置保存失败，请重试",
+    featureNew: "新功能",
+    featureTitle: "现在可以共享 Skill 了",
+    featureBody: "创建或打开你自己的 Skill，选择“共享”，即可邀请同事共同使用。Skill 仍由你维护。",
+    featureDismiss: "知道了",
+    featureAction: "去看看",
+    featureClose: "关闭新功能提示"
   },
   en: {
     title: "Choose a Skill",
@@ -175,7 +184,13 @@ const COPY = {
     saveShare: "Save sharing",
     shareSaved: "Saved. Skill shared with {count} people",
     shareLoadError: "Could not load members. Try again.",
-    shareSaveError: "Could not save sharing. Try again."
+    shareSaveError: "Could not save sharing. Try again.",
+    featureNew: "New",
+    featureTitle: "You can now share Skills",
+    featureBody: "Create or open one of your Skills, then choose Share to invite colleagues. You remain the owner.",
+    featureDismiss: "Got it",
+    featureAction: "Take a look",
+    featureClose: "Close new feature announcement"
   }
 } as const;
 
@@ -265,6 +280,11 @@ type SkillPickerProps = {
   recentSkillIds: string[];
   onEnabledSkillIdsChange: (ids: string[]) => Promise<void> | void;
   onFillPrompt: (prompt: string) => void;
+  featureAnnouncements?: {
+    enabled: boolean;
+    dismissedIds: string[];
+    onDismiss: (id: string) => Promise<void> | void;
+  };
 };
 
 export const PortalSelectedSkillBar: FC<
@@ -326,7 +346,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   enabledSkillIds,
   recentSkillIds,
   onEnabledSkillIdsChange,
-  onFillPrompt
+  onFillPrompt,
+  featureAnnouncements
 }) => {
   const { locale } = usePortalI18n();
   const copy = currentCopy(locale);
@@ -345,6 +366,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   const [sharingError, setSharingError] = useState("");
   const [sharingNotice, setSharingNotice] = useState("");
   const [shareCounts, setShareCounts] = useState<Record<string, number>>({});
+  const [sharingAnnouncementOpen, setSharingAnnouncementOpen] = useState(false);
+  const [sharingAnnouncementTarget, setSharingAnnouncementTarget] = useState<SharingAnnouncementTarget>("create");
   const panelRef = useRef<HTMLDivElement>(null);
 
   const allSkills = useMemo(() => [...availableSkills, ...automaticSkills], [automaticSkills, availableSkills]);
@@ -371,6 +394,38 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   const focusedSkill =
     filteredSkills.find((skill) => skill.id === focusedSkillId) ??
     filteredSkills[0];
+  const firstOwnedPrivateSkill = availableSkills.find((skill) =>
+    skillScope(skill) === "private" && Boolean(skill.managedSkillId && skill.sharing?.isOwner));
+  const canShowSharingAnnouncement = Boolean(
+    featureAnnouncements?.enabled &&
+    !featureAnnouncements.dismissedIds.includes(SKILL_SHARING_ANNOUNCEMENT_ID)
+  );
+
+  const dismissSharingAnnouncement = () => {
+    setSharingAnnouncementOpen(false);
+    if (!featureAnnouncements?.onDismiss) return;
+    void Promise.resolve(featureAnnouncements.onDismiss(SKILL_SHARING_ANNOUNCEMENT_ID)).catch(() => undefined);
+  };
+
+  const prepareSharingAnnouncement = (): boolean => {
+    if (!canShowSharingAnnouncement) return false;
+    if (firstOwnedPrivateSkill) {
+      setSharingAnnouncementTarget("share");
+      setScope("private");
+      setFocusedSkillId(firstOwnedPrivateSkill.id);
+      setMobileStep(isMobile ? "detail" : "list");
+    } else {
+      const createSkill = availableSkills.find((skill) => skill.presentation.shortcutKey === "create_skill");
+      setSharingAnnouncementTarget("create");
+      if (createSkill) {
+        setScope(skillScope(createSkill));
+        setFocusedSkillId(createSkill.id);
+      }
+      setMobileStep("list");
+    }
+    setSharingAnnouncementOpen(true);
+    return true;
+  };
 
   useEffect(() => {
     if (typeof window === "undefined" || availableSkills.length === 0) return;
@@ -383,10 +438,14 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     setScope(skillScope(createSkill));
     setFocusedSkillId(createSkill.id);
     setMobileStep(isMobile ? "detail" : "list");
+    if (canShowSharingAnnouncement) {
+      setSharingAnnouncementTarget("create");
+      setSharingAnnouncementOpen(true);
+    }
     params.delete("openSkill");
     const nextSearch = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
-  }, [availableSkills, isMobile]);
+  }, [availableSkills, canShowSharingAnnouncement, isMobile]);
 
   useEffect(() => {
     if (!isMobile) return;
@@ -422,17 +481,21 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
         ? enabledSkillIds.filter((id) => id !== skill.id)
         : [...enabledSkillIds.filter((id) => skillById.get(id)?.name !== skill.name), skill.id]
     );
-    if (saved && !isSelected) setOpen(false);
+    if (saved && !isSelected) openPicker(false);
   };
 
   const openPicker = (nextOpen: boolean) => {
     setOpen(nextOpen);
-    if (!nextOpen) return;
+    if (!nextOpen) {
+      if (sharingAnnouncementOpen) dismissSharingAnnouncement();
+      return;
+    }
     setQuery("");
     setScope("all");
     setErrorText("");
     setMobileStep("list");
     setFocusedSkillId(recentSkills[0]?.id ?? allSkills[0]?.id ?? "");
+    prepareSharingAnnouncement();
   };
 
   const focusSkill = (skill: SkillOption) => {
@@ -453,7 +516,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
       ? shareCounts[skill.managedSkillId]
       : skill.sharing?.sharedWithCount ?? 0;
 
-  const openSharing = async (skill: SkillOption) => {
+  async function openSharing(skill: SkillOption) {
     if (!skill.managedSkillId || !skill.sharing?.isOwner) return;
     setSharingSkill(skill);
     setSharingState(undefined);
@@ -467,6 +530,18 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     } finally {
       setSharingLoading(false);
     }
+  }
+
+  const handleSharingAnnouncementAction = () => {
+    dismissSharingAnnouncement();
+    if (firstOwnedPrivateSkill) {
+      setQuery("");
+      setScope("private");
+      focusSkill(firstOwnedPrivateSkill);
+      void openSharing(firstOwnedPrivateSkill);
+      return;
+    }
+    focusCreateSkill();
   };
 
   const saveSharing = async (userIds: string[]) => {
@@ -493,7 +568,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     const enabled = await enableSkill(skill);
     if (!enabled) return;
     onFillPrompt(prompt);
-    setOpen(false);
+    openPicker(false);
   };
 
   const scopeOptions: Array<{ id: ScopeFilter; label: string }> = [
@@ -509,7 +584,16 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
       <section className="portal-skill-catalog-column" aria-label={copy.title}>
         <div className="portal-skill-picker-heading">
           <h3>{copy.title}</h3>
-          <Button icon={<Plus size={16} />} onClick={focusCreateSkill}>{copy.create}</Button>
+          {sharingAnnouncementOpen && sharingAnnouncementTarget === "create" ? (
+            <SkillFeatureAnnouncement
+              open
+              mobile={isMobile}
+              onDismiss={dismissSharingAnnouncement}
+              onAction={handleSharingAnnouncementAction}
+            >
+              <Button className="portal-skill-feature-anchor" icon={<Plus size={16} />} onClick={focusCreateSkill}>{copy.create}</Button>
+            </SkillFeatureAnnouncement>
+          ) : <Button icon={<Plus size={16} />} onClick={focusCreateSkill}>{copy.create}</Button>}
         </div>
         <Input
           value={query}
@@ -590,12 +674,16 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
           onToggle={isAutomaticSkill(focusedSkill) ? undefined : () => void toggleSelection(focusedSkill)}
           sharedWithCount={sharedWithCount(focusedSkill)}
           onShare={focusedSkill.managedSkillId && focusedSkill.sharing?.isOwner ? () => void openSharing(focusedSkill) : undefined}
+          sharingAnnouncementOpen={sharingAnnouncementOpen && sharingAnnouncementTarget === "share"}
+          onDismissSharingAnnouncement={dismissSharingAnnouncement}
+          onSharingAnnouncementAction={handleSharingAnnouncementAction}
         />
       ) : null}
-      <button type="button" className="portal-skill-close" aria-label={copy.close} onClick={() => setOpen(false)}>
+      <button type="button" className="portal-skill-close" aria-label={copy.close} onClick={() => openPicker(false)}>
         <X size={17} aria-hidden="true" />
       </button>
       {sharingNotice ? <div className="portal-skill-share-toast" role="status"><CircleCheck size={16} />{sharingNotice}</div> : null}
+      {sharingAnnouncementOpen ? <div className="portal-skill-feature-scrim" aria-hidden="true" /> : null}
       <SkillSharingDialog
         open={Boolean(sharingSkill)}
         skill={sharingSkill}
@@ -631,7 +719,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
         placement="bottom"
         height="min(92dvh, 820px)"
         title={copy.title}
-        onClose={() => setOpen(false)}
+        onClose={() => openPicker(false)}
         rootClassName="portal-skill-mobile-drawer"
         destroyOnHidden={false}
       >
@@ -667,7 +755,10 @@ function SkillDetail({
   onFill,
   onToggle,
   sharedWithCount,
-  onShare
+  onShare,
+  sharingAnnouncementOpen,
+  onDismissSharingAnnouncement,
+  onSharingAnnouncementAction
 }: {
   skill: SkillOption;
   selected: boolean;
@@ -679,6 +770,9 @@ function SkillDetail({
   onToggle?: () => void;
   sharedWithCount: number;
   onShare?: () => void;
+  sharingAnnouncementOpen: boolean;
+  onDismissSharingAnnouncement: () => void;
+  onSharingAnnouncementAction: () => void;
 }) {
   const { locale } = usePortalI18n();
   const copy = currentCopy(locale);
@@ -712,7 +806,18 @@ function SkillDetail({
             {isAutomaticSkill(skill) ? <BadgeCheck size={15} /> : <ScopeIcon scope={skillScope(skill)} />}
             {isAutomaticSkill(skill) ? copy.automaticAvailable : scopeLabel(skill, copy, sharedWithCount)}
           </p>
-          {onShare ? <Button type="link" icon={<Share2 size={14} />} onClick={onShare}>{sharedWithCount > 0 ? copy.manageShare : copy.share}</Button> : null}
+          {onShare ? sharingAnnouncementOpen ? (
+            <SkillFeatureAnnouncement
+              open
+              mobile={mobile}
+              onDismiss={onDismissSharingAnnouncement}
+              onAction={onSharingAnnouncementAction}
+            >
+              <Button className="portal-skill-feature-anchor" type="link" icon={<Share2 size={14} />} onClick={onShare}>
+                {sharedWithCount > 0 ? copy.manageShare : copy.share}
+              </Button>
+            </SkillFeatureAnnouncement>
+          ) : <Button type="link" icon={<Share2 size={14} />} onClick={onShare}>{sharedWithCount > 0 ? copy.manageShare : copy.share}</Button> : null}
         </div>
         {isAutomaticSkill(skill) ? <p className="portal-skill-automatic-note">{copy.automaticNote}</p> : null}
 
@@ -759,6 +864,50 @@ function SkillDetail({
         )}
       </div> : null}
     </section>
+  );
+}
+
+function SkillFeatureAnnouncement({
+  open,
+  mobile,
+  onDismiss,
+  onAction,
+  children
+}: {
+  open: boolean;
+  mobile: boolean;
+  onDismiss: () => void;
+  onAction: () => void;
+  children: ReactNode;
+}) {
+  const { locale } = usePortalI18n();
+  const copy = currentCopy(locale);
+  return (
+    <Popover
+      open={open}
+      trigger={[]}
+      placement={mobile ? "bottom" : "leftBottom"}
+      rootClassName="portal-skill-feature-popover"
+      arrow={{ pointAtCenter: true }}
+      content={(
+        <div className="portal-skill-feature-content" role="status" aria-live="polite">
+          <div className="portal-skill-feature-eyebrow">
+            <span>{copy.featureNew}</span>
+            <button type="button" aria-label={copy.featureClose} onClick={onDismiss}>
+              <X size={15} aria-hidden="true" />
+            </button>
+          </div>
+          <strong>{copy.featureTitle}</strong>
+          <p>{copy.featureBody}</p>
+          <div className="portal-skill-feature-actions">
+            <Button type="text" onClick={onDismiss}>{copy.featureDismiss}</Button>
+            <Button type="primary" onClick={onAction}>{copy.featureAction}</Button>
+          </div>
+        </div>
+      )}
+    >
+      <span className="portal-skill-feature-anchor-wrap">{children}</span>
+    </Popover>
   );
 }
 

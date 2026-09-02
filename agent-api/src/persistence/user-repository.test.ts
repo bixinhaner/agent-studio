@@ -177,7 +177,8 @@ describe("UserRepository", () => {
             preferencesJson: {
               portal: {
                 showProcessTrace: true,
-                collapseFinalTraceOnDone: false
+                collapseFinalTraceOnDone: false,
+                dismissedFeatureAnnouncements: ["skill-sharing-v1", "skill-sharing-v1", ""]
               }
             }
           })
@@ -195,7 +196,8 @@ describe("UserRepository", () => {
       id: "user_1",
       portalPreferences: {
         showProcessTrace: true,
-        collapseFinalTraceOnDone: false
+        collapseFinalTraceOnDone: false,
+        dismissedFeatureAnnouncements: ["skill-sharing-v1"]
       }
     });
   });
@@ -204,7 +206,8 @@ describe("UserRepository", () => {
     const existing = buildUserRow({
       preferencesJson: {
         portal: {
-          showProcessTrace: false
+          showProcessTrace: false,
+          dismissedFeatureAnnouncements: ["existing-feature-v1"]
         },
         workbench: {
           sidebarCollapsed: true
@@ -216,7 +219,8 @@ describe("UserRepository", () => {
         preferencesJson: {
           portal: {
             showProcessTrace: true,
-            collapseFinalTraceOnDone: true
+            collapseFinalTraceOnDone: true,
+            dismissedFeatureAnnouncements: ["existing-feature-v1", "skill-sharing-v1"]
           },
           workbench: {
             sidebarCollapsed: true
@@ -239,7 +243,8 @@ describe("UserRepository", () => {
       userId: "user_1",
       portalPreferences: {
         showProcessTrace: true,
-        collapseFinalTraceOnDone: true
+        collapseFinalTraceOnDone: true,
+        dismissedFeatureAnnouncements: ["existing-feature-v1", "skill-sharing-v1"]
       }
     });
 
@@ -249,7 +254,8 @@ describe("UserRepository", () => {
         preferencesJson: {
           portal: {
             showProcessTrace: true,
-            collapseFinalTraceOnDone: true
+            collapseFinalTraceOnDone: true,
+            dismissedFeatureAnnouncements: ["existing-feature-v1", "skill-sharing-v1"]
           },
           workbench: {
             sidebarCollapsed: true
@@ -261,7 +267,8 @@ describe("UserRepository", () => {
     expect(user).toMatchObject({
       portalPreferences: {
         showProcessTrace: true,
-        collapseFinalTraceOnDone: true
+        collapseFinalTraceOnDone: true,
+        dismissedFeatureAnnouncements: ["existing-feature-v1", "skill-sharing-v1"]
       }
     });
   });

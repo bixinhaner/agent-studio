@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isInternalPortalExperience } from "./portal-experience";
+import { isInternalOrganization, isInternalPortalExperience } from "./portal-experience";
 
 describe("isInternalPortalExperience", () => {
   it("gives brand employees the internal portal experience without changing their global user type", () => {
@@ -17,5 +17,11 @@ describe("isInternalPortalExperience", () => {
       organizationType: "customer",
       membershipType: "customer_member"
     })).toBe(false);
+  });
+
+  it("targets announcements only by the active internal organization", () => {
+    expect(isInternalOrganization("internal")).toBe(true);
+    expect(isInternalOrganization(" Internal ")).toBe(true);
+    expect(isInternalOrganization("customer")).toBe(false);
   });
 });

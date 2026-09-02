@@ -15,6 +15,7 @@ export type AuthenticatedUser = {
 export type UserPortalPreferences = {
   showProcessTrace?: boolean;
   collapseFinalTraceOnDone?: boolean;
+  dismissedFeatureAnnouncements?: string[];
 };
 
 export type UserRecord = AuthenticatedUser & {
@@ -147,12 +148,29 @@ function normalizePortalPreferences(value: unknown): UserPortalPreferences | und
       : typeof record.collapse_final_trace_on_done === "boolean"
         ? record.collapse_final_trace_on_done
         : undefined;
-  if (showProcessTrace === undefined && collapseFinalTraceOnDone === undefined) {
+  const dismissedFeatureAnnouncementsRaw = Array.isArray(record.dismissedFeatureAnnouncements)
+    ? record.dismissedFeatureAnnouncements
+    : Array.isArray(record.dismissed_feature_announcements)
+      ? record.dismissed_feature_announcements
+      : undefined;
+  const dismissedFeatureAnnouncements = dismissedFeatureAnnouncementsRaw
+    ? Array.from(new Set(dismissedFeatureAnnouncementsRaw
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)))
+        .slice(0, 50)
+    : undefined;
+  if (
+    showProcessTrace === undefined &&
+    collapseFinalTraceOnDone === undefined &&
+    dismissedFeatureAnnouncements === undefined
+  ) {
     return undefined;
   }
   return {
     ...(showProcessTrace !== undefined ? { showProcessTrace } : {}),
-    ...(collapseFinalTraceOnDone !== undefined ? { collapseFinalTraceOnDone } : {})
+    ...(collapseFinalTraceOnDone !== undefined ? { collapseFinalTraceOnDone } : {}),
+    ...(dismissedFeatureAnnouncements !== undefined ? { dismissedFeatureAnnouncements } : {})
   };
 }
 
@@ -176,6 +194,12 @@ function mergePreferencesJson(
     ...(portalPreferences.showProcessTrace !== undefined ? { showProcessTrace: portalPreferences.showProcessTrace } : {}),
     ...(portalPreferences.collapseFinalTraceOnDone !== undefined
       ? { collapseFinalTraceOnDone: portalPreferences.collapseFinalTraceOnDone }
+      : {}),
+    ...(currentPortal.dismissedFeatureAnnouncements !== undefined
+      ? { dismissedFeatureAnnouncements: currentPortal.dismissedFeatureAnnouncements }
+      : {}),
+    ...(portalPreferences.dismissedFeatureAnnouncements !== undefined
+      ? { dismissedFeatureAnnouncements: portalPreferences.dismissedFeatureAnnouncements }
       : {})
   };
   if (Object.keys(nextPortal).length > 0) {
