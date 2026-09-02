@@ -31,6 +31,10 @@ export type PackageSharingPolicy = {
 
 export type PackageSharingMigrationPlan = {
   skills: PackageSharingSkill[];
+  skillMigrations: Array<{
+    sourceSkill: PackageSharingSkill;
+    targetSkill: PackageSharingSkill;
+  }>;
   packageIds: string[];
   packagePolicyIdsToDelete: string[];
   managedPoliciesToCreate: Array<{
@@ -71,6 +75,9 @@ export function planPackageSharingMigration(input: {
   const candidates = new Map(input.skills
     .filter((skill) => skill.scope === "agent_mode" && skill.status === "active" && Boolean(skill.ownerUserId))
     .map((skill) => [skill.id, skill] as const));
+  const archivedPrivateByIdentity = new Map(input.skills
+    .filter((skill) => skill.scope === "private" && skill.status === "archived" && Boolean(skill.ownerUserId))
+    .map((skill) => [`${skill.organizationId ?? ""}:${skill.ownerUserId}:${skill.skillName}`, skill] as const));
   const packagePoliciesByResource = new Map<string, PackageSharingPolicy[]>();
   for (const policy of input.packagePolicies) {
     if (policy.resourceType !== "skill_package" || policy.subjectType !== "user") continue;
@@ -111,6 +118,16 @@ export function planPackageSharingMigration(input: {
     .map((skillId) => candidates.get(skillId))
     .filter((skill): skill is PackageSharingSkill => Boolean(skill))
     .sort((left, right) => left.skillName.localeCompare(right.skillName) || left.id.localeCompare(right.id));
+  const skillMigrations = selectedSkills.map((sourceSkill) => ({
+    sourceSkill,
+    targetSkill: archivedPrivateByIdentity.get(
+      `${sourceSkill.organizationId ?? ""}:${sourceSkill.ownerUserId}:${sourceSkill.skillName}`
+    ) ?? sourceSkill
+  }));
+  const targetSkillBySourceId = new Map(skillMigrations.map((migration) => [
+    migration.sourceSkill.id,
+    migration.targetSkill
+  ] as const));
   const existingBySubjectAndSkill = new Map<string, Set<string>>();
   for (const policy of input.managedSkillPolicies) {
     if (policy.resourceType !== "managed_skill" || policy.subjectType !== "user") continue;
@@ -127,13 +144,14 @@ export function planPackageSharingMigration(input: {
     for (const skillId of selectedPackage.skillIds) {
       const skill = candidates.get(skillId);
       if (!skill) continue;
+      const targetSkill = targetSkillBySourceId.get(skill.id) ?? skill;
       for (const policy of selectedPackage.policies) {
         if (policy.subjectId === skill.ownerUserId) continue;
         if (policy.effect !== "allow" && policy.effect !== "deny") {
           blockers.push(`Policy ${policy.id} 的 effect=${policy.effect} 无法迁移`);
           continue;
         }
-        const key = policyKey({ subjectId: policy.subjectId, resourceId: skill.id });
+        const key = policyKey({ subjectId: policy.subjectId, resourceId: targetSkill.id });
         const existingEffects = existingBySubjectAndSkill.get(key);
         if (existingEffects?.has(policy.effect)) {
           retainedManagedPolicies += 1;
@@ -152,7 +170,7 @@ export function planPackageSharingMigration(input: {
           subjectType: "user",
           subjectId: policy.subjectId,
           resourceType: "managed_skill",
-          resourceId: skill.id,
+          resourceId: targetSkill.id,
           effect: policy.effect
         });
       }
@@ -161,6 +179,7 @@ export function planPackageSharingMigration(input: {
 
   return {
     skills: selectedSkills,
+    skillMigrations,
     packageIds: selectedPackages.map((item) => item.row.id).sort(),
     packagePolicyIdsToDelete: [...new Set(selectedPackages.flatMap((item) => item.policies.map((policy) => policy.id)))].sort(),
     managedPoliciesToCreate,

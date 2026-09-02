@@ -83,6 +83,39 @@ describe("planPackageSharingMigration", () => {
     expect(plan.blockers).toContain("用户 member-2 对 Skill alarm 已存在相反的 deny 授权");
   });
 
+  it("restores the archived original private Skill as the canonical shared record", () => {
+    const archivedPrivate = {
+      ...skills[0],
+      id: "private-alarm",
+      scope: "private",
+      status: "archived",
+      publishedPath: "/skills/user/owner-1/alarm"
+    };
+    const plan = planPackageSharingMigration({
+      skills: [...skills, archivedPrivate],
+      packages: [{
+        id: "package-1",
+        slug: "alarm",
+        bindings: [{
+          runtimeType: "codex",
+          bindingType: "codex_skill",
+          bindingPayload: { managedSkillId: "skill-alarm" }
+        }]
+      }],
+      packagePolicies,
+      managedSkillPolicies: []
+    });
+
+    expect(plan.skillMigrations).toEqual([{
+      sourceSkill: skills[0],
+      targetSkill: archivedPrivate
+    }]);
+    expect(plan.managedPoliciesToCreate.map((policy) => policy.resourceId)).toEqual([
+      "private-alarm",
+      "private-alarm"
+    ]);
+  });
+
   it("skips a package that mixes a target Skill with an unsupported binding", () => {
     const plan = planPackageSharingMigration({
       skills,
