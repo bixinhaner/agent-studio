@@ -185,16 +185,18 @@ async function main(): Promise<void> {
 
     await db.$transaction(async (tx) => {
       for (const row of threadUpdates) {
-        await tx.thread.update({
-          where: { id: row.id },
-          data: { codexRunConfig: row.runConfig as Prisma.InputJsonValue }
-        });
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE threads
+          SET codex_run_config = ${JSON.stringify(row.runConfig)}::jsonb
+          WHERE id = ${row.id}
+        `);
       }
       for (const row of messageUpdates) {
-        await tx.message.update({
-          where: { id: row.id },
-          data: { runConfig: row.runConfig as Prisma.InputJsonValue }
-        });
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE messages
+          SET run_config = ${JSON.stringify(row.runConfig)}::jsonb
+          WHERE id = ${row.id}
+        `);
       }
     }, { timeout: 120_000 });
 
