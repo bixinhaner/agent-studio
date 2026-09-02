@@ -127,6 +127,7 @@ function emptyBrand(): PublicBrandInput {
     answerFeedbackEnabled: true,
     answerFeedbackPrompt: "Was this answer helpful?",
     externalOnly: true,
+    employeeEmailDomains: [],
     accessRequestEnabled: true,
     accessSalesContactLabel: "Sales Contact",
     billingEnabled: true,
@@ -172,6 +173,7 @@ function toInput(brand: PublicBrandRecord): PublicBrandInput {
     knowledgeProjectionItemCount: _projectionItems,
     knowledgeProjectionAt: _projectionAt,
     knowledgeProjectionError: _projectionError,
+    employeeOrganizationId: _employeeOrganizationId,
     ...input
   } = brand;
   return input;
@@ -224,6 +226,7 @@ function normalizeInput(value: PublicBrandInput): PublicBrandInput {
     hostname: domain.hostname.trim().toLowerCase()
   }));
   next.outputForbiddenTerms = Array.from(new Set(value.outputForbiddenTerms.map((item) => item.trim()).filter(Boolean)));
+  next.employeeEmailDomains = Array.from(new Set(value.employeeEmailDomains.map((item) => item.trim().toLowerCase()).filter(Boolean)));
   return next;
 }
 
@@ -585,7 +588,7 @@ export function BrandManagementView() {
 
           {tab === "experience" ? <>
             <section className="brand-config-section"><div className="brand-section-heading"><h2>视觉与助手</h2><p>客户在登录、工作台和对话中看到同一套品牌身份。</p></div><div className="brand-config-grid"><label className="brand-config-field"><span>主色</span><div className="brand-color-control"><input type="color" value={draft.primaryColor} onChange={(event) => patch({ primaryColor: event.target.value.toUpperCase() })} /><Input value={draft.primaryColor} onChange={(event) => patch({ primaryColor: event.target.value })} /></div></label><label className="brand-config-field"><span>辅助色</span><div className="brand-color-control"><input type="color" value={draft.accentColor} onChange={(event) => patch({ accentColor: event.target.value.toUpperCase() })} /><Input value={draft.accentColor} onChange={(event) => patch({ accentColor: event.target.value })} /></div></label><label className="brand-config-field"><span>顶部副标题</span><Input value={draft.headerSubtitle} onChange={(event) => patch({ headerSubtitle: event.target.value })} /></label><label className="brand-config-field"><span>助手名称</span><Input value={draft.assistantName} onChange={(event) => patch({ assistantName: event.target.value })} /></label>{assetField("品牌 Logo", "logoUrl")}{assetField("站点图标", "iconUrl")}{assetField("助手头像", "assistantAvatarUrl")}{assetField("登录背景", "loginBackgroundUrl")}{assetField("欢迎页插图", "portalWelcomeIllustrationUrl")}</div></section>
-            <section className="brand-config-section"><div className="brand-section-heading"><h2>Portal 体验</h2><p>只展示客户完成问答和服务申请所需的信息。</p></div><div className="brand-config-grid"><label className="brand-config-field brand-field-wide"><span>桌面欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageDesktop} onChange={(event) => patch({ portalWelcomeMessageDesktop: event.target.value })} /></label><label className="brand-config-field brand-field-wide"><span>移动端欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageMobile} onChange={(event) => patch({ portalWelcomeMessageMobile: event.target.value })} /></label><div className="brand-config-field brand-field-wide"><span>快捷问题</span><SuggestionEditor value={draft.portalWelcomeSuggestions} onChange={(portalWelcomeSuggestions) => patch({ portalWelcomeSuggestions })} /></div><label className="brand-config-field brand-field-wide"><span>回答反馈提示</span><Input value={draft.answerFeedbackPrompt} disabled={!draft.answerFeedbackEnabled} onChange={(event) => patch({ answerFeedbackPrompt: event.target.value })} /></label></div><div className="brand-toggle-grid"><label><Switch checked={draft.externalOnly} onChange={(externalOnly) => patch({ externalOnly })} /><span>仅允许外部客户登录</span></label><label><Switch checked={draft.accessRequestEnabled} onChange={(accessRequestEnabled) => patch({ accessRequestEnabled })} /><span>开放试用申请</span></label><label><Switch checked={draft.billingEnabled} onChange={(billingEnabled) => patch({ billingEnabled })} /><span>开放套餐购买</span></label><label><Switch checked={draft.answerFeedbackEnabled} onChange={(answerFeedbackEnabled) => patch({ answerFeedbackEnabled })} /><span>收集回答反馈</span></label></div></section>
+            <section className="brand-config-section"><div className="brand-section-heading"><h2>Portal 体验</h2><p>客户保持精简体验；命中员工邮箱域名的用户自动使用完整内部工作台，资源仍限制在当前品牌。</p></div><div className="brand-config-grid"><label className="brand-config-field brand-field-wide"><span>桌面欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageDesktop} onChange={(event) => patch({ portalWelcomeMessageDesktop: event.target.value })} /></label><label className="brand-config-field brand-field-wide"><span>移动端欢迎语</span><TextArea rows={2} value={draft.portalWelcomeMessageMobile} onChange={(event) => patch({ portalWelcomeMessageMobile: event.target.value })} /></label><div className="brand-config-field brand-field-wide"><span>快捷问题</span><SuggestionEditor value={draft.portalWelcomeSuggestions} onChange={(portalWelcomeSuggestions) => patch({ portalWelcomeSuggestions })} /></div><label className="brand-config-field brand-field-wide"><span>员工邮箱域名</span><Select mode="tags" tokenSeparators={[",", " "]} value={draft.employeeEmailDomains} placeholder="例如 cloud-ran.ai" options={draft.employeeEmailDomains.map((domain) => ({ value: domain, label: domain }))} onChange={(employeeEmailDomains) => patch({ employeeEmailDomains })} /><small>这些邮箱验证成功后自动加入系统维护的员工组织，无需申请、审批或套餐。</small></label><label className="brand-config-field brand-field-wide"><span>回答反馈提示</span><Input value={draft.answerFeedbackPrompt} disabled={!draft.answerFeedbackEnabled} onChange={(event) => patch({ answerFeedbackPrompt: event.target.value })} /></label></div><div className="brand-toggle-grid"><label><Switch checked={draft.externalOnly} onChange={(externalOnly) => patch({ externalOnly })} /><span>关闭平台内部 SSO</span></label><label><Switch checked={draft.accessRequestEnabled} onChange={(accessRequestEnabled) => patch({ accessRequestEnabled })} /><span>开放客户试用申请</span></label><label><Switch checked={draft.billingEnabled} onChange={(billingEnabled) => patch({ billingEnabled })} /><span>开放客户套餐购买</span></label><label><Switch checked={draft.answerFeedbackEnabled} onChange={(answerFeedbackEnabled) => patch({ answerFeedbackEnabled })} /><span>收集回答反馈</span></label></div></section>
           </> : null}
 
           {tab === "email" ? <Spin spinning={emailTransportLoading}>

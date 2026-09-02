@@ -26,6 +26,7 @@ const brand: PublicBrandInput = {
   answerFeedbackEnabled: true,
   answerFeedbackPrompt: "Was this answer helpful?",
   externalOnly: true,
+  employeeEmailDomains: ["ranley.example.com"],
   accessRequestEnabled: true,
   accessSalesContactLabel: "Account manager",
   billingEnabled: true,

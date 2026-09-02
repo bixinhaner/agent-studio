@@ -3,6 +3,7 @@ import path from "node:path";
 import { Router, type Request, type Response } from "express";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
+import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
 import { detectedContentType, sendStructuredPreview } from "../files/structured-preview-service.js";
 import type { PublicBrandService } from "../public-brands/service.js";
@@ -53,7 +54,10 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    if ((await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed") {
+    if (
+      (await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed" &&
+      !isBrandEmployeeMembership(req.currentMembership?.membershipType)
+    ) {
       res.json({ knowledgeSets: [] });
       return;
     }
@@ -99,7 +103,10 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    if ((await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed") {
+    if (
+      (await options.publicBrands?.getForOrganization(req.currentOrganization?.id))?.resourceBindingMode === "brand_managed" &&
+      !isBrandEmployeeMembership(req.currentMembership?.membershipType)
+    ) {
       res.status(403).json({ detail: "Knowledge-set files are managed by the assigned assistant" });
       return;
     }

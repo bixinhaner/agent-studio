@@ -27,6 +27,7 @@ import {
 } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
+import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
 import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
 import { createAuthEmailSender, createBrandAwareEmailSender } from "./auth/email.js";
 import {
@@ -3840,7 +3841,7 @@ function withRunConfigMode(
 }
 
 function isExternalActor(actor: CurrentActor): boolean {
-  return actor.userType === "external_user" || actor.organizationType === "customer";
+  return isExternalPortalActor(actor);
 }
 
 function withExternalRunProfileBoundaries(
@@ -6460,7 +6461,7 @@ async function getPortalOwnedThread(threadId: string, actor: CurrentActor): Prom
 async function getPortalReadableThread(threadId: string, actor: CurrentActor): Promise<ThreadRecord | undefined> {
   const owned = await getPortalOwnedThread(threadId, actor);
   if (owned) return owned;
-  if (!isInternalOrganizationType(actor.organizationType)) return undefined;
+  if (!isInternalPortalActor(actor)) return undefined;
   return trainingCatalog.getThread({
     viewer: {
       userId: actor.id,
@@ -6489,7 +6490,8 @@ async function resolveModeSelection(input: {
     organizationId: input.currentUser.organizationId,
     userId: input.currentUser.id,
     roleIds,
-    departmentIds
+    departmentIds,
+    membershipType: input.currentUser.membershipType
   });
   if (!runtimeOptions.modes.length) {
     throw new Error("No available agent mode for the current account");
@@ -6536,7 +6538,8 @@ async function resolveSelectedSkillIdsForMode(input: {
     organizationId: input.currentUser.organizationId,
     userId: input.currentUser.id,
     roleIds: roleIdsForActor(input.currentUser),
-    departmentIds: await listDepartmentIdsForActor(input.currentUser)
+    departmentIds: await listDepartmentIdsForActor(input.currentUser),
+    membershipType: input.currentUser.membershipType
   });
   const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.modeId);
   const availableById = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.id, skill] as const));
@@ -6987,6 +6990,7 @@ async function resolveKnowledgeSetRunConfig(input: {
     userId: input.currentUser.id,
     roleIds: roleIdsForActor(input.currentUser),
     departmentIds: await listDepartmentIdsForActor(input.currentUser),
+    membershipType: input.currentUser.membershipType,
     workspacePath: input.workspacePath,
     knowledgeSetIds: input.knowledgeSetIds,
     codexRunConfig: input.codexRunConfig
@@ -7151,7 +7155,8 @@ async function assertChatAllowsNewSession(input: {
     currentUser: {
       id: input.currentUser.id,
       organizationId: input.currentUser.organizationId,
-      organizationType: input.currentUser.organizationType
+      organizationType: input.currentUser.organizationType,
+      membershipType: input.currentUser.membershipType
     },
     model: input.model,
     threadId: input.threadId,
@@ -9307,9 +9312,7 @@ function dingtalkBotRecoveryKey(
 
 function recoveryAudienceForActor(actor?: CurrentActor): "internal" | "external" | "unknown" {
   if (!actor) return "unknown";
-  if (actor.userType === "external_user" || actor.organizationType === "customer") return "external";
-  if (actor.userType === "internal_employee" || actor.organizationType === "internal") return "internal";
-  return "unknown";
+  return isInternalPortalActor(actor) ? "internal" : "external";
 }
 
 function dingTalkErrorDetail(error: unknown): string {
@@ -11697,7 +11700,8 @@ app.use(
       return {
         userId: currentUser.id,
         organizationId: currentUser.organizationId,
-        organizationType: currentUser.organizationType || ""
+        organizationType: currentUser.organizationType || "",
+        membershipType: currentUser.membershipType
       };
     }
   })
@@ -12506,6 +12510,10 @@ app.get(
         res.status(404).json({ detail: "Public link does not exist or has expired" });
         return;
       }
+      if (!(await threads.get(share.threadId, req.currentOrganization!.id))) {
+        res.status(404).json({ detail: "Public link does not exist or has expired" });
+        return;
+      }
       const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
       const userDisplayName = await resolveThreadPublicShareUserDisplayName(share.createdByUserId);
       res.setHeader("Cache-Control", "private, no-store");
@@ -12545,6 +12553,10 @@ app.get(
 
       const share = await threadPublicShares.getActiveByToken(token);
       if (!share) {
+        res.status(404).json({ detail: "Public link does not exist or has expired" });
+        return;
+      }
+      if (!(await threads.get(share.threadId, req.currentOrganization!.id))) {
         res.status(404).json({ detail: "Public link does not exist or has expired" });
         return;
       }
@@ -12827,7 +12839,8 @@ app.put("/api/threads/:threadId/skills", async (req: Request, res: Response) => 
       organizationId: currentUser.organizationId,
       userId: currentUser.id,
       roleIds: roleIdsForActor(currentUser),
-      departmentIds: await listDepartmentIdsForActor(currentUser)
+      departmentIds: await listDepartmentIdsForActor(currentUser),
+      membershipType: currentUser.membershipType
     });
     const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.mode_id);
     if (!selectedMode) {

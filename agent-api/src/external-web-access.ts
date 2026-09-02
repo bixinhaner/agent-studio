@@ -1,4 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
 
 import type { CreateAdminAuditLogInput } from "./persistence/admin-audit-log-repository.js";
 
@@ -132,9 +133,11 @@ export function createAuthenticatedExternalWebGate(
   access: Pick<ExternalWebAccessService, "isMaintenanceEnabled">
 ): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const isExternal =
-      req.currentUser?.userType === "external_user" ||
-      req.currentOrganization?.type === "customer";
+    const isExternal = isExternalPortalActor({
+      userType: req.currentUser?.userType,
+      organizationType: req.currentOrganization?.type,
+      membershipType: req.currentMembership?.membershipType
+    });
     if (!isExternal) {
       next();
       return;
@@ -155,9 +158,11 @@ export function createExternalWebSurfaceGate(
   access: Pick<ExternalWebAccessService, "isMaintenanceEnabled">
 ): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const isInternal =
-      req.currentUser?.userType !== "external_user" &&
-      req.currentOrganization?.type === "internal";
+    const isInternal = isInternalPortalActor({
+      userType: req.currentUser?.userType,
+      organizationType: req.currentOrganization?.type,
+      membershipType: req.currentMembership?.membershipType
+    });
     if (isInternal) {
       next();
       return;

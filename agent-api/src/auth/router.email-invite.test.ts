@@ -35,8 +35,9 @@ function createEmailAuthHarness(input?: {
   existingUser?: boolean;
   maintenanceEnabled?: boolean;
   publicBrandId?: string;
+  brandEmployee?: boolean;
 }) {
-  const email = "customer@example.com";
+  const email = input?.brandEmployee ? "employee@cloud-ran.ai" : "customer@example.com";
   const publicBrandId = input?.publicBrandId ?? "brand-bailey";
   const organization = {
     id: "org-1",
@@ -290,6 +291,8 @@ function createEmailAuthHarness(input?: {
       id: publicBrandId,
       platformName: publicBrandId === "brand-ranley" ? "Ranley" : "Bailey",
       externalOnly: true,
+      employeeEmailDomains: input?.brandEmployee ? ["cloud-ran.ai"] : [],
+      employeeOrganizationId: input?.brandEmployee ? organization.id : undefined,
       emailFromName: publicBrandId === "brand-ranley" ? "Ranley" : "Bailey",
       emailFromAddress: publicBrandId === "brand-ranley" ? "support@cloud-ran.ai" : "support@baicells.com",
       emailSenderVerified: true
@@ -376,6 +379,51 @@ describe("email invitation sign-in", () => {
     expect(requested.body.challenge_id).toBe("challenge-1");
     expect(harness.state.challenges[0]).toMatchObject({ purpose: "email_sign_in" });
     expect(harness.state.challenges[0].inviteId).toBeUndefined();
+  });
+
+  it("auto-enrolls a configured brand employee without an invitation or customer plan", async () => {
+    const harness = createEmailAuthHarness({
+      publicBrandId: "brand-ranley",
+      brandEmployee: true
+    });
+
+    const requested = await request(harness.app).post("/api/auth/email/request").send({ email: harness.email });
+
+    expect(requested.status).toBe(200);
+    expect(requested.body.challenge_id).toBe("challenge-1");
+    expect(harness.state.challenges[0]).toMatchObject({
+      purpose: "email_sign_in",
+      organizationId: harness.organization.id,
+      publicBrandId: "brand-ranley"
+    });
+
+    const verified = await request(harness.app)
+      .post("/api/auth/email/verify")
+      .send({ email: harness.email, code: harness.state.sentCode });
+
+    expect(verified.status).toBe(200);
+    expect(verified.body.active_organization).toMatchObject({
+      id: harness.organization.id,
+      membership_type: "brand_employee"
+    });
+    expect(harness.state.memberships[0]).toMatchObject({
+      organizationId: harness.organization.id,
+      membershipType: "brand_employee",
+      status: "active"
+    });
+  });
+
+  it("keeps configured brand employee email login available during external maintenance", async () => {
+    const harness = createEmailAuthHarness({
+      publicBrandId: "brand-ranley",
+      brandEmployee: true,
+      maintenanceEnabled: true
+    });
+
+    const requested = await request(harness.app).post("/api/auth/email/request").send({ email: harness.email });
+
+    expect(requested.status).toBe(200);
+    expect(requested.body.challenge_id).toBe("challenge-1");
   });
 
   it("keeps email verification codes isolated to the requesting public brand", async () => {

@@ -11,12 +11,12 @@ function pingRouter() {
   return router;
 }
 
-function createApp(actor: "internal" | "external") {
+function createApp(actor: "internal" | "external" | "brand_employee") {
   const app = express();
   registerCommonApiRoutes(app, {
     currentUserMiddleware: (req, _res, next) => {
-      const external = actor === "external";
-      const organizationId = external ? "customer-1" : "internal-org";
+      const external = actor !== "internal";
+      const organizationId = actor === "internal" ? "internal-org" : actor === "brand_employee" ? "ranley-employees" : "customer-1";
       req.currentUser = {
         id: external ? "external-1" : "internal-1",
         userType: external ? "external_user" : "internal_employee",
@@ -29,6 +29,7 @@ function createApp(actor: "internal" | "external") {
       } as never;
       req.currentMembership = {
         status: "active",
+        membershipType: actor === "brand_employee" ? "brand_employee" : external ? "customer_member" : "employee",
         organizationId,
         organization: req.currentOrganization
       } as never;
@@ -60,9 +61,11 @@ describe("registerCommonApiRoutes external Web maintenance scope", () => {
   it("keeps non-Web integrations and internal Portal access available", async () => {
     const externalApp = createApp("external");
     const internalApp = createApp("internal");
+    const brandEmployeeApp = createApp("brand_employee");
 
     expect((await request(externalApp).get("/api/integrations/zendesk/ping")).status).toBe(200);
     expect((await request(externalApp).get("/api/integrations/crest/ping")).status).toBe(200);
     expect((await request(internalApp).get("/api/portal/ping")).status).toBe(200);
+    expect((await request(brandEmployeeApp).get("/api/portal/ping")).status).toBe(200);
   });
 });

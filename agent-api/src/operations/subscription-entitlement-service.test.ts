@@ -110,6 +110,24 @@ describe("SubscriptionEntitlementService", () => {
     expect(decision.reasonCode).toBe("external_subscription_required");
   });
 
+  it("allows brand employees without assigning a customer subscription", async () => {
+    const service = createService();
+
+    const decision = await service.evaluateAccessForChat({
+      currentUser: {
+        id: "user-ranley",
+        organizationId: "org-ranley-employees",
+        organizationType: "customer",
+        membershipType: "brand_employee"
+      },
+      model: "gpt-5.4",
+      now: new Date("2026-04-20T00:00:00.000Z")
+    });
+
+    expect(decision.allowed).toBe(true);
+    expect(decision.defaultPolicy).toBe("internal_unlimited");
+  });
+
   it("blocks when the AI request limit has been exhausted", async () => {
     const service = createService({
       userGrant: createGrant(),

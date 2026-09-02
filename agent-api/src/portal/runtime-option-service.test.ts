@@ -268,6 +268,29 @@ describe("PortalRuntimeOptionService", () => {
     expect(result.modes.map((mode) => mode.id)).toEqual(["mode-tech"]);
   });
 
+  it("uses organization policies instead of the customer brand binding for brand employees", async () => {
+    const service = createService({
+      modes: [agentMode(), agentMode({ id: "mode-employee", name: "Employee", slug: "employee" })],
+      publicBrandAgentModeId: "mode-tech",
+      allowedByType: {
+        agent_mode: ["mode-employee"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-allowed"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-ranley",
+      roleIds: ["org_external_user"],
+      departmentIds: [],
+      membershipType: "brand_employee"
+    });
+
+    expect(result.modes.map((mode) => mode.id)).toEqual(["mode-employee"]);
+    expect(result.modes[0]?.availableSkills.map((skill) => skill.name)).toEqual(["allowed-skill"]);
+  });
+
   it("keeps an authorized agent mode visible while filtering unauthorized skill packages", async () => {
     const service = createService({
       allowedByType: {

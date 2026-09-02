@@ -283,6 +283,8 @@ model PublicBrand {
   answerFeedbackEnabled        Boolean             @default(true) @map("answer_feedback_enabled")
   answerFeedbackPrompt         String              @default("Was this answer helpful?") @map("answer_feedback_prompt")
   externalOnly                 Boolean             @default(true) @map("external_only")
+  employeeEmailDomains         String[]            @default([]) @map("employee_email_domains")
+  employeeOrganizationId       String?             @map("employee_organization_id")
   accessRequestEnabled         Boolean             @default(true) @map("access_request_enabled")
   accessSalesContactLabel      String              @default("Sales Contact") @map("access_sales_contact_label")
   billingEnabled               Boolean             @default(true) @map("billing_enabled")
@@ -326,6 +328,7 @@ model PublicBrand {
   emailTransport               PublicBrandEmailTransport?
 
   @@index([status, name])
+  @@index([employeeOrganizationId])
   @@map("public_brands")
 }
 

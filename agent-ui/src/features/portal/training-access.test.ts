@@ -20,4 +20,12 @@ describe("canAccessPortalTraining", () => {
       organizationType: "customer"
     })).toBe(false);
   });
+
+  it("allows brand employees to use the internal portal training surface", () => {
+    expect(canAccessPortalTraining({
+      userType: "external_user",
+      organizationType: "customer",
+      membershipType: "brand_employee"
+    })).toBe(true);
+  });
 });

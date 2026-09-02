@@ -3,6 +3,7 @@ import multer, { MulterError } from "multer";
 import { z } from "zod";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
+import { isInternalPortalActor } from "../auth/portal-audience.js";
 import type { CustomerExperienceIssueReporter } from "../operations/customer-experience-issue-reporter.js";
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
 import type { ProductFeedbackRepository } from "../persistence/product-feedback-repository.js";
@@ -94,10 +95,13 @@ function handleProductFeedbackUploadError(error: unknown, res: Response): boolea
   return true;
 }
 
-function audienceFromOrganizationType(organizationType: string | null | undefined): "internal" | "external" | "unknown" {
-  const normalized = typeof organizationType === "string" ? organizationType.trim() : "";
-  if (!normalized) return "unknown";
-  return isInternalOrganizationType(normalized) ? "internal" : "external";
+function audienceForRequest(req: Request): "internal" | "external" | "unknown" {
+  if (!req.currentUser || !req.currentOrganization) return "unknown";
+  return isInternalPortalActor({
+    userType: req.currentUser.userType,
+    organizationType: req.currentOrganization.type,
+    membershipType: req.currentMembership?.membershipType
+  }) ? "internal" : "external";
 }
 
 export function createPortalRouter(options: {
@@ -132,6 +136,7 @@ export function createPortalRouter(options: {
           userId: currentUser.id,
           roleIds,
           departmentIds,
+          membershipType: req.currentMembership?.membershipType,
           locale: req.headers["accept-language"]
         }),
         options.modelCatalog.getCatalog({ maxWaitMs: 100 })
@@ -198,7 +203,7 @@ export function createPortalRouter(options: {
             description: feedback.description,
             context: feedback.context,
             createdAt: feedback.createdAt,
-            audience: audienceFromOrganizationType(req.currentOrganization?.type)
+            audience: audienceForRequest(req)
           }).catch((error) => {
             console.warn("product feedback experience issue report failed", {
               feedbackId: feedback.id,
@@ -237,7 +242,8 @@ export function createPortalRouter(options: {
         currentUser: {
           id: currentUser.id,
           organizationId: req.currentOrganization?.id ?? currentUser.primaryOrganizationId ?? "",
-          organizationType: req.currentOrganization?.type
+          organizationType: req.currentOrganization?.type,
+          membershipType: req.currentMembership?.membershipType
         },
         model: ""
       });

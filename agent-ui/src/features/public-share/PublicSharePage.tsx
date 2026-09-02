@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
 import { useAuth } from "../auth/AuthProvider";
+import { isInternalPortalExperience } from "../auth/portal-experience";
 import { useBranding } from "../branding/BrandingProvider";
 import {
   extractMermaidCodeFromPreChildren,
@@ -477,7 +478,11 @@ export function PublicSharePage(props: { token?: string }) {
         setErrorText("Sign in with an internal employee account to view this conversation.");
         return;
       }
-      if (auth.activeOrganization?.type !== "internal") {
+      if (!isInternalPortalExperience({
+        userType: auth.user.userType,
+        organizationType: auth.activeOrganization?.type,
+        membershipType: auth.activeOrganization?.membershipType
+      })) {
         setLoading(false);
         setAccessStatus(403);
         setErrorText("This link is restricted to internal employees. Switch to your internal organization and try again.");
@@ -505,7 +510,7 @@ export function PublicSharePage(props: { token?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [auth.activeOrganization?.type, auth.loading, auth.user, token]);
+  }, [auth.activeOrganization?.membershipType, auth.activeOrganization?.type, auth.loading, auth.user, token]);
 
   useEffect(() => {
     const title = share?.title ? `${share.title} · ${branding.platformName}` : `${branding.platformName} Protected Link`;

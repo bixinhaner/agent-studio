@@ -26,6 +26,7 @@ function validBrandInput() {
     answerFeedbackEnabled: true,
     answerFeedbackPrompt: "Was this answer helpful?",
     externalOnly: true,
+    employeeEmailDomains: ["cloud-ran.ai"],
     accessRequestEnabled: true,
     accessSalesContactLabel: "CloudRAN.AI Sales Contact",
     billingEnabled: true,

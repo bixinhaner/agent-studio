@@ -8,6 +8,7 @@ import {
   rememberPreferredAuthEntryMode,
   type AuthEntryMode
 } from "./features/auth/auth-entry-preference";
+import { isInternalPortalExperience } from "./features/auth/portal-experience";
 import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
@@ -48,8 +49,11 @@ function PublicShareRoute(props: {
 }) {
   const auth = useAuth();
   const isInternalActor =
-    auth.user?.userType !== "external_user" &&
-    auth.activeOrganization?.type === "internal";
+    isInternalPortalExperience({
+      userType: auth.user?.userType,
+      organizationType: auth.activeOrganization?.type,
+      membershipType: auth.activeOrganization?.membershipType
+    });
 
   if (
     props.externalWebAccessLoading ||
@@ -541,13 +545,16 @@ function AppContent(props: {
         readPreferredAuthEntryMode() === "internal"
       ? "internal"
       : props.authMode;
-  const isExternalWebActor =
-    auth.user?.userType === "external_user" ||
-    auth.activeOrganization?.type === "customer";
+  const isExternalWebActor = !isInternalPortalExperience({
+    userType: auth.user?.userType,
+    organizationType: auth.activeOrganization?.type,
+    membershipType: auth.activeOrganization?.membershipType
+  });
   const trainingMode = isTrainingPath(props.pathname);
   const trainingAccessAllowed = canAccessPortalTraining({
     userType: auth.user?.userType,
-    organizationType: auth.activeOrganization?.type
+    organizationType: auth.activeOrganization?.type,
+    membershipType: auth.activeOrganization?.membershipType
   });
   const openTraining = trainingMode || !trainingAccessAllowed
     ? undefined

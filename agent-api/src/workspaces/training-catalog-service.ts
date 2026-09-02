@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 import type { ThreadRecord } from "../persistence/thread-repository.js";
+import { isInternalPortalActor } from "../auth/portal-audience.js";
 import {
   PortalWorkspaceService,
   type WorkspaceActor,
@@ -14,6 +15,7 @@ export type TrainingCatalogViewer = {
   userId: string;
   organizationId: string;
   organizationType: string;
+  membershipType?: string;
 };
 
 export type TrainingCatalogSummary = {
@@ -817,7 +819,7 @@ export class TrainingCatalogService {
   }
 
   private assertInternalViewer(viewer: TrainingCatalogViewer): void {
-    if (viewer.organizationType !== "internal") {
+    if (!isInternalPortalActor(viewer)) {
       throw new TrainingCatalogAccessError("培训案例仅对内部员工开放", 403);
     }
   }

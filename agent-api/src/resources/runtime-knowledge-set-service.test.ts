@@ -41,4 +41,42 @@ describe("RuntimeKnowledgeSetService public brand binding", () => {
     });
     expect(filterAllowedResources).not.toHaveBeenCalled();
   });
+
+  it("uses organization-authorized knowledge selections for brand employees", async () => {
+    const filterAllowedResources = vi.fn(async ({ candidateIds }: { candidateIds: string[] }) => candidateIds);
+    const service = new RuntimeKnowledgeSetService({
+      knowledgeSets: {
+        list: async () => [
+          { id: "knowledge-customer", status: "active", sourceType: "managed_upload", storageKey: "Customer" },
+          { id: "knowledge-employee", status: "active", sourceType: "managed_upload", storageKey: "Employee" }
+        ]
+      },
+      policies: { filterAllowedResources },
+      storage: { resolveReadableMountPath: (key: string) => `/data/${key}` },
+      publicBrands: {
+        getForOrganization: async () => ({
+          resourceBindingMode: "brand_managed",
+          knowledgeSetIds: ["knowledge-customer"],
+          knowledgeIsolationMode: "direct"
+        }),
+        ensureKnowledgeProjection: async (brand: unknown) => brand
+      }
+    } as never);
+
+    const result = await service.mergeSelectedKnowledgeSetsIntoRunConfig({
+      organizationId: "org-ranley-employees",
+      userId: "user-ranley",
+      roleIds: ["org_external_user"],
+      departmentIds: [],
+      membershipType: "brand_employee",
+      workspacePath: "/workspace/user-ranley",
+      knowledgeSetIds: ["knowledge-employee"]
+    });
+
+    expect(result?.additionalDirectories).toEqual(["/data/Employee"]);
+    expect(filterAllowedResources).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: "org-ranley-employees",
+      candidateIds: ["knowledge-employee"]
+    }));
+  });
 });

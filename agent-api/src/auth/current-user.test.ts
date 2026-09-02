@@ -51,4 +51,19 @@ describe("requireInternalOrganizationMember", () => {
     expect(status).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledOnce();
   });
+
+  it("allows a brand employee without granting internal organization membership", () => {
+    const { response, status } = responseDouble();
+    const next = vi.fn() as NextFunction;
+    const request = {
+      currentUser: { id: "ranley-employee", userType: "external_user" },
+      currentOrganization: { id: "ranley-employees", type: "customer" },
+      currentMembership: { status: "active", membershipType: "brand_employee" }
+    } as Request;
+
+    requireInternalOrganizationMember(request, response, next);
+
+    expect(status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledOnce();
+  });
 });

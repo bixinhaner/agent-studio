@@ -20,9 +20,11 @@ import type { OrganizationInviteRepository } from "../persistence/organization-i
 import type { LoginChallengeRepository } from "../persistence/login-challenge-repository.js";
 import { resolvePublicPlatformName } from "../system-settings/public-branding.js";
 import type { SystemSettingsVersionRecord } from "../system-settings/types.js";
-import { createPublicExternalWebGate, type ExternalWebAccessService } from "../external-web-access.js";
+import { createPublicExternalWebGate, sendExternalWebMaintenance, type ExternalWebAccessService } from "../external-web-access.js";
 import type { PublicBrandService } from "../public-brands/service.js";
 import { organizationMatchesRequestBrand } from "../public-brands/middleware.js";
+import { brandEmployeeOrganizationIdForEmail } from "../public-brands/employee-access.js";
+import { BRAND_EMPLOYEE_MEMBERSHIP_TYPE } from "./portal-audience.js";
 
 const dingtalkSessionSchema = z.object({
   code: z.string().trim().min(1, "code is required"),
@@ -514,6 +516,29 @@ export function createAuthRouter(options: {
     return organizationMatchesRequestBrand(req, organization);
   }
 
+  async function brandEmployeeOrganizationForEmail(req: Request, email: string) {
+    const organizationId = brandEmployeeOrganizationIdForEmail(req.publicBrand, email);
+    if (!organizationId) return undefined;
+    const organization = await options.organizations.getById(organizationId);
+    if (
+      !organization ||
+      organization.status !== "active" ||
+      organization.type !== "customer" ||
+      !organizationMatchesRequestBrand(req, organization)
+    ) {
+      throw new Error("Brand employee access is not configured correctly");
+    }
+    return organization;
+  }
+
+  async function blockEmailAccessDuringMaintenance(res: Response, brandEmployee: boolean): Promise<boolean> {
+    if (brandEmployee || !options.externalWebAccess || !(await options.externalWebAccess.isMaintenanceEnabled())) {
+      return false;
+    }
+    sendExternalWebMaintenance(res);
+    return true;
+  }
+
   router.get("/dingtalk/config", (req: Request, res: Response) => {
     if (req.publicBrand?.externalOnly) {
       res.status(404).json({ detail: "Internal sign-in is not available on this brand" });
@@ -848,7 +873,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.post("/email/request", externalWebGate, async (req: Request, res: Response) => {
+  router.post("/email/request", async (req: Request, res: Response) => {
     try {
       if (req.publicBrand && (!req.publicBrand.emailSenderVerified || !trimOrUndefined(req.publicBrand.emailFromAddress))) {
         res.status(503).json({ detail: `${req.publicBrand.platformName} email sign-in is temporarily unavailable` });
@@ -881,13 +906,16 @@ export function createAuthRouter(options: {
         return;
       }
 
+      const employeeOrganization = explicitInvite ? undefined : await brandEmployeeOrganizationForEmail(req, email);
+      if (await blockEmailAccessDuringMaintenance(res, Boolean(employeeOrganization))) return;
+
       const pendingInviteCandidates = explicitInvite ? [explicitInvite] : await options.invites.listPendingByEmail(email);
       const pendingInvites = [];
       for (const candidate of pendingInviteCandidates) {
         if (await inviteMatchesRequestBrand(req, candidate)) pendingInvites.push(candidate);
       }
       const activePendingInvites = pendingInvites.filter((item) => isActivePendingInvite(item));
-      const invite = explicitInvite ?? (activePendingInvites.length === 1 ? activePendingInvites[0] : undefined);
+      const invite = explicitInvite ?? (!employeeOrganization && activePendingInvites.length === 1 ? activePendingInvites[0] : undefined);
 
       const shouldUseInternalEntry =
         !invite && !req.publicBrand?.externalOnly &&
@@ -914,7 +942,7 @@ export function createAuthRouter(options: {
         });
         return;
       }
-      if (existingIdentities.length === 0 && activePendingInvites.length === 0) {
+      if (existingIdentities.length === 0 && activePendingInvites.length === 0 && !employeeOrganization) {
         res.json({ ok: true });
         return;
       }
@@ -926,7 +954,7 @@ export function createAuthRouter(options: {
         targetRef: email,
         challengeHash: hashToken(code),
         purpose: invite ? "invite_accept" : "email_sign_in",
-        organizationId: invite?.organizationId,
+        organizationId: invite?.organizationId ?? employeeOrganization?.id,
         inviteId: invite?.id,
         expiresAt: new Date(Date.now() + 15 * 60 * 1000)
       });
@@ -958,7 +986,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.post("/email/verify", externalWebGate, async (req: Request, res: Response) => {
+  router.post("/email/verify", async (req: Request, res: Response) => {
     try {
       const input = verifyEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);
@@ -976,6 +1004,8 @@ export function createAuthRouter(options: {
         res.status(400).json({ detail: "Invite email does not match" });
         return;
       }
+      const employeeOrganization = invite ? undefined : await brandEmployeeOrganizationForEmail(req, email);
+      if (await blockEmailAccessDuringMaintenance(res, Boolean(employeeOrganization))) return;
 
       const challengeHash = hashToken(input.code);
       const inviteChallenges = await options.challenges.listActive({
@@ -1050,6 +1080,15 @@ export function createAuthRouter(options: {
         await options.invites.accept(invite.id, user.id);
         await options.accessRequests?.markActivatedFromInvite(invite.id, user.id);
         activeOrganizationId = invite.organizationId;
+      } else if (employeeOrganization) {
+        await options.memberships.upsert({
+          organizationId: employeeOrganization.id,
+          userId: user.id,
+          membershipType: BRAND_EMPLOYEE_MEMBERSHIP_TYPE,
+          status: "active",
+          joinedAt: new Date()
+        });
+        activeOrganizationId = employeeOrganization.id;
       }
 
       const activeMemberships = filterMembershipsForRequest(req, await options.memberships.listActiveForUser(user.id));

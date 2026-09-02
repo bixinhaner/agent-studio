@@ -3,6 +3,7 @@ import type { NextFunction, Request, RequestHandler, Response } from "express";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 import type { OrganizationMembershipRecord } from "../persistence/organization-membership-repository.js";
 import type { SessionCookieManager } from "./session-cookie.js";
+import { isInternalPortalActor } from "./portal-audience.js";
 
 declare global {
   namespace Express {
@@ -137,7 +138,11 @@ export function requireInternalOrganizationMember(req: Request, res: Response, n
     !req.currentOrganization ||
     !req.currentMembership ||
     req.currentMembership.status !== "active" ||
-    req.currentOrganization.type !== "internal"
+    !isInternalPortalActor({
+      userType: req.currentUser.userType,
+      organizationType: req.currentOrganization.type,
+      membershipType: req.currentMembership.membershipType
+    })
   ) {
     res.status(403).json({ detail: "Internal employee access is required" });
     return;

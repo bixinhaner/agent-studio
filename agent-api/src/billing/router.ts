@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
 import type { PublicBrandService } from "../public-brands/service.js";
+import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 import type { BillingEmailScenario, BillingService } from "./service.js";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -71,7 +72,11 @@ function requirePortalBillingCustomer(req: Request, res: Response) {
     res.status(403).json({ detail: "Organization context is required" });
     return null;
   }
-  if (req.currentUser.userType !== "external_user" || organization.type !== "customer") {
+  if (
+    req.currentUser.userType !== "external_user" ||
+    organization.type !== "customer" ||
+    isBrandEmployeeMembership(req.currentMembership?.membershipType)
+  ) {
     res.status(403).json({ detail: "Customer billing is only available to external customer organizations" });
     return null;
   }

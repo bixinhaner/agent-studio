@@ -61,6 +61,8 @@ const optionalEmailSchema = z
   .nullable()
   .transform((value) => value || null);
 
+const emailDomainSchema = hostnameSchema;
+
 const replacementRuleSchema = z.object({
   source: z.string().trim().min(1).max(200),
   target: z.string().trim().max(200),
@@ -90,6 +92,7 @@ export const publicBrandInputSchema = z
     answerFeedbackEnabled: z.boolean(),
     answerFeedbackPrompt: z.string().trim().min(1).max(200),
     externalOnly: z.boolean(),
+    employeeEmailDomains: z.array(emailDomainSchema).max(50).default([]),
     accessRequestEnabled: z.boolean(),
     accessSalesContactLabel: z.string().trim().min(1).max(120),
     billingEnabled: z.boolean(),
@@ -179,6 +182,8 @@ export type PublicBrandRecord = {
   answerFeedbackEnabled: boolean;
   answerFeedbackPrompt: string;
   externalOnly: boolean;
+  employeeEmailDomains: string[];
+  employeeOrganizationId?: string;
   accessRequestEnabled: boolean;
   accessSalesContactLabel: string;
   billingEnabled: boolean;

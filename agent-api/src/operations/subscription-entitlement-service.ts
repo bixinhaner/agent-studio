@@ -1,4 +1,4 @@
-import { isInternalOrganizationType } from "../auth/resource-role-context.js";
+import { isInternalPortalActor } from "../auth/portal-audience.js";
 import type { UsageEventRepository } from "../persistence/usage-event-repository.js";
 import type {
   SubscriptionDenialLogRepository
@@ -17,6 +17,7 @@ type CurrentActor = {
   id: string;
   organizationId: string;
   organizationType?: string;
+  membershipType?: string;
 };
 
 export type SubscriptionGrantUsage = {
@@ -195,8 +196,8 @@ function makeGrantCopy(
   }
 }
 
-function defaultDecision(organizationType: string | null | undefined): ChatAccessDecision {
-  if (isInternalOrganizationType(organizationType)) {
+function defaultDecision(actor: Pick<CurrentActor, "organizationType" | "membershipType">): ChatAccessDecision {
+  if (isInternalPortalActor(actor)) {
     return {
       allowed: true,
       reasonCode: null,
@@ -672,7 +673,7 @@ export class SubscriptionEntitlementService {
     ]);
 
     if (!userGrant && !organizationGrant) {
-      return defaultDecision(input.currentUser.organizationType);
+      return defaultDecision(input.currentUser);
     }
 
     const [userEvaluation, organizationEvaluation] = await Promise.all([

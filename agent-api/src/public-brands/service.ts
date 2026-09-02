@@ -88,6 +88,8 @@ function mapBrand(row: NonNullable<BrandRow>): PublicBrandRecord {
     answerFeedbackEnabled: row.answerFeedbackEnabled,
     answerFeedbackPrompt: row.answerFeedbackPrompt,
     externalOnly: row.externalOnly,
+    employeeEmailDomains: stringArray(row.employeeEmailDomains),
+    employeeOrganizationId: trimOrUndefined(row.employeeOrganizationId),
     accessRequestEnabled: row.accessRequestEnabled,
     accessSalesContactLabel: row.accessSalesContactLabel,
     billingEnabled: row.billingEnabled,
@@ -134,7 +136,9 @@ function mapBrand(row: NonNullable<BrandRow>): PublicBrandRecord {
       createdAt: toIsoString(domain.createdAt),
       updatedAt: toIsoString(domain.updatedAt)
     })),
-    organizationIds: (row.organizations ?? []).filter((organization) => organization.type === "customer").map((organization) => organization.id)
+    organizationIds: (row.organizations ?? [])
+      .filter((organization) => organization.type === "customer" && organization.id !== row.employeeOrganizationId)
+      .map((organization) => organization.id)
   };
 }
 
@@ -161,6 +165,7 @@ function brandData(input: PublicBrandInput, actorUserId: string) {
     answerFeedbackEnabled: input.answerFeedbackEnabled,
     answerFeedbackPrompt: input.answerFeedbackPrompt,
     externalOnly: input.externalOnly,
+    employeeEmailDomains: input.employeeEmailDomains,
     accessRequestEnabled: input.accessRequestEnabled,
     accessSalesContactLabel: input.accessSalesContactLabel,
     billingEnabled: input.billingEnabled,
@@ -280,6 +285,12 @@ export class PublicBrandService {
           domains: { create: parsed.domains }
         }
       });
+      await this.ensureEmployeeOrganization(tx, {
+        brandId: brand.id,
+        brandKey: brand.key,
+        brandName: brand.name,
+        employeeEmailDomains: parsed.employeeEmailDomains
+      });
       if (parsed.organizationIds.length) {
         await tx.organization.updateMany({
           where: { id: { in: parsed.organizationIds }, type: "customer" },
@@ -307,6 +318,13 @@ export class PublicBrandService {
           emailSenderVerified: emailAddressChanged ? false : existing.emailSenderVerified
         }
       });
+      const employeeOrganizationId = await this.ensureEmployeeOrganization(tx, {
+        brandId,
+        brandKey: parsed.key,
+        brandName: parsed.name,
+        employeeEmailDomains: parsed.employeeEmailDomains,
+        existingOrganizationId: existing.employeeOrganizationId
+      });
       if (emailAddressChanged) {
         await tx.publicBrandEmailTransport.updateMany({
           where: { publicBrandId: brandId },
@@ -325,7 +343,11 @@ export class PublicBrandService {
         data: parsed.domains.map((domain) => ({ ...domain, publicBrandId: brandId }))
       });
       await tx.organization.updateMany({
-        where: { publicBrandId: brandId, type: "customer", ...(parsed.organizationIds.length ? { id: { notIn: parsed.organizationIds } } : {}) },
+        where: {
+          publicBrandId: brandId,
+          type: "customer",
+          id: { notIn: [...parsed.organizationIds, ...(employeeOrganizationId ? [employeeOrganizationId] : [])] }
+        },
         data: { publicBrandId: null }
       });
       if (parsed.organizationIds.length) {
@@ -387,17 +409,19 @@ export class PublicBrandService {
   }
 
   async lookups() {
-    const [agentModes, knowledgeSets, plans, organizations] = await Promise.all([
+    const [agentModes, knowledgeSets, plans, organizations, employeeBrands] = await Promise.all([
       this.db.agentMode.findMany({ where: { status: "active", visibleToUsers: true }, select: { id: true, name: true, slug: true }, orderBy: { name: "asc" } }),
       this.db.knowledgeSet.findMany({ where: { status: "active" }, select: { id: true, name: true, slug: true, _count: { select: { items: true } } }, orderBy: { name: "asc" } }),
       this.db.subscriptionPlan.findMany({ where: { status: "active" }, select: { id: true, name: true, slug: true, billingStatus: true }, orderBy: { name: "asc" } }),
-      this.db.organization.findMany({ where: { type: "customer" }, select: { id: true, name: true, slug: true, publicBrandId: true, status: true }, orderBy: { name: "asc" } })
+      this.db.organization.findMany({ where: { type: "customer" }, select: { id: true, name: true, slug: true, publicBrandId: true, status: true }, orderBy: { name: "asc" } }),
+      this.db.publicBrand.findMany({ where: { employeeOrganizationId: { not: null } }, select: { employeeOrganizationId: true } })
     ]);
+    const employeeOrganizationIds = new Set(employeeBrands.map((brand) => brand.employeeOrganizationId).filter(Boolean));
     return {
       agentModes,
       knowledgeSets: knowledgeSets.map(({ _count, ...knowledgeSet }) => ({ ...knowledgeSet, itemCount: _count.items })),
       plans,
-      organizations
+      organizations: organizations.filter((organization) => !employeeOrganizationIds.has(organization.id))
     };
   }
 
@@ -412,5 +436,51 @@ export class PublicBrandService {
     if (knowledgeSetCount !== input.knowledgeSetIds.length) throw new Error("One or more knowledge sets do not exist");
     if (planCount !== input.subscriptionPlanIds.length) throw new Error("One or more subscription plans do not exist");
     if (organizationCount !== input.organizationIds.length) throw new Error("One or more customer organizations do not exist");
+  }
+
+  private async ensureEmployeeOrganization(
+    db: Prisma.TransactionClient,
+    input: {
+      brandId: string;
+      brandKey: string;
+      brandName: string;
+      employeeEmailDomains: string[];
+      existingOrganizationId?: string | null;
+    }
+  ): Promise<string | undefined> {
+    const existingOrganizationId = trimOrUndefined(input.existingOrganizationId);
+    if (input.employeeEmailDomains.length === 0) return existingOrganizationId;
+
+    if (existingOrganizationId) {
+      const existing = await db.organization.findUnique({ where: { id: existingOrganizationId } });
+      if (!existing || existing.publicBrandId !== input.brandId) {
+        throw new Error("Brand employee organization is unavailable");
+      }
+      if (existing.status !== "active") {
+        await db.organization.update({ where: { id: existing.id }, data: { status: "active" } });
+      }
+      return existing.id;
+    }
+
+    const slug = `${input.brandKey}-employees`;
+    const sameSlug = await db.organization.findUnique({ where: { slug } });
+    if (sameSlug && sameSlug.publicBrandId !== input.brandId) {
+      throw new Error(`Organization slug ${slug} is already in use`);
+    }
+    const organization = sameSlug ?? await db.organization.create({
+      data: {
+        slug,
+        name: `${input.brandName} Employees`,
+        type: "customer",
+        status: "active",
+        publicBrandId: input.brandId,
+        settingsJson: { managedPurpose: "brand_employee" }
+      }
+    });
+    await db.publicBrand.update({
+      where: { id: input.brandId },
+      data: { employeeOrganizationId: organization.id }
+    });
+    return organization.id;
   }
 }

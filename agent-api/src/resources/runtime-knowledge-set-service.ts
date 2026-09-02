@@ -1,4 +1,5 @@
 import type { PublicBrandService } from "../public-brands/service.js";
+import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -177,6 +178,7 @@ export class RuntimeKnowledgeSetService {
     userId: string;
     roleIds: string[];
     departmentIds: string[];
+    membershipType?: string;
     workspacePath: string;
     knowledgeSetIds?: string[];
     codexRunConfig?: Record<string, unknown>;
@@ -190,7 +192,7 @@ export class RuntimeKnowledgeSetService {
     const brand = resolvedBrand
       ? await this.options.publicBrands?.ensureKnowledgeProjection(resolvedBrand) ?? resolvedBrand
       : undefined;
-    const brandManagesResources = brand?.resourceBindingMode === "brand_managed";
+    const brandManagesResources = brand?.resourceBindingMode === "brand_managed" && !isBrandEmployeeMembership(input.membershipType);
     const selectedKnowledgeSetIds = brandManagesResources
       ? [...brand.knowledgeSetIds]
       : resolveSelectedKnowledgeSetIds({

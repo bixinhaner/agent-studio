@@ -115,6 +115,7 @@ import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
+import { isInternalPortalExperience } from "../auth/portal-experience";
 import {
   createThreadPublicShare,
   fetchThreadPublicShareStatus,
@@ -6736,6 +6737,11 @@ export function PortalShell(props: {
     return t("feedback.impactLow");
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
+  const isExternalPortalUser = !isInternalPortalExperience({
+    userType: portalPreferenceUser?.userType,
+    organizationType: auth.activeOrganization?.type,
+    membershipType: auth.activeOrganization?.membershipType
+  });
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -6949,7 +6955,7 @@ export function PortalShell(props: {
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
   const [showProcessTrace, setShowProcessTrace] = useState(() => resolveShowProcessTracePreference(portalPreferenceUser));
-  const effectiveShowProcessTrace = brand.externalOnly ? false : showProcessTrace;
+  const effectiveShowProcessTrace = isExternalPortalUser ? false : showProcessTrace;
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(() =>
     resolveCollapseFinalTraceOnDonePreference(portalPreferenceUser)
   );
@@ -7338,7 +7344,6 @@ export function PortalShell(props: {
     };
   }, [activeThreadIdentity.remoteId]);
 
-  const isExternalPortalUser = props.currentUser?.userType === "external_user";
   const [billingPanelOpen, setBillingPanelOpen] = useState(false);
   const [billingReturnNotice, setBillingReturnNotice] = useState<PortalBillingReturnNotice | null>(null);
   const [subscriptionReminderModalOpen, setSubscriptionReminderModalOpen] = useState(false);
@@ -8277,9 +8282,7 @@ export function PortalShell(props: {
     }),
     [behavior.portalWelcomeSuggestions, locale, t]
   );
-  const isInternalAnswerFeedbackAudience = auth.activeOrganization?.type
-    ? auth.activeOrganization.type === "internal"
-    : portalPreferenceUser?.userType === "internal_employee";
+  const isInternalAnswerFeedbackAudience = !isExternalPortalUser;
   const answerFeedbackConfig = useMemo<AnswerFeedbackUiConfig>(
     () => ({
       enabled: isInternalAnswerFeedbackAudience

@@ -12,6 +12,7 @@ import { resolveSkillCatalogPresentation, selectCatalogEntry } from "../skill-ca
 import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
 import type { PortalSkillPresentation } from "./skill-presentation.js";
 import type { PublicBrandService } from "../public-brands/service.js";
+import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 
 export type PortalRuntimeOptionRunProfile = {
   id: string;
@@ -116,6 +117,7 @@ type RuntimeOptionRequest = {
   userId: string;
   roleIds: string[];
   departmentIds: string[];
+  membershipType?: string;
   locale?: string;
 };
 
@@ -365,16 +367,17 @@ export class PortalRuntimeOptionService {
         Promise.resolve([]),
       this.deps.skillCatalog?.listPublished({ organizationId: input.organizationId }) ?? Promise.resolve([])
     ]);
+    const brandManagesResources = brand?.resourceBindingMode === "brand_managed" && !isBrandEmployeeMembership(input.membershipType);
 
     const activeVisibleModeRows = modeRows.filter(
       (mode) =>
         isActive(mode.status) &&
         mode.visibleToUsers &&
         matchesOrganization(mode.organizationId, input.organizationId) &&
-        (!brand || brand.resourceBindingMode === "organization_policy" || mode.id === brand.agentModeId)
+        (!brand || !brandManagesResources || mode.id === brand.agentModeId)
     );
     const allowedModeIds = new Set(
-      brand?.resourceBindingMode === "brand_managed"
+      brandManagesResources
         ? activeVisibleModeRows.map((mode) => mode.id)
         : await this.deps.policies.filterAllowedResources({
             organizationId: input.organizationId,

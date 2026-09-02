@@ -45,6 +45,7 @@ export type PublicBrandInput = {
   answerFeedbackEnabled: boolean;
   answerFeedbackPrompt: string;
   externalOnly: boolean;
+  employeeEmailDomains: string[];
   accessRequestEnabled: boolean;
   accessSalesContactLabel: string;
   billingEnabled: boolean;
@@ -78,6 +79,7 @@ export type PublicBrandInput = {
 
 export type PublicBrandRecord = PublicBrandInput & {
   id: string;
+  employeeOrganizationId?: string;
   createdByUserId?: string;
   updatedByUserId?: string;
   createdAt: string;
