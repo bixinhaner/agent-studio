@@ -15,7 +15,7 @@ import {
 } from "./api";
 import type { AdminCustomerOrganization, AdminDepartmentNode, AdminUser } from "./types";
 
-type UserScope = "active" | "internal" | "external" | "dingtalkOnly" | "disabled" | "all";
+type UserScope = "active" | "internal" | "brandEmployee" | "external" | "dingtalkOnly" | "disabled" | "all";
 type LoginFilter = "all" | "loggedIn" | "neverLoggedIn";
 type StatusFilter = "all" | "active" | "disabled" | "manualDisabled";
 
@@ -24,7 +24,8 @@ const ALL_OWNERSHIP_FILTER = "__all__";
 const USER_SCOPE_OPTIONS: Array<{ value: UserScope; label: string }> = [
   { value: "active", label: "激活用户" },
   { value: "internal", label: "内部账号" },
-  { value: "external", label: "外部账号" },
+  { value: "brandEmployee", label: "品牌员工" },
+  { value: "external", label: "外部客户" },
   { value: "dingtalkOnly", label: "仅钉钉同步" },
   { value: "disabled", label: "已停用" },
   { value: "all", label: "全部人员" }
@@ -91,6 +92,16 @@ function userTypeLabel(userType: string): string {
   }
 }
 
+function brandEmployeeMembership(user: AdminUser) {
+  return userSource(user).organizations.find(
+    (membership) => membership.membershipType === "brand_employee" && membership.status === "active"
+  );
+}
+
+function userAudienceLabel(user: AdminUser): string {
+  return brandEmployeeMembership(user) ? "品牌员工" : userTypeLabel(userSource(user).userType);
+}
+
 function providerLabel(provider: string): string {
   switch (provider) {
     case "dingtalk":
@@ -110,6 +121,8 @@ function membershipTypeLabel(membershipType: string): string {
       return "Admin";
     case "customer_member":
       return "User";
+    case "brand_employee":
+      return "品牌员工";
     default:
       return membershipType || "未命名成员";
   }
@@ -133,6 +146,7 @@ function userPrimaryRole(user: AdminUser): string {
     return user.primaryRole.name;
   }
   if (user.local.role === "employee") {
+    if (brandEmployeeMembership(user)) return "品牌员工";
     return userSource(user).userType === "external_user" ? "User" : "员工";
   }
   if (user.local.role === "admin") {
@@ -175,8 +189,10 @@ function matchesUserScope(user: AdminUser, scope: UserScope): boolean {
       return !disabled && !dingtalkOnly;
     case "internal":
       return source.userType === "internal_employee" && !disabled && !dingtalkOnly;
+    case "brandEmployee":
+      return Boolean(brandEmployeeMembership(user)) && !disabled;
     case "external":
-      return source.userType === "external_user" && !disabled;
+      return source.userType === "external_user" && !brandEmployeeMembership(user) && !disabled;
     case "dingtalkOnly":
       return !disabled && dingtalkOnly;
     case "disabled":
@@ -220,6 +236,9 @@ function userOrganizationSummary(user: AdminUser): string {
     return "未加入组织";
   }
   const visible = source.organizations.slice(0, 2).map((membership) => {
+    if (membership.membershipType === "brand_employee") {
+      return `${membership.publicBrandName || membership.organizationName || "品牌"} · 品牌员工`;
+    }
     const organizationName = membership.organizationName || (membership.organizationType === "internal" ? "内部组织" : "未命名组织");
     return `${organizationName} · ${membershipTypeLabel(membership.membershipType)}`;
   });
@@ -512,7 +531,7 @@ export function UsersView() {
         ...user.synced.departmentIds.map((departmentId) => resolveDepartmentLabelFromMap(departmentId)),
         ...source.identities.map((identity) => `${identity.provider} ${identity.email ?? ""}`),
         ...source.organizations.map((membership) =>
-          `${membership.organizationName ?? ""} ${membership.membershipType}`
+          `${membership.organizationName ?? ""} ${membership.publicBrandName ?? ""} ${membership.publicBrandKey ?? ""} ${membership.membershipType}`
         )
       ]
         .join(" ")
@@ -664,8 +683,8 @@ export function UsersView() {
           <strong style={{ color: "var(--admin-color-text)", fontSize: 14 }}>{userDisplayTitle(record)}</strong>
           <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>{userContact(record)}</span>
           <Space size={[4, 4]} wrap>
-            <Tag color="blue" style={{ borderRadius: 12, margin: 0 }}>
-              {userTypeLabel(userSource(record).userType)}
+            <Tag color={brandEmployeeMembership(record) ? "cyan" : "blue"} style={{ borderRadius: 12, margin: 0 }}>
+              {userAudienceLabel(record)}
             </Tag>
             {userIdentitySources(record).map((label) => (
               <Tag key={label} color="geekblue" style={{ borderRadius: 12, margin: 0 }}>
@@ -1118,7 +1137,7 @@ export function UsersView() {
                     <div className="admin-entity-card-grid">
                       <div>
                         <div className="admin-entity-card-subtle">用户类型</div>
-                        <strong>{userTypeLabel(userSource(user).userType)}</strong>
+                        <strong>{userAudienceLabel(user)}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">岗位</div>
@@ -1211,7 +1230,7 @@ export function UsersView() {
                 <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>{userContact(editingUser)}</span>
                 <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
                   <Tag color="blue" style={{ borderRadius: 12, margin: 0 }}>
-                    {userTypeLabel(userSource(editingUser).userType)}
+                    {userAudienceLabel(editingUser)}
                   </Tag>
                   {userIdentitySources(editingUser).map((label) => (
                     <Tag key={label} color="geekblue" style={{ borderRadius: 12, margin: 0 }}>

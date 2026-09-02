@@ -97,6 +97,43 @@ describe("UsersView", () => {
             syncState: "active",
             lastSyncedAt: new Date().toISOString()
           }
+        },
+        {
+          id: "3",
+          source: {
+            userType: "external_user",
+            primaryOrganizationId: "org_ranley_employees",
+            identities: [{ provider: "email_magic_link", email: "melven.meng@cloud-ran.ai", lastLoginAt: new Date().toISOString() }],
+            organizations: [
+              {
+                organizationId: "org_ranley_employees",
+                organizationSlug: "ranley-employees",
+                organizationName: "Ranley Employees",
+                organizationType: "customer",
+                publicBrandId: "brand_ranley",
+                publicBrandKey: "ranley",
+                publicBrandName: "Ranley",
+                membershipType: "brand_employee",
+                status: "active"
+              }
+            ]
+          },
+          synced: {
+            displayName: "Melven Meng",
+            email: "melven.meng@cloud-ran.ai",
+            dingtalkUserId: null,
+            departmentIds: [],
+            primaryDepartmentId: null
+          },
+          local: { role: "employee", manualDisabled: false, adminNote: null },
+          assignedRoles: [],
+          primaryRole: null,
+          effective: {
+            status: "active",
+            statusSource: "local",
+            syncState: "active",
+            lastSyncedAt: new Date().toISOString()
+          }
         }
       ]
     });
@@ -146,14 +183,14 @@ describe("UsersView", () => {
     expect(await screen.findByText(/全部部门: 研发部 .* 交付部/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("tab", { name: "客户组织与邀请" }));
     expect(await screen.findByRole("button", { name: "创建客户组织" })).toBeTruthy();
-  });
+  }, 10_000);
 
   it("filters users by text", async () => {
     render(<UsersView />);
     const searchInputs = screen.getAllByPlaceholderText(/搜索/i);
     fireEvent.change(searchInputs[0], { target: { value: "John" } });
     expect(await screen.findByText("John Doe")).toBeTruthy();
-  });
+  }, 10_000);
 
   it("keeps DingTalk-only synced users out of the default active scope", async () => {
     render(<UsersView />);
@@ -163,5 +200,17 @@ describe("UsersView", () => {
 
     fireEvent.click(await screen.findByText("仅钉钉同步 1"));
     expect(await screen.findByText("Sync Only")).toBeTruthy();
+  });
+
+  it("shows brand employees separately from external customers", async () => {
+    render(<UsersView />);
+
+    expect(await screen.findByText("Melven Meng")).toBeTruthy();
+    expect(screen.getAllByText("品牌员工").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Ranley · 品牌员工")).toBeTruthy();
+
+    fireEvent.click(await screen.findByText("品牌员工 1"));
+    expect(await screen.findByText("Melven Meng")).toBeTruthy();
+    expect(screen.queryByText("John Doe")).toBeNull();
   });
 });

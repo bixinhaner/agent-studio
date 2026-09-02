@@ -18,7 +18,7 @@ export type AdminSection =
 
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-export type AdminConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk" | "action_connector";
+export type AdminConversationSourceFilter = "all" | "internal" | "brand_employee" | "external" | "zendesk" | "dingtalk" | "action_connector";
 export type AdminConversationSort = "updated_desc" | "created_desc";
 export type AdminApiAuditResultFilter = "all" | "success" | "failed";
 export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
@@ -306,6 +306,12 @@ export type AdminConversationUser = {
   email: string | null;
   role: string;
   status: string;
+  membershipType: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+  publicBrandId: string | null;
+  publicBrandKey: string | null;
+  publicBrandName: string | null;
 };
 
 export type AdminConversationFeedback = {
@@ -358,7 +364,7 @@ export type AdminConversationAgentModeSummary = {
 export type AdminConversationSummary = {
   id: string;
   externalId: string | null;
-  audience: "internal" | "external" | "unknown";
+  audience: "internal" | "brand_employee" | "external" | "unknown";
   title: string;
   status: string;
   model: string;
@@ -1092,6 +1098,9 @@ export type AdminUser = {
       organizationSlug: string | null;
       organizationName: string | null;
       organizationType: string | null;
+      publicBrandId: string | null;
+      publicBrandKey: string | null;
+      publicBrandName: string | null;
       membershipType: string;
       status: string;
     }>;

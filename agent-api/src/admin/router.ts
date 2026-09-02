@@ -132,6 +132,12 @@ type UserOrganizationMembershipRow = {
     name: string;
     type: string | null;
     status: string | null;
+    publicBrandId?: string | null;
+    publicBrand?: {
+      id: string;
+      key: string;
+      name: string;
+    } | null;
   } | null;
 };
 
@@ -519,7 +525,7 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
           organizationMembership: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> };
         }).organizationMembership.findMany({
           where: { userId: row.id },
-          include: { organization: true },
+          include: { organization: { include: { publicBrand: true } } },
           orderBy: { createdAt: "asc" }
         })
       : [];
@@ -541,6 +547,9 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
         organizationSlug: trimOrUndefined(membership.organization?.slug) ?? null,
         organizationName: trimOrUndefined(membership.organization?.name) ?? null,
         organizationType: trimOrUndefined(membership.organization?.type) ?? null,
+        publicBrandId: trimOrUndefined(membership.organization?.publicBrandId) ?? null,
+        publicBrandKey: trimOrUndefined(membership.organization?.publicBrand?.key) ?? null,
+        publicBrandName: trimOrUndefined(membership.organization?.publicBrand?.name) ?? null,
         membershipType: trimOrUndefined(membership.membershipType) ?? "customer_member",
         status: trimOrUndefined(membership.status) ?? "active"
       }))

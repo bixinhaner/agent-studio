@@ -36,6 +36,7 @@ import {
   type ExternalConversationBindingRepositoryDb
 } from "../persistence/external-conversation-binding-repository.js";
 import { UsageEventRepository, type UsageEventRecord, type UsageEventRepositoryDb } from "../persistence/usage-event-repository.js";
+import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 import { ConversationRecordService } from "../operations/conversation-record-service.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
@@ -71,6 +72,20 @@ type ConversationAuditUserRow = {
   email: string | null;
   role: string | null;
   status: string | null;
+  organizationMemberships?: Array<{
+    membershipType: string | null;
+    status: string | null;
+    organization?: {
+      id: string;
+      slug: string;
+      name: string;
+      publicBrand?: {
+        id: string;
+        key: string;
+        name: string;
+      } | null;
+    } | null;
+  }>;
 };
 
 type UsageEventAuditRow = UsageEventRecord;
@@ -92,8 +107,8 @@ type AgentModeAuditRow = {
 
 type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & UsageEventRepositoryDb & {
   user: {
-    findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<ConversationAuditUserRow[]>;
-    findUnique(args: { where: { id: string } }): Promise<ConversationAuditUserRow | null>;
+    findMany(args?: unknown): Promise<ConversationAuditUserRow[]>;
+    findUnique(args: unknown): Promise<ConversationAuditUserRow | null>;
   };
   integrationInstance: {
     findMany(args?: {
@@ -110,7 +125,7 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & Us
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
 type ConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-export type ConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk" | "action_connector";
+export type ConversationSourceFilter = "all" | "internal" | "brand_employee" | "external" | "zendesk" | "dingtalk" | "action_connector";
 type ConversationSort = "updated_desc" | "created_desc";
 
 type ApiAuditResultFilter = "all" | "success" | "failed";
@@ -128,9 +143,15 @@ type ConversationAuditUser = {
   email: string | null;
   role: string;
   status: string;
+  membershipType: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+  publicBrandId: string | null;
+  publicBrandKey: string | null;
+  publicBrandName: string | null;
 };
 
-type ConversationAudience = "internal" | "external" | "unknown";
+type ConversationAudience = "internal" | "brand_employee" | "external" | "unknown";
 
 type ConversationChannelSummary = {
   type: string;
@@ -912,6 +933,7 @@ function parseFeedbackFilter(value: unknown): ConversationFeedbackFilter {
 
 function parseSourceFilter(value: unknown): ConversationSourceFilter {
   return value === "internal" ||
+    value === "brand_employee" ||
     value === "external" ||
     value === "zendesk" ||
     value === "dingtalk" ||
@@ -999,23 +1021,33 @@ function parseAiResponseReviewSort(value: unknown): AiResponseReviewSort | undef
 
 function normalizeUser(row: ConversationAuditUserRow | null | undefined): ConversationAuditUser | null {
   if (!row) return null;
+  const brandMembership = row.organizationMemberships?.find(
+    (membership) => membership.status === "active" && isBrandEmployeeMembership(membership.membershipType)
+  );
   return {
     id: row.id,
     userType: trimOrUndefined(row.userType) ?? "internal_employee",
     displayName: trimOrUndefined(row.displayName) ?? null,
     email: trimOrUndefined(row.email) ?? null,
     role: trimOrUndefined(row.role) ?? "employee",
-    status: trimOrUndefined(row.status) ?? "active"
+    status: trimOrUndefined(row.status) ?? "active",
+    membershipType: trimOrUndefined(brandMembership?.membershipType) ?? null,
+    organizationId: trimOrUndefined(brandMembership?.organization?.id) ?? null,
+    organizationName: trimOrUndefined(brandMembership?.organization?.name) ?? null,
+    publicBrandId: trimOrUndefined(brandMembership?.organization?.publicBrand?.id) ?? null,
+    publicBrandKey: trimOrUndefined(brandMembership?.organization?.publicBrand?.key) ?? null,
+    publicBrandName: trimOrUndefined(brandMembership?.organization?.publicBrand?.name) ?? null
   };
 }
 
 export function resolveConversationAudience(
-  user: { userType?: string | null } | null | undefined,
+  user: { userType?: string | null; membershipType?: string | null } | null | undefined,
   channel?: ConversationChannelSummary | null
 ): ConversationAudience {
   const userType = trimOrUndefined(user?.userType ?? undefined);
   if (!userType && channel?.type === "zendesk") return "external";
   if (!userType) return "unknown";
+  if (isBrandEmployeeMembership(user?.membershipType)) return "brand_employee";
   return userType === "external_user" ? "external" : "internal";
 }
 
@@ -1031,6 +1063,7 @@ export function matchesConversationSourceFilter(
   if (filter === "dingtalk") return summary.channel?.type === "dingtalk_bot";
   if (filter === "action_connector") return summary.channel?.type === "action_connector";
   if (filter === "internal") return !summary.channel && summary.audience === "internal";
+  if (filter === "brand_employee") return !summary.channel && summary.audience === "brand_employee";
   if (filter === "external") return !summary.channel && summary.audience === "external";
   return true;
 }
@@ -1724,6 +1757,10 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
     summary.user?.displayName,
     summary.user?.email,
     summary.user?.userType,
+    summary.user?.membershipType,
+    summary.user?.organizationName,
+    summary.user?.publicBrandKey,
+    summary.user?.publicBrandName,
     summary.user?.role,
     summary.preview.firstUserText,
     summary.preview.latestText,
@@ -1925,7 +1962,15 @@ export function createConversationAuditRouter(options: {
     const records = conversationRecords();
     const [threads, users, integrations, agentModes] = await Promise.all([
       records.listThreads({ includeArchived: true }),
-      db.user.findMany({ orderBy: { createdAt: "asc" } }),
+      db.user.findMany({
+        orderBy: { createdAt: "asc" },
+        include: {
+          organizationMemberships: {
+            where: { status: "active" },
+            include: { organization: { include: { publicBrand: true } } }
+          }
+        }
+      }),
       db.integrationInstance.findMany(),
       db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
     ]);
@@ -2420,7 +2465,17 @@ export function createConversationAuditRouter(options: {
       }
 
       const [userRow, bindings, integrationRows, agentModeRows] = await Promise.all([
-        thread.userId ? db.user.findUnique({ where: { id: thread.userId } }) : Promise.resolve(null),
+        thread.userId
+          ? db.user.findUnique({
+              where: { id: thread.userId },
+              include: {
+                organizationMemberships: {
+                  where: { status: "active" },
+                  include: { organization: { include: { publicBrand: true } } }
+                }
+              }
+            })
+          : Promise.resolve(null),
         records.listExternalConversationBindingsByThreadIds([thread.id]),
         db.integrationInstance.findMany(),
         db.agentMode.findMany({ orderBy: { createdAt: "asc" } })

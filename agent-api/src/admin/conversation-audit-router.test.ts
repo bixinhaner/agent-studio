@@ -37,6 +37,7 @@ describe("adminThreadFileContentDisposition", () => {
 describe("resolveConversationAudience", () => {
   it("classifies internal and external conversation owners", () => {
     expect(resolveConversationAudience({ userType: "internal_employee" })).toBe("internal");
+    expect(resolveConversationAudience({ userType: "external_user", membershipType: "brand_employee" })).toBe("brand_employee");
     expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
     expect(resolveConversationAudience(null)).toBe("unknown");
     expect(resolveConversationAudience(null, { type: "zendesk" } as never)).toBe("external");
@@ -113,6 +114,8 @@ describe("product feedback reply routes", () => {
 describe("matchesConversationSourceFilter", () => {
   it("treats internal and external filters as Portal-only conversations", () => {
     expect(matchesConversationSourceFilter({ audience: "internal", channel: null }, "internal")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "brand_employee", channel: null }, "brand_employee")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "brand_employee", channel: null }, "external")).toBe(false);
     expect(matchesConversationSourceFilter({ audience: "external", channel: null }, "external")).toBe(true);
     expect(matchesConversationSourceFilter({ audience: "external", channel: { type: "zendesk" } }, "external")).toBe(false);
     expect(matchesConversationSourceFilter({ audience: "internal", channel: { type: "dingtalk_bot" } }, "internal")).toBe(false);

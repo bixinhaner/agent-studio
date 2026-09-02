@@ -123,6 +123,7 @@ const FEEDBACK_OPTIONS: Array<{ value: AdminConversationFeedbackFilter; label: s
 const SOURCE_OPTIONS: Array<{ value: AdminConversationSourceFilter; label: string }> = [
   { value: "all", label: "全部" },
   { value: "internal", label: "内部对话" },
+  { value: "brand_employee", label: "品牌员工对话" },
   { value: "external", label: "外部客户对话" },
   { value: "zendesk", label: "Zendesk" },
   { value: "dingtalk", label: "钉钉" },
@@ -191,6 +192,7 @@ function displayUserLabel(user: AdminConversationUser | null): string {
 }
 
 function conversationAudienceLabel(audience: AdminConversationSummary["audience"]): string {
+  if (audience === "brand_employee") return "品牌员工";
   if (audience === "external") return "外部客户";
   if (audience === "internal") return "内部";
   return "未关联";
@@ -198,6 +200,9 @@ function conversationAudienceLabel(audience: AdminConversationSummary["audience"
 
 function conversationSourceAudienceLabel(conversation: AdminConversationSummary): string {
   if (conversation.channel?.type === "action_connector") return "外部系统";
+  if (conversation.audience === "brand_employee" && conversation.user?.publicBrandName) {
+    return `${conversation.user.publicBrandName} · 品牌员工`;
+  }
   return conversationAudienceLabel(conversation.audience);
 }
 
@@ -1431,6 +1436,11 @@ function ConversationDetail(props: {
             </div>
           </div>
           <div className="conversation-detail-tags">
+            {conversation.audience === "brand_employee" ? (
+              <Tag color="cyan">
+                {conversation.user?.publicBrandName || "品牌"} · 品牌员工
+              </Tag>
+            ) : null}
             {conversation.channel ? <Tag color="cyan">{conversation.channel.label}</Tag> : null}
             {agentModeLabel ? (
               <Tag color="geekblue" title={conversationAgentModeTitle(conversation.agentMode)}>
