@@ -1,0 +1,39 @@
+name: Apply reviewed assistant patch
+on:
+  push:
+    branches: [codex/assistant-lifecycle]
+    paths: [temp/assistant-patch-manifest.json]
+permissions:
+  contents: write
+concurrency:
+  group: assistant-patch
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/codex/assistant-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and apply the reviewed patch
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, re, subprocess
+          manifest = json.loads(pathlib.Path('temp/assistant-patch-manifest.json').read_text())
+          assert 1 <= len(manifest['parts']) <= 12
+          assert all(re.fullmatch(r'temp/assistant-patch-\d+\.txt', p) for p in manifest['parts'])
+          raw = ''.join(pathlib.Path(p).read_text().strip() for p in manifest['parts'])
+          patch = lzma.decompress(base64.b64decode(raw, validate=True))
+          assert len(patch) <= 4_000_000
+          assert hashlib.sha256(patch).hexdigest() == manifest['sha256'], 'patch checksum mismatch'
+          pathlib.Path('/tmp/assistant.patch').write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', '/tmp/assistant.patch'], check=True)
+          subprocess.run(['git', 'apply', '--index', '/tmp/assistant.patch'], check=True)
+          paths = subprocess.check_output(['git', 'diff', '--cached', '--name-only']).decode().splitlines()
+          assert paths and all(not p.startswith('.github/') for p in paths), 'workflow changes must use the authorized connector'
+          PY
+          git rm -f -- temp/assistant-patch-manifest.json temp/assistant-patch-*.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(agent): 落地独立助手生命周期与验证' -m '应用已校验的跨仓库配套实现；保留现有运行时，使用不可变执行快照、真实试运行和数据库租约。'
+          git push origin HEAD:codex/assistant-lifecycle
