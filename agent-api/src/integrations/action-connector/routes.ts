@@ -37,6 +37,28 @@ export function createActionConnectorRuntimeRouter(options: {
   const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, options.codexRunner, bridge);
   const requireService = options.serviceTokenMiddleware ?? ((_req: Request, _res: Response, next: NextFunction) => next());
 
+  // These endpoints are service-to-service only. xOMC owns assistant identities,
+  // revisions, authorization, and scheduling; Studio receives execution snapshots.
+  router.post("/:connectorId/assistant-builder/plan", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    const controller = new AbortController();
+    const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+    res.on("close", disconnect);
+    try { res.json(await options.proactive.planAssistant(req.params.connectorId, req.body, controller.signal)); }
+    catch (error) { assistantError(res, error); }
+    finally { res.off("close", disconnect); }
+  });
+  router.post("/:connectorId/assistant-runs", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try { res.status(202).json(await options.proactive.submitAssistantRun(req.params.connectorId, req.body)); }
+    catch (error) { assistantError(res, error); }
+  });
+  router.get("/:connectorId/assistant-runs/:runId", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try { res.json(await options.proactive.assistantRun(req.params.connectorId, req.params.runId)); }
+    catch (error) { assistantError(res, error); }
+  });
+
   router.post("/:connectorId/events", requireService, async (req: Request, res: Response) => {
     if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
     try {
@@ -278,4 +300,10 @@ export function createActionConnectorRuntimeRouter(options: {
   });
 
   return router;
+}
+
+function assistantError(res: Response, error: unknown): void {
+  const code = error instanceof Error ? error.message : "ASSISTANT_REQUEST_FAILED";
+  const status = code.includes("NOT_FOUND") ? 404 : code.includes("CONFLICT") ? 409 : code.includes("QUEUE_FULL") ? 429 : 400;
+  if (!res.headersSent) res.status(status).json({ error: { code: code.slice(0, 2000) } });
 }

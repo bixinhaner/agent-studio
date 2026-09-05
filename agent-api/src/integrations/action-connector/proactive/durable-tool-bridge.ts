@@ -29,6 +29,11 @@ type BackgroundRegistration = {
   traceId: string;
   allowedOperations: string[];
   timeoutSeconds: number;
+  maxToolCalls?: number;
+  runAttempt?: number;
+  signal?: AbortSignal;
+  toolCalls?: number;
+  deadlineAt?: number;
   bridgeToken?: string;
   emit?: (event: AgentStreamEvent) => void;
 };
@@ -50,7 +55,7 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
   constructor(private readonly db: PrismaClient) {}
 
   prepareBackgroundRun(input: Omit<BackgroundRegistration, "bridgeToken" | "emit">): void {
-    this.background.set(this.key(input.connectorId, input.runId), { ...input });
+    this.background.set(this.key(input.connectorId, input.runId), { ...input, toolCalls: 0, deadlineAt: Date.now() + input.timeoutSeconds * 1000 });
   }
 
   registerRun(input: {
@@ -77,17 +82,27 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
     if (!registration.bridgeToken || !safeEquals(registration.bridgeToken, input.bridgeToken)) {
       throw new Error("External tool bridge run is not active.");
     }
+    registration.signal?.throwIfAborted();
+    const active = await this.db.proactiveAgentRun.findUnique({ where: { id: input.runId } });
+    if (!active || !["RUNNING", "WAITING_TOOL"].includes(active.status) ||
+        (registration.runAttempt !== undefined && active.runAttempt !== registration.runAttempt)) {
+      throw new Error("BACKGROUND_RUN_NOT_ACTIVE");
+    }
     const operationId = input.request.operationId?.trim() ?? "";
     const allowedOperation = registration.allowedOperations.includes(operationId) ||
       BACKGROUND_HANDBOOK_OPERATIONS.has(operationId);
     if (input.request.method.toUpperCase() !== "GET" || !allowedOperation) {
       throw new Error("Background tool operation is outside the installed scenario policy.");
     }
-    const toolCallId = input.toolCallId?.trim() || `rest-${randomUUID()}`;
-    const deadlineAt = new Date(Date.now() + registration.timeoutSeconds * 1000);
+    if (!BACKGROUND_HANDBOOK_OPERATIONS.has(operationId)) {
+      registration.toolCalls = (registration.toolCalls ?? 0) + 1;
+      if (registration.toolCalls > (registration.maxToolCalls ?? 18)) throw new Error("BACKGROUND_TOOL_BUDGET_EXCEEDED");
+    }
+    const toolCallId = `${input.runId}-${active.runAttempt}-${input.toolCallId?.trim() || randomUUID()}`;
+    const deadlineAt = new Date(registration.deadlineAt ?? Date.now() + registration.timeoutSeconds * 1000);
     await this.db.connectorToolInvocation.create({
       data: {
-        id: toolCallId, runId: input.runId, connectorId: input.connectorId,
+        id: toolCallId, runId: input.runId, runAttempt: active.runAttempt, connectorId: input.connectorId,
         scenarioKey: registration.scenarioKey, packageDigest: registration.packageDigest,
         handbookDigest: registration.handbookDigest, operationId,
         method: "GET", path: input.request.path,
@@ -98,20 +113,25 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
         deadlineAt, traceId: registration.traceId
       }
     });
-    await this.db.proactiveAgentRun.update({ where: { id: input.runId }, data: { status: "WAITING_TOOL" } });
+    await this.db.proactiveAgentRun.updateMany({ where: { id: input.runId, runAttempt: active.runAttempt, status: { in: ["RUNNING", "WAITING_TOOL"] } }, data: { status: "WAITING_TOOL" } });
     registration.emit?.({
       type: "tool_request", runId: input.runId, toolCallId, tool: "rest.request",
       title: `GET ${input.request.path}`, input: input.request
     });
     while (Date.now() < deadlineAt.getTime()) {
+      registration.signal?.throwIfAborted();
+      const current = await this.db.proactiveAgentRun.findUnique({ where: { id: input.runId } });
+      if (!current || current.runAttempt !== active.runAttempt || !["RUNNING", "WAITING_TOOL"].includes(current.status)) {
+        throw new Error("BACKGROUND_RUN_NOT_ACTIVE");
+      }
       const invocation = await this.db.connectorToolInvocation.findUnique({ where: { id: toolCallId } });
       if (invocation?.status === "SUCCEEDED") {
-        await this.db.proactiveAgentRun.update({ where: { id: input.runId }, data: { status: "RUNNING" } });
+        await this.db.proactiveAgentRun.updateMany({ where: { id: input.runId, runAttempt: active.runAttempt, status: { in: ["RUNNING", "WAITING_TOOL"] } }, data: { status: "RUNNING" } });
         const result = invocation.result as Record<string, unknown> | null;
         return { runId: input.runId, toolCallId, status: "ok", output: result?.output };
       }
       if (invocation?.status === "FAILED" || invocation?.status === "EXPIRED") {
-        await this.db.proactiveAgentRun.update({ where: { id: input.runId }, data: { status: "RUNNING" } });
+        await this.db.proactiveAgentRun.updateMany({ where: { id: input.runId, runAttempt: active.runAttempt, status: { in: ["RUNNING", "WAITING_TOOL"] } }, data: { status: "RUNNING" } });
         const result = (invocation.error ?? {}) as Record<string, unknown>;
         const error = (result.error ?? {}) as Record<string, unknown>;
         return { runId: input.runId, toolCallId, status: "error", error: {
