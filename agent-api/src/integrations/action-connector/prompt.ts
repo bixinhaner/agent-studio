@@ -28,6 +28,9 @@ function renderActionConnectorPromptTemplate(
 }
 
 export function buildActionConnectorRuntimePrompt(input: ActionConnectorRuntimePromptInput): string {
+  // The builder returns a validated definition; it must not inherit the normal
+  // "inspect the system now" action-connector prompt or tool instructions.
+  if (input.request.context?.assistantBuilder === true) return input.request.message;
   const approvedAction = input.request.approvedAction
     ? JSON.stringify(input.request.approvedAction, null, 2)
     : "";

@@ -228,7 +228,7 @@ export class ProactiveScenarioRegistry {
       }),
       this.db.proactiveIntegrationPackage.findMany({ orderBy: { createdAt: "desc" } }),
       this.db.proactiveAgentRun.findMany({
-        where: { connectorId },
+        where: { connectorId, NOT: { scenarioKey: { startsWith: "assistant:" } } },
         orderBy: { createdAt: "desc" },
         take: 100
       }),

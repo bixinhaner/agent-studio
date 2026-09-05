@@ -19,6 +19,14 @@ export class ProactiveLeaseService {
         WHERE connector_id = ${connectorId}
           AND (status = 'PENDING' OR (status = 'LEASED' AND lease_expires_at <= now()))
           AND deadline_at > now()
+          AND EXISTS (
+            SELECT 1 FROM proactive_agent_runs r
+            WHERE r.id = connector_tool_invocations.run_id
+              AND r.connector_id = connector_tool_invocations.connector_id
+              AND r.run_attempt = connector_tool_invocations.run_attempt
+              AND r.status IN ('RUNNING', 'WAITING_TOOL')
+              AND r.lease_expires_at > now()
+          )
         ORDER BY created_at
         FOR UPDATE SKIP LOCKED
         LIMIT ${limit}
@@ -50,15 +58,30 @@ export class ProactiveLeaseService {
 
   async submitToolResult(connectorId: string, invocationId: string, input: Record<string, unknown>) {
     const leaseToken = typeof input.leaseToken === "string" ? input.leaseToken : "";
+    if (input.status !== "succeeded" && input.status !== "failed") throw new Error("TOOL_RESULT_STATUS_INVALID");
     return await this.db.$transaction(async (tx) => {
+      // Lock both records before validating the fencing token. A concurrent run
+      // cancellation/reclaim cannot turn a stale response into current evidence.
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT i.id FROM connector_tool_invocations i
+        JOIN proactive_agent_runs r ON r.id = i.run_id AND r.connector_id = i.connector_id
+        WHERE i.id = ${invocationId} AND i.connector_id = ${connectorId}
+        FOR UPDATE OF r, i
+      `);
+      if (!rows.length) throw new Error("TOOL_INVOCATION_NOT_FOUND");
       const invocation = await tx.connectorToolInvocation.findUnique({ where: { id: invocationId } });
-      if (!invocation || invocation.connectorId !== connectorId) throw new Error("TOOL_INVOCATION_NOT_FOUND");
+      if (!invocation) throw new Error("TOOL_INVOCATION_NOT_FOUND");
       if (invocation.status === "SUCCEEDED" || invocation.status === "FAILED") {
         if (JSON.stringify(invocation.result ?? invocation.error) === JSON.stringify(input)) return invocation;
         throw new Error("TOOL_RESULT_CONFLICT");
       }
+      const run = await tx.proactiveAgentRun.findUnique({ where: { id: invocation.runId } });
+      if (!run || !["RUNNING", "WAITING_TOOL"].includes(run.status) ||
+          run.runAttempt !== invocation.runAttempt || !run.leaseExpiresAt || run.leaseExpiresAt <= new Date()) {
+        throw new Error("BACKGROUND_RUN_NOT_ACTIVE");
+      }
       if (invocation.status !== "LEASED" || !invocation.leaseExpiresAt || invocation.leaseExpiresAt <= new Date() ||
-          invocation.leaseTokenHash !== tokenHash(leaseToken)) throw new Error("TOOL_LEASE_INVALID");
+          invocation.deadlineAt <= new Date() || invocation.leaseTokenHash !== tokenHash(leaseToken)) throw new Error("TOOL_LEASE_INVALID");
       const succeeded = input.status === "succeeded";
       return await tx.connectorToolInvocation.update({
         where: { id: invocationId },
@@ -66,8 +89,8 @@ export class ProactiveLeaseService {
           status: succeeded ? "SUCCEEDED" : "FAILED",
           result: succeeded ? input as Prisma.InputJsonValue : Prisma.JsonNull,
           error: succeeded ? Prisma.JsonNull : input as Prisma.InputJsonValue,
-          leaseTokenHash: null, leaseOwner: null, leaseExpiresAt: null
-        }
+          leaseTokenHash: null, leaseOwner: null, leaseExpiresAt: null,
+        },
       });
     });
   }

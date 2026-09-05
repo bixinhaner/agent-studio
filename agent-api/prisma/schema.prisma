@@ -166,6 +166,8 @@ model ProactiveAgentRun {
   error                Json?
   traceId              String             @map("trace_id")
   runAttempt           Int                @default(0) @map("run_attempt")
+  leaseOwner           String?            @map("lease_owner")
+  leaseExpiresAt       DateTime?          @map("lease_expires_at")
   queuedAt             DateTime           @default(now()) @map("queued_at")
   startedAt            DateTime?          @map("started_at")
   completedAt          DateTime?          @map("completed_at")
@@ -173,6 +175,7 @@ model ProactiveAgentRun {
   updatedAt            DateTime           @updatedAt @map("updated_at")
 
   @@index([status, queuedAt])
+  @@index([status, leaseExpiresAt, queuedAt], map: "proactive_run_lease_idx")
   @@index([connectorId, scenarioKey, createdAt])
   @@unique([sourceEventReceiptId, scenarioKey])
   @@map("proactive_agent_runs")
@@ -181,6 +184,7 @@ model ProactiveAgentRun {
 model ConnectorToolInvocation {
   id             String                        @id @default(cuid())
   runId          String                        @map("run_id")
+  runAttempt       Int @default(0) @map("run_attempt")
   connectorId    String                        @map("connector_id")
   scenarioKey    String                        @map("scenario_key")
   packageDigest  String                        @map("package_digest")
@@ -205,6 +209,7 @@ model ConnectorToolInvocation {
   @@unique([runId, id])
   @@index([connectorId, status, createdAt])
   @@index([runId, status])
+  @@index([runId, runAttempt], map: "connector_tool_invocations_run_attempt_idx")
   @@map("connector_tool_invocations")
 }
 

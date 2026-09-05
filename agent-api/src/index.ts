@@ -5120,7 +5120,8 @@ async function resolveActionConnectorRuntimeOptions(
     bridgeToken: context.bridgeToken,
     identity: context.identity
   });
-  const enabledSkills = await resolveEnabledSkillsForBotMode(agentModeId);
+  const planningOnly = input.request.context?.assistantBuilder === true;
+  const enabledSkills = planningOnly ? [] : await resolveEnabledSkillsForBotMode(agentModeId);
   const actionConnectorRunConfig: Record<string, unknown> = {
     integrationInstanceId: input.connector.id,
     displayName: input.config.displayName,
