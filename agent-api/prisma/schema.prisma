@@ -1503,7 +1503,6 @@ model CodexMemoryBackfillItem {
 
   @@unique([userMessageId, assistantMessageId])
   @@index([runId, status])
-  @@index([runId, runAttempt], map: "connector_tool_invocations_run_attempt_idx")
   @@index([threadId])
   @@index([channel, status])
   @@map("codex_memory_backfill_items")
