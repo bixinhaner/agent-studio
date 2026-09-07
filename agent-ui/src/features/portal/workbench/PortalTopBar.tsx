@@ -44,7 +44,7 @@ export function PortalTopBar(props: {
   onExitTraining?: () => void;
 }) {
   const { branding } = useBranding();
-  const { locale, setLocale, t } = usePortalI18n();
+  const { languageSwitcherEnabled, locale, setLocale, t } = usePortalI18n();
   const isRightPanelOpen = props.drawerOpen;
   const showRuntimeSummary = props.showRuntimeSummary ?? true;
   const showAdvancedSettings = props.showAdvancedSettings ?? true;
@@ -53,7 +53,6 @@ export function PortalTopBar(props: {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
-  const hasOverflowActions = true;
   const mobileActionItems = useMemo(
     () => [
       props.trainingMode && props.onExitTraining
@@ -130,6 +129,7 @@ export function PortalTopBar(props: {
     }>,
     [props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenTraining, props.trainingMode, showAdvancedSettings, t]
   );
+  const hasOverflowActions = languageSwitcherEnabled || mobileActionItems.length > 0;
   const languageMenu: MenuProps = {
     items: PORTAL_LANGUAGE_OPTIONS.map((option) => ({
       key: option.key,
@@ -286,7 +286,7 @@ export function PortalTopBar(props: {
                 />
               </Tooltip>
             ) : null}
-            {!isMobile ? (
+            {!isMobile && languageSwitcherEnabled ? (
               <Dropdown
                 menu={languageMenu}
                 trigger={["hover", "click"]}
@@ -372,7 +372,7 @@ export function PortalTopBar(props: {
                 </Button>
               ))}
             </div>
-            <section className="portal-topbar-mobile-language" aria-label={t("language.select")}>
+            {languageSwitcherEnabled ? <section className="portal-topbar-mobile-language" aria-label={t("language.select")}>
               <p>{t("language.select")}</p>
               <div>
                 {PORTAL_LANGUAGE_OPTIONS.map((option) => (
@@ -391,7 +391,7 @@ export function PortalTopBar(props: {
                   </Button>
                 ))}
               </div>
-            </section>
+            </section> : null}
           </div>
         </Drawer>
       ) : null}

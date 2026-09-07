@@ -69,6 +69,14 @@ export function normalizeBehavior(value: Partial<PublicPortalBehavior> | null | 
     : [];
 
   return {
+    portalDefaultLocale:
+      value?.portalDefaultLocale === "en" || value?.portalDefaultLocale === "zh-CN"
+        ? value.portalDefaultLocale
+        : "browser",
+    portalLanguageSwitcherEnabled:
+      typeof value?.portalLanguageSwitcherEnabled === "boolean"
+        ? value.portalLanguageSwitcherEnabled
+        : DEFAULT_PORTAL_BEHAVIOR.portalLanguageSwitcherEnabled,
     portalWelcomeMessageDesktop:
       asString(value?.portalWelcomeMessageDesktop) || DEFAULT_PORTAL_BEHAVIOR.portalWelcomeMessageDesktop,
     portalWelcomeMessageMobile:

@@ -4,7 +4,8 @@ import zhCN from "antd/locale/zh_CN";
 
 export type PortalLocale = "en" | "zh-CN";
 
-const PORTAL_LOCALE_STORAGE_KEY = "agent-studio.portal.locale.v1";
+const LEGACY_PORTAL_LOCALE_STORAGE_KEY = "agent-studio.portal.locale.v1";
+const PORTAL_LOCALE_STORAGE_KEY_PREFIX = "agent-studio.portal.locale.v2";
 
 const EN_MESSAGES = {
   "language.current": "English",
@@ -1189,6 +1190,7 @@ type PortalI18nValue = {
   locale: PortalLocale;
   intlLocale: "en-US" | "zh-CN";
   antdLocale: typeof enUS;
+  languageSwitcherEnabled: boolean;
   setLocale(locale: PortalLocale): void;
   toggleLocale(): void;
   t(key: PortalMessageKey, values?: Record<string, string | number>): string;
@@ -1198,6 +1200,7 @@ const DEFAULT_PORTAL_I18N: PortalI18nValue = {
   locale: "en",
   intlLocale: "en-US",
   antdLocale: enUS,
+  languageSwitcherEnabled: true,
   setLocale: () => undefined,
   toggleLocale: () => undefined,
   t: (key, values) => interpolate(EN_MESSAGES[key], values)
@@ -1205,11 +1208,35 @@ const DEFAULT_PORTAL_I18N: PortalI18nValue = {
 
 const PortalI18nContext = createContext<PortalI18nValue>(DEFAULT_PORTAL_I18N);
 
-function readInitialLocale(): PortalLocale {
+export type PortalDefaultLocale = PortalLocale | "browser";
+
+type PortalI18nProviderProps = PropsWithChildren<{
+  brandKey?: string;
+  defaultLocale?: PortalDefaultLocale;
+  languageSwitcherEnabled?: boolean;
+}>;
+
+function portalLocaleStorageKey(brandKey: string): string {
+  return `${PORTAL_LOCALE_STORAGE_KEY_PREFIX}:${brandKey || "default"}`;
+}
+
+function resolveConfiguredLocale(defaultLocale: PortalDefaultLocale): PortalLocale {
+  if (defaultLocale !== "browser") return defaultLocale;
+  return resolveInitialPortalLocale({
+    browserLanguages: navigator.languages?.length ? navigator.languages : [navigator.language]
+  });
+}
+
+function readInitialLocale(options: Required<Omit<PortalI18nProviderProps, "children">>): PortalLocale {
   if (typeof window === "undefined") return "en";
+  if (!options.languageSwitcherEnabled) return resolveConfiguredLocale(options.defaultLocale);
+
   let storedLocale: string | null = null;
   try {
-    storedLocale = window.localStorage.getItem(PORTAL_LOCALE_STORAGE_KEY);
+    storedLocale = window.localStorage.getItem(portalLocaleStorageKey(options.brandKey));
+    if (!storedLocale && (options.brandKey === "default" || options.brandKey === "bailey")) {
+      storedLocale = window.localStorage.getItem(LEGACY_PORTAL_LOCALE_STORAGE_KEY);
+    }
   } catch {
     // Storage can be unavailable in privacy-restricted contexts.
   }
@@ -1217,47 +1244,60 @@ function readInitialLocale(): PortalLocale {
     const requested = new URLSearchParams(window.location.search).get("lang");
     if (requested === "en") return "en";
   }
-  return resolveInitialPortalLocale({
-    storedLocale,
-    browserLanguages: navigator.languages?.length ? navigator.languages : [navigator.language]
-  });
+  const stored = normalizePortalLocale(storedLocale);
+  return stored ?? resolveConfiguredLocale(options.defaultLocale);
 }
 
-function persistPortalLocale(locale: PortalLocale): void {
+function persistPortalLocale(brandKey: string, locale: PortalLocale): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(PORTAL_LOCALE_STORAGE_KEY, locale);
+    window.localStorage.setItem(portalLocaleStorageKey(brandKey), locale);
   } catch {
     // The current view can still switch languages when persistence is blocked.
   }
 }
 
-export function PortalI18nProvider({ children }: PropsWithChildren) {
-  const [locale, setLocale] = useState<PortalLocale>(readInitialLocale);
+export function PortalI18nProvider({
+  children,
+  brandKey = "default",
+  defaultLocale = "browser",
+  languageSwitcherEnabled = true
+}: PortalI18nProviderProps) {
+  const localeConfig = useMemo(
+    () => ({ brandKey, defaultLocale, languageSwitcherEnabled }),
+    [brandKey, defaultLocale, languageSwitcherEnabled]
+  );
+  const [locale, setLocale] = useState<PortalLocale>(() => readInitialLocale(localeConfig));
+
+  useEffect(() => {
+    setLocale(readInitialLocale(localeConfig));
+  }, [localeConfig]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
-    persistPortalLocale(locale);
+    if (languageSwitcherEnabled) persistPortalLocale(brandKey, locale);
     if (window.location.pathname === "/training") {
       const nextUrl = new URL(window.location.href);
       if (locale === "en") nextUrl.searchParams.set("lang", "en");
       else nextUrl.searchParams.delete("lang");
       window.history.replaceState(window.history.state, "", nextUrl);
     }
-  }, [locale]);
+  }, [brandKey, languageSwitcherEnabled, locale]);
 
   const updateLocale = useCallback((nextLocale: PortalLocale) => {
-    persistPortalLocale(nextLocale);
+    if (!languageSwitcherEnabled) return;
+    persistPortalLocale(brandKey, nextLocale);
     setLocale(nextLocale);
-  }, []);
+  }, [brandKey, languageSwitcherEnabled]);
 
   const toggleLocale = useCallback(() => {
+    if (!languageSwitcherEnabled) return;
     setLocale((current) => {
       const nextLocale = current === "en" ? "zh-CN" : "en";
-      persistPortalLocale(nextLocale);
+      persistPortalLocale(brandKey, nextLocale);
       return nextLocale;
     });
-  }, []);
+  }, [brandKey, languageSwitcherEnabled]);
 
   const t = useCallback(
     (key: PortalMessageKey, values?: Record<string, string | number>) => {
@@ -1272,11 +1312,12 @@ export function PortalI18nProvider({ children }: PropsWithChildren) {
       locale,
       intlLocale: locale === "zh-CN" ? "zh-CN" : "en-US",
       antdLocale: locale === "zh-CN" ? zhCN : enUS,
+      languageSwitcherEnabled,
       setLocale: updateLocale,
       toggleLocale,
       t
     }),
-    [locale, t, toggleLocale, updateLocale]
+    [languageSwitcherEnabled, locale, t, toggleLocale, updateLocale]
   );
 
   return <PortalI18nContext.Provider value={value}>{children}</PortalI18nContext.Provider>;

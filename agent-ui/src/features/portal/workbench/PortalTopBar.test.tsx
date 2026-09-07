@@ -29,6 +29,24 @@ afterEach(() => {
 });
 
 describe("PortalTopBar language menu", () => {
+  it("does not render a language action when the brand disables switching", () => {
+    render(
+      <PortalI18nProvider brandKey="ranley" defaultLocale="en" languageSwitcherEnabled={false}>
+        <PortalTopBar
+          sessionRailCollapsed={false}
+          onToggleRail={vi.fn()}
+          onOpenAdvancedSettings={vi.fn()}
+          onToggleDrawer={vi.fn()}
+          showRuntimeSummary={false}
+          showAdvancedSettings={false}
+          showRightPanelToggle={false}
+        />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Select language" })).toBeNull();
+  });
+
   it("opens on hover and changes language without a toggle tooltip", async () => {
     render(
       <PortalI18nProvider>

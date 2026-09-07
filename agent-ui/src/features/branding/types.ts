@@ -35,6 +35,8 @@ export type PublicPortalWelcomeSuggestion = {
 };
 
 export type PublicPortalBehavior = {
+  portalDefaultLocale: "browser" | "en" | "zh-CN";
+  portalLanguageSwitcherEnabled: boolean;
   portalWelcomeMessageDesktop: string;
   portalWelcomeMessageMobile: string;
   portalWelcomeSuggestions: PublicPortalWelcomeSuggestion[];
@@ -86,6 +88,8 @@ export const DEFAULT_BRAND_IDENTITY: PublicBrandIdentity = {
 };
 
 export const DEFAULT_PORTAL_BEHAVIOR: PublicPortalBehavior = {
+  portalDefaultLocale: "browser",
+  portalLanguageSwitcherEnabled: true,
   portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}. Ask about products, versions, deployment, alarms, or troubleshooting.",
   portalWelcomeMessageMobile: "Ask about products, versions, deployment, alarms, or troubleshooting.",
   portalWelcomeSuggestions: [

@@ -89,6 +89,8 @@ export const publicBrandInputSchema = z
     portalWelcomeMessageDesktop: z.string().trim().min(1).max(500),
     portalWelcomeMessageMobile: z.string().trim().min(1).max(300),
     portalWelcomeSuggestions: z.array(suggestionSchema).max(8),
+    portalDefaultLocale: z.enum(["browser", "en", "zh-CN"]).default("browser"),
+    portalLanguageSwitcherEnabled: z.boolean().default(true),
     answerFeedbackEnabled: z.boolean(),
     answerFeedbackPrompt: z.string().trim().min(1).max(200),
     externalOnly: z.boolean(),
@@ -179,6 +181,8 @@ export type PublicBrandRecord = {
   portalWelcomeMessageDesktop: string;
   portalWelcomeMessageMobile: string;
   portalWelcomeSuggestions: Array<{ label: string; prompt: string }>;
+  portalDefaultLocale: "browser" | "en" | "zh-CN";
+  portalLanguageSwitcherEnabled: boolean;
   answerFeedbackEnabled: boolean;
   answerFeedbackPrompt: string;
   externalOnly: boolean;

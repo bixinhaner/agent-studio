@@ -23,6 +23,8 @@ function validBrandInput() {
     portalWelcomeMessageDesktop: "Hello, I'm {{assistantName}}.",
     portalWelcomeMessageMobile: "Ask Ranley.",
     portalWelcomeSuggestions: [{ label: "Troubleshoot", prompt: "Help me troubleshoot this issue." }],
+    portalDefaultLocale: "en",
+    portalLanguageSwitcherEnabled: false,
     answerFeedbackEnabled: true,
     answerFeedbackPrompt: "Was this answer helpful?",
     externalOnly: true,
@@ -56,6 +58,8 @@ describe("public brand configuration", () => {
   it("accepts one current active primary domain", () => {
     expect(publicBrandInputSchema.parse(validBrandInput())).toMatchObject({
       key: "ranley",
+      portalDefaultLocale: "en",
+      portalLanguageSwitcherEnabled: false,
       domains: [{ hostname: "ranley.cloud-ran.ai", status: "active", isPrimary: true }]
     });
   });

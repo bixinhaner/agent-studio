@@ -54,6 +54,8 @@ async function main() {
           assistantAvatarUrl: "/brands/ranley/assistant.png",
           portalWelcomeMessageDesktop: "Hello, I'm {{assistantName}}, your CloudRAN technical support assistant. How can I help?",
           portalWelcomeMessageMobile: "Ask Ranley about CloudRAN products, deployment, or troubleshooting.",
+          portalDefaultLocale: "en",
+          portalLanguageSwitcherEnabled: false,
           portalWelcomeSuggestions: [
             { label: "Check product fit", prompt: "Help me identify the right CloudRAN product and version for this deployment scenario." },
             { label: "Review deployment", prompt: "Review this CloudRAN deployment plan and identify risks, missing prerequisites, and verification steps." },
@@ -88,6 +90,8 @@ async function main() {
           assistantAvatarUrl: "/brands/ranley/assistant.png",
           portalWelcomeMessageDesktop: "Hello, I'm {{assistantName}}, your CloudRAN technical support assistant. How can I help?",
           portalWelcomeMessageMobile: "Ask Ranley about CloudRAN products, deployment, or troubleshooting.",
+          portalDefaultLocale: "en",
+          portalLanguageSwitcherEnabled: false,
           portalWelcomeSuggestions: [
             { label: "Check product fit", prompt: "Help me identify the right CloudRAN product and version for this deployment scenario." },
             { label: "Review deployment", prompt: "Review this CloudRAN deployment plan and identify risks, missing prerequisites, and verification steps." },

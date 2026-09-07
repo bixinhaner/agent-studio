@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CreditCard,
   FileText,
+  Globe,
   Link2,
   LockKeyhole,
   Mail,
@@ -126,7 +127,7 @@ function PortalScene({ brand, device }: { brand: PublicBrandInput; device: "desk
   ];
   return (
     <div className="brand-preview-app-shell">
-      <PreviewHeader brand={brand} trailing={<span className="brand-preview-user"><UserRound size={13} /></span>} />
+      <PreviewHeader brand={brand} trailing={<>{brand.portalLanguageSwitcherEnabled ? <span className="brand-preview-user" title="语言切换"><Globe size={13} /></span> : null}<span className="brand-preview-user"><UserRound size={13} /></span></>} />
       <div className="brand-preview-portal-body">
         <nav className="brand-preview-side-nav" aria-hidden="true">
           <span className="is-active"><MessageSquareText size={13} />新对话</span>

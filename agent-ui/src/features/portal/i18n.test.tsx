@@ -83,7 +83,38 @@ describe("portal i18n", () => {
     expect(screen.getByText("重新执行")).toBeTruthy();
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
-      expect(window.localStorage.getItem("agent-studio.portal.locale.v1")).toBe("zh-CN");
+      expect(window.localStorage.getItem("agent-studio.portal.locale.v2:default")).toBe("zh-CN");
+    });
+  });
+
+  it("locks a brand to its configured language when switching is disabled", async () => {
+    window.localStorage.setItem("agent-studio.portal.locale.v1", "zh-CN");
+    window.localStorage.setItem("agent-studio.portal.locale.v2:ranley", "zh-CN");
+
+    render(
+      <PortalI18nProvider brandKey="ranley" defaultLocale="en" languageSwitcherEnabled={false}>
+        <LocaleProbe />
+      </PortalI18nProvider>
+    );
+
+    expect(await screen.findByText("New session")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Chinese" }));
+    expect(screen.getByText("New session")).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("stores language choices separately for each brand", async () => {
+    render(
+      <PortalI18nProvider brandKey="customer-a" defaultLocale="zh-CN">
+        <LocaleProbe />
+      </PortalI18nProvider>
+    );
+
+    expect(await screen.findByText("新建会话")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to English" }));
+    await waitFor(() => {
+      expect(window.localStorage.getItem("agent-studio.portal.locale.v2:customer-a")).toBe("en");
+      expect(window.localStorage.getItem("agent-studio.portal.locale.v2:customer-b")).toBeNull();
     });
   });
 });

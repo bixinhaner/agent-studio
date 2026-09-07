@@ -386,6 +386,8 @@ model PublicBrand {
   portalWelcomeMessageDesktop  String              @map("portal_welcome_message_desktop")
   portalWelcomeMessageMobile   String              @map("portal_welcome_message_mobile")
   portalWelcomeSuggestions     Json                @default("[]") @map("portal_welcome_suggestions")
+  portalDefaultLocale          String              @default("browser") @map("portal_default_locale")
+  portalLanguageSwitcherEnabled Boolean            @default(true) @map("portal_language_switcher_enabled")
   answerFeedbackEnabled        Boolean             @default(true) @map("answer_feedback_enabled")
   answerFeedbackPrompt         String              @default("Was this answer helpful?") @map("answer_feedback_prompt")
   externalOnly                 Boolean             @default(true) @map("external_only")

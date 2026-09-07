@@ -56,6 +56,8 @@ describe("resolvePublicBranding", () => {
     expect(response.branding.portalWelcomeIllustrationUrl).toBe("/assets/portal-hero.png");
     expect(response.adminConsole.showOperationsAndConversationMenus).toBe(false);
     expect(response.behavior).toEqual({
+      portalDefaultLocale: "browser",
+      portalLanguageSwitcherEnabled: true,
       portalWelcomeMessageDesktop: "Hello from {{assistantName}} on {{platformName}}.",
       portalWelcomeMessageMobile: "Hello from mobile.",
       portalWelcomeSuggestions: [

@@ -23,6 +23,8 @@ const brand: PublicBrandInput = {
   portalWelcomeMessageDesktop: "Hello, I'm {{assistantName}}. How can I help?",
   portalWelcomeMessageMobile: "Ask {{assistantName}} anything.",
   portalWelcomeSuggestions: [{ label: "Summarize a document", prompt: "Summarize this document" }],
+  portalDefaultLocale: "en",
+  portalLanguageSwitcherEnabled: false,
   answerFeedbackEnabled: true,
   answerFeedbackPrompt: "Was this answer helpful?",
   externalOnly: true,
@@ -91,6 +93,7 @@ describe("BrandCustomerPreview", () => {
     expect(frame?.style.getPropertyValue("--preview-brand")).toBe("#0066FF");
     expect(frame?.style.getPropertyValue("--preview-accent")).toBe("#2CCFF0");
     expect(screen.getByText("Ask Ranley Assistant anything.")).toBeTruthy();
+    expect(container.querySelector('[title="语言切换"]')).toBeNull();
 
     rerender(<BrandCustomerPreview brand={brand} scene="billing" device="desktop" planNames={["Team Plus"]} />);
     expect(screen.getByText("Team Plus")).toBeTruthy();

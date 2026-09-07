@@ -35,6 +35,8 @@ export type PublicBrandingResponse = {
     showOperationsAndConversationMenus: boolean;
   };
   behavior: {
+    portalDefaultLocale: "browser" | "en" | "zh-CN";
+    portalLanguageSwitcherEnabled: boolean;
     portalWelcomeMessageDesktop: string;
     portalWelcomeMessageMobile: string;
     portalWelcomeSuggestions: Array<{
@@ -57,6 +59,8 @@ export function defaultBranding(): SystemSettingsBranding {
 export function defaultPublicBehavior(): PublicBrandingResponse["behavior"] {
   const behavior = createDefaultSystemSettingsPayload().behavior;
   return {
+    portalDefaultLocale: "browser",
+    portalLanguageSwitcherEnabled: true,
     portalWelcomeMessageDesktop: behavior.portalWelcomeMessageDesktop,
     portalWelcomeMessageMobile: behavior.portalWelcomeMessageMobile,
     portalWelcomeSuggestions: behavior.portalWelcomeSuggestions.map((item) => ({
@@ -87,6 +91,8 @@ export async function resolvePublicBranding(reader: SystemSettingsBrandingReader
       showOperationsAndConversationMenus: payload.safety.showAdminOperationsAndConversationMenus
     },
     behavior: {
+      portalDefaultLocale: "browser",
+      portalLanguageSwitcherEnabled: true,
       portalWelcomeMessageDesktop: behavior.portalWelcomeMessageDesktop,
       portalWelcomeMessageMobile: behavior.portalWelcomeMessageMobile,
       portalWelcomeSuggestions: behavior.portalWelcomeSuggestions.map((item) => ({
@@ -134,6 +140,8 @@ export function resolveBrandPublicBranding(brand: PublicBrandRecord): PublicBran
       showOperationsAndConversationMenus: !brand.externalOnly
     },
     behavior: {
+      portalDefaultLocale: brand.portalDefaultLocale,
+      portalLanguageSwitcherEnabled: brand.portalLanguageSwitcherEnabled,
       portalWelcomeMessageDesktop: brand.portalWelcomeMessageDesktop,
       portalWelcomeMessageMobile: brand.portalWelcomeMessageMobile,
       portalWelcomeSuggestions: brand.portalWelcomeSuggestions,

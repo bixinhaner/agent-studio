@@ -42,6 +42,8 @@ export type PublicBrandInput = {
   portalWelcomeMessageDesktop: string;
   portalWelcomeMessageMobile: string;
   portalWelcomeSuggestions: PublicBrandSuggestion[];
+  portalDefaultLocale: "browser" | "en" | "zh-CN";
+  portalLanguageSwitcherEnabled: boolean;
   answerFeedbackEnabled: boolean;
   answerFeedbackPrompt: string;
   externalOnly: boolean;

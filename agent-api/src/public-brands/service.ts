@@ -85,6 +85,10 @@ function mapBrand(row: NonNullable<BrandRow>): PublicBrandRecord {
     portalWelcomeMessageDesktop: row.portalWelcomeMessageDesktop,
     portalWelcomeMessageMobile: row.portalWelcomeMessageMobile,
     portalWelcomeSuggestions: welcomeSuggestions(row.portalWelcomeSuggestions),
+    portalDefaultLocale: (["en", "zh-CN"] as string[]).includes(row.portalDefaultLocale)
+      ? row.portalDefaultLocale as PublicBrandRecord["portalDefaultLocale"]
+      : "browser",
+    portalLanguageSwitcherEnabled: row.portalLanguageSwitcherEnabled,
     answerFeedbackEnabled: row.answerFeedbackEnabled,
     answerFeedbackPrompt: row.answerFeedbackPrompt,
     externalOnly: row.externalOnly,
@@ -162,6 +166,8 @@ function brandData(input: PublicBrandInput, actorUserId: string) {
     portalWelcomeMessageDesktop: input.portalWelcomeMessageDesktop,
     portalWelcomeMessageMobile: input.portalWelcomeMessageMobile,
     portalWelcomeSuggestions: input.portalWelcomeSuggestions,
+    portalDefaultLocale: input.portalDefaultLocale,
+    portalLanguageSwitcherEnabled: input.portalLanguageSwitcherEnabled,
     answerFeedbackEnabled: input.answerFeedbackEnabled,
     answerFeedbackPrompt: input.answerFeedbackPrompt,
     externalOnly: input.externalOnly,

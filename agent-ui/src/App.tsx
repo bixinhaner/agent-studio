@@ -483,7 +483,7 @@ function AppContent(props: {
   externalWebAccessLoading: boolean;
 }) {
   const auth = useAuth();
-  const { brand, branding } = useBranding();
+  const { brand, branding, behavior } = useBranding();
   const adminEligible = useMemo(
     () => !brand.externalOnly && canOpenAdmin(auth.user?.role, auth.activeOrganization?.type),
     [auth.activeOrganization?.type, auth.user?.role, brand.externalOnly]
@@ -647,7 +647,11 @@ function AppContent(props: {
   }
 
   return (
-    <PortalI18nProvider>
+    <PortalI18nProvider
+      brandKey={brand.key}
+      defaultLocale={behavior.portalDefaultLocale}
+      languageSwitcherEnabled={behavior.portalLanguageSwitcherEnabled}
+    >
       <Suspense fallback={<PortalLoadingFallback />}>
         <PortalShellLazy
           currentUser={auth.user}
