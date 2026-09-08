@@ -6,6 +6,16 @@ import {
 } from "./model-config.js";
 
 describe("model-config", () => {
+  it("offers Astra without changing the default model and rejects unsupported efforts", () => {
+    const catalog = fallbackModelCatalog();
+    expect(catalog.models.find((model) => model.id === "gpt-6-astra")).toMatchObject({
+      label: "GPT-6 Astra", isDefault: false, defaultReasoningEffort: "low",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"], contextLimit: 1_050_000
+    });
+    expect(normalizeReasoningEffortForModel("gpt-6-astra", "none")).toBe("low");
+    expect(normalizeReasoningEffortForModel("gpt-6-astra", "ultra")).toBe("ultra");
+  });
+
   it("preserves frontier reasoning efforts for gpt-5.5", () => {
     expect(normalizeReasoningEffortForModel("gpt-5.5", "none")).toBe("none");
     expect(normalizeReasoningEffortForModel("gpt-5.5", "xhigh")).toBe("xhigh");
