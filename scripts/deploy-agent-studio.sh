@@ -1023,7 +1023,7 @@ main() {
   fi
   if deploy_builds_backend; then
     build_backend
-    migrate_portal_user_workspaces
+    log_step "Skipping Portal historical workspace migration (run npm run workspace:migrate explicitly when required)"
   fi
   if deploy_restarts_admin; then
     seed_rbac
