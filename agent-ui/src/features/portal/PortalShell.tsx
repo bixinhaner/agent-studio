@@ -6785,6 +6785,7 @@ export function PortalShell(props: {
     return t("feedback.impactLow");
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
+  const canUseLocalBridge = portalPreferenceUser?.email?.trim().toLowerCase() === "like@baicells.com";
   const isExternalPortalUser = !isInternalPortalExperience({
     userType: portalPreferenceUser?.userType,
     organizationType: auth.activeOrganization?.type,
@@ -10744,7 +10745,7 @@ export function PortalShell(props: {
                 onOpenAdmin={trainingReadOnly ? undefined : props.onOpenAdmin}
                 onOpenFeedback={trainingReadOnly ? undefined : openProductFeedbackModal}
                 onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
-                onOpenLocalBridge={trainingReadOnly ? undefined : () => setLocalBridgeOpen(true)}
+                onOpenLocalBridge={canUseLocalBridge && !trainingReadOnly ? () => setLocalBridgeOpen(true) : undefined}
                 runtimeSummary={topbarRuntimeSummaryText}
                 showRuntimeSummary={!isExternalPortalUser && !trainingReadOnly}
                 showAdvancedSettings={!isExternalPortalUser && !trainingReadOnly}
