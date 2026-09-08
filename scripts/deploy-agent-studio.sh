@@ -918,8 +918,9 @@ migrate_portal_user_workspaces() {
     run_as_app_user_shell "touch '$legacy_import_marker'"
   fi
 
-  log_step "Adapting historical Portal tasks and files into user workspaces"
-  run_as_app_user_shell "cd '$APP_API_DIR' && NODE_ENV=production npm run workspace:migrate"
+  # Historical Portal migration is an explicit maintenance operation. Keep
+  # normal releases independent from bulk legacy data migration so one bad
+  # historical filename cannot block an application rollout.
 }
 
 seed_rbac() {
