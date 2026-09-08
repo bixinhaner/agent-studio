@@ -45,6 +45,32 @@ body.portal-workbench-mode {
   overscroll-behavior: none;
 }
 
+.local-bridge-drawer .ant-drawer-content { background: #0d1117; color: #eef2f7; }
+.local-bridge-drawer .ant-drawer-header { background: #111821; border-bottom: 1px solid #273241; }
+.local-bridge-drawer .ant-drawer-title, .local-bridge-drawer .ant-drawer-close { color: #eef2f7; }
+.local-bridge-intro { display:flex; justify-content:space-between; gap:16px; padding: 8px 0 24px; color:#90a1b5; }
+.local-bridge-intro h2 { margin:0 0 8px; color:#f5f7fa; font-size:20px; }
+.local-bridge-intro p { margin:0; line-height:1.6; }
+.local-bridge-intro svg { color:#54d38b; flex:none; }
+.local-bridge-toolbar { display:flex; justify-content:space-between; align-items:center; margin: 8px 0 14px; color:#aab8c8; font-size:13px; }
+.local-bridge-card { border:1px solid #273241; border-radius:12px; background:#121a24; padding:16px; margin-bottom:14px; }
+.local-bridge-card-head { display:flex; align-items:center; gap:12px; }
+.local-bridge-device-icon { width:40px; height:40px; display:grid; place-items:center; border-radius:10px; background:#1b355c; color:#4c9dff; }
+.local-bridge-device-meta { display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap; }
+.local-bridge-device-meta strong { width:100%; color:#f5f7fa; font-size:15px; }
+.local-bridge-device-meta span { color:#8b9aae; font-size:12px; }
+.local-bridge-roots { margin-top:16px; padding-top:14px; border-top:1px solid #273241; }
+.local-bridge-section-label { color:#8b9aae; font-size:12px; margin-bottom:8px; }
+.local-bridge-root { display:flex; justify-content:space-between; gap:8px; padding:10px 12px; margin-bottom:8px; border:1px solid #2f4764; border-radius:8px; background:#14253d; color:#d7e6fb; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+.local-bridge-root small { color:#74aef5; white-space:nowrap; }
+.local-bridge-empty { border:1px dashed #334255; border-radius:12px; padding:42px 20px; text-align:center; color:#91a0b2; }
+.local-bridge-empty svg { color:#4c9dff; }
+.local-bridge-empty p { margin:12px 0 6px; color:#f5f7fa; }
+.local-bridge-note { display:flex; gap:8px; align-items:flex-start; margin-top:20px; padding:12px; border:1px solid #4a3d1f; border-radius:10px; background:#211b11; color:#d9b568; font-size:12px; line-height:1.5; }
+.local-bridge-code { display:flex; align-items:center; justify-content:space-between; margin:18px 0 12px; padding:18px; border-radius:10px; background:#111821; border:1px solid #2f4764; }
+.local-bridge-code strong { letter-spacing: .18em; color:#4c9dff; font: 24px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.local-bridge-help { color:#8b9aae; font-size:12px; }
+
 @supports (height: 100dvh) {
   .portal-workbench-root {
     height: 100dvh;

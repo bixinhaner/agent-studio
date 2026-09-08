@@ -1,0 +1,1 @@
+{"name":"@agent-studio/local-bridge","private":true,"type":"module","scripts":{"build":"tsc -p tsconfig.json","test":"node --test dist/*.test.js"},"dependencies":{"@types/node":"^22.0.0","typescript":"^5.0.0"},"devDependencies":{}}

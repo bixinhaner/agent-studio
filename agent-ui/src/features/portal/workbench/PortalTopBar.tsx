@@ -14,6 +14,7 @@ import {
   PanelRightOpen,
   Settings,
   Shield
+  , Computer
 } from "lucide-react";
 
 import { BrandMark } from "../../branding/BrandMark";
@@ -33,6 +34,7 @@ export function PortalTopBar(props: {
   onOpenAdmin?: () => void;
   onOpenFeedback?: () => void;
   onOpenBilling?: () => void;
+  onOpenLocalBridge?: () => void;
   runtimeSummary?: string;
   drawerOpen?: boolean;
   showRuntimeSummary?: boolean;
@@ -99,6 +101,14 @@ export function PortalTopBar(props: {
             }
           }
         : null,
+      props.onOpenLocalBridge
+        ? {
+            key: "local-bridge",
+            label: "我的电脑",
+            icon: <Computer size={18} />,
+            onClick: () => { setMobileActionsOpen(false); props.onOpenLocalBridge?.(); }
+          }
+        : null,
       props.onOpenAdmin
         ? {
             key: "admin",
@@ -127,7 +137,7 @@ export function PortalTopBar(props: {
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenTraining, props.trainingMode, showAdvancedSettings, t]
+    [props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenLocalBridge, props.onOpenTraining, props.trainingMode, showAdvancedSettings, t]
   );
   const hasOverflowActions = languageSwitcherEnabled || mobileActionItems.length > 0;
   const languageMenu: MenuProps = {
@@ -260,6 +270,11 @@ export function PortalTopBar(props: {
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
                   aria-label={t("topbar.billingAria")}
                 />
+              </Tooltip>
+            ) : null}
+            {!isMobile && props.onOpenLocalBridge ? (
+              <Tooltip title="我的电脑" placement="bottom">
+                <Button type="text" className="portal-topbar-ghost-btn" icon={<Computer size={18} />} onClick={props.onOpenLocalBridge} style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label="我的电脑" />
               </Tooltip>
             ) : null}
             {!isMobile && props.onOpenAdmin ? (

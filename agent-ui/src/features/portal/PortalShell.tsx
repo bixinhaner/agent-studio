@@ -144,6 +144,7 @@ import {
   type CodexFileChangeView
 } from "../artifacts/codex-file-changes";
 import { PortalTopBar } from "./workbench/PortalTopBar";
+import { LocalBridgePanel } from "./workbench/LocalBridgePanel";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
@@ -6814,6 +6815,7 @@ export function PortalShell(props: {
       isSessionRailCollapsed: true
     };
   });
+  const [localBridgeOpen, setLocalBridgeOpen] = useState(false);
   const isMobile = useIsNarrowScreen(768);
   const isCompactDesktop = useIsNarrowScreen(1279) && !isMobile;
 
@@ -10742,6 +10744,7 @@ export function PortalShell(props: {
                 onOpenAdmin={trainingReadOnly ? undefined : props.onOpenAdmin}
                 onOpenFeedback={trainingReadOnly ? undefined : openProductFeedbackModal}
                 onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
+                onOpenLocalBridge={trainingReadOnly ? undefined : () => setLocalBridgeOpen(true)}
                 runtimeSummary={topbarRuntimeSummaryText}
                 showRuntimeSummary={!isExternalPortalUser && !trainingReadOnly}
                 showAdvancedSettings={!isExternalPortalUser && !trainingReadOnly}
@@ -10752,6 +10755,7 @@ export function PortalShell(props: {
                 onOpenTraining={props.onOpenTraining}
                 onExitTraining={props.onExitTraining}
               />
+              <LocalBridgePanel open={localBridgeOpen} onClose={() => setLocalBridgeOpen(false)} />
 
               <div className="portal-workbench-body">
                 {isMobile ? (

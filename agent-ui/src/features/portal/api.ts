@@ -201,6 +201,21 @@ export async function fetchPortalSubscriptionStatus(): Promise<PortalSubscriptio
   return normalizePortalSubscriptionStatus(response.status);
 }
 
+export type LocalBridgeDevice = { id: string; name: string; platform?: string | null; status: "online" | "offline"; last_seen_at?: string | null; roots: Array<{ id: string; path: string; label?: string | null }> };
+export async function fetchLocalBridgeDevices(): Promise<LocalBridgeDevice[]> {
+  const response = await api<{ devices: LocalBridgeDevice[] }>("/api/local-bridge/devices");
+  return response.devices;
+}
+export async function createLocalBridgePairing(): Promise<{ code: string; expires_at: string }> {
+  return api("/api/local-bridge/devices/pairing", { method: "POST", json: {} });
+}
+export async function revokeLocalBridgeDevice(id: string): Promise<void> {
+  await api(`/api/local-bridge/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+export async function addLocalBridgeRoot(deviceId: string, path: string, label?: string): Promise<void> {
+  await api(`/api/local-bridge/devices/${encodeURIComponent(deviceId)}/roots`, { method: "POST", json: { path, label } });
+}
+
 export async function fetchPortalBillingSummary(): Promise<PortalBillingSummaryResponse> {
   return api<PortalBillingSummaryResponse>("/api/portal/billing/summary");
 }

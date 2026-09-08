@@ -423,6 +423,7 @@ import {
 import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
+import { createLocalBridgeRouter } from "./local-bridge-router.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
 import { createTrainingCatalogRouter } from "./workspaces/training-catalog-router.js";
@@ -11359,6 +11360,7 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use(createPublicBrandContextMiddleware(publicBrands));
+app.use("/api/local-bridge", createLocalBridgeRouter(db));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
 
