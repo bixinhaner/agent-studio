@@ -33,6 +33,11 @@ function displayNameFromUpload(filePath: string): string {
   return (modern?.[1] || crest?.[1] || fileName).normalize("NFKC").trim().slice(0, 255) || "upload.bin";
 }
 
+function safeWorkspaceItemName(value: string | undefined, fallback: string): string {
+  const name = String(value || fallback).normalize("NFKC").replace(/[\\/\0]/g, "_").trim().slice(0, 255);
+  return name || fallback;
+}
+
 function mimeTypeForName(fileName: string): string {
   const extension = path.extname(fileName).toLowerCase();
   return {
@@ -197,7 +202,7 @@ async function main(): Promise<void> {
           const saved = await service.saveFile({
             actor,
             parentId: folderId,
-            name: artifact.displayName || path.basename(artifact.relativePath),
+            name: safeWorkspaceItemName(artifact.displayName, path.basename(artifact.relativePath)),
             content,
             mimeType: artifact.mimeType ?? mimeTypeForName(artifact.relativePath),
             conflict: "keep_both",
