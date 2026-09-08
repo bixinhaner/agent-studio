@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { UsageIngestionService } from "./usage-ingestion-service.js";
+import { calculateEstimatedCost, UsageIngestionService } from "./usage-ingestion-service.js";
 import type { CostProfileRecord } from "../persistence/cost-profile-repository.js";
 import type { CreateUsageEventInput } from "../persistence/usage-event-repository.js";
 
@@ -18,6 +18,19 @@ const profile: CostProfileRecord = {
 };
 
 describe("UsageIngestionService", () => {
+  it("prices Astra cache writes and crosses the long-context boundary only above 272K", () => {
+    const astra: CostProfileRecord = {...profile, model: "gpt-6-astra",
+      inputTokenPrice: "10", cachedInputTokenPrice: "1", cacheWriteTokenPrice: "12.5", outputTokenPrice: "50",
+      longContextThresholdTokens: 272000, longContextInputMultiplier: "2", longContextOutputMultiplier: "1.5"};
+    const cost = (inputTokens: number) => calculateEstimatedCost({profile: astra, inputTokens,
+      cachedInputTokens: 20000, cacheWriteTokens: 10000, outputTokens: 10000, cacheWriteTelemetryAvailable: true});
+    expect(cost(100000)).toMatchObject({estimatedCost: "1.345000", internalCost: "1.614000", longContextApplied: false});
+    expect(cost(272000)).toMatchObject({estimatedCost: "3.065000", longContextApplied: false});
+    expect(cost(272001)).toMatchObject({estimatedCost: "5.880020", longContextApplied: true});
+    expect(calculateEstimatedCost({profile: astra, inputTokens: 10, cachedInputTokens: 50,
+      cacheWriteTokens: 50, outputTokens: 0, cacheWriteTelemetryAvailable: true}).estimatedCost).toBe("0.000010");
+  });
+
   it("calculates costs from prices configured per 1M tokens", async () => {
     let createdInput: (CreateUsageEventInput & { estimatedCost: string; internalCost: string }) | undefined;
     const service = new UsageIngestionService({
