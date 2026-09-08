@@ -34,7 +34,12 @@ function displayNameFromUpload(filePath: string): string {
 }
 
 function safeWorkspaceItemName(value: string | undefined, fallback: string): string {
-  const name = String(value || fallback).normalize("NFKC").replace(/[\\/\0]/g, "_").trim().slice(0, 255);
+  const name = String(value || fallback)
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}._()（）\- ]/gu, "_")
+    .trim()
+    .replace(/[. ]+$/g, "")
+    .slice(0, 255);
   return name || fallback;
 }
 
