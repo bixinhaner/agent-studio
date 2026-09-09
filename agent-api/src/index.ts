@@ -2206,6 +2206,7 @@ const oauthStates = createOAuthStateCookieManager({
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
+const threadSessionEnsureInFlight = new Map<string, Promise<SessionRecord>>();
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const crestMcpProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "crest-mcp-proxy.mjs");
 const dwsProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "dws-proxy.mjs");
@@ -7215,7 +7216,7 @@ async function assertChatAllowsNewSession(input: {
   }
 }
 
-async function ensureThreadSession(
+async function ensureThreadSessionCore(
   currentUser: CurrentActor,
   threadId: string,
   patch?: {
@@ -7619,6 +7620,47 @@ async function ensureThreadSession(
   }
   timing?.updateContext({ sessionId: session.sessionId, model: session.model });
   return session;
+}
+
+/**
+ * Serialize session recovery/creation per Agent Studio Thread. Multiple browser
+ * retries can arrive while the first restore is still materializing its runtime;
+ * allowing them to each remove/create a session races Codex thread ownership.
+ */
+async function ensureThreadSession(
+  currentUser: CurrentActor,
+  threadId: string,
+  patch?: {
+    model?: string;
+    reasoning_effort?: ReasoningEffort;
+    knowledge_set_ids?: string[];
+    selected_skill_ids?: string[];
+    codex_run_config?: Record<string, unknown>;
+    allow_mode_change?: boolean;
+    force_run_profile_controls?: boolean;
+    resume_codex_thread_id?: string;
+  },
+  timing?: RuntimeStartupTimer,
+  enforcePortalSecurityDomain = false
+): Promise<SessionRecord> {
+  const previous = threadSessionEnsureInFlight.get(threadId);
+  const next = (previous ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => ensureThreadSessionCore(
+      currentUser,
+      threadId,
+      patch,
+      timing,
+      enforcePortalSecurityDomain
+    ));
+  threadSessionEnsureInFlight.set(threadId, next);
+  try {
+    return await next;
+  } finally {
+    if (threadSessionEnsureInFlight.get(threadId) === next) {
+      threadSessionEnsureInFlight.delete(threadId);
+    }
+  }
 }
 
 type DingTalkBotActor = {
