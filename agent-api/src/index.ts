@@ -9140,11 +9140,20 @@ async function ensureDingTalkBotThreadSession(input: {
     return active;
   }
 
-  const resumeCodexThreadId = await resolveCodexThreadContinuityWithHistory({
-    threadCodexThreadId: input.thread.codexThreadId,
-    activeSessionCodexThreadId: active?.codexThreadId,
-    loadHistoricalSessionCodexThreadId: () => latestCodexThreadIdForAgentThread(input.thread.id)
-  });
+  // A newly-created DingTalk thread can have a Codex thread id even though no
+  // durable conversation message was ever written. Resuming that id makes the
+  // first real message depend on a rollout that may not exist anymore. Start a
+  // fresh Codex thread for empty conversations; this also repairs threads that
+  // were created during a failed first-message/session bootstrap.
+  const messageRepository = await conversationRecords.getMessageRepository(input.thread.id);
+  const hasPersistedConversation = messageRepository.messages.length > 0;
+  const resumeCodexThreadId = hasPersistedConversation
+    ? await resolveCodexThreadContinuityWithHistory({
+        threadCodexThreadId: input.thread.codexThreadId,
+        activeSessionCodexThreadId: active?.codexThreadId,
+        loadHistoricalSessionCodexThreadId: () => latestCodexThreadIdForAgentThread(input.thread.id)
+      })
+    : undefined;
 
   await assertChatAllowsNewSession({
     currentUser: input.currentUser,
@@ -9156,13 +9165,38 @@ async function ensureDingTalkBotThreadSession(input: {
     await sessions.remove(active.sessionId);
     liveRuntimeThreads.delete(active.sessionId);
   }
-  const session = await createSession(desiredSession, input.thread.id, undefined, resumeCodexThreadId);
+  const startedSession = await startWithMissingCodexRolloutRecovery<SessionRecord>({
+    resumeCodexThreadId,
+    start: (requestedCodexThreadId) =>
+      createSession(desiredSession, input.thread.id, undefined, requestedCodexThreadId),
+    codexThreadId: (createdSession) => trimOrUndefined(createdSession.codexThreadId),
+    persistRecoveredCodexThreadId: (replacementCodexThreadId) =>
+      threads.update(input.thread.id, { codexThreadId: replacementCodexThreadId }).then(() => undefined),
+    rollbackRecovered: async (createdSession) => {
+      liveRuntimeThreads.delete(createdSession.sessionId);
+      await sessions.remove(createdSession.sessionId);
+    },
+    onRecover: ({ failedCodexThreadId, error }) => {
+      console.warn("DingTalk session replacing missing Codex rollout", {
+        threadId: input.thread.id,
+        failedCodexThreadId,
+        detail: runtimeErrorDetail(error)
+      });
+    }
+  });
+  const session = startedSession.value;
+  const sessionCodexThreadId = trimOrUndefined(session.codexThreadId);
+  if (!startedSession.recovered && !resumeCodexThreadId && sessionCodexThreadId) {
+    await threads.update(input.thread.id, { codexThreadId: sessionCodexThreadId });
+  }
   assertCodexThreadContinuity({
-    expectedCodexThreadId: resumeCodexThreadId,
-    observedCodexThreadId: session.codexThreadId,
+    expectedCodexThreadId: startedSession.recovered
+      ? sessionCodexThreadId
+      : resumeCodexThreadId ?? sessionCodexThreadId,
+    observedCodexThreadId: sessionCodexThreadId,
     scope: "DingTalk conversation"
   });
-  return await persistSessionCodexThreadId(session, session.codexThreadId ?? "");
+  return await persistSessionCodexThreadId(session, sessionCodexThreadId ?? "");
 }
 
 async function dingtalkMessageProcessingState(threadId: string, messageId: string): Promise<{
