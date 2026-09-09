@@ -908,9 +908,15 @@ class CodexAppServerProcess {
   private startPromise: Promise<void> | undefined;
   private closedError: Error | undefined;
   private stderrTail = "";
+  private readonly exitPromise: Promise<void>;
+  private resolveExitPromise!: () => void;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(readonly scope: RuntimeScope) {
     this.scopeKey = scope.key;
+    this.exitPromise = new Promise<void>((resolve) => {
+      this.resolveExitPromise = resolve;
+    });
   }
 
   get closed(): boolean {
@@ -980,16 +986,63 @@ class CodexAppServerProcess {
   }
 
   stop(reason = "stopped"): void {
-    if (this.closedError) return;
-    this.closedError = new Error(`Codex app-server ${reason}`);
-    for (const [, pending] of this.pending) {
-      clearTimeout(pending.timeout);
-      pending.reject(this.closedError);
+    void this.stopAndWait(reason);
+  }
+
+  async stopAndWait(reason = "stopped"): Promise<void> {
+    if (!this.stopPromise) {
+      this.stopPromise = this.stopInner(reason);
     }
-    this.pending.clear();
-    this.rl?.close();
-    this.proc?.kill();
-    this.subscribers.clear();
+    await this.stopPromise;
+  }
+
+  async waitForExit(timeoutMs = 5_000): Promise<void> {
+    await Promise.race([
+      this.exitPromise,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref();
+      })
+    ]);
+  }
+
+  private async stopInner(reason: string): Promise<void> {
+    if (!this.closedError) {
+      this.closedError = new Error(`Codex app-server ${reason}`);
+      for (const [, pending] of this.pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(this.closedError);
+      }
+      this.pending.clear();
+      this.rl?.close();
+      this.subscribers.clear();
+    }
+
+    const proc = this.proc;
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+      this.resolveExitPromise();
+      return;
+    }
+
+    proc.kill("SIGTERM");
+    const graceful = await Promise.race([
+      this.exitPromise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 2_000);
+        timer.unref();
+      })
+    ]);
+    if (!graceful && proc.exitCode === null && proc.signalCode === null) {
+      proc.kill("SIGKILL");
+      const killed = await Promise.race([
+        this.exitPromise.then(() => true),
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 2_000);
+          timer.unref();
+        })
+      ]);
+      if (!killed) this.resolveExitPromise();
+    }
   }
 
   private releaseTurnSlot(): void {
@@ -1124,22 +1177,24 @@ class CodexAppServerProcess {
   }
 
   private handleExit(error: Error): void {
-    if (this.closedError) return;
-    this.closedError = error;
-    for (const [, pending] of this.pending) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
+    if (!this.closedError) {
+      this.closedError = error;
+      for (const [, pending] of this.pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(error);
+      }
+      this.pending.clear();
+      for (const subscriber of [...this.subscribers]) {
+        subscriber({
+          method: "error",
+          params: {
+            message: error.message
+          }
+        });
+      }
+      this.subscribers.clear();
     }
-    this.pending.clear();
-    for (const subscriber of [...this.subscribers]) {
-      subscriber({
-        method: "error",
-        params: {
-          message: error.message
-        }
-      });
-    }
-    this.subscribers.clear();
+    this.resolveExitPromise();
   }
 }
 
@@ -1239,7 +1294,18 @@ class CodexAppServerManager {
       assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
     }
     if (!process.loadedThreads.has(threadId)) {
-      const result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
+      let result: unknown;
+      try {
+        result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
+      } catch (error) {
+        // A fresh process cannot own a thread whose writer is still held by a
+        // retired process. Reap this candidate before the caller retries so it
+        // never leaves a second writer alive in the shared Codex home.
+        if (error instanceof Error && /already has an active writer/i.test(error.message)) {
+          await process.stopAndWait("thread writer conflict");
+        }
+        throw error;
+      }
       const resumedThreadId = threadIdFromResult(result) ?? threadId;
       process.loadedThreads.add(resumedThreadId);
     }
@@ -1423,7 +1489,7 @@ class CodexAppServerManager {
     const cancelAndReapIfNeeded = async () => {
       const interrupted = await bestEffortCancel();
       if (!interrupted) {
-        process.stop("turn interrupt failed");
+        void process.stopAndWait("turn interrupt failed");
         return;
       }
       let timeout: NodeJS.Timeout | undefined;
@@ -1436,14 +1502,14 @@ class CodexAppServerManager {
       ]);
       if (timeout) clearTimeout(timeout);
       if (!terminalConfirmed) {
-        process.stop("turn interrupt confirmation timeout");
+        void process.stopAndWait("turn interrupt confirmation timeout");
       }
     };
 
     const failTurn = (error: CodexAppServerTurnError) => {
       logFailure(error);
       if (error.category === "turn_timeout" && process.activeTurns <= 1) {
-        process.stop("turn timeout");
+        void process.stopAndWait("turn timeout");
       }
       const settleFailure = () => {
         if (failureSettled) return;
@@ -1634,6 +1700,7 @@ class CodexAppServerManager {
       return existing;
     }
     if (existing?.closed) {
+      await existing.waitForExit();
       this.processes.delete(scope.key);
       for (const key of this.skillRefreshFingerprints.keys()) {
         if (key.startsWith(`${scope.key}\u0000`)) this.skillRefreshFingerprints.delete(key);
@@ -1655,7 +1722,7 @@ class CodexAppServerManager {
     if (!idle) {
       throw new Error(`Codex app-server capacity reached (${maxProcesses}) and no idle process can be evicted`);
     }
-    idle.stop("evicted by LRU capacity policy");
+    await idle.stopAndWait("evicted by LRU capacity policy");
     this.processes.delete(idle.scopeKey);
     for (const key of this.skillRefreshFingerprints.keys()) {
       if (key.startsWith(`${idle.scopeKey}\u0000`)) this.skillRefreshFingerprints.delete(key);
@@ -1664,7 +1731,7 @@ class CodexAppServerManager {
 
   stopAll(reason = "stopped"): void {
     for (const process of this.processes.values()) {
-      process.stop(reason);
+      void process.stopAndWait(reason);
     }
     this.processes.clear();
     this.activeTurnsByThread.clear();

@@ -81,6 +81,7 @@ import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { sendBufferContent, sendFileContent } from "./files/raw-content-response.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
+import { closeCodexThreadRuntimeLeasePool, withCodexThreadRuntimeLease } from "./codex-thread-runtime-lease.js";
 import {
   assertCodexThreadContinuity,
   resolveCodexThreadContinuity,
@@ -2289,7 +2290,7 @@ async function getDeploymentDrainReason(): Promise<string | undefined> {
   }
 }
 
-async function restoreLiveRuntimeThread(
+async function restoreLiveRuntimeThreadUnlocked(
   session: SessionRecord,
   timing?: RuntimeStartupTimer
 ): Promise<LiveRuntimeThread | undefined> {
@@ -2406,9 +2407,20 @@ async function restoreLiveRuntimeThread(
   }
 }
 
+async function restoreLiveRuntimeThread(
+  session: SessionRecord,
+  timing?: RuntimeStartupTimer
+): Promise<LiveRuntimeThread | undefined> {
+  return await withCodexThreadRuntimeLease(session.threadId ?? session.sessionId, () =>
+    restoreLiveRuntimeThreadUnlocked(session, timing)
+  );
+}
+
 function runtimePrewarmLimit(): number {
+  const configured = Number.parseInt((process.env.CODEX_APP_SERVER_PREWARM_LIMIT || "").trim(), 10);
+  if (Number.isFinite(configured) && configured > 0) return configured;
   const parsed = Number.parseInt((process.env.CODEX_APP_SERVER_MAX_PROCESSES || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 4) : 4;
 }
 
 function runtimePrewarmHours(): number {
@@ -2441,6 +2453,7 @@ async function prewarmAppServerRuntimeSessions(): Promise<void> {
   });
 
   const seenScopes = new Set<string>();
+  const seenThreads = new Set<string>();
   let attempted = 0;
   let restored = 0;
   for (const row of rows) {
@@ -2451,11 +2464,14 @@ async function prewarmAppServerRuntimeSessions(): Promise<void> {
     const codexHome = codexHomeFromRunConfig(session?.codexRunConfig);
     const codexThreadId = trimOrUndefined(session?.codexThreadId);
     if (!session || !codexHome || !codexThreadId) continue;
+    const leaseThreadId = session.threadId ?? session.sessionId;
+    if (seenThreads.has(leaseThreadId)) continue;
+    seenThreads.add(leaseThreadId);
     const scopeKey = `${codexHome}::${stableJson(session.providerSnapshot?.runtimeOptions)}`;
     if (seenScopes.has(scopeKey)) continue;
     seenScopes.add(scopeKey);
     attempted += 1;
-    const liveThread = await restoreLiveRuntimeThread(session);
+    const liveThread = await withCodexThreadRuntimeLease(leaseThreadId, () => restoreLiveRuntimeThread(session));
     if (liveThread) restored += 1;
   }
   console.log("app-server runtime prewarm completed", {
@@ -7646,13 +7662,13 @@ async function ensureThreadSession(
   const previous = threadSessionEnsureInFlight.get(threadId);
   const next = (previous ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => ensureThreadSessionCore(
+    .then(() => withCodexThreadRuntimeLease(threadId, () => ensureThreadSessionCore(
       currentUser,
       threadId,
       patch,
       timing,
       enforcePortalSecurityDomain
-    ));
+    )));
   threadSessionEnsureInFlight.set(threadId, next);
   try {
     return await next;
@@ -14366,13 +14382,16 @@ if (runsAdminService) {
 if (runsChatService && isAppServerRuntimeEnabled()) {
   process.once("exit", () => {
     shutdownCodexAppServerRuntime("node process exiting");
+    void closeCodexThreadRuntimeLeasePool();
   });
   process.once("SIGTERM", () => {
     shutdownCodexAppServerRuntime("received SIGTERM");
+    void closeCodexThreadRuntimeLeasePool();
     process.exit(0);
   });
   process.once("SIGINT", () => {
     shutdownCodexAppServerRuntime("received SIGINT");
+    void closeCodexThreadRuntimeLeasePool();
     process.exit(130);
   });
 }
