@@ -21,6 +21,14 @@
     respond 404
   }
 
+  # Desktop companion installers live outside the frontend dist directory so
+  # frontend-only deploys cannot delete the download files.
+  handle /downloads/local-bridge/* {
+    root * /usr/local/agent-studio/downloads
+    header Content-Disposition "attachment"
+    file_server
+  }
+
   @missing_js_asset {
     path /assets/*.js
     not file
