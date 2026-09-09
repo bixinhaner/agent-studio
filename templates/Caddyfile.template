@@ -24,7 +24,7 @@
   # Desktop companion installers live outside the frontend dist directory so
   # frontend-only deploys cannot delete the download files.
   handle_path /downloads/local-bridge/* {
-    root * /usr/local/agent-studio/downloads
+    root * /usr/local/agent-studio/downloads/local-bridge
     header Content-Disposition "attachment"
     file_server
   }
