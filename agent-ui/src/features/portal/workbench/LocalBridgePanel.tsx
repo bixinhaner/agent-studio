@@ -22,7 +22,7 @@ export function LocalBridgePanel(props: { open: boolean; onClose(): void }) {
           ["macOS", "Apple 芯片（arm64）", "Agent-Studio-Local-Bridge-latest-mac-arm64.dmg"],
           ["Windows", "Windows 10 或更高版本", "Agent-Studio-Local-Bridge-latest-Windows-x64.exe"],
           ["Linux", "AppImage，无需安装", "Agent-Studio-Local-Bridge-latest-Linux-x86_64.AppImage"]
-        ].map(([platform, description, file]) => <a className="local-bridge-download-card" href={`/downloads/local-bridge/${file}`} key={platform}><span className="local-bridge-download-icon"><Download size={16} /></span><span><strong>{platform}</strong><small>{description}</small></span><span className="local-bridge-download-arrow">↗</span></a>)}
+        ].map(([platform, description, file]) => <a className="local-bridge-download-card" href={`/downloads/local-bridge/${file}`} download={file} onClick={(event) => event.stopPropagation()} key={platform}><span className="local-bridge-download-icon"><Download size={16} /></span><span><strong>{platform}</strong><small>{description}</small></span><span className="local-bridge-download-arrow">↧</span></a>)}
       </div>
       <small className="local-bridge-release-note">当前版本 0.1.0 · 下载后直接打开即可</small>
     </div>
