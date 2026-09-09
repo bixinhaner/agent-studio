@@ -909,7 +909,7 @@ class CodexAppServerProcess {
   private closedError: Error | undefined;
   private stderrTail = "";
 
-  constructor(private readonly scope: RuntimeScope) {
+  constructor(readonly scope: RuntimeScope) {
     this.scopeKey = scope.key;
   }
 
@@ -1213,8 +1213,18 @@ class CodexAppServerManager {
     threadOptions: AppServerThreadOptions
   ): Promise<CodexAppServerThread> {
     const baseScope = runtimeScope(options);
-    const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
-    const process = await this.getProcess(turnSkillScope.scope);
+    const threadSuffix = `\u0000${threadId}`;
+    const existingProcessEntry = [...this.threadProcessScopes.entries()]
+      .reverse()
+      .map(([key, scopeKey]) => ({ key, process: this.processes.get(scopeKey) }))
+      .find(({ key, process }) => key.endsWith(threadSuffix) && process && !process.closed);
+    // A persisted thread may be restored with a newly computed capability scope.
+    // Reuse the process that already owns the thread; starting another process and
+    // calling thread/resume would create a Codex active-writer conflict.
+    const process = existingProcessEntry?.process
+      ?? await this.getProcess(runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []).scope);
+    const effectiveScope = process.scope;
+    const turnSkillScope = runtimeScopeForTurnSkills(effectiveScope, threadOptions.skills ?? []);
     await this.refreshSkillsForProcess(
       process,
       turnSkillScope.scope.key,
@@ -1233,12 +1243,12 @@ class CodexAppServerManager {
       const resumedThreadId = threadIdFromResult(result) ?? threadId;
       process.loadedThreads.add(resumedThreadId);
     }
-    this.threadProcessScopes.set(`${baseScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
+    this.threadProcessScopes.set(`${effectiveScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
     return {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
-      scopeKey: baseScope.key,
-      scope: baseScope,
+      scopeKey: effectiveScope.key,
+      scope: effectiveScope,
       options: threadOptions
     };
   }

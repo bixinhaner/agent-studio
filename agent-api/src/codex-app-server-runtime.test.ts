@@ -1278,6 +1278,47 @@ describe("Codex app-server runtime", () => {
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
   });
 
+  it("reuses the owning process when restoring a thread with a different computed scope", async () => {
+    const creatingRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-resume-owner")
+      }
+    });
+    const restoringRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-resume-different")
+      }
+    });
+    const thread = await creatingRuntime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+
+    const restored = await restoringRuntime.resumeThreadWithOptions({
+      threadId: thread.id,
+      model: thread.options.model,
+      reasoningEffort: thread.options.reasoningEffort,
+      workspace: thread.options.workspace,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    expect(restored.scopeKey).toBe(thread.scopeKey);
+    const events: CodexStreamEvent[] = [];
+    for await (const event of restoringRuntime.runStreamed(restored, "resume-after-scope-change")) {
+      events.push(event);
+    }
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
   it("drops stale pre-start events from a previous turn before accepting the new turn", async () => {
     const runtime = new CodexRuntime({
       envOverrides: {
