@@ -13,6 +13,16 @@ async function* events(items: Array<Record<string, unknown>>) {
 }
 
 describe("streamRuntimeCompletionWithBestEffortUsage", () => {
+  it.each(["cache_write_input_tokens", "cache_write_tokens", "cacheWriteInputTokens", "cacheWriteTokens"])(
+    "preserves %s from upgraded and legacy SDK telemetry, including zero", (field) => {
+      for (const value of [0, 5]) {
+        expect(extractRuntimeUsageFromStreamEvent({type: "turn.completed", usage: {
+          input_tokens: 100, cached_input_tokens: 20, output_tokens: 10, [field]: value
+        }})).toMatchObject({inputTokens: 100, cachedInputTokens: 20, outputTokens: 10, cacheWriteTokens: value});
+      }
+    }
+  );
+
   it("uses cumulative token-count telemetry so app-server multi-step turns are billed by snapshot diff", () => {
     expect(extractRuntimeUsageFromStreamEvent({
       type: "token_count",
