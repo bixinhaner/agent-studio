@@ -6944,3 +6944,12 @@ button.session-rail-new-btn:active,
     animation: none;
   }
 }
+.local-bridge-downloads{margin-top:24px;padding:16px;border:1px solid rgba(83,112,134,.28);border-radius:14px;background:rgba(23,39,53,.38)}
+.local-bridge-downloads>p{margin:6px 0 14px;color:var(--portal-text-subtle,#81909f);font-size:12px;line-height:1.5}
+.local-bridge-download-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.local-bridge-download-card{min-width:0;display:flex;align-items:center;gap:8px;padding:10px;border:1px solid rgba(83,112,134,.34);border-radius:10px;color:inherit;text-decoration:none;background:rgba(12,24,35,.34);transition:border-color .18s ease,transform .18s ease}
+.local-bridge-download-card:hover{border-color:#75c9ed;transform:translateY(-1px)}
+.local-bridge-download-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:#17364a;color:#8edcf8;flex:0 0 auto}
+.local-bridge-download-card span:nth-child(2){display:grid;gap:3px;min-width:0}.local-bridge-download-card strong{font-size:12px}.local-bridge-download-card small{font-size:10px;color:#7f909f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.local-bridge-download-arrow{margin-left:auto;color:#77cbea;font-size:14px}
+.local-bridge-release-note{display:block;margin-top:11px;color:#718293;font-size:10px}
+@media (max-width:640px){.local-bridge-download-grid{grid-template-columns:1fr}.local-bridge-download-card small{white-space:normal}}

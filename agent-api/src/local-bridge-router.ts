@@ -74,6 +74,22 @@ export function createLocalBridgeRouter(db: Db): Router {
     res.status(201).json({ device_id: device.id, token });
   });
 
+  router.post("/agent/roots", async (req, res) => {
+    const device = await authenticateAgent(req, res);
+    if (!device) return;
+    try {
+      const parsed = z.object({ path: z.string().min(1).max(4096), label: z.string().max(120).optional() }).parse(req.body);
+      const root = await db.localBridgeRoot.upsert({
+        where: { deviceId_path: { deviceId: device.id, path: parsed.path } },
+        update: { label: parsed.label ?? null },
+        create: { deviceId: device.id, path: parsed.path, label: parsed.label ?? null }
+      });
+      res.status(201).json({ root: { id: root.id, path: root.path, label: root.label } });
+    } catch (e) {
+      res.status(400).json({ detail: e instanceof Error ? e.message : "Invalid root" });
+    }
+  });
+
   async function authenticateAgent(req: Request, res: Response) {
     const raw = req.header("authorization")?.replace(/^Bearer\s+/i, ""); if (!raw) { res.status(401).json({ detail: "Missing device token" }); return null; }
     const device = await db.localBridgeDevice.findFirst({ where: { tokenHash: hash(raw), status: "active" }, include: { roots: true } }); if (!device) { res.status(401).json({ detail: "Invalid device token" }); return null; }

@@ -1,0 +1,25 @@
+{
+  "name": "@agent-studio/local-bridge-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent Studio Local Bridge desktop companion",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --publish never",
+    "dist": "electron-builder --publish never"
+  },
+  "build": {
+    "appId": "cloud.indonesiacentral.agentstudio.localbridge",
+    "productName": "Agent Studio Local Bridge",
+    "directories": { "output": "dist" },
+    "files": ["electron/**", "renderer/**"],
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}" },
+    "win": { "target": ["nsis", "zip"], "artifactName": "Agent-Studio-Local-Bridge-${version}-Windows-${arch}.${ext}" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Development", "artifactName": "Agent-Studio-Local-Bridge-latest-Linux-${arch}.${ext}" }
+  },
+  "devDependencies": {
+    "electron": "^36.4.0",
+    "electron-builder": "^26.0.12"
+  }
+}
