@@ -20,6 +20,8 @@ const originalEnv = {
   CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS,
   CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS: process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS,
   CODEX_APP_SERVER_TURN_MAX_MS: process.env.CODEX_APP_SERVER_TURN_MAX_MS,
+  CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS: process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS,
+  FAKE_INTERRUPT_NO_TERMINAL: process.env.FAKE_INTERRUPT_NO_TERMINAL,
   CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS: process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS
 };
 
@@ -40,6 +42,7 @@ const overloadRecoveryModeByThread = new Map();
 const configByThread = new Map();
 const skillRefreshCountAtThreadLoad = new Map();
 const activeTurnByThread = new Map();
+const suppressInterruptCompletion = process.env.FAKE_INTERRUPT_NO_TERMINAL === "1";
 let extraSkillRoots = [];
 let skillsListCount = 0;
 
@@ -218,6 +221,7 @@ rl.on("line", (line) => {
   }
   if (message.method === "turn/interrupt") {
     respond(id, {});
+    if (suppressInterruptCompletion) return;
     notify("turn/completed", {
       threadId: params.threadId,
       turn: { id: params.turnId, status: "interrupted" }
@@ -529,6 +533,8 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS = "2";
     process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "";
     process.env.CODEX_APP_SERVER_TURN_MAX_MS = "";
+    process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS = "";
+    delete process.env.FAKE_INTERRUPT_NO_TERMINAL;
     process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0,0";
   });
 
@@ -1377,5 +1383,36 @@ describe("Codex app-server runtime", () => {
       expect.anything()
     );
     warnSpy.mockRestore();
+  });
+
+  it("retires an app-server when interrupt acknowledgement does not release the turn", async () => {
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "500";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "1000";
+    process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS = "30";
+    process.env.FAKE_INTERRUPT_NO_TERMINAL = "1";
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-abort-reap")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const abortController = new AbortController();
+
+    await expect(async () => {
+      for await (const event of runtime.runStreamed(thread, "hang", { signal: abortController.signal })) {
+        if (event.type === "turn.started") abortController.abort();
+      }
+    }).rejects.toThrow(/aborted by client/);
+
+    delete process.env.FAKE_INTERRUPT_NO_TERMINAL;
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "after-abort")) {
+      if (event.delta) answer += event.delta;
+    }
+    expect(answer).toBe("Hello");
   });
 });

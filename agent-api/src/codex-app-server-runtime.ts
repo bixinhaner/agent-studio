@@ -77,6 +77,7 @@ type RuntimeScope = {
   maxActiveTurns: number;
   turnIdleTimeoutMs: number;
   turnMaxMs: number;
+  turnInterruptTimeoutMs: number;
 };
 
 type TurnSkillRuntimeScope = {
@@ -88,6 +89,7 @@ type TurnSkillRuntimeScope = {
 const DEFAULT_MAX_PROCESSES = 30;
 const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_TURN_INTERRUPT_TIMEOUT_MS = 5_000;
 const DEFAULT_TURN_IDLE_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_TURN_MAX_MS = 90 * 60_000;
 const DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS = [2_000, 5_000, 10_000] as const;
@@ -412,7 +414,11 @@ function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
     config,
     maxActiveTurns: parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS, DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS),
     turnIdleTimeoutMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS, DEFAULT_TURN_IDLE_TIMEOUT_MS),
-    turnMaxMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_MAX_MS, DEFAULT_TURN_MAX_MS)
+    turnMaxMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_MAX_MS, DEFAULT_TURN_MAX_MS),
+    turnInterruptTimeoutMs: parsePositiveDurationMs(
+      process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS,
+      DEFAULT_TURN_INTERRUPT_TIMEOUT_MS
+    )
   };
 }
 
@@ -1321,6 +1327,16 @@ class CodexAppServerManager {
     const startedAtMs = Date.now();
     const lastEvents: RuntimeEventSummary[] = [];
     const bufferedBeforeTurnId: CodexStreamEvent[] = [];
+    let resolveTurnTerminal: (() => void) | undefined;
+    let turnTerminalSettled = false;
+    const turnTerminal = new Promise<void>((resolve) => {
+      resolveTurnTerminal = resolve;
+    });
+    const markTurnTerminal = () => {
+      if (turnTerminalSettled) return;
+      turnTerminalSettled = true;
+      resolveTurnTerminal?.();
+    };
 
     const makeTurnError = (
       message: string,
@@ -1352,15 +1368,57 @@ class CodexAppServerManager {
       });
     };
 
-    const bestEffortCancel = async () => {
-      if (!turnId) return;
-      await process.request("turn/interrupt", { threadId: thread.id, turnId }).catch((error) => {
+    const bestEffortCancel = async (): Promise<boolean> => {
+      if (!turnId) return false;
+      let timeout: NodeJS.Timeout | undefined;
+      try {
+        const result = await Promise.race([
+          process.request("turn/interrupt", { threadId: thread.id, turnId })
+            .then(() => "confirmed" as const)
+            .catch(() => "failed" as const),
+          new Promise<"timeout">((resolve) => {
+            timeout = setTimeout(() => resolve("timeout"), scope.turnInterruptTimeoutMs);
+            timeout.unref();
+          })
+        ]);
+        if (result === "timeout") {
+          console.warn("codex app-server turn interrupt timed out", {
+            threadId: thread.id,
+            turnId,
+            timeoutMs: scope.turnInterruptTimeoutMs
+          });
+        }
+        return result === "confirmed";
+      } catch (error) {
         console.warn("codex app-server turn interrupt failed", {
           threadId: thread.id,
           turnId,
           detail: error instanceof Error ? error.message : String(error)
         });
-      });
+        return false;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    };
+
+    const cancelAndReapIfNeeded = async () => {
+      const interrupted = await bestEffortCancel();
+      if (!interrupted) {
+        process.stop("turn interrupt failed");
+        return;
+      }
+      let timeout: NodeJS.Timeout | undefined;
+      const terminalConfirmed = await Promise.race([
+        turnTerminal.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timeout = setTimeout(() => resolve(false), scope.turnInterruptTimeoutMs);
+          timeout.unref();
+        })
+      ]);
+      if (timeout) clearTimeout(timeout);
+      if (!terminalConfirmed) {
+        process.stop("turn interrupt confirmation timeout");
+      }
     };
 
     const failTurn = (error: CodexAppServerTurnError) => {
@@ -1374,8 +1432,8 @@ class CodexAppServerManager {
         queue.error(error);
         abortReject?.(error);
       };
-      if (error.category === "client_aborted" && turnId) {
-        void bestEffortCancel().finally(settleFailure);
+      if (error.category === "client_aborted") {
+        void cancelAndReapIfNeeded().finally(settleFailure);
         return;
       }
       void bestEffortCancel();
@@ -1401,10 +1459,12 @@ class CodexAppServerManager {
         queue.push(event);
       }
       if (event.type === "turn.completed") {
+        markTurnTerminal();
         completed = true;
         setTimeout(() => queue.close(), 150);
       }
       if (event.type === "error") {
+        markTurnTerminal();
         failTurn(makeTurnError(event.text || "Codex app-server runtime error", { raw: event.raw }));
       }
     };
