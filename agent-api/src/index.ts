@@ -11774,6 +11774,7 @@ registerCommonApiRoutes(app, {
     publicBrands
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
+  localBridgeRouter: createLocalBridgeRouter(db),
   externalWebAccessMiddleware: createAuthenticatedExternalWebGate(externalWebAccess),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
@@ -11794,10 +11795,6 @@ registerCommonApiRoutes(app, {
     serviceTokenMiddleware: requireServiceToken
   })
 });
-
-// Mount after the shared current-user middleware so Portal device requests
-// resolve the session cookie before the Relay router checks ownership.
-app.use("/api/local-bridge", createLocalBridgeRouter(db));
 
 app.use(
   "/api/portal/workspace",

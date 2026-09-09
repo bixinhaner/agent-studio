@@ -25,6 +25,7 @@ export function registerCommonApiRoutes(
     portalRouter: Router;
     resourcesPortalRouter?: Router;
     portalSkillRouter?: Router;
+    localBridgeRouter?: Router;
     externalWebAccessMiddleware?: RequestHandler;
     serviceTokenMiddleware: RequestHandler;
     zendeskRouter: Router;
@@ -38,6 +39,9 @@ export function registerCommonApiRoutes(
   systemSettingsMount.use("/system-settings", options.systemSettingsRouter ?? options.adminRouter.systemSettingsRouter ?? Router());
 
   app.use(options.currentUserMiddleware);
+  // Portal device routes need the parsed session, while desktop pairing and polling
+  // authenticate with a one-time code or device token instead of a browser cookie.
+  app.use("/api/local-bridge", options.localBridgeRouter ?? Router());
   app.use(
     "/api/auth",
     options.externalWebAccessMiddleware ?? ((_req, _res, next) => next()),
