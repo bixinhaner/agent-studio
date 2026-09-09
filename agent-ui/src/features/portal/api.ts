@@ -1,4 +1,4 @@
-import { api } from "../../lib/api";
+import { api, apiBase, ApiError } from "../../lib/api";
 
 type PortalSubscriptionStatusPayload = {
   status: {
@@ -202,18 +202,34 @@ export async function fetchPortalSubscriptionStatus(): Promise<PortalSubscriptio
 }
 
 export type LocalBridgeDevice = { id: string; name: string; platform?: string | null; status: "online" | "offline"; last_seen_at?: string | null; roots: Array<{ id: string; path: string; label?: string | null }> };
+async function localBridgeApi<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.json !== undefined) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${apiBase()}${path}`, {
+    ...init,
+    credentials: "include",
+    headers,
+    body: init?.json === undefined ? init?.body : JSON.stringify(init.json)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = body && typeof body === "object" && typeof body.detail === "string" ? body.detail : `Request failed (${response.status})`;
+    throw new ApiError({ message: detail, detail, status: response.status, payload: body });
+  }
+  return body as T;
+}
 export async function fetchLocalBridgeDevices(): Promise<LocalBridgeDevice[]> {
-  const response = await api<{ devices: LocalBridgeDevice[] }>("/api/local-bridge/devices");
+  const response = await localBridgeApi<{ devices: LocalBridgeDevice[] }>("/api/local-bridge/devices");
   return response.devices;
 }
 export async function createLocalBridgePairing(): Promise<{ code: string; expires_at: string }> {
-  return api("/api/local-bridge/devices/pairing", { method: "POST", json: {} });
+  return localBridgeApi("/api/local-bridge/devices/pairing", { method: "POST", json: {} });
 }
 export async function revokeLocalBridgeDevice(id: string): Promise<void> {
-  await api(`/api/local-bridge/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await localBridgeApi(`/api/local-bridge/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 export async function addLocalBridgeRoot(deviceId: string, path: string, label?: string): Promise<void> {
-  await api(`/api/local-bridge/devices/${encodeURIComponent(deviceId)}/roots`, { method: "POST", json: { path, label } });
+  await localBridgeApi(`/api/local-bridge/devices/${encodeURIComponent(deviceId)}/roots`, { method: "POST", json: { path, label } });
 }
 
 export async function fetchPortalBillingSummary(): Promise<PortalBillingSummaryResponse> {
