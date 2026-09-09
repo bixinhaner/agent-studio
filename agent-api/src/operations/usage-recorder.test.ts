@@ -25,6 +25,28 @@ function usageEventFromInput(input: RecordUsageInput) {
 }
 
 describe("UsageRecorder", () => {
+  it.each(["chat_stream", "dingtalk_bot", "zendesk", "crest_assistant"])(
+    "preserves upgraded cache-write snapshots for %s on success and failure", async (source) => {
+      const recorded: RecordUsageInput[] = [];
+      const recorder = new UsageRecorder({usageIngestion: {
+        async recordCodexRuntimeUsage(input) { recorded.push(input); return usageEventFromInput(input); },
+        async record(input) { throw new Error("Codex must use the cumulative recorder"); }
+      }});
+      for (const resultStatus of ["success", "failed"] as const) {
+        await recorder.recordCodexUsage({model: "gpt-6-astra", featureType: "chat", resultStatus,
+          codexThreadId: "astra-thread", metadata: {source}, usage: {
+            inputTokens: 100, cachedInputTokens: 20, cacheWriteTokens: 5, outputTokens: 10,
+            kind: "cumulative_snapshot", modelInvocations: [{inputTokens: 100, cachedInputTokens: 20,
+              cacheWriteTokens: 5, outputTokens: 10}]
+          }});
+      }
+      expect(recorded.map((entry) => entry.resultStatus)).toEqual(["success", "failed"]);
+      for (const entry of recorded) expect(entry).toMatchObject({cacheWriteTokens: 5,
+        codexRuntimeUsageKind: "cumulative_snapshot", codexThreadId: "astra-thread",
+        codexRuntimeModelInvocations: [{cacheWriteTokens: 5}], metadata: {source}});
+    }
+  );
+
   it("centralizes Codex runtime usage conversion before ingestion", async () => {
     let codexInput: RecordUsageInput | undefined;
     const recorder = new UsageRecorder({

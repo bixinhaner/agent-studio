@@ -494,8 +494,8 @@ rl.on("line", (line) => {
         threadId,
         turnId,
         tokenUsage: {
-          total: { inputTokens: 12, cachedInputTokens: 3, outputTokens: 7 },
-          last: { inputTokens: 12, cachedInputTokens: 3, outputTokens: 7 },
+          total: { inputTokens: 12, cachedInputTokens: 3, cacheWriteInputTokens: 2, outputTokens: 7 },
+          last: { inputTokens: 12, cachedInputTokens: 3, cacheWriteInputTokens: 0, outputTokens: 7 },
           modelContextWindow: 353400
         }
       });
@@ -571,6 +571,9 @@ describe("Codex app-server runtime", () => {
       "Hello"
     );
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(events.find((event) => event.type === "token_count")?.raw).toMatchObject({
+      info: {total_token_usage: {cache_write_tokens: 2}, last_token_usage: {cache_write_tokens: 0}}
+    });
     expect(events.some((event) => {
       const raw = event.raw as { info?: { model_context_window?: number } } | undefined;
       return event.type === "token_count" && raw?.info?.model_context_window === 353400;

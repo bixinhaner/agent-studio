@@ -699,7 +699,9 @@ function tokenUsageEvent(message: JsonRecord): CodexStreamEvent | undefined {
   const toSnake = (value: Record<string, unknown>) => ({
     input_tokens: value.inputTokens,
     cached_input_tokens: value.cachedInputTokens,
-    ...(value.cacheWriteTokens !== undefined ? { cache_write_tokens: value.cacheWriteTokens } : {}),
+    ...((value.cacheWriteInputTokens ?? value.cacheWriteTokens) !== undefined
+      ? { cache_write_tokens: value.cacheWriteInputTokens ?? value.cacheWriteTokens }
+      : {}),
     output_tokens: value.outputTokens
   });
   const raw = {

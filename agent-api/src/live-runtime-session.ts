@@ -119,7 +119,9 @@ function parseUsageRecord(
 
   const inputTokens = toTokenCount(usage.input_tokens);
   const cachedInputTokens = toTokenCount(usage.cached_input_tokens);
-  const cacheWriteTokens = toTokenCount(usage.cache_write_tokens ?? usage.cacheWriteTokens);
+  const cacheWriteTokens = toTokenCount(
+    usage.cache_write_input_tokens ?? usage.cache_write_tokens ?? usage.cacheWriteInputTokens ?? usage.cacheWriteTokens
+  );
   const outputTokens = toTokenCount(usage.output_tokens);
   if (inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) {
     return undefined;
