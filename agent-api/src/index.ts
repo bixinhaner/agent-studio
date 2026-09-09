@@ -11360,7 +11360,6 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use(createPublicBrandContextMiddleware(publicBrands));
-app.use("/api/local-bridge", createLocalBridgeRouter(db));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
 
@@ -11703,6 +11702,10 @@ registerCommonApiRoutes(app, {
     serviceTokenMiddleware: requireServiceToken
   })
 });
+
+// Mount after the shared current-user middleware so Portal device requests
+// resolve the session cookie before the Relay router checks ownership.
+app.use("/api/local-bridge", createLocalBridgeRouter(db));
 
 app.use(
   "/api/portal/workspace",
