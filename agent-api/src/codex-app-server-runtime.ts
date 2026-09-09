@@ -1312,15 +1312,24 @@ class CodexAppServerManager {
     message: string,
     options: CodexRunStreamOptions = {}
   ): AsyncGenerator<CodexStreamEvent> {
-    const turnSkillScope = runtimeScopeForTurnSkills(thread.scope, options.skills ?? []);
-    const scope = turnSkillScope.scope;
+    let turnSkillScope = runtimeScopeForTurnSkills(thread.scope, options.skills ?? []);
+    let scope = turnSkillScope.scope;
     const turnOptions: AppServerThreadOptions = {
       model: options.model ?? thread.options.model,
       reasoningEffort: options.reasoningEffort ?? thread.options.reasoningEffort,
       workspace: options.workspace ?? thread.options.workspace,
       codexRunConfig: options.codexRunConfig ?? thread.options.codexRunConfig
     };
-    const process = await this.getProcess(scope);
+    const threadProcessKey = `${thread.scopeKey}\u0000${thread.id}`;
+    const owningScopeKey = this.threadProcessScopes.get(threadProcessKey);
+    const owningProcess = owningScopeKey ? this.processes.get(owningScopeKey) : undefined;
+    const process = owningProcess && !owningProcess.closed
+      ? owningProcess
+      : await this.getProcess(scope);
+    if (owningProcess && !owningProcess.closed) {
+      turnSkillScope = runtimeScopeForTurnSkills(owningProcess.scope, options.skills ?? []);
+      scope = turnSkillScope.scope;
+    }
     const activeTurnKey = `${thread.scopeKey}\u0000${thread.id}`;
     const releaseThread = await this.acquireThreadLock(thread.id);
     const releaseTurn = await process.acquireTurnSlot();
@@ -1522,10 +1531,14 @@ class CodexAppServerManager {
           forceReload: true
         });
         assertTurnSkillsVisible(skillsResult, turnOptions.workspace, turnSkillScope.skills);
+      } else if (owningProcess && !owningProcess.closed) {
+        // A previous turn may have mounted selected Skill roots on this shared
+        // process. Clear them before a deselected turn so Skill selection remains
+        // turn-scoped even when the Codex Thread process is reused.
+        await process.request("skills/extraRoots/set", { extraRoots: [] });
       }
 
-      const threadProcessKey = `${thread.scopeKey}\u0000${thread.id}`;
-      const switchedProcess = this.threadProcessScopes.get(threadProcessKey) !== scope.key;
+      const switchedProcess = this.threadProcessScopes.get(threadProcessKey) !== process.scopeKey;
       if (switchedProcess) {
         process.loadedThreads.delete(thread.id);
       }
@@ -1533,7 +1546,7 @@ class CodexAppServerManager {
         await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
         process.loadedThreads.add(thread.id);
       }
-      this.threadProcessScopes.set(threadProcessKey, scope.key);
+      this.threadProcessScopes.set(threadProcessKey, process.scopeKey);
       unsubscribe = process.subscribe((notification) => {
         const params = asRecord(notification.params) ?? {};
         const eventThreadId = trimOrUndefined(params.threadId) ?? trimOrUndefined(asRecord(params.thread)?.id);
