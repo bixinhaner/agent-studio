@@ -159,4 +159,12 @@ describe("runtime scope resolver", () => {
     expect(support.scopeSegments.slice(0, 3)).toEqual(["integrations", "zendesk", "instance_1"]);
     expect(anotherTicket.scopeSegments).toEqual(support.scopeSegments);
   });
+  it("isolates tool-free planning homes without changing normal integration homes", () => {
+    const input = { provider: "action_connector", integrationInstanceId: "omc", modeId: "operations" };
+    const executing = buildSharedIntegrationCodexHomeScope(input);
+    const planning = buildSharedIntegrationCodexHomeScope({ ...input, capabilityProfile: "assistant-planner" });
+    expect(planning.scopeSegments).toEqual([...executing.scopeSegments, "profiles", "assistant-planner"]);
+    expect(buildSharedIntegrationCodexHomeScope({ ...input, capabilityProfile: undefined })).toEqual(executing);
+  });
+
 });

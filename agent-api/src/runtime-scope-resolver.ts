@@ -184,6 +184,7 @@ export function buildSharedIntegrationCodexHomeScope(input: {
   provider: string;
   integrationInstanceId: string;
   modeId: string;
+  capabilityProfile?: string;
   codexRunConfig?: Record<string, unknown>;
 }): SharedIntegrationCodexHomeScope {
   const provider = sanitizePathSegment(input.provider, "integration");
@@ -200,7 +201,8 @@ export function buildSharedIntegrationCodexHomeScope(input: {
       "integrations",
       provider,
       integrationInstanceId,
-      `agent-${sanitizePathSegment(input.modeId, "default")}-${capabilityHash}`
+      `agent-${sanitizePathSegment(input.modeId, "default")}-${capabilityHash}`,
+      ...(input.capabilityProfile ? ["profiles", sanitizePathSegment(input.capabilityProfile, "profile")] : [])
     ],
     manifest: {
       version: 1,

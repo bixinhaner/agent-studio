@@ -299,6 +299,7 @@ import { ProactiveLeaseService } from "./integrations/action-connector/proactive
 import { ProactiveActionConnectorService } from "./integrations/action-connector/proactive/service.js";
 import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
+import { actionConnectorCliSource } from "./integrations/action-connector/cli.js";
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import {
@@ -4942,132 +4943,6 @@ function actionConnectorStoredMessage(
   };
 }
 
-function actionConnectorCliSource(): string {
-  return `#!/usr/bin/env node
-import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-
-const command = process.argv[2];
-const args = process.argv.slice(3);
-
-function required(value, name) {
-  if (!value || !String(value).trim()) throw new Error(name + " is required");
-  return String(value).trim();
-}
-
-function runtimeConfig() {
-  const filePath = required(process.env.ACTION_CONNECTOR_RUNTIME_CONFIG, "ACTION_CONNECTOR_RUNTIME_CONFIG");
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
-function parseJsonArg(value, fallback) {
-  if (!value || !value.trim()) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    throw new Error("Invalid JSON argument: " + error.message);
-  }
-}
-
-function unwrap(payload) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
-  if (Object.prototype.hasOwnProperty.call(payload, "ret")) {
-    if (payload.ret === 1) return payload.data;
-    throw new Error(typeof payload.msg === "string" ? payload.msg : "Connector request failed");
-  }
-  return payload;
-}
-
-async function readPayload(response) {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-function connectorBridgeUrl(config) {
-  const baseUrl = required(config.bridgeBaseUrl, "bridgeBaseUrl").replace(/\\/+$/, "");
-  const connectorId = encodeURIComponent(required(config.connectorId, "connectorId"));
-  return baseUrl + "/api/action-connectors/" + connectorId + "/tool-requests";
-}
-
-async function submitToolRequest(input, toolCallId) {
-  const config = runtimeConfig();
-  const headers = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-Action-Connector-Bridge-Token": required(config.bridgeToken, "bridgeToken")
-  };
-  const response = await fetch(connectorBridgeUrl(config), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      runId: required(config.runId, "runId"),
-      toolCallId: toolCallId || randomUUID(),
-      input
-    })
-  });
-  const payload = await readPayload(response);
-  if (!response.ok) {
-    const detail =
-      payload && typeof payload === "object" && payload.error && typeof payload.error.message === "string"
-        ? payload.error.message
-        : "External tool bridge failed with HTTP " + response.status;
-    throw new Error(detail);
-  }
-  if (payload && typeof payload === "object" && payload.status === "error") {
-    const error = payload.error && typeof payload.error === "object" ? payload.error : {};
-    throw new Error(typeof error.message === "string" ? error.message : "External tool request failed");
-  }
-  const output = unwrap(payload && typeof payload === "object" && "output" in payload ? payload.output : payload);
-  const files = payload && typeof payload === "object" && Array.isArray(payload.files) ? payload.files : [];
-  console.log(JSON.stringify(files.length ? { output, files } : output, null, 2));
-}
-
-try {
-  const config = runtimeConfig();
-  if (command === "identity") {
-    console.log(JSON.stringify(config.identity || {}, null, 2));
-  } else if (command === "catalog" || command === "list" || command === "search") {
-    const query = command === "catalog" || command === "search" ? args.join(" ").trim() : "";
-    await submitToolRequest({
-      operationId: "agent.catalog.search",
-      method: "GET",
-      path: "/api/v1/agent/catalog",
-      query: query ? { q: query } : {}
-    });
-  } else if (command === "describe") {
-    await submitToolRequest({
-      operationId: "agent.catalog.describe",
-      method: "GET",
-      path: "/api/v1/agent/catalog/describe",
-      query: { operationId: required(args[0], "operationId") }
-    });
-  } else if (command === "request") {
-    const method = required(args[0], "method").toUpperCase();
-    const requestPath = required(args[1], "path");
-    const input = parseJsonArg(args[2], {});
-    await submitToolRequest({
-      operationId: typeof input.operationId === "string" ? input.operationId : undefined,
-      method,
-      path: requestPath,
-      query: input.query && typeof input.query === "object" ? input.query : undefined,
-      body: Object.prototype.hasOwnProperty.call(input, "body") ? input.body : undefined,
-      reason: typeof input.reason === "string" ? input.reason : undefined
-    });
-  } else {
-    throw new Error("Unknown command. Use identity, catalog, search, describe, or request.");
-  }
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-}
-`;
-}
-
 async function materializeActionConnectorRuntimeFiles(input: {
   runner: ActionConnectorCodexRunnerInput;
   workspace: string;
@@ -5163,6 +5038,7 @@ async function resolveActionConnectorRuntimeOptions(
     provider: ACTION_CONNECTOR_CHANNEL,
     integrationInstanceId: input.connector.id,
     modeId: agentModeId,
+    capabilityProfile: planningOnly ? "assistant-planner" : undefined,
     codexRunConfig: baseCodexRunConfig
   });
   const capabilityReconciliation = await reconcileRuntimeHomeCapabilities({
@@ -6693,12 +6569,14 @@ async function materializeSharedIntegrationCodexHomeForRunConfig(input: {
   provider: string;
   integrationInstanceId: string;
   modeId: string;
+  capabilityProfile?: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
   const scope = buildSharedIntegrationCodexHomeScope({
     provider: input.provider,
     integrationInstanceId: input.integrationInstanceId,
     modeId: input.modeId,
+    capabilityProfile: input.capabilityProfile,
     codexRunConfig: input.codexRunConfig
   });
   return materializeCodexHomeForRunConfig({
