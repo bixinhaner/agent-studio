@@ -17,7 +17,7 @@ export class ProactiveLeaseService {
       const candidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM connector_tool_invocations
         WHERE connector_id = ${connectorId}
-          AND (status = 'PENDING' OR (status = 'LEASED' AND lease_expires_at <= now()))
+          AND (status = 'PENDING' OR (status = 'LEASED' AND method IN ('GET', 'HEAD', 'OPTIONS') AND lease_expires_at <= now()))
           AND deadline_at > now()
           AND EXISTS (
             SELECT 1 FROM proactive_agent_runs r

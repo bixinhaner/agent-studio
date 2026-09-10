@@ -60,6 +60,20 @@ suite("PostgreSQL assistant lifecycle (real database + tool protocol, fixture mo
     const old = await db.connectorToolInvocation.create({ data: { runId: r.runId, runAttempt: 1, connectorId, scenarioKey: `assistant:${r.assistantId}`, packageDigest: r.definitionDigest, handbookDigest: r.handbookDigest, operationId: "get.devices", method: "GET", path: "/api/v1/devices", arguments: {}, resourceScope: [], deadlineAt: new Date(Date.now() + 60000), traceId: r.runId } });
     const items = await new ProactiveLeaseService(db).leaseTools(connectorId, "worker", 10, 60); expect(items.some((item) => item.invocationId === old.id)).toBe(false); await service.cancelRun(connectorId, r.runId);
   });
+  it("releases expired reads but never repeats a write with an uncertain lease outcome", async () => {
+    const service = new ProactiveActionConnectorService(db, new DurableActionConnectorToolBridge(db), async () => undefined);
+    const r = request(); await service.submitAssistantRun(connectorId, r);
+    await db.proactiveAgentRun.update({ where: { id: r.runId }, data: { status: "RUNNING", runAttempt: 1, leaseOwner: "current", leaseExpiresAt: new Date(Date.now() + 60000) } });
+    const ids: Record<string, string> = {};
+    for (const method of ["GET", "PATCH"]) {
+      const row = await db.connectorToolInvocation.create({ data: { runId: r.runId, runAttempt: 1, connectorId, scenarioKey: `assistant:${r.assistantId}`, packageDigest: r.definitionDigest, handbookDigest: r.handbookDigest, operationId: `${method.toLowerCase()}.products.by_id`, method, path: "/api/v1/products/a", arguments: { body: method === "PATCH" ? { label: "new" } : null }, resourceScope: [], deadlineAt: new Date(Date.now() + 60000), traceId: r.runId, status: "LEASED", leaseExpiresAt: new Date(Date.now() - 1000) } });
+      ids[method] = row.id;
+    }
+    const items = await new ProactiveLeaseService(db).leaseTools(connectorId, "next-worker", 10, 60);
+    expect(items.some((item) => item.invocationId === ids.GET)).toBe(true);
+    expect(items.some((item) => item.invocationId === ids.PATCH)).toBe(false);
+    await service.cancelRun(connectorId, r.runId);
+  });
   it("recovers expired runs and drains a backlog larger than the old startup-only limit", async () => {
     const bridge = new DurableActionConnectorToolBridge(db); const service = new ProactiveActionConnectorService(db, bridge, async (input) => input.emit({ type: "delta", text: JSON.stringify(noData) }));
     const rs = Array.from({ length: 55 }, request); for (const r of rs) await service.submitAssistantRun(connectorId, r);

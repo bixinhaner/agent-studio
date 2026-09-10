@@ -4,6 +4,7 @@ import { z } from "zod";
 // from a scenario-name switch in Agent Studio.
 export const capabilitySchema = z.object({
   operationId: z.string().min(1).max(160),
+  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]).optional(),
   title: z.string().max(240),
   description: z.string().max(4000),
   path: z.string().startsWith("/api/v1/"),
@@ -24,6 +25,8 @@ export const triggerSchema = z.object({
   conditions: z.array(conditionSchema).max(10).default([]),
 });
 export const definitionSchema = z.object({
+  apiAccess: z.literal("discover").optional(),
+  allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])).min(1).max(7).optional(),
   name: z.string().trim().min(1).max(100),
   goal: z.string().trim().min(1).max(8000),
   scope: z.object({
@@ -32,7 +35,7 @@ export const definitionSchema = z.object({
     label: z.string().max(240).optional(),
   }),
   trigger: triggerSchema,
-  operations: z.array(z.string().min(1).max(160)).min(1).max(24),
+  operations: z.array(z.string().min(1).max(160)).max(24),
   notify: z.enum(["always", "findings"]),
   cooldownMinutes: z.number().int().min(0).max(10080),
 });
@@ -40,7 +43,7 @@ export const planningRequestSchema = z.object({
   message: z.string().trim().min(1).max(8000),
   definition: definitionSchema.nullable().optional(),
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(8000) })).max(20).default([]),
-  capabilities: z.array(capabilitySchema).max(300),
+  capabilities: z.array(capabilitySchema).max(5000),
   events: z.array(z.object({ type: z.string(), title: z.string(), fields: z.array(z.string()) })).max(30).default([]),
   locale: z.string().max(30).default("en-US"),
   timezone: z.string().max(100).default("UTC"),
@@ -53,8 +56,11 @@ export const planningResponseSchema = z.object({
   missingCapabilities: z.array(z.string().max(500)).max(10),
   definition: definitionSchema.nullable(),
 });
+export const operationGrantSchema = z.object({ operationId: z.string().min(1).max(160), method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) });
 export const executionRequestSchema = z.object({
-  contractVersion: z.literal("1.0"),
+  toolGrants: z.array(operationGrantSchema).max(5000).optional(),
+  toolPolicy: z.object({ allowedMethods: z.array(z.string()), blockedPathPrefixes: z.array(z.string()), toolTimeoutSeconds: z.number(), maxResponseBytes: z.number() }).optional(),
+  contractVersion: z.enum(["1.0", "1.1"]),
   runId: z.string().uuid(),
   assistantId: z.string().uuid(),
   revision: z.number().int().positive(),
@@ -97,8 +103,12 @@ export function validatePlan(input: PlanningRequest, output: z.infer<typeof plan
   if (output.readiness !== "ready") return;
   if (!output.definition || output.questions.length || output.missingCapabilities.length) throw new Error("ASSISTANT_PLAN_NOT_READY");
   const plan = output.definition;
+  if (!plan.apiAccess && (!plan.operations.length || plan.allowedMethods)) throw new Error("ASSISTANT_INVALID_API_ACCESS");
+  const methods = plan.apiAccess ? (plan.allowedMethods ?? ["GET"]) : ["GET"];
+  if (new Set(methods).size !== methods.length) throw new Error("ASSISTANT_INVALID_METHOD");
   const catalog = new Map(input.capabilities.map((item) => [item.operationId, item]));
   if (plan.operations.some((id) => !catalog.has(id))) throw new Error("ASSISTANT_UNKNOWN_CAPABILITY");
+  if (plan.operations.some((id) => !methods.includes(catalog.get(id)?.method ?? "GET"))) throw new Error("ASSISTANT_METHOD_NOT_ALLOWED");
   if (plan.scope.kind === "device" && (!plan.scope.deviceId || plan.operations.some((id) => !catalog.get(id)?.deviceScoped))) {
     throw new Error("ASSISTANT_SCOPE_NOT_RESOLVED");
   }

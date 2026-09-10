@@ -19,7 +19,13 @@ export const BACKGROUND_HANDBOOK_OPERATIONS = new Set([
   "get.agent.handbook.chunks.by_index"
 ]);
 
+export const BACKGROUND_DISCOVERY_OPERATIONS = new Set([
+  "get.agent.catalog", "get.agent.catalog.categories", "get.agent.catalog.describe"
+]);
+
 type BackgroundRegistration = {
+  operationGrants?: Array<{ operationId: string; method: string }>;
+  allowDiscovery?: boolean;
   connectorId: string;
   runId: string;
   scenarioKey: string;
@@ -89,9 +95,13 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
       throw new Error("BACKGROUND_RUN_NOT_ACTIVE");
     }
     const operationId = input.request.operationId?.trim() ?? "";
-    const allowedOperation = registration.allowedOperations.includes(operationId) ||
-      BACKGROUND_HANDBOOK_OPERATIONS.has(operationId);
-    if (input.request.method.toUpperCase() !== "GET" || !allowedOperation) {
+    const method = input.request.method.toUpperCase();
+    const discovery = registration.allowDiscovery && BACKGROUND_DISCOVERY_OPERATIONS.has(operationId);
+    const infrastructure = BACKGROUND_HANDBOOK_OPERATIONS.has(operationId) || discovery;
+    const allowedOperation = infrastructure ? method === "GET" : registration.operationGrants
+      ? registration.operationGrants.some((g) => g.operationId === operationId && g.method === method)
+      : method === "GET" && registration.allowedOperations.includes(operationId);
+    if (!allowedOperation || (infrastructure && input.request.body != null)) {
       throw new Error("Background tool operation is outside the installed scenario policy.");
     }
     if (!BACKGROUND_HANDBOOK_OPERATIONS.has(operationId)) {
@@ -105,9 +115,9 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
         id: toolCallId, runId: input.runId, runAttempt: active.runAttempt, connectorId: input.connectorId,
         scenarioKey: registration.scenarioKey, packageDigest: registration.packageDigest,
         handbookDigest: registration.handbookDigest, operationId,
-        method: "GET", path: input.request.path,
+        method, path: input.request.path,
         arguments: {
-          path: {}, query: input.request.query ?? {}, body: null
+          path: {}, query: input.request.query ?? {}, body: input.request.body ?? null
         } as Prisma.InputJsonValue,
         resourceScope: registration.resourceScope as Prisma.InputJsonValue,
         deadlineAt, traceId: registration.traceId
@@ -116,7 +126,7 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
     await this.db.proactiveAgentRun.updateMany({ where: { id: input.runId, runAttempt: active.runAttempt, status: { in: ["RUNNING", "WAITING_TOOL"] } }, data: { status: "WAITING_TOOL" } });
     registration.emit?.({
       type: "tool_request", runId: input.runId, toolCallId, tool: "rest.request",
-      title: `GET ${input.request.path}`, input: input.request
+      title: `${method} ${input.request.path}`, input: input.request
     });
     while (Date.now() < deadlineAt.getTime()) {
       registration.signal?.throwIfAborted();

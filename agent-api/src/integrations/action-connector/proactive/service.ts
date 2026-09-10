@@ -254,7 +254,7 @@ export class ProactiveActionConnectorService {
     } catch (error) {
       if (!this.stopping) await this.db.proactiveAgentRun.updateMany({ where: guard, data: {
         status: "FAILED", completedAt: new Date(), leaseOwner: null, leaseExpiresAt: null,
-        error: { code: "BACKGROUND_RUN_FAILED", message: (error instanceof Error ? error.message : "Background run failed").slice(0, 2000), retryable: false },
+        error: { code: error instanceof Error && error.message === "ASSISTANT_WRITE_RECOVERY_REVIEW_REQUIRED" ? error.message : "BACKGROUND_RUN_FAILED", message: (error instanceof Error ? error.message : "Background run failed").slice(0, 2000), retryable: false },
       } });
     } finally {
       clearInterval(renewal);
