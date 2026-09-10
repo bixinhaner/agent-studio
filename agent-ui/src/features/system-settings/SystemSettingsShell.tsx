@@ -419,7 +419,7 @@ export function SystemSettingsShell() {
       {/* Main Content Area */}
       <div
         className={`admin-settings-content ${
-          section === "conversation-security-review" ? "conversation-security-review-active" : ""
+          section === "conversation-security-review" ? "conversation-security-review-active" : section === "local-bridge" ? "local-bridge-visibility-active" : ""
         }`}
       >
         <div className="admin-settings-content-header">

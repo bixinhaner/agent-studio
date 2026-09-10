@@ -7413,6 +7413,17 @@
     flex-basis: 100%;
   }
 
+  .admin-settings-content.local-bridge-visibility-active .admin-settings-content-header,
+  .admin-settings-content.local-bridge-visibility-active .admin-settings-content-scroll,
+  .admin-settings-content.local-bridge-visibility-active .admin-floating-action-bar {
+    padding: 16px;
+  }
+
+  .admin-settings-content.local-bridge-visibility-active .admin-floating-action-bar > .ant-space {
+    flex-wrap: wrap;
+  }
+
+  .admin-settings-content.local-bridge-visibility-active .admin-floating-action-bar,
   .admin-settings-content.conversation-security-review-active .admin-floating-action-bar {
     align-items: stretch;
     flex-direction: column;
