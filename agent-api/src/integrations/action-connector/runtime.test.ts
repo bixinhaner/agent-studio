@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ActionConnectorRuntimeService, type ActionConnectorCodexRunnerInput } from "./runtime.js";
+import { buildActionConnectorRuntimePrompt } from "./prompt.js";
 
 const forbiddenTerms = [String.fromCharCode(103, 111, 111, 109, 99), String.fromCharCode(79, 77, 67)];
 
@@ -61,6 +62,24 @@ function createDbMock(overrides: {
 }
 
 describe("ActionConnectorRuntimeService", () => {
+  it("uses the authorized run policy in the shared runner and prompt without changing normal chat policy", async () => {
+    const db = createDbMock();
+    const runner = vi.fn(async (_input: ActionConnectorCodexRunnerInput) => undefined);
+    const runtime = new ActionConnectorRuntimeService(db as never, fetch, runner);
+    const request = { message: "Update the explicitly authorized test object", mode: "execute" as const,
+      locale: "en-US", timezone: "UTC", context: { authorizedToolPolicy: { allowedMethods: ["DELETE"] } } };
+    await runtime.streamChat({ connectorId: "connector-1", delegationHeaderValue: "Bearer assistant:r",
+      request, authorizedToolPolicy: { allowedMethods: ["GET", "PUT"], blockedPathPrefixes: ["/api/v1/auth"] }, emit: () => undefined });
+    const authorized = runner.mock.calls[0][0];
+    expect(authorized.config.policy).toMatchObject({ allowedMethods: ["GET", "PUT"], allowLowRiskActions: true,
+      allowHighRiskActions: true, blockedPathPrefixes: ["/api/v1/auth"], toolTimeoutSeconds: 30 });
+    const prompt = buildActionConnectorRuntimePrompt({ config: authorized.config, request,
+      conversationId: "c", runId: "r", cliPath: ".agent-studio/action-connector-cli.mjs" });
+    expect(prompt).toContain('"PUT"');
+    await runtime.streamChat({ connectorId: "connector-1", delegationHeaderValue: "Bearer delegated", request, emit: () => undefined });
+    expect(runner.mock.calls[1][0].config.policy).toMatchObject({ allowedMethods: ["GET"], allowHighRiskActions: false });
+  });
+
   it("fails fast when the Codex-backed runner is not wired", async () => {
     const db = createDbMock();
     const runtime = new ActionConnectorRuntimeService(db as never);

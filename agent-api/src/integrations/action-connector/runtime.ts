@@ -167,6 +167,10 @@ export class ActionConnectorRuntimeService {
     connectorId: string;
     delegationHeaderValue: string;
     request: ActionConnectorChatRequest;
+    // Internal execution input, never read from external chat context. The
+    // durable assistant snapshot is authoritative for this run's tool policy.
+    authorizedToolPolicy?: Pick<ActionConnectorConfig["policy"], "allowedMethods"> &
+      Partial<Pick<ActionConnectorConfig["policy"], "blockedPathPrefixes" | "toolTimeoutSeconds" | "maxResponseBytes">>;
     signal?: AbortSignal;
     emit(event: AgentStreamEvent): void;
   }): Promise<void> {
@@ -175,6 +179,15 @@ export class ActionConnectorRuntimeService {
     }
 
     const { instance, config } = await loadConnector(this.db, input.connectorId);
+    if (input.authorizedToolPolicy) {
+      const policy = input.authorizedToolPolicy;
+      const writes = policy.allowedMethods.some((method) => !["GET", "HEAD", "OPTIONS"].includes(method));
+      config.policy = {
+        ...config.policy, ...policy,
+        allowReadActions: policy.allowedMethods.some((method) => ["GET", "HEAD", "OPTIONS"].includes(method)),
+        allowLowRiskActions: writes, allowHighRiskActions: writes,
+      };
+    }
     await this.codexRunner({
       connector: instance,
       config,

@@ -45,9 +45,24 @@ describe("assistant API exploration", () => {
     const request = executionRequestSchema.parse({ contractVersion: "1.0", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
     const bridge = { prepareBackgroundRun: vi.fn() };
     const result = { outcome: "insufficient_data", title: "No data", summary: "No business query", facts: [], hypotheses: [], nextSteps: [] };
-    const runtime = { streamChat: async (input: {emit: (e: unknown) => void}) => input.emit({type:"delta", text:JSON.stringify(result)}) };
+    const runtime = { streamChat: vi.fn(async (input: {emit: (e: unknown) => void}) => input.emit({type:"delta", text:JSON.stringify(result)})) };
     await executeAssistant({ db: { connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
     expect(bridge.prepareBackgroundRun).toHaveBeenCalledWith(expect.objectContaining({ allowDiscovery: true, allowedOperations: definition.operations, operationGrants: undefined }));
+    expect(runtime.streamChat).toHaveBeenCalledWith(expect.objectContaining({ authorizedToolPolicy: { allowedMethods: ["GET"] } }));
+  });
+  it("passes only the intersection of task and frozen methods to the shared runtime", async () => {
+    const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1,
+      definition: { ...definition, apiAccess: "discover", allowedMethods: ["GET", "PUT", "DELETE"] },
+      definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u",
+      toolGrants: [{ operationId: "get.devices", method: "GET" }, { operationId: "put.products.by_id", method: "PUT" }],
+      toolPolicy: { allowedMethods: ["GET", "PUT"], blockedPathPrefixes: ["/api/v1/auth"], toolTimeoutSeconds: 30, maxResponseBytes: 262144 } });
+    const runtime = { streamChat: vi.fn(async (input: {emit: (e: unknown) => void}) => input.emit({type: "delta", text: JSON.stringify({
+      outcome: "insufficient_data", title: "No data", summary: "No query", facts: [], hypotheses: [], nextSteps: [] })})) };
+    const bridge = { prepareBackgroundRun: vi.fn() };
+    await executeAssistant({ db: { connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge,
+      run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
+    expect(runtime.streamChat).toHaveBeenCalledWith(expect.objectContaining({ authorizedToolPolicy: {
+      ...request.toolPolicy, allowedMethods: ["GET", "PUT"] } }));
   });
   it("permits deferred API discovery without inventing operation IDs", () => {
     const output = planningResponseSchema.parse({ reply: "Trial will inspect contracts", readiness: "ready", questions: [], missingCapabilities: [], definition: { ...definition, apiAccess: "discover", operations: [] } });

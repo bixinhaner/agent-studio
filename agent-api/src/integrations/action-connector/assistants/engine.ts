@@ -44,6 +44,9 @@ export async function executeAssistant(input: {
   let failure: Error | undefined;
   await runtime.streamChat({
     connectorId: run.connectorId, delegationHeaderValue: `Bearer assistant:${run.id}`,
+    authorizedToolPolicy: discovering
+      ? { ...request.toolPolicy!, allowedMethods: methods.filter((method) => request.toolPolicy!.allowedMethods.includes(method)) }
+      : { allowedMethods: ["GET"] },
     signal: AbortSignal.any([signal, outputLimit.signal, AbortSignal.timeout(request.limits.timeoutSeconds * 1000)]),
     request: {
       clientRunId: run.id, conversationId: `assistant-${run.id}-${run.runAttempt}`,
