@@ -29,6 +29,14 @@ describe('local task directory state', () => {
     await waitFor(()=>expect(result.current.bindingLoadFailed).toBe(true)); act(()=>result.current.reloadBinding());
     await waitFor(()=>expect(result.current.busy).toBe(false)); expect(result.current.bindingLoadFailed).toBe(false);
   });
+  it('a delayed binding lookup does not overwrite a completed folder selection', async () => {
+    let resolveLookup: (value: any) => void = () => {};
+    vi.mocked(localBridgeApi).mockImplementation(async (_url, init) => init?.method === 'PUT' ? { binding: folder } as any : new Promise(resolve => { resolveLookup = resolve; }));
+    const { result } = renderHook(() => useLocalWorkspace('task', true));
+    await act(async () => { await result.current.select(folder); });
+    await act(async () => { resolveLookup({ binding: null }); });
+    expect(result.current.selection?.root_id).toBe('root');
+  });
   it('offline connection preserves the selected directory', async () => {
     vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{id:'device',name:'电脑',status:'offline',roots:[]}]);
     vi.mocked(localBridgeApi).mockResolvedValue({binding:{...folder,thread_id:'task',status:'offline'}});

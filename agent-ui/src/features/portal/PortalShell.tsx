@@ -9794,7 +9794,7 @@ export function PortalShell(props: {
               });
             }
 
-            if (itemType === "mcp_tool_call" && isCompleted && processEnabled) {
+            if (itemType === "mcp_tool_call" && (isCompleted || (item?.server === "local_computer" && eventType === "item.started")) && (processEnabled || item?.server === "local_computer")) {
               const server = typeof item?.server === "string" ? item.server : "";
               const tool = typeof item?.tool === "string" ? item.tool : "";
               const args = (item?.arguments && typeof item.arguments === "object" ? item.arguments : {}) as Record<
@@ -9823,7 +9823,7 @@ export function PortalShell(props: {
                 ...(result !== undefined ? { result } : {}),
                 ...(errMsg ? { isError: true } : {})
               });
-              updates.push({
+              if (isCompleted && processEnabled) updates.push({
                 type: "data",
                 name: "codex_process",
                 data: {

@@ -19,6 +19,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
   const connectionRef = useRef(connection); connectionRef.current = connection;
   const threadRef = useRef(threadId); threadRef.current = threadId;
   const generation = useRef(0);
+  const selectionRevision = useRef(0);
   const refresh = useCallback(async () => { const next = await fetchLocalBridgeDevices(); setDevices(next); }, []);
   useEffect(() => {
     if (!enabled) return;
@@ -32,16 +33,18 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
   }, [enabled, selection?.device_id, dialog]);
   useEffect(() => {
     const ticket = ++generation.current;
+    const selectionVersion = selectionRevision.current;
     connectionAttempt.current++;
     setBindingLoadFailed(false);
     setDialog(false); setError(''); setConnection(null);
     if (connectionRef.current) void localBridgeApi(`/api/local-bridge/connections/${connectionRef.current.id}`, { method: 'DELETE' }).catch(() => {});
     if (!threadId || !enabled) { setSelection(null); setBusy(false); return; }
     setBusy(true);
-    void localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${threadId}/binding`).then(out => { if (generation.current === ticket) setSelection(out.binding); }).catch(e => { if (generation.current === ticket) { setError(e.message); setBindingLoadFailed(true); setSelection(null); } }).finally(() => { if (generation.current === ticket) setBusy(false); });
+    void localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${threadId}/binding`).then(out => { if (generation.current === ticket && selectionVersion === selectionRevision.current) setSelection(out.binding); }).catch(e => { if (generation.current === ticket && selectionVersion === selectionRevision.current) { setError(e.message); setBindingLoadFailed(true); setSelection(null); } }).finally(() => { if (generation.current === ticket && selectionVersion === selectionRevision.current) setBusy(false); });
   }, [threadId, enabled, loadRevision]);
   const select = useCallback(async (root: LocalSelection | null) => {
     const target = threadRef.current; const ticket = generation.current;
+    selectionRevision.current++;
     setBusy(true); setError('');
     try {
       const next = target ? (await localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${target}/binding`, { method: 'PUT', json: { root_id: root?.root_id || null } })).binding : root;
