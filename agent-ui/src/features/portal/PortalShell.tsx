@@ -147,6 +147,7 @@ import { PortalTopBar } from "./workbench/PortalTopBar";
 import { LocalToolCard } from "./workbench/LocalToolCard";
 import { isLocalToolPart, upsertLocalToolParts } from "./workbench/local-tool-parts";
 import { LocalBridgePanel } from "./workbench/LocalBridgePanel";
+import { isLocalBridgeEntryVisible } from "./local-bridge-visibility";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
@@ -6796,6 +6797,7 @@ export function PortalShell(props: {
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
   const canUseLocalBridge = Boolean(portalPreferenceUser?.id) && !trainingReadOnly;
+  const showLocalBridgeEntry = canUseLocalBridge && isLocalBridgeEntryVisible(portalPreferenceUser);
   const isExternalPortalUser = !isInternalPortalExperience({
     userType: portalPreferenceUser?.userType,
     organizationType: auth.activeOrganization?.type,
@@ -10716,7 +10718,7 @@ export function PortalShell(props: {
 
 
   return (
-    <LocalWorkspaceContext.Provider value={{ ...localWorkspace, running: Boolean(runningThreadIds[activeRemoteThreadId]), manage: () => setLocalBridgeOpen(true) }}>
+    <LocalWorkspaceContext.Provider value={{ ...localWorkspace, showEntry: showLocalBridgeEntry, running: Boolean(runningThreadIds[activeRemoteThreadId]), manage: () => setLocalBridgeOpen(true) }}>
     <AssistantRuntimeProvider runtime={runtime}>
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalChatRecoveryContext.Provider value={portalChatRecoveryContextValue}>
@@ -10758,7 +10760,7 @@ export function PortalShell(props: {
                 onOpenAdmin={trainingReadOnly ? undefined : props.onOpenAdmin}
                 onOpenFeedback={trainingReadOnly ? undefined : openProductFeedbackModal}
                 onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
-                onOpenLocalBridge={canUseLocalBridge && !trainingReadOnly ? () => setLocalBridgeOpen(true) : undefined}
+                onOpenLocalBridge={showLocalBridgeEntry ? () => setLocalBridgeOpen(true) : undefined}
                 runtimeSummary={topbarRuntimeSummaryText}
                 showRuntimeSummary={!isExternalPortalUser && !trainingReadOnly}
                 showAdvancedSettings={!isExternalPortalUser && !trainingReadOnly}
@@ -10769,7 +10771,7 @@ export function PortalShell(props: {
                 onOpenTraining={props.onOpenTraining}
                 onExitTraining={props.onExitTraining}
               />
-              <LocalBridgePanel open={localBridgeOpen} onClose={() => setLocalBridgeOpen(false)} />
+              <LocalBridgePanel open={showLocalBridgeEntry && localBridgeOpen} onClose={() => setLocalBridgeOpen(false)} />
               <LocalWorkspaceDialogs />
 
               <div className="portal-workbench-body">

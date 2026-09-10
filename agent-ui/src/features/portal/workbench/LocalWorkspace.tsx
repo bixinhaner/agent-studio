@@ -94,7 +94,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
   }, [connection, dialog, refresh, select]);
   return { bindingLoadFailed, reloadBinding: () => setLoadRevision(v => v + 1), selection, selectionRef, devices, busy, error, dialog, connection, select, refresh, begin, launch, close, enabled, offline: selection?.status === 'offline' };
 }
-type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { running: boolean; manage(): void };
+type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { showEntry: boolean; running: boolean; manage(): void };
 export const LocalWorkspaceContext = createContext<WorkspaceContext | null>(null);
 export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; notice: string; actionLabel?: string; retry(): Promise<void> } | null {
   const local = useContext(LocalWorkspaceContext);
@@ -109,7 +109,7 @@ export function LocalWorkspaceControls() {
   const [open, setOpen] = useState(false);
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
   useEffect(() => { const query = window.matchMedia('(max-width: 768px)'); const listener = () => setMobile(query.matches); query.addEventListener('change', listener); return () => query.removeEventListener('change', listener); }, []);
-  if (!local?.enabled) return null;
+  if (!local?.enabled || !local.showEntry) return null;
   const choose = async (value: LocalSelection | null) => { try { await local.select(value); setOpen(false); } catch {} };
   const content = <div className="local-folder-menu"><div className="local-folder-menu-title">使用电脑文件夹</div><p className="local-section-label">最近使用</p><div className="local-folder-list">{local.devices.flatMap(d => d.roots.map(r => <button type="button" className={`local-folder-row${local.selection?.root_id === r.id ? ' selected' : ''}`} key={r.id} disabled={local.running || local.busy} title={r.path} onClick={() => void choose({ id: `selection-${r.id}`, root_id: r.id, path: r.path, label: r.label || r.path.split(/[\\/]/).pop() || r.path, device_id: d.id, device_name: d.name, status: d.status })}><Folder size={21} /><span><strong>{r.label || r.path.split(/[\\/]/).pop()}</strong><small><i className={`local-status-dot ${d.status}`} />{d.name} · {d.status === 'online' ? '已连接' : '离线'}</small></span>{local.selection?.root_id === r.id ? <Check size={17} /> : null}</button>))}{!local.devices.some(d => d.roots.length) ? <p className="local-no-folders">选择电脑中的文件夹，让 Agent 开始处理。</p> : null}</div><div className="local-folder-menu-actions"><button type="button" disabled={local.running || local.busy} onClick={() => { setOpen(false); local.begin(); }}><FolderPlus size={17} />选择其他文件夹</button><button type="button" onClick={() => { setOpen(false); local.manage(); }}><Computer size={17} />我的电脑</button>{local.selection ? <button type="button" disabled={local.running || local.busy} onClick={() => void choose(null)}><Unplug size={17} />取消目录绑定</button> : null}</div>{local.running ? <p className="local-menu-hint">停止当前任务后可以切换目录</p> : null}</div>;
   const trigger = <button type="button" className={`local-workspace-trigger${local.selection ? ' has-selection' : ''}${local.offline ? ' is-offline' : ''}`} aria-label="使用电脑文件夹" title={local.selection?.path || '使用电脑文件夹'} onClick={() => setOpen(!open)}><Folder size={16} /><span>{local.selection ? `工作目录：${local.selection.label}` : '使用电脑文件夹'}</span>{local.selection ? <small>· {local.selection.device_name}</small> : null}{local.offline ? <i className="local-status-dot offline" /> : null}<ChevronDown size={13} /></button>;
@@ -118,7 +118,7 @@ export function LocalWorkspaceControls() {
 export function LocalWorkspaceDialogs() {
   const local = useContext(LocalWorkspaceContext);
   const [codeVisible, setCodeVisible] = useState(false);
-  if (!local) return null;
+  if (!local?.showEntry) return null;
   return <Modal open={local.dialog} onCancel={local.close} footer={null} width={480} title="使用电脑文件夹" className="local-connect-modal" destroyOnClose><div className="local-connect-body"><div className="local-connect-icon">{local.connection ? <LoaderCircle className="local-spinner" size={32} /> : <Monitor size={32} />}</div><h3>{local.connection ? '正在等待选择文件夹' : '连接你的电脑'}</h3><p>{local.connection ? '在桌面客户端选择文件夹，完成后会自动回到任务。' : '打开桌面客户端，选择要处理的文件夹。'}</p>{local.error ? <Alert type="warning" message={local.error} showIcon /> : null}<Button block type="primary" size="large" loading={local.busy} onClick={() => { setCodeVisible(false); void local.launch(); }}>{local.connection ? '重新打开客户端' : '打开客户端并选择'}</Button><LocalBridgeDownloads compact /><button type="button" className="local-text-button" onClick={() => { setCodeVisible(true); if (!local.connection) void local.launch(true); }}>使用配对码连接</button>{codeVisible && local.connection ? <div className="local-pair-code"><strong>{local.connection.code}</strong><Button onClick={() => void navigator.clipboard.writeText(local.connection!.code)}>复制</Button><small>在桌面客户端输入，10 分钟内有效</small></div> : null}</div></Modal>;
 }
 export function LocalBridgeDownloads({ compact = false }: { compact?: boolean }) {
