@@ -8,7 +8,7 @@ const ACQUIRE_TIMEOUT_MS = 30_000;
 const RETRY_DELAY_MS = 250;
 
 let pool: Pool | undefined;
-const leaseContext = new AsyncLocalStorage<ReadonlySet<string>>();
+const leaseContext = new AsyncLocalStorage<{ keys: ReadonlySet<string>; client: PoolClient }>();
 
 function getPool(): Pool {
   if (!pool) {
@@ -45,22 +45,25 @@ async function acquire(client: PoolClient, key: string): Promise<void> {
 
 export async function withCodexThreadRuntimeLease<T>(threadId: string, action: () => Promise<T>): Promise<T> {
   const key = lockKey(threadId);
-  const inheritedLeases = leaseContext.getStore();
-  if (inheritedLeases?.has(key)) return await action();
-  const client = await getPool().connect();
+  const inherited = leaseContext.getStore();
+  if (inherited?.keys.has(key)) return await action();
+  // A conversation lease can enclose runtime restoration's thread lease. Use
+  // the same connection so four active turns cannot exhaust the pool waiting
+  // for four additional connections during restoration.
+  const client = inherited?.client ?? await getPool().connect();
   try {
     await acquire(client, key);
   } catch (error) {
-    client.release();
+    if (!inherited) client.release();
     throw error;
   }
-  const activeLeases = new Set(inheritedLeases);
+  const activeLeases = new Set(inherited?.keys);
   activeLeases.add(key);
   try {
-    return await leaseContext.run(activeLeases, action);
+    return await leaseContext.run({ keys: activeLeases, client }, action);
   } finally {
     await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [`${LOCK_NAMESPACE}:${key}`]).catch(() => undefined);
-    client.release();
+    if (!inherited) client.release();
   }
 }
 

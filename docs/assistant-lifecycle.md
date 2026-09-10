@@ -49,6 +49,16 @@ Defaults: 120-second execution deadline, 18 tool calls, 32 KiB final output. Leg
 
 The existing Codex runner continues to select providers, prepare runtime context and record usage through `UsageRecorder`; neither planner nor assistant engine implements parallel token accounting.
 
+## Continuous assistant conversations
+
+Upgraded source systems send `contextScopeDigest`, an opaque SHA-256 binding of the owner, role and data visibility. Studio uses the assistant ID plus this binding, the selected resource scope and effective API authorization to derive a stable conversation. The existing Action Connector binding also isolates connector and external owner. Subsequent runs, ordinary goal revisions and recovery attempts reuse the same business thread, Codex thread and workspace. They do not import earlier per-run conversations.
+
+An authorization or resource-scope change selects a separate context; historical observations from another permission scope must not be replayed into the new one. Pre-upgrade requests without the authoritative digest retain their previous per-attempt isolation. No new database table or migration is required. Deploy Studio before the upgraded xOMC source.
+
+The shared runner holds a PostgreSQL conversation lock from before bridge-file preparation through final message and usage recording. Nested thread-restoration locks reuse its connection. Recovery attempts have distinct message IDs in the same conversation; existing run-attempt fencing, cancellation and uncertain-write recovery guards still apply.
+
+Every turn supplies the current complete definition and current-run authorization. Earlier context can guide follow-up, but current-state facts still require fresh business calls from this run. Static API contracts and the digest-verified handbook workspace cache can be reused. Provider prompt-cache hits are measured through the existing `UsageRecorder` cached-input fields, not assumed or guaranteed by a stable thread ID. Runtime compaction, model/provider changes and cache retention can affect reuse.
+
 ## Persistence and deployment
 
 Prisma migration: `20260906000100_assistant_run_leases`. It adds run lease ownership/expiry, invocation attempt binding and indexes. Apply through the existing deployment process (`prisma migrate deploy`); do not use `db push` on production. Existing rows default to attempt zero and are reconciled by the worker.

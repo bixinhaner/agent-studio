@@ -302,6 +302,7 @@ import type { ActionConnectorCodexRunnerInput } from "./integrations/action-conn
 import { actionConnectorCliSource } from "./integrations/action-connector/cli.js";
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
+import { actionConnectorTurnMessageKey } from "./integrations/action-connector/turn-identity.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
   projectActionConnectorRuntimeEvents
@@ -5522,6 +5523,24 @@ async function resolveExistingConversationParentId(
 }
 
 async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
+  input.signal?.throwIfAborted();
+  const request = { ...input.request, conversationId: input.request.conversationId || randomUUID() };
+  const runner = { ...input, request };
+  const identity = actionConnectorIdentityFromRequest(runner);
+  const key = actionConnectorConversationKey({
+    connectorId: input.connector.id,
+    externalUserKey: actionConnectorExternalUserKey(identity),
+    conversationId: request.conversationId,
+  });
+  // Acquire before rewriting per-turn bridge files or resolving a session.
+  // The database lease coordinates workers/processes and releases on a crash.
+  return withCodexThreadRuntimeLease(`action-connector-conversation:${key}`, async () => {
+    input.signal?.throwIfAborted();
+    await runActionConnectorCodexChatUnlocked(runner);
+  });
+}
+
+async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
   const startedAt = Date.now();
   const acceptedAt = new Date(startedAt).toISOString();
@@ -5546,7 +5565,8 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
     trimOrUndefined(prepared.identity?.externalUserId) ??
     trimOrUndefined(prepared.identity?.externalUnionId);
   const externalUserName = trimOrUndefined(prepared.identity?.externalUserName);
-  const userMessageId = `${ACTION_CONNECTOR_CHANNEL}-user-${prepared.runId}`;
+  const turnMessageKey = actionConnectorTurnMessageKey(input.request, prepared.runId);
+  const userMessageId = `${ACTION_CONNECTOR_CHANNEL}-user-${turnMessageKey}`;
   const actionConnectorParentId = await resolveExistingConversationParentId(
     prepared.thread.id,
     prepared.thread.headId
@@ -5652,7 +5672,7 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
           parentId: userMessageId,
           message: actionConnectorStoredMessage(
             "assistant",
-            `${ACTION_CONNECTOR_CHANNEL}-assistant-${prepared.runId}`,
+            `${ACTION_CONNECTOR_CHANNEL}-assistant-${turnMessageKey}`,
             answerText,
             {
               integrationInstanceId: input.connector.id,

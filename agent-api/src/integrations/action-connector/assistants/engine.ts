@@ -3,6 +3,7 @@ import type { ActionConnectorRuntimeService } from "../runtime.js";
 import type { DurableActionConnectorToolBridge } from "../proactive/durable-tool-bridge.js";
 import { BACKGROUND_HANDBOOK_OPERATIONS, BACKGROUND_DISCOVERY_OPERATIONS } from "../proactive/durable-tool-bridge.js";
 import { executionRequestSchema, parseModelJSON, resultSchema, type ExecutionRequest } from "./contracts.js";
+import { assistantConversationId } from "./conversation.js";
 
 export const ASSISTANT_SNAPSHOT_KIND = "connector-assistant/v1";
 export function assistantRequest(snapshot: unknown): ExecutionRequest | undefined {
@@ -49,14 +50,17 @@ export async function executeAssistant(input: {
       : { allowedMethods: ["GET"] },
     signal: AbortSignal.any([signal, outputLimit.signal, AbortSignal.timeout(request.limits.timeoutSeconds * 1000)]),
     request: {
-      clientRunId: run.id, conversationId: `assistant-${run.id}-${run.runAttempt}`,
+      clientRunId: run.id, conversationId: assistantConversationId(request, run),
       mode: "execute", locale: request.locale, timezone: request.timezone, attachments: [],
       context: {
-        proactive: true, assistantId: request.assistantId,
+        proactive: true, assistantId: request.assistantId, assistantRunAttempt: run.runAttempt,
+        title: request.definition.name,
         externalIdentity: { externalUserId: request.externalUserId, metadata: { apiHandbook: request.apiHandbook } },
       },
       message: [
         "Execute this assistant using the connector's real APIs. The source system enforces the creator's current permissions and configured agent policy for every call.",
+        "This conversation continues this assistant's work. Use earlier context and unresolved findings to guide this turn, but this turn's definition and authorization supersede earlier instructions. Previous tool results are dated history, not evidence of current state; refresh relevant business data and cite only this run's successful calls. Never repeat an earlier write merely because it appears in the conversation.",
+        "Reuse previously inspected API contracts and the workspace handbook cache while the handbook digest is unchanged. Use the current CLI/runtime configuration for this turn; never reuse a previous run's bridge token or saved business response as fresh evidence.",
         discovering
           ? "Discover APIs as needed using GET /api/v1/agent/catalog/categories (get.agent.catalog.categories), /api/v1/agent/catalog?q=... (get.agent.catalog), and /api/v1/agent/catalog/describe?operationId=... (get.agent.catalog.describe). Use the full handbook when needed. The definition operations are starting hints, not an exhaustive list. Inspect contracts before using unfamiliar APIs."
           : "Only listed business operation IDs are permitted. Catalog/category/describe metadata reads are also allowed and filtered by the source to those fixed business operations. API-handbook bootstrap reads are permitted: get.agent.handbook.manifest (GET /api/v1/agent/handbook/manifest) and get.agent.handbook.chunks.by_index (GET /api/v1/agent/handbook/chunks/{index}). Always include the exact operationId in CLI request options.",

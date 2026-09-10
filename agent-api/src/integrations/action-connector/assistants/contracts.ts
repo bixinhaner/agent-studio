@@ -72,6 +72,8 @@ export const executionRequestSchema = z.object({
   timezone: z.string().max(100).default("UTC"),
   externalUserId: z.string().min(1).max(160),
   triggerContext: z.record(z.unknown()).default({}),
+  // Optional for stored requests and source deployments predating continuity.
+  contextScopeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   limits: z.object({
     timeoutSeconds: z.number().int().min(10).max(300).default(120),
     maxToolCalls: z.number().int().min(1).max(40).default(18),

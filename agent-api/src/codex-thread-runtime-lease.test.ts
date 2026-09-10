@@ -50,6 +50,17 @@ afterEach(async () => {
 });
 
 describe("Codex thread runtime lease", () => {
+  it("reuses the connection for nested conversation and thread leases without releasing the outer lock", async () => {
+    await withCodexThreadRuntimeLease("conversation", async () => {
+      await expect(withCodexThreadRuntimeLease("thread", async () => {
+        expect(fakePg.lockedKeys.size).toBe(2);
+        throw new Error("interrupted turn");
+      })).rejects.toThrow("interrupted turn");
+      expect(fakePg.lockedKeys.size).toBe(1);
+      expect(fakePg.connectCalls).toBe(1);
+    });
+    expect(fakePg.lockedKeys.size).toBe(0);
+  });
   it("serializes concurrent requests in the same Node process", async () => {
     const order: string[] = [];
     let releaseFirst!: () => void;
