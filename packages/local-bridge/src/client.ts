@@ -1,24 +1,20 @@
-import { execute } from './bridge.js';
-
-export type LocalBridgeClientOptions = { relayUrl: string; token: string; intervalMs?: number; signal?: AbortSignal };
-
-/** Outbound-only polling client. The user's machine never accepts a public connection. */
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { createExecutor } = require('../runtime/executor.cjs');
+const { runTransport } = require('../runtime/transport.cjs');
+export type LocalBridgeClientOptions = {
+  relayUrl: string; token: string; roots: Array<{ id: string; path: string; label?: string }>;
+  journalDir: string; signal: AbortSignal; onStatus?: (status: { connected: boolean; error: string }) => void;
+};
+/** Headless and Electron use the same executor and outbound delivery loop. */
 export async function runLocalBridgeClient(options: LocalBridgeClientOptions): Promise<void> {
-  const base = options.relayUrl.replace(/\/$/, '');
-  const headers = { authorization: `Bearer ${options.token}`, 'content-type': 'application/json' };
-  const interval = options.intervalMs ?? 800;
-  while (!options.signal?.aborted) {
-    try {
-      const response = await fetch(`${base}/api/local-bridge/agent/poll`, { method: 'POST', headers });
-      if (!response.ok) throw new Error(`relay poll ${response.status}`);
-      const payload = await response.json() as { command?: Record<string, unknown> | null };
-      if (payload.command) {
-        const command = payload.command as any;
-        let result: unknown;
-        try { result = await execute(command); } catch (error) { result = { ok: false, error: error instanceof Error ? error.message : 'BRIDGE_ERROR' }; }
-        await fetch(`${base}/api/local-bridge/agent/result`, { method: 'POST', headers, body: JSON.stringify({ id: command.id, result }) });
-      }
-    } catch { /* transient network failure; retry without exposing a local port */ }
-    await new Promise((resolve) => setTimeout(resolve, interval));
-  }
+  const executor = createExecutor({ getRoots: () => options.roots, journalDir: options.journalDir });
+  const api = async (endpoint: string, init: RequestInit) => {
+    const response = await fetch(options.relayUrl.replace(/\/$/, '') + endpoint, { ...init, headers: { authorization: `Bearer ${options.token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(15000) });
+    const result = await response.json() as any;
+    if (!response.ok) throw new Error(result.detail || `Relay ${response.status}`);
+    return result;
+  };
+  try { await runTransport({ api, executor, signal: options.signal, onStatus: options.onStatus }); }
+  finally { executor.stopAll(); }
 }

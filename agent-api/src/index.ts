@@ -427,6 +427,7 @@ import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
 import { createLocalBridgeRouter } from "./local-bridge-router.js";
+import { bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace } from "./local-bridge-service.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
 import { createTrainingCatalogRouter } from "./workspaces/training-catalog-router.js";
@@ -2718,6 +2719,7 @@ const crestArtifactContentSchema = z.object({
 });
 
 const createThreadSchema = z.object({
+  local_root_id: z.string().min(1).nullable().optional(),
   title: z.string().optional(),
   external_id: z.string().optional(),
   model: z.string().optional(),
@@ -2842,6 +2844,7 @@ type SessionOptions = {
 };
 
 type RuntimeCapabilityFingerprint = {
+  localComputer?: { bindingId: string };
   crestCrm?: {
     enabled: true;
     proxyTokenExpiresAt: string;
@@ -2988,6 +2991,8 @@ function runtimeCapabilitiesFromRunConfig(
       proxyTokenExpiresAt: dwsProxyTokenExpiresAt
     };
   }
+  const localRaw = asRecord(raw?.localComputer);
+  if (typeof localRaw?.bindingId === "string") capabilities.localComputer = { bindingId: localRaw.bindingId };
   return capabilities;
 }
 
@@ -3044,7 +3049,7 @@ function withRuntimeCapabilityMetadata(
   capabilities: RuntimeCapabilityFingerprint
 ): Record<string, unknown> | undefined {
   const next = withoutRuntimeCapabilityMetadata(codexRunConfig);
-  if (!capabilities.crestCrm && !capabilities.dingtalkDws) return next;
+  if (!capabilities.crestCrm && !capabilities.dingtalkDws && !capabilities.localComputer) return next;
   return {
     ...(next ?? {}),
     [RUNTIME_CAPABILITIES_RUN_CONFIG_KEY]: capabilities
@@ -3514,10 +3519,11 @@ async function resolveRuntimeLaunchConfig(input: {
   workspace?: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<RuntimeLaunchConfig> {
-  const [crestMcp, dwsRuntime, publishedSystemSettings] = await Promise.all([
+  const [crestMcp, dwsRuntime, publishedSystemSettings, localRuntime] = await Promise.all([
     input.userId ? buildCrestMcpRuntimeConfigForUser(input.userId, input.workspace) : undefined,
     input.userId ? buildDwsRuntimeConfigForUser(input.userId, input.workspace) : undefined,
-    codexProviders.getPublishedSystemSettings()
+    codexProviders.getPublishedSystemSettings(),
+    buildLocalRuntime(db, agentStudioInternalBaseUrl(), input.userId, input.workspace)
   ]);
   const pythonRuntimeSettings =
     publishedSystemSettings?.payload.pythonRuntime ?? createDefaultSystemSettingsPayload().pythonRuntime;
@@ -3536,6 +3542,7 @@ async function resolveRuntimeLaunchConfig(input: {
   });
   const runtimeHint = sharedPythonRuntimeHint(pythonRuntimeSettings);
   const runtimeHints = [
+    ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
     ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : [])
   ];
@@ -3543,6 +3550,7 @@ async function resolveRuntimeLaunchConfig(input: {
     withRuntimeCapabilityMetadata(
       input.codexRunConfig,
       {
+        ...(localRuntime ? { localComputer: { bindingId: localRuntime.bindingId } } : {}),
         ...(crestMcp?.capabilities ?? {}),
         ...(dwsRuntime?.capabilities ?? {})
       }
@@ -3560,13 +3568,15 @@ async function resolveRuntimeLaunchConfig(input: {
       : {})
   };
   return {
-    configOverrides: crestMcp?.configOverrides,
+    configOverrides: localRuntime ? { ...(crestMcp?.configOverrides ?? {}), mcp_servers: { ...((crestMcp?.configOverrides?.mcp_servers as Record<string, unknown>) ?? {}), local_computer: localRuntime.server } } : crestMcp?.configOverrides,
     envOverrides: Object.keys(envOverrides).length > 0 ? envOverrides : undefined,
     codexRunConfig
   };
 }
 
 async function sessionRuntimeCapabilitiesAreCurrent(session: SessionRecord, userId?: string): Promise<boolean> {
+  const local = await localBindingForWorkspace(db, userId ?? session.userId, session.workspace);
+  if ((runtimeCapabilitiesFromRunConfig(session.codexRunConfig).localComputer?.bindingId ?? null) !== (local?.id ?? null)) return false;
   const desired = await desiredRuntimeCapabilitiesForUser(userId ?? session.userId);
   return runtimeCapabilitiesAreCurrent(session.codexRunConfig, desired);
 }
@@ -4756,6 +4766,7 @@ async function cancelPortalActiveChatRun(input: {
     };
   }
   const userMessageId = trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId);
+  if (threadId) await cancelLocalTask(db, threadId);
 
   const runtimeAbortRequested = Boolean(entry && !entry.controller.signal.aborted);
   if (entry && !entry.controller.signal.aborted) {
@@ -11348,6 +11359,7 @@ app.post(
     }
   }
 );
+app.use("/api/local-bridge", express.json({ limit: "4mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(createPublicBrandContextMiddleware(publicBrands));
 
@@ -11672,7 +11684,7 @@ registerCommonApiRoutes(app, {
     publicBrands
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
-  localBridgeRouter: createLocalBridgeRouter(db),
+  localBridgeRouter: createLocalBridgeRouter(db, { isTaskRunning: (threadId) => [...portalActiveChatRuns.values()].some(run => run.threadId === threadId) }),
   externalWebAccessMiddleware: createAuthenticatedExternalWebGate(externalWebAccess),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
@@ -12730,6 +12742,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         codexRunConfig: options.codexRunConfig
       })
     );
+    if (input.local_root_id) await bindLocalRoot(db, currentUser.id, createdThread.id, input.local_root_id);
     const session = shouldStartSession
       ? await timing.time("create_thread.create_session", () =>
           createSession(options, createdThread.id, timing)

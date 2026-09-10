@@ -1,2 +1,0 @@
-import test from 'node:test'; import assert from 'node:assert/strict'; import {allowedPath} from './protocol.js'; import {mkdtemp,writeFile} from 'node:fs/promises'; import {tmpdir} from 'node:os'; import {join} from 'node:path';
-test('denies traversal outside root',async()=>{const root=await mkdtemp(join(tmpdir(),'bridge-')); await writeFile(join(root,'a'),'x'); await assert.rejects(()=>allowedPath(join(root,'..','outside'),[root]),/BRIDGE_PATH_DENIED/)});

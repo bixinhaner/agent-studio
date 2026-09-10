@@ -1,71 +1,97 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
-const fs = require("node:fs/promises");
-const path = require("node:path");
-const os = require("node:os");
-const crypto = require("node:crypto");
-
-const RELAY_URL = process.env.AGENT_STUDIO_RELAY_URL || "https://aiagent.indonesiacentral.cloudapp.azure.com";
-let mainWindow;
-let config = { relayUrl: RELAY_URL, token: "", deviceId: "", deviceName: os.hostname(), roots: [] };
-let pollTimer;
-
-function configPath() { return path.join(app.getPath("userData"), "bridge.json"); }
-async function loadConfig() { try { config = { ...config, ...JSON.parse(await fs.readFile(configPath(), "utf8")) }; } catch {} }
-async function saveConfig() { await fs.mkdir(path.dirname(configPath()), { recursive: true }); await fs.writeFile(configPath(), JSON.stringify(config, null, 2)); }
-function emit(channel, payload) { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); }
+const { app, BrowserWindow, dialog, ipcMain, shell, Tray, Menu, nativeImage, safeStorage } = require('electron');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const runtimeDir = app.isPackaged ? path.join(process.resourcesPath, 'local-runtime') : path.join(__dirname, '../../local-bridge/runtime');
+const { createExecutor } = require(path.join(runtimeDir, 'executor.cjs'));
+const { runTransport } = require(path.join(runtimeDir, 'transport.cjs'));
+const RELAY_URL = process.env.AGENT_STUDIO_RELAY_URL || 'https://aiagent.indonesiacentral.cloudapp.azure.com';
+const PORTAL_URL = process.env.AGENT_STUDIO_PORTAL_URL || 'https://bailey.baicells.com/?view=workspace';
+let mainWindow, tray, controller, loop, executor, quitting = false, ready = false;
+let config = { relayUrl: RELAY_URL, token: '', deviceId: '', deviceName: os.hostname(), roots: [], paused: false };
+let status = { connected: false, error: '' };
+let pendingLinks = [];
+const configPath = () => path.join(app.getPath('userData'), 'bridge.json');
+async function saveConfig() {
+  await fs.mkdir(path.dirname(configPath()), { recursive: true, mode: 0o700 });
+  const persisted = { ...config };
+  delete persisted.encryptedToken;
+  if (safeStorage.isEncryptionAvailable() && config.token) { persisted.encryptedToken = safeStorage.encryptString(config.token).toString('base64'); delete persisted.token; }
+  const temp = configPath() + '.tmp'; await fs.writeFile(temp, JSON.stringify(persisted, null, 2), { mode: 0o600 }); await fs.rename(temp, configPath());
+}
+function state() { return { paired: Boolean(config.token), deviceName: config.deviceName, deviceId: config.deviceId, roots: config.roots, paused: config.paused, version: app.getVersion(), ...status }; }
+function emit() { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('bridge:state', state()); }
 async function api(endpoint, init = {}) {
-  const headers = { "content-type": "application/json", ...(init.headers || {}) };
-  if (config.token) headers.authorization = `Bearer ${config.token}`;
-  const response = await fetch(`${config.relayUrl.replace(/\/$/, "")}${endpoint}`, { ...init, headers });
+  const response = await fetch(config.relayUrl.replace(/\/$/, '') + endpoint, { ...init, headers: { 'content-type': 'application/json', ...(config.token ? { authorization: `Bearer ${config.token}` } : {}) }, signal: AbortSignal.timeout(15000) });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || `请求失败（${response.status}）`);
+  if (response.status === 401 && endpoint !== '/api/local-bridge/agent/pair') { executor?.stopAll(); throw new Error('连接已失效，请在 Portal 重新连接这台电脑。'); }
+  if (!response.ok) throw new Error(body.detail || `连接失败（${response.status}），正在重试`);
   return body;
 }
-async function execute(command) {
-  const canonical = await fs.realpath(command.path);
-  const roots = command.scope.roots || [];
-  if (!roots.some((root) => { const r = path.resolve(root); const p = path.resolve(canonical); return p === r || p.startsWith(`${r}${path.sep}`); })) throw new Error("BRIDGE_PATH_DENIED");
-  if (command.op === "read") return { path: canonical, content: await fs.readFile(canonical, "utf8") };
-  if (command.op === "list") return { path: canonical, entries: await fs.readdir(canonical) };
-  if (typeof command.content !== "string" || Buffer.byteLength(command.content) > 10 * 1024 * 1024) throw new Error("BRIDGE_PAYLOAD_INVALID");
-  await fs.writeFile(canonical, command.content, "utf8");
-  return { path: canonical, written: true };
+async function startPolling() {
+  if (loop || !config.token || config.paused) return;
+  controller = new AbortController();
+  loop = runTransport({ api, executor, signal: controller.signal, onStatus: next => { const changed = status.connected !== next.connected || status.error !== next.error; status = next; if (changed) emit(); } }).finally(() => { loop = undefined; });
 }
-async function poll() {
-  if (!config.token) return;
+async function stopPolling() { controller?.abort(); executor?.stopAll(); if (loop) await loop; status = { connected: false, error: '' }; emit(); }
+async function chooseRoot(connectionId, returnUrl) {
+  showWindow();
+  const result = await dialog.showOpenDialog(mainWindow, { title: '选择要处理的文件夹', buttonLabel: '使用此文件夹', properties: ['openDirectory', 'createDirectory'] });
+  if (result.canceled || !result.filePaths[0]) { if (connectionId) await api('/api/local-bridge/agent/complete', { method: 'POST', body: JSON.stringify({ connection_id: connectionId, root_id: null }) }); return null; }
+  const canonical = await fs.realpath(result.filePaths[0]);
+  const { root } = await api('/api/local-bridge/agent/roots', { method: 'POST', body: JSON.stringify({ path: canonical, label: path.basename(canonical) || canonical }) });
+  config.roots = [...config.roots.filter(r => r.id !== root.id), root]; await saveConfig(); emit();
+  if (connectionId) { await api('/api/local-bridge/agent/complete', { method: 'POST', body: JSON.stringify({ connection_id: connectionId, root_id: root.id }) }); await shell.openExternal(returnUrl || PORTAL_URL); }
+  return root;
+}
+async function pair(code) {
+  const result = await api('/api/local-bridge/agent/pair', { method: 'POST', body: JSON.stringify({ code, name: config.deviceName, platform: process.platform }) });
+  if (config.deviceId !== result.device_id) config.roots = [];
+  config.token = result.token; config.deviceId = result.device_id; config.paused = false; await saveConfig(); void startPolling(); emit();
+  await chooseRoot(result.connection_id, result.return_url); return state();
+}
+function showWindow() { if (mainWindow) { mainWindow.show(); if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } }
+async function handleLink(value) {
+  if (!ready) { pendingLinks.push(value); return; }
   try {
-    const body = await api("/api/local-bridge/agent/poll", { method: "POST", body: "{}" });
-    emit("bridge:status", { connected: true, roots: body.roots || config.roots });
-    if (body.command) {
-      let result;
-      try { result = await execute(body.command); } catch (error) { result = { ok: false, error: error.message || "BRIDGE_ERROR" }; }
-      await api("/api/local-bridge/agent/result", { method: "POST", body: JSON.stringify({ id: body.command.id, result }) });
-    }
-  } catch (error) { emit("bridge:status", { connected: false, error: error.message || "网络连接失败" }); }
+    const url = new URL(value);
+    if (url.protocol !== 'agent-studio:' || url.hostname !== 'connect') return;
+    // The relay URL is local configuration, never taken from an untrusted deep link.
+    const code = url.searchParams.get('code'); showWindow();
+    if (code && /^[A-Fa-f0-9]{8,10}$/.test(code)) await pair(code);
+  } catch (error) { status.error = error.message; emit(); }
 }
-function startPolling() { clearInterval(pollTimer); pollTimer = setInterval(() => void poll(), 800); void poll(); }
-
-ipcMain.handle("bridge:get-state", () => ({ ...config, connected: Boolean(config.token) }));
-ipcMain.handle("bridge:pair", async (_event, code) => {
-  const result = await api("/api/local-bridge/agent/pair", { method: "POST", body: JSON.stringify({ code, name: config.deviceName, platform: process.platform }) });
-  config = { ...config, token: result.token, deviceId: result.device_id };
-  await saveConfig(); startPolling(); emit("bridge:paired", { deviceId: config.deviceId, name: config.deviceName });
-  return { deviceId: config.deviceId, name: config.deviceName };
-});
-ipcMain.handle("bridge:choose-root", async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
-  if (result.canceled || !result.filePaths[0]) return null;
-  const root = result.filePaths[0];
-  await api("/api/local-bridge/agent/roots", { method: "POST", body: JSON.stringify({ path: root, label: path.basename(root) || root }) });
-  config.roots = [...new Set([...config.roots, root])]; await saveConfig(); emit("bridge:roots", config.roots); return root;
-});
-ipcMain.handle("bridge:disconnect", async () => { config.token = ""; config.deviceId = ""; config.roots = []; await saveConfig(); clearInterval(pollTimer); emit("bridge:status", { connected: false }); });
-
-async function createWindow() {
-  await loadConfig();
-  mainWindow = new BrowserWindow({ width: 980, height: 700, minWidth: 760, minHeight: 560, title: "Agent Studio Local Bridge", backgroundColor: "#0b1018", webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: true } });
-  await mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
-  if (config.token) startPolling();
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on('second-instance', (_event, argv) => { showWindow(); const link = argv.find(v => v.startsWith('agent-studio://')); if (link) void handleLink(link); });
+  app.on('open-url', (event, url) => { event.preventDefault(); void handleLink(url); });
+  app.on('activate', showWindow);
+  app.on('before-quit', () => { quitting = true; controller?.abort(); executor?.stopAll(); });
+  app.whenReady().then(async () => {
+    try { const saved = JSON.parse(await fs.readFile(configPath(), 'utf8')); config = { ...config, ...saved }; if (saved.encryptedToken) config.token = safeStorage.decryptString(Buffer.from(saved.encryptedToken, 'base64')); } catch {}
+    executor = createExecutor({ getRoots: () => config.roots, journalDir: path.join(app.getPath('userData'), 'requests'), chooseRoot, openPath: async target => { const error = await shell.openPath(target); if (error) throw new Error(error); } });
+    if (process.defaultApp) app.setAsDefaultProtocolClient('agent-studio', process.execPath, [path.resolve(process.argv[1])]); else app.setAsDefaultProtocolClient('agent-studio');
+    mainWindow = new BrowserWindow({ width: 900, height: 680, minWidth: 680, minHeight: 540, title: 'Agent Studio · 我的电脑', backgroundColor: '#ffffff', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    mainWindow.webContents.on('will-navigate', event => event.preventDefault());
+    mainWindow.on('close', event => { if (!quitting) { event.preventDefault(); mainWindow.hide(); } });
+    await mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    const icon = nativeImage.createFromPath(path.join(__dirname, '../renderer/tray.png')); icon.setTemplateImage(true);
+    tray = new Tray(icon); tray.setToolTip('Agent Studio · 我的电脑'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开我的电脑', click: showWindow }, { label: '打开 Portal', click: () => shell.openExternal(PORTAL_URL) }, { type: 'separator' }, { label: '退出', click: () => app.quit() }])); tray.on('click', showWindow);
+    // Upgrade only roots already selected in the local 0.1 client.
+    if (config.token) for (const old of config.roots.filter(r => typeof r === 'string')) { try { const { root } = await api('/api/local-bridge/agent/roots', { method: 'POST', body: JSON.stringify({ path: old, label: path.basename(old) }) }); config.roots = config.roots.map(r => r === old ? root : r); } catch {} }
+    config.roots = config.roots.filter(r => typeof r === 'object'); await saveConfig();
+    // Operational request receipts are short-lived and contain no file history.
+    const receipts = path.join(app.getPath('userData'), 'requests');
+    for (const entry of await fs.readdir(receipts).catch(() => [])) { const file = path.join(receipts, entry); const stat = await fs.stat(file).catch(() => null); if (stat && Date.now() - stat.mtimeMs > 7 * 86400000) await fs.rm(file, { force: true }); }
+    ready = true; void startPolling();
+    const argvLink = process.argv.find(v => v.startsWith('agent-studio://')); if (argvLink) pendingLinks.push(argvLink);
+    for (const link of pendingLinks.splice(0)) await handleLink(link);
+  });
 }
-app.whenReady().then(createWindow);
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+ipcMain.handle('bridge:get-state', () => state());
+ipcMain.handle('bridge:pair', (_event, code) => pair(String(code)));
+ipcMain.handle('bridge:choose-root', () => chooseRoot());
+ipcMain.handle('bridge:portal', () => shell.openExternal(PORTAL_URL));
+ipcMain.handle('bridge:pause', async () => { config.paused = !config.paused; await saveConfig(); if (config.paused) await stopPolling(); else void startPolling(); emit(); return state(); });
+ipcMain.handle('bridge:disconnect', async () => { await stopPolling(); config.token = ''; config.deviceId = ''; config.roots = []; config.paused = false; await saveConfig(); emit(); return state(); });

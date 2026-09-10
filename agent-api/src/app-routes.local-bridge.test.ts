@@ -11,6 +11,17 @@ describe("registerCommonApiRoutes Local Bridge authentication", () => {
       id: "device-1",
       ...data
     }));
+    const connections = new Map<string, any>();
+    const testDb: any = {
+      localBridgeDevice: { create: createDevice },
+      localBridgeConnection: {
+        create: async ({ data }: any) => { const c = { id: "connection-1", status: "pending", ...data }; connections.set(c.tokenHash, c); return c; },
+        findUnique: async ({ where }: any) => connections.get(where.tokenHash),
+        updateMany: async ({ where, data }: any) => { const c = [...connections.values()].find(v => v.id === where.id && v.status === where.status); if (!c) return { count: 0 }; Object.assign(c, data); return { count: 1 }; },
+        update: async () => ({})
+      },
+      $transaction: (fn: any) => fn(testDb)
+    };
     const app = express();
     app.use(express.json());
     registerCommonApiRoutes(app, {
@@ -30,9 +41,7 @@ describe("registerCommonApiRoutes Local Bridge authentication", () => {
       authRouter: Router(),
       adminRouter: Router() as never,
       portalRouter: Router(),
-      localBridgeRouter: createLocalBridgeRouter({
-        localBridgeDevice: { create: createDevice }
-      }),
+      localBridgeRouter: createLocalBridgeRouter(testDb),
       serviceTokenMiddleware: (_req, _res, next) => next(),
       zendeskRouter: Router()
     });

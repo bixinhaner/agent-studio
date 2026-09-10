@@ -1,6 +1,6 @@
 {
   "name": "@agent-studio/local-bridge-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Agent Studio Local Bridge desktop companion",
   "main": "electron/main.cjs",
@@ -13,14 +13,61 @@
     "appId": "cloud.indonesiacentral.agentstudio.localbridge",
     "executableName": "agent-studio-local-bridge",
     "productName": "Agent Studio Local Bridge",
-    "directories": { "output": "dist" },
-    "files": ["electron/**", "renderer/**"],
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}" },
-    "win": { "target": ["nsis", "zip"], "artifactName": "Agent-Studio-Local-Bridge-${version}-Windows-${arch}.${ext}" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Development", "artifactName": "Agent-Studio-Local-Bridge-latest-Linux-${arch}.${ext}" }
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "renderer/**"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "Agent-Studio-Local-Bridge-latest-Windows-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "artifactName": "Agent-Studio-Local-Bridge-latest-Linux-${arch}.${ext}",
+      "maintainer": "Agent Studio",
+      "syncDesktopName": true
+    },
+    "extraResources": [
+      {
+        "from": "../local-bridge/runtime",
+        "to": "local-runtime",
+        "filter": [
+          "*.cjs"
+        ]
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Agent Studio",
+        "schemes": [
+          "agent-studio"
+        ]
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^36.4.0",
     "electron-builder": "^26.0.12"
-  }
+  },
+  "author": "Agent Studio",
+  "homepage": "https://bailey.baicells.com",
+  "desktopName": "agent-studio-local-bridge.desktop"
 }

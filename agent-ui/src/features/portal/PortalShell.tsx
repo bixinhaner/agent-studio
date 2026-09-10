@@ -144,7 +144,9 @@ import {
   type CodexFileChangeView
 } from "../artifacts/codex-file-changes";
 import { PortalTopBar } from "./workbench/PortalTopBar";
+import { LocalToolCard } from "./workbench/LocalToolCard";
 import { LocalBridgePanel } from "./workbench/LocalBridgePanel";
+import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
@@ -2495,7 +2497,9 @@ const UploadAwareComposer: FC = () => {
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
-  const runtimeReadiness = useContext(RuntimeReadinessContext);
+  const baseRuntimeReadiness = useContext(RuntimeReadinessContext);
+  const localWorkspaceReadiness = useLocalWorkspaceReadiness();
+  const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
@@ -2728,6 +2732,7 @@ const UploadAwareComposer: FC = () => {
           </p>
         ) : null}
         <SelectedSkillContextBar />
+        <LocalWorkspaceControls />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
@@ -2803,7 +2808,9 @@ const MobileAwareComposer: FC = () => {
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
-  const runtimeReadiness = useContext(RuntimeReadinessContext);
+  const baseRuntimeReadiness = useContext(RuntimeReadinessContext);
+  const localWorkspaceReadiness = useLocalWorkspaceReadiness();
+  const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
@@ -2933,6 +2940,7 @@ const MobileAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint" role="status">{workflowNotice}</p>
         ) : null}
         <SelectedSkillContextBar />
+        <LocalWorkspaceControls />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
@@ -4203,7 +4211,7 @@ const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
   );
 };
 
-const HiddenToolFallback: FC<any> = () => null;
+const HiddenToolFallback: FC<any> = (props) => <LocalToolCard {...props} />;
 
 const AssistantLiveStatus: FC<{ title: string; compact?: boolean }> = ({ title, compact }) => {
   const { t } = usePortalI18n();
@@ -6785,7 +6793,7 @@ export function PortalShell(props: {
     return t("feedback.impactLow");
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
-  const canUseLocalBridge = portalPreferenceUser?.email?.trim().toLowerCase() === "like@baicells.com";
+  const canUseLocalBridge = Boolean(portalPreferenceUser?.id) && !trainingReadOnly;
   const isExternalPortalUser = !isInternalPortalExperience({
     userType: portalPreferenceUser?.userType,
     organizationType: auth.activeOrganization?.type,
@@ -6881,6 +6889,7 @@ export function PortalShell(props: {
   const [persistedCompletionNoticeThreadIds, setPersistedCompletionNoticeThreadIds] =
     useState<RunningThreadIdsContextValue>({});
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
+  const localWorkspace = useLocalWorkspace(String(activeThreadIdentity.remoteId || ""), canUseLocalBridge);
 
   useEffect(() => {
     if (isMobile) {
@@ -7876,6 +7885,7 @@ export function PortalShell(props: {
               knowledge_set_ids: knowledgeSetIds,
               folder_id: folderId || undefined,
               codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills),
+              local_root_id: localWorkspace.selectionRef.current?.root_id,
               start_session: false
             }
           });
@@ -10704,6 +10714,7 @@ export function PortalShell(props: {
 
 
   return (
+    <LocalWorkspaceContext.Provider value={{ ...localWorkspace, running: Boolean(runningThreadIds[activeRemoteThreadId]), manage: () => setLocalBridgeOpen(true) }}>
     <AssistantRuntimeProvider runtime={runtime}>
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalChatRecoveryContext.Provider value={portalChatRecoveryContextValue}>
@@ -10757,6 +10768,7 @@ export function PortalShell(props: {
                 onExitTraining={props.onExitTraining}
               />
               <LocalBridgePanel open={localBridgeOpen} onClose={() => setLocalBridgeOpen(false)} />
+              <LocalWorkspaceDialogs />
 
               <div className="portal-workbench-body">
                 {isMobile ? (
@@ -11267,6 +11279,7 @@ export function PortalShell(props: {
       </PortalChatRecoveryContext.Provider>
       </PortalComposerWorkflowProvider>
     </AssistantRuntimeProvider>
+    </LocalWorkspaceContext.Provider>
   );
 }
 

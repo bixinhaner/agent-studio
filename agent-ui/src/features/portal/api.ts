@@ -202,7 +202,7 @@ export async function fetchPortalSubscriptionStatus(): Promise<PortalSubscriptio
 }
 
 export type LocalBridgeDevice = { id: string; name: string; platform?: string | null; status: "online" | "offline"; last_seen_at?: string | null; roots: Array<{ id: string; path: string; label?: string | null }> };
-async function localBridgeApi<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+export async function localBridgeApi<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.json !== undefined) headers.set("Content-Type", "application/json");
   const response = await fetch(`${apiBase()}${path}`, {
@@ -227,9 +227,6 @@ export async function createLocalBridgePairing(): Promise<{ code: string; expire
 }
 export async function revokeLocalBridgeDevice(id: string): Promise<void> {
   await localBridgeApi(`/api/local-bridge/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-export async function addLocalBridgeRoot(deviceId: string, path: string, label?: string): Promise<void> {
-  await localBridgeApi(`/api/local-bridge/devices/${encodeURIComponent(deviceId)}/roots`, { method: "POST", json: { path, label } });
 }
 
 export async function fetchPortalBillingSummary(): Promise<PortalBillingSummaryResponse> {

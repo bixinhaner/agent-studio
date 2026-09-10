@@ -348,6 +348,7 @@ model LocalBridgeDevice {
   updatedAt    DateTime @updatedAt @map("updated_at")
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   roots        LocalBridgeRoot[]
+  commands     LocalBridgeCommand[]
   @@index([userId, status])
   @@map("local_bridge_devices")
 }
@@ -359,6 +360,7 @@ model LocalBridgeRoot {
   label     String?
   createdAt DateTime @default(now()) @map("created_at")
   device    LocalBridgeDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  bindings LocalBridgeBinding[]
   @@unique([deviceId, path])
   @@map("local_bridge_roots")
 }
@@ -1159,6 +1161,7 @@ model Thread {
   workspaceNodesCreated WorkspaceNode[] @relation("WorkspaceNodeSourceThread")
   workspaceVersionsCreated WorkspaceFileVersion[] @relation("WorkspaceVersionCreatedByThread")
   workspaceChangeSets WorkspaceChangeSet[] @relation("WorkspaceChangeSetThread")
+  localBridgeBinding LocalBridgeBinding?
 
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
@@ -2844,4 +2847,50 @@ enum SessionStatus {
 enum SystemSettingsVersionStatus {
   draft
   published
+}
+
+model LocalBridgeConnection {
+  id String @id @default(cuid())
+  returnUrl String? @map("return_url")
+  threadId String? @map("thread_id")
+  userId String @map("user_id")
+  tokenHash String @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  status String @default("pending")
+  deviceId String? @map("device_id")
+  rootId String? @map("root_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([expiresAt])
+  @@map("local_bridge_connections")
+}
+
+model LocalBridgeBinding {
+  id String @id @default(cuid())
+  threadId String @unique @map("thread_id")
+  rootId String @map("root_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  root LocalBridgeRoot @relation(fields: [rootId], references: [id], onDelete: Cascade)
+  @@map("local_bridge_bindings")
+}
+
+// Operational delivery state only: no file versions, diffs, or approval records.
+model LocalBridgeCommand {
+  id String @id
+  deviceId String @map("device_id")
+  threadId String? @map("thread_id")
+  bindingId String? @map("binding_id")
+  rootId String? @map("root_id")
+  op String
+  args Json
+  status String @default("pending")
+  lease String?
+  leaseUntil DateTime? @map("lease_until")
+  result Json?
+  deadline DateTime
+  createdAt DateTime @default(now()) @map("created_at")
+  device LocalBridgeDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  @@index([deviceId, status, createdAt])
+  @@index([deadline])
+  @@map("local_bridge_commands")
 }
