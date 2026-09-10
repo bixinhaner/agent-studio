@@ -13,6 +13,7 @@ export function LocalBridgeVisibilitySettingsView({ value, fieldErrors, disabled
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [search, setSearch] = useState("");
   useEffect(() => {
     let alive = true;
     setLoading(true); setFailed(false);
@@ -27,6 +28,10 @@ export function LocalBridgeVisibilitySettingsView({ value, fieldErrors, disabled
     return () => { alive = false; };
   }, [revision]);
   const emailErrors = Object.entries(fieldErrors).filter(([key]) => key.startsWith("localBridgeVisibility.emails")).map(([, message]) => message);
+  const typedEmail = search.trim().toLowerCase();
+  const selectableOptions = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typedEmail) && !options.some(option => option.value === typedEmail)
+    ? [...options, { value: typedEmail, label: typedEmail }]
+    : options;
   return <section className="resource-center-section">
     <div className="resource-center-section-header"><div>
       <h3>本机文件夹入口</h3>
@@ -41,7 +46,7 @@ export function LocalBridgeVisibilitySettingsView({ value, fieldErrors, disabled
       {value.mode === "selected" ? <>
         {failed ? <Alert type="warning" showIcon message="用户列表暂时无法加载，仍可直接填写登录邮箱。" action={<Button size="small" onClick={() => setRevision(old => old + 1)}>重试</Button>} style={{ marginBottom: 16 }} /> : null}
         <Form.Item label="可见用户" htmlFor="local-bridge-visible-users" validateStatus={emailErrors.length ? "error" : undefined} help={emailErrors.length ? emailErrors.join("；") : undefined} extra="按姓名或邮箱搜索，也可以输入登录邮箱后按回车。名单为空时，所有用户均不显示入口。">
-          <Select id="local-bridge-visible-users" mode="tags" value={value.emails} options={options} loading={loading} disabled={disabled} optionFilterProp="label" tokenSeparators={[",", ";", "，", "；", " ", "\n"]} placeholder="搜索用户或填写登录邮箱" style={{ width: "100%" }} onChange={emails => onChange({ emails: [...new Set(emails.map(email => email.trim().toLowerCase()).filter(Boolean))] })} />
+          <Select id="local-bridge-visible-users" mode="multiple" showSearch searchValue={search} onSearch={setSearch} value={value.emails} options={selectableOptions} loading={loading} disabled={disabled} optionFilterProp="label" notFoundContent="未找到用户，可填写完整登录邮箱" placeholder="搜索用户或填写登录邮箱" style={{ width: "100%" }} onChange={emails => { setSearch(""); onChange({ emails: [...new Set(emails.map(email => email.trim().toLowerCase()).filter(Boolean))] }); }} />
         </Form.Item>
       </> : null}
       <p style={{ color: "var(--admin-color-subtle)" }}>点击“应用并发布”后生效，无需重新部署。用户刷新 Portal 或回到页面时会更新入口。</p>
