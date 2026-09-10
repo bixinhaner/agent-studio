@@ -41,6 +41,14 @@ describe("assistant API exploration", () => {
     await expect(f.request("get.devices", "POST", "/api/v1/devices")).rejects.toThrow("policy");
     await f.request("get.devices", "GET", "/api/v1/devices");
   });
+  it("allows fixed assistants to inspect contracts while retaining their business allowlist", async () => {
+    const request = executionRequestSchema.parse({ contractVersion: "1.0", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
+    const bridge = { prepareBackgroundRun: vi.fn() };
+    const result = { outcome: "insufficient_data", title: "No data", summary: "No business query", facts: [], hypotheses: [], nextSteps: [] };
+    const runtime = { streamChat: async (input: {emit: (e: unknown) => void}) => input.emit({type:"delta", text:JSON.stringify(result)}) };
+    await executeAssistant({ db: { connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
+    expect(bridge.prepareBackgroundRun).toHaveBeenCalledWith(expect.objectContaining({ allowDiscovery: true, allowedOperations: definition.operations, operationGrants: undefined }));
+  });
   it("permits deferred API discovery without inventing operation IDs", () => {
     const output = planningResponseSchema.parse({ reply: "Trial will inspect contracts", readiness: "ready", questions: [], missingCapabilities: [], definition: { ...definition, apiAccess: "discover", operations: [] } });
     expect(() => validatePlan(planningInput, output)).not.toThrow();
