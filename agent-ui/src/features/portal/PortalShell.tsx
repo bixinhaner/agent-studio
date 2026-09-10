@@ -145,6 +145,7 @@ import {
 } from "../artifacts/codex-file-changes";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { LocalToolCard } from "./workbench/LocalToolCard";
+import { isLocalToolPart, upsertLocalToolParts } from "./workbench/local-tool-parts";
 import { LocalBridgePanel } from "./workbench/LocalBridgePanel";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
@@ -5062,6 +5063,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
     }
 
     if (type === "tool-call") {
+      if (isLocalToolPart(p)) continue;
       if (p.isError === true) {
         rows.push({
           id: `timeline-${++seq}`,
@@ -9169,7 +9171,7 @@ export function PortalShell(props: {
 
         const appendDisplayDataParts = (parts: any[]): boolean => {
           if (parts.length === 0) return false;
-          let changed = false;
+          let changed = upsertLocalToolParts(orderedParts, parts);
           for (const part of parts) {
             const partObj = asRecord(part);
             if (!partObj || partObj.type !== "data") continue;
@@ -9820,7 +9822,7 @@ export function PortalShell(props: {
                 toolName,
                 args,
                 argsText: JSON.stringify(args),
-                ...(result !== undefined ? { result } : {}),
+                ...(isCompleted && result != null ? { result } : {}),
                 ...(errMsg ? { isError: true } : {})
               });
               if (isCompleted && processEnabled) updates.push({

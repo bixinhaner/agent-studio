@@ -584,6 +584,7 @@ export function codexCommentaryEntriesToContentPart(
 
 export class CodexRunProjection {
   private readonly traceRows: CodexTraceRow[] = [];
+  private readonly localToolParts = new Map<string, Record<string, unknown>>();
   private readonly commentaryEntries: CodexCommentaryEntry[] = [];
   private readonly agentMessagePhaseById = new Map<string, string>();
   private pendingLiveCommentaryEntry: CodexCommentaryEntry | undefined;
@@ -615,6 +616,27 @@ export class CodexRunProjection {
       }
     }
     this.traceRows.push(...projection.traceRows);
+    if (projection.toolCall?.server === "local_computer") {
+      const tool = projection.toolCall;
+      let result: any = tool.result;
+      try {
+        if (typeof result === "string") result = JSON.parse(result);
+        const text = result?.content?.find?.((part: any) => part.type === "text")?.text;
+        if (typeof text === "string") result = JSON.parse(text);
+      } catch { result = undefined; }
+      // Persist the conversation result card, not file contents or command output.
+      const summary = {
+        ok: !tool.errorMessage && result?.ok !== false,
+        ...(typeof result?.path === "string" ? { path: result.path } : {}),
+        ...(result?.pending ? { pending: true } : {}),
+        ...(tool.errorMessage || typeof result?.error === "string" ? { error: tool.errorMessage || result.error } : {})
+      };
+      const toolCallId = tool.id || `local-${this.localToolParts.size}`;
+      this.localToolParts.set(toolCallId, {
+        type: "tool-call", toolCallId, toolName: tool.name, args: {}, argsText: "{}",
+        result: summary, ...(summary.ok ? {} : { isError: true })
+      });
+    }
     if (projection.completedAgentMessage) {
       if ((projection.completedAgentMessage.phase ?? agentMessagePhase) === "final_answer") {
         projection.liveCommentaryEntries = this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [];
@@ -650,12 +672,13 @@ export class CodexRunProjection {
       commentaryEntries,
       liveCommentaryEntries,
       traceRows,
-      contentParts: [commentaryPart, tracePart].filter((part): part is Record<string, unknown> => Boolean(part))
+      contentParts: [commentaryPart, tracePart, ...this.localToolParts.values()].filter((part): part is Record<string, unknown> => Boolean(part))
     };
   }
 
   reset(): void {
     this.traceRows.length = 0;
+    this.localToolParts.clear();
     this.commentaryEntries.length = 0;
     this.pendingLiveCommentaryEntry = undefined;
     this.commentarySeq = 0;
