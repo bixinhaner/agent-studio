@@ -26,7 +26,8 @@
         "zip"
       ],
       "category": "public.app-category.developer-tools",
-      "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}"
+      "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}",
+      "identity": "-"
     },
     "win": {
       "target": [
