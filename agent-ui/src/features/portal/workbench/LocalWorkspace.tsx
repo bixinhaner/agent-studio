@@ -96,12 +96,12 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
 }
 type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { running: boolean; manage(): void };
 export const LocalWorkspaceContext = createContext<WorkspaceContext | null>(null);
-export function useLocalWorkspaceReadiness() {
+export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; notice: string; actionLabel?: string; retry(): Promise<void> } | null {
   const local = useContext(LocalWorkspaceContext);
   if (!local?.enabled) return null;
   if (local.bindingLoadFailed) return { status: 'error' as const, notice: '无法确认任务的工作目录，请重试。', retry: async () => local.reloadBinding() };
   if (local.busy) return { status: 'loading' as const, notice: '正在更新工作目录…', retry: async () => {} };
-  if (local.offline) return { status: 'error' as const, notice: '电脑暂时离线，打开客户端后继续。', retry: async () => { local.begin(); } };
+  if (local.offline) return { status: 'error' as const, notice: '电脑暂时离线，打开客户端后继续。', actionLabel: '打开客户端', retry: async () => { window.location.href = 'agent-studio://connect'; } };
   return null;
 }
 export function LocalWorkspaceControls() {

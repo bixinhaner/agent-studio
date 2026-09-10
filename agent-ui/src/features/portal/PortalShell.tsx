@@ -2699,7 +2699,7 @@ const UploadAwareComposer: FC = () => {
             <span>{runtimeReadiness.notice}</span>
             {runtimeReadiness.status === "error" ? (
               <button type="button" onClick={() => void runtimeReadiness.retry()}>
-                {t("runtime.retry")}
+                {localWorkspaceReadiness?.actionLabel ?? t("runtime.retry")}
               </button>
             ) : null}
           </div>
@@ -2929,7 +2929,7 @@ const MobileAwareComposer: FC = () => {
             <span>{runtimeReadiness.notice}</span>
             {runtimeReadiness.status === "error" ? (
               <button type="button" onClick={() => void runtimeReadiness.retry()}>
-                {t("runtime.retry")}
+                {localWorkspaceReadiness?.actionLabel ?? t("runtime.retry")}
               </button>
             ) : null}
           </div>
