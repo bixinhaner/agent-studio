@@ -1,5 +1,6 @@
 export type SystemSettingsSection =
   | "branding"
+  | "local-bridge"
   | "model-defaults"
   | "retention-upload"
   | "artifact-access"
@@ -230,6 +231,11 @@ export type SystemSettingsBehavior = {
   };
 };
 
+export type SystemSettingsLocalBridgeVisibility = {
+  mode: "hidden" | "selected" | "all";
+  emails: string[];
+};
+
 export type SystemSettingsVersionRecord = {
   id: string;
   versionNumber: number;
@@ -245,6 +251,7 @@ export type SystemSettingsVersionRecord = {
 export type SystemSettingsFieldErrors = Record<string, string>;
 
 export type SystemSettingsPayload = {
+  localBridgeVisibility: SystemSettingsLocalBridgeVisibility;
   branding: SystemSettingsBranding;
   platformDefaults: SystemSettingsPlatformDefaults;
   retention: SystemSettingsRetention;

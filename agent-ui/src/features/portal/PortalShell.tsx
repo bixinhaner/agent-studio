@@ -147,7 +147,7 @@ import { PortalTopBar } from "./workbench/PortalTopBar";
 import { LocalToolCard } from "./workbench/LocalToolCard";
 import { isLocalToolPart, upsertLocalToolParts } from "./workbench/local-tool-parts";
 import { LocalBridgePanel } from "./workbench/LocalBridgePanel";
-import { isLocalBridgeEntryVisible } from "./local-bridge-visibility";
+import { useLocalBridgeEntryVisibility } from "./local-bridge-visibility";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
@@ -6797,7 +6797,7 @@ export function PortalShell(props: {
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
   const canUseLocalBridge = Boolean(portalPreferenceUser?.id) && !trainingReadOnly;
-  const showLocalBridgeEntry = canUseLocalBridge && isLocalBridgeEntryVisible(portalPreferenceUser);
+  const showLocalBridgeEntry = useLocalBridgeEntryVisibility(canUseLocalBridge ? portalPreferenceUser?.id : undefined);
   const isExternalPortalUser = !isInternalPortalExperience({
     userType: portalPreferenceUser?.userType,
     organizationType: auth.activeOrganization?.type,

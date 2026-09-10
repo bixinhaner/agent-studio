@@ -180,6 +180,7 @@ describe("ManagedCodexProviderResolver", () => {
             revision: 1,
             status: "published",
             payload: {
+              localBridgeVisibility: { mode: "selected", emails: [] },
               branding: {
                 platformName: "Agent Studio",
                 headerSubtitle: "test",
@@ -332,6 +333,7 @@ describe("resolveManagedCodexDefaults", () => {
         revision: 1,
         status: "published",
         payload: {
+          localBridgeVisibility: { mode: "selected", emails: [] },
           branding: {
             platformName: "Agent Studio",
             headerSubtitle: "test",

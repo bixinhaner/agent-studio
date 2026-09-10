@@ -298,6 +298,12 @@ export const systemSettingsAnswerFeedbackSchema = z.object({
   prompt: z.string().trim().min(1).max(160).default("Was this answer helpful?")
 });
 
+export const systemSettingsLocalBridgeVisibilitySchema = z.object({
+  mode: z.enum(["hidden", "selected", "all"]),
+  emails: z.array(z.string().trim().email().transform(value => value.toLowerCase()))
+    .max(500).transform(values => [...new Set(values)])
+}).strict();
+
 export const systemSettingsBehaviorSchema = z.object({
   markdown: z.string().trim().min(1),
   portalWelcomeMessageDesktop: z.string().trim().min(1),
@@ -367,6 +373,7 @@ export const systemSettingsPayloadSchema = z
     enterpriseContext: systemSettingsEnterpriseContextSchema,
     pythonRuntime: systemSettingsPythonRuntimeSchema,
     adminEmailNotifications: systemSettingsAdminEmailNotificationsSchema,
+    localBridgeVisibility: systemSettingsLocalBridgeVisibilitySchema,
     behavior: systemSettingsBehaviorSchema
   })
   .strict();
@@ -419,6 +426,7 @@ export const systemSettingsPayloadPatchSchema = z
     enterpriseContext: systemSettingsEnterpriseContextPatchSchema.optional(),
     pythonRuntime: systemSettingsPythonRuntimePatchSchema.optional(),
     adminEmailNotifications: systemSettingsAdminEmailNotificationsPatchSchema.optional(),
+    localBridgeVisibility: systemSettingsLocalBridgeVisibilitySchema.partial().optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
   })
   .strict();
@@ -441,6 +449,7 @@ export type AdminEmailNotificationEventKey = z.infer<typeof adminEmailNotificati
 export type SystemSettingsAdminEmailNotifications = z.infer<typeof systemSettingsAdminEmailNotificationsSchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
+export type SystemSettingsLocalBridgeVisibility = z.infer<typeof systemSettingsLocalBridgeVisibilitySchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
 export type SystemSettingsPayload = z.infer<typeof systemSettingsPayloadSchema>;
 export type SystemSettingsPayloadPatch = z.infer<typeof systemSettingsPayloadPatchSchema>;
@@ -693,6 +702,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
       }
     }
   },
+  // 保留已上线的试用范围；管理员可在后台修改并发布。
+  localBridgeVisibility: { mode: "selected", emails: ["like@baicells.com"] },
   behavior: {
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",
     portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}. Ask about products, versions, deployment, alarms, or troubleshooting.",

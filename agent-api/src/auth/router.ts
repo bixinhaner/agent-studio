@@ -19,7 +19,7 @@ import type { UserRepositoryLike } from "../persistence/user-repository.js";
 import type { OrganizationInviteRepository } from "../persistence/organization-invite-repository.js";
 import type { LoginChallengeRepository } from "../persistence/login-challenge-repository.js";
 import { resolvePublicPlatformName } from "../system-settings/public-branding.js";
-import type { SystemSettingsVersionRecord } from "../system-settings/types.js";
+import { createDefaultSystemSettingsPayload, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 import { createPublicExternalWebGate, sendExternalWebMaintenance, type ExternalWebAccessService } from "../external-web-access.js";
 import type { PublicBrandService } from "../public-brands/service.js";
 import { organizationMatchesRequestBrand } from "../public-brands/middleware.js";
@@ -691,6 +691,20 @@ export function createAuthRouter(options: {
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Crest login failed";
       res.status(400).json({ detail });
+    }
+  });
+
+  // 仅下发当前用户的界面显隐结果，不作为 Local Bridge 执行权限。
+  router.get("/portal-features", requireCurrentUser, async (req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    try {
+      const published = await options.systemSettings?.getCurrentPublished();
+      const visibility = published?.payload.localBridgeVisibility ?? createDefaultSystemSettingsPayload().localBridgeVisibility;
+      const email = req.currentUser!.email?.trim().toLowerCase();
+      const visible = visibility.mode === "all" || (visibility.mode === "selected" && Boolean(email && visibility.emails.includes(email)));
+      res.json({ local_bridge_visible: visible });
+    } catch {
+      res.status(503).json({ detail: "暂时无法读取界面配置，请稍后重试" });
     }
   });
 

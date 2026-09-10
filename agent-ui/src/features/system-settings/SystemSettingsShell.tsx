@@ -14,6 +14,7 @@ import { SafetySettingsView } from "./SafetySettingsView";
 import { ConversationSecurityReviewSettingsView } from "./ConversationSecurityReviewSettingsView";
 import { UsageGovernanceSettingsView } from "./UsageGovernanceSettingsView";
 import { AdminEmailNotificationSettingsView } from "./AdminEmailNotificationSettingsView";
+import { LocalBridgeVisibilitySettingsView } from "./LocalBridgeVisibilitySettingsView";
 import type {
   SystemSettingsFieldErrors,
   SystemSettingsPayload,
@@ -25,6 +26,7 @@ import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from
 
 const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; group: string }> = [
   { id: "branding", label: "基本设置", icon: Settings2, group: 'General' },
+  { id: "local-bridge", label: "本机文件夹", icon: HardDrive, group: 'General' },
   { id: "model-defaults", label: "运行时默认与兜底", icon: Box, group: 'General' },
   { id: "organization-defaults", label: "组织默认值", icon: Users, group: 'General' },
   { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
@@ -38,6 +40,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; gro
 
 function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
   return {
+    localBridgeVisibility: { ...payload.localBridgeVisibility, emails: [...payload.localBridgeVisibility.emails] },
     branding: { ...payload.branding },
     platformDefaults: { ...payload.platformDefaults },
     retention: { ...payload.retention },
@@ -363,6 +366,7 @@ export function SystemSettingsShell() {
   const draftPayload = draftRecord.payload;
   const publishedPayload = publishedRecord?.payload ?? null;
   const changedAreaCount = [
+    isPayloadSectionChanged(draftPayload.localBridgeVisibility, publishedPayload?.localBridgeVisibility),
     isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding),
     isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults),
     isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null),
@@ -484,6 +488,17 @@ export function SystemSettingsShell() {
           )}
           {section === "safety" && (
             <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} />
+          )}
+          {section === "local-bridge" && (
+            <LocalBridgeVisibilitySettingsView
+              value={draftPayload.localBridgeVisibility}
+              fieldErrors={fieldErrors}
+              disabled={saving || publishing}
+              onChange={(patch) => updateDraft(
+                current => ({ ...current, payload: { ...current.payload, localBridgeVisibility: { ...current.payload.localBridgeVisibility, ...patch } } }),
+                fieldPaths("localBridgeVisibility", patch)
+              )}
+            />
           )}
           {section === "conversation-security-review" && (
             <ConversationSecurityReviewSettingsView

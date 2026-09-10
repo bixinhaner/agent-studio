@@ -44,6 +44,7 @@ export function parseSystemSettingsValidationDetail(detail: string): ParsedSyste
 }
 
 export function sectionForFieldPath(path: string): SystemSettingsSection {
+  if (path.startsWith("localBridgeVisibility.")) return "local-bridge";
   if (path.startsWith("branding.") || path.startsWith("behavior.")) return "branding";
   if (path.startsWith("platformDefaults.")) return "model-defaults";
   if (path.startsWith("retention.") || path.startsWith("uploads.")) return "retention-upload";
