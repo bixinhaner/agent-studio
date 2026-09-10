@@ -899,6 +899,9 @@ class CodexAppServerProcess {
   lastUsedAt = Date.now();
   activeTurns = 0;
   readonly loadedThreads = new Set<string>();
+  private activeRequests = 0;
+  private reservations = 0;
+  private ready = false;
   private nextRequestId = 1;
   private proc: ReturnType<typeof spawn> | undefined;
   private rl: readline.Interface | undefined;
@@ -923,6 +926,21 @@ class CodexAppServerProcess {
     return Boolean(this.closedError);
   }
 
+  get busy(): boolean {
+    return !this.ready || this.activeRequests > 0 || this.activeTurns > 0 || this.reservations > 0;
+  }
+
+  reserve(): () => void {
+    this.reservations += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.reservations = Math.max(0, this.reservations - 1);
+      this.lastUsedAt = Date.now();
+    };
+  }
+
   async start(): Promise<void> {
     if (this.startPromise) return await this.startPromise;
     this.startPromise = this.startInner();
@@ -930,8 +948,15 @@ class CodexAppServerProcess {
   }
 
   async request(method: string, params?: unknown): Promise<unknown> {
-    await this.start();
-    return await this.sendRequest(method, params);
+    this.activeRequests += 1;
+    this.lastUsedAt = Date.now();
+    try {
+      await this.start();
+      return await this.sendRequest(method, params);
+    } finally {
+      this.activeRequests = Math.max(0, this.activeRequests - 1);
+      this.lastUsedAt = Date.now();
+    }
   }
 
   private async sendRequest(method: string, params?: unknown): Promise<unknown> {
@@ -1019,29 +1044,58 @@ class CodexAppServerProcess {
     }
 
     const proc = this.proc;
-    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+    const pid = proc?.pid;
+    if (!proc || !pid) {
       this.resolveExitPromise();
       return;
     }
 
-    proc.kill("SIGTERM");
-    const graceful = await Promise.race([
-      this.exitPromise.then(() => true),
-      new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), 2_000);
-        timer.unref();
-      })
-    ]);
-    if (!graceful && proc.exitCode === null && proc.signalCode === null) {
-      proc.kill("SIGKILL");
-      const killed = await Promise.race([
-        this.exitPromise.then(() => true),
-        new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => resolve(false), 2_000);
-          timer.unref();
-        })
-      ]);
-      if (!killed) this.resolveExitPromise();
+    this.signalProcessTree(proc, "SIGTERM");
+    const graceful = await this.waitForProcessTreeExit(proc, pid, 2_000);
+    if (!graceful) {
+      this.signalProcessTree(proc, "SIGKILL");
+      await this.waitForProcessTreeExit(proc, pid, 2_000);
+    }
+    this.resolveExitPromise();
+  }
+
+  private signalProcessTree(proc: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
+    const pid = proc.pid;
+    if (process.platform !== "win32" && pid) {
+      try {
+        process.kill(-pid, signal);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill(signal);
+    }
+  }
+
+  private async waitForProcessTreeExit(
+    proc: ReturnType<typeof spawn>,
+    pid: number,
+    timeoutMs: number
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.isProcessTreeAlive(proc, pid)) return true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    return !this.isProcessTreeAlive(proc, pid);
+  }
+
+  private isProcessTreeAlive(proc: ReturnType<typeof spawn>, pid: number): boolean {
+    if (process.platform === "win32") {
+      return proc.exitCode === null && proc.signalCode === null;
+    }
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "EPERM";
     }
   }
 
@@ -1056,6 +1110,7 @@ class CodexAppServerProcess {
 
   private async startInner(): Promise<void> {
     this.proc = spawn(this.scope.binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"], {
+      detached: process.platform !== "win32",
       env: this.scope.env,
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -1088,6 +1143,7 @@ class CodexAppServerProcess {
       }
     });
     this.notify("initialized");
+    this.ready = true;
   }
 
   private handleLine(line: string): void {
@@ -1195,6 +1251,7 @@ class CodexAppServerProcess {
       this.subscribers.clear();
     }
     this.resolveExitPromise();
+    void this.stopAndWait("exited");
   }
 }
 
@@ -1209,57 +1266,66 @@ class CodexAppServerManager {
     string,
     { process: CodexAppServerProcess; scopeKey: string; turnId: string }
   >();
+  private processPoolTail: Promise<void> = Promise.resolve();
 
   async listModels(options: CodexRuntimeOptions): Promise<CodexModelCapability[]> {
-    const process = await this.getProcess(runtimeScope(options));
-    const models: CodexModelCapability[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = asRecord(await process.request("model/list", {
-        includeHidden: false,
-        limit: 100,
-        ...(cursor ? { cursor } : {})
-      }));
-      const page = Array.isArray(result?.data) ? result.data : [];
-      models.push(
-        ...page
-          .map(modelCapabilityFromAppServer)
-          .filter((model): model is CodexModelCapability => Boolean(model))
-      );
-      cursor = trimOrUndefined(result?.nextCursor);
-    } while (cursor);
-    return models;
+    const { process, release } = await this.getReservedProcess(runtimeScope(options));
+    try {
+      const models: CodexModelCapability[] = [];
+      let cursor: string | undefined;
+      do {
+        const result = asRecord(await process.request("model/list", {
+          includeHidden: false,
+          limit: 100,
+          ...(cursor ? { cursor } : {})
+        }));
+        const page = Array.isArray(result?.data) ? result.data : [];
+        models.push(
+          ...page
+            .map(modelCapabilityFromAppServer)
+            .filter((model): model is CodexModelCapability => Boolean(model))
+        );
+        cursor = trimOrUndefined(result?.nextCursor);
+      } while (cursor);
+      return models;
+    } finally {
+      release();
+    }
   }
 
   async startThread(options: CodexRuntimeOptions, threadOptions: AppServerThreadOptions): Promise<CodexAppServerThread> {
     const baseScope = runtimeScope(options);
     const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
-    const process = await this.getProcess(turnSkillScope.scope);
-    await this.refreshSkillsForProcess(
-      process,
-      turnSkillScope.scope.key,
-      threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
-    );
-    if (turnSkillScope.skillRoots.length > 0) {
-      await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
-      const skillsResult = await process.request("skills/list", {
-        cwds: [threadOptions.workspace],
-        forceReload: true
-      });
-      assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
+    const { process, release } = await this.getReservedProcess(turnSkillScope.scope);
+    try {
+      await this.refreshSkillsForProcess(
+        process,
+        turnSkillScope.scope.key,
+        threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
+      );
+      if (turnSkillScope.skillRoots.length > 0) {
+        await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
+        const skillsResult = await process.request("skills/list", {
+          cwds: [threadOptions.workspace],
+          forceReload: true
+        });
+        assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
+      }
+      const result = await process.request("thread/start", threadStartParams(threadOptions, turnSkillScope.scope.config));
+      const threadId = threadIdFromResult(result);
+      if (!threadId) throw new Error("Codex app-server did not return a thread id");
+      process.loadedThreads.add(threadId);
+      this.threadProcessScopes.set(`${baseScope.key}\u0000${threadId}`, process.scopeKey);
+      return {
+        id: threadId,
+        driver: TOML_DRIVER_APP_SERVER,
+        scopeKey: baseScope.key,
+        scope: baseScope,
+        options: threadOptions
+      };
+    } finally {
+      release();
     }
-    const result = await process.request("thread/start", threadStartParams(threadOptions, turnSkillScope.scope.config));
-    const threadId = threadIdFromResult(result);
-    if (!threadId) throw new Error("Codex app-server did not return a thread id");
-    process.loadedThreads.add(threadId);
-    this.threadProcessScopes.set(`${baseScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
-    return {
-      id: threadId,
-      driver: TOML_DRIVER_APP_SERVER,
-      scopeKey: baseScope.key,
-      scope: baseScope,
-      options: threadOptions
-    };
   }
 
   async resumeThread(
@@ -1268,63 +1334,66 @@ class CodexAppServerManager {
     threadOptions: AppServerThreadOptions
   ): Promise<CodexAppServerThread> {
     const baseScope = runtimeScope(options);
-    const threadSuffix = `\u0000${threadId}`;
-    const existingProcessEntry = [...this.threadProcessScopes.entries()]
-      .reverse()
-      .map(([key, scopeKey]) => ({ key, process: this.processes.get(scopeKey) }))
-      .find(({ key, process }) => key.endsWith(threadSuffix) && process && !process.closed);
     // A persisted thread may be restored with a newly computed capability scope.
     // Reuse the process that already owns the thread; starting another process and
     // calling thread/resume would create a Codex active-writer conflict.
-    const process = existingProcessEntry?.process
-      ?? await this.getProcess(runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []).scope);
-    const effectiveScope = process.scope;
-    const turnSkillScope = runtimeScopeForTurnSkills(effectiveScope, threadOptions.skills ?? []);
-    await this.refreshSkillsForProcess(
-      process,
-      turnSkillScope.scope.key,
-      threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
-    );
-    if (turnSkillScope.skillRoots.length > 0) {
-      await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
-      const skillsResult = await process.request("skills/list", {
-        cwds: [threadOptions.workspace],
-        forceReload: true
-      });
-      assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
-    }
-    if (!process.loadedThreads.has(threadId)) {
-      let result: unknown;
-      try {
-        result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
-      } catch (error) {
-        // A fresh process cannot own a thread whose writer is still held by a
-        // retired process. Reap this candidate before the caller retries so it
-        // never leaves a second writer alive in the shared Codex home.
-        if (error instanceof Error && /already has an active writer/i.test(error.message)) {
-          await process.stopAndWait("thread writer conflict");
-        }
-        throw error;
+    const fallbackScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []).scope;
+    const { process, release } = await this.getReservedThreadProcess(threadId, fallbackScope);
+    try {
+      const effectiveScope = process.scope;
+      const turnSkillScope = runtimeScopeForTurnSkills(effectiveScope, threadOptions.skills ?? []);
+      await this.refreshSkillsForProcess(
+        process,
+        turnSkillScope.scope.key,
+        threadOptions.skillRefresh ?? await this.skillRefreshFromCapabilityManifest(turnSkillScope.scope, threadOptions.workspace)
+      );
+      if (turnSkillScope.skillRoots.length > 0) {
+        await process.request("skills/extraRoots/set", { extraRoots: turnSkillScope.skillRoots });
+        const skillsResult = await process.request("skills/list", {
+          cwds: [threadOptions.workspace],
+          forceReload: true
+        });
+        assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
       }
-      const resumedThreadId = threadIdFromResult(result) ?? threadId;
-      process.loadedThreads.add(resumedThreadId);
+      if (!process.loadedThreads.has(threadId)) {
+        let result: unknown;
+        try {
+          result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
+        } catch (error) {
+          // A fresh process cannot own a thread whose writer is still held by a
+          // retired process. Reap this candidate before the caller retries so it
+          // never leaves a second writer alive in the shared Codex home.
+          if (error instanceof Error && /already has an active writer/i.test(error.message)) {
+            await process.stopAndWait("thread writer conflict");
+          }
+          throw error;
+        }
+        const resumedThreadId = threadIdFromResult(result) ?? threadId;
+        process.loadedThreads.add(resumedThreadId);
+      }
+      this.threadProcessScopes.set(`${effectiveScope.key}\u0000${threadId}`, process.scopeKey);
+      return {
+        id: threadId,
+        driver: TOML_DRIVER_APP_SERVER,
+        scopeKey: effectiveScope.key,
+        scope: effectiveScope,
+        options: threadOptions
+      };
+    } finally {
+      release();
     }
-    this.threadProcessScopes.set(`${effectiveScope.key}\u0000${threadId}`, turnSkillScope.scope.key);
-    return {
-      id: threadId,
-      driver: TOML_DRIVER_APP_SERVER,
-      scopeKey: effectiveScope.key,
-      scope: effectiveScope,
-      options: threadOptions
-    };
   }
 
   async refreshSkills(
     thread: CodexAppServerThread,
     input: { cwds: string[]; fingerprint: string }
   ): Promise<void> {
-    const process = await this.getProcess(thread.scope);
-    await this.refreshSkillsForProcess(process, thread.scopeKey, input);
+    const { process, release } = await this.getReservedThreadProcess(thread.id, thread.scope);
+    try {
+      await this.refreshSkillsForProcess(process, thread.scopeKey, input);
+    } finally {
+      release();
+    }
   }
 
   private async refreshSkillsForProcess(
@@ -1387,18 +1456,25 @@ class CodexAppServerManager {
       codexRunConfig: options.codexRunConfig ?? thread.options.codexRunConfig
     };
     const threadProcessKey = `${thread.scopeKey}\u0000${thread.id}`;
-    const owningScopeKey = this.threadProcessScopes.get(threadProcessKey);
-    const owningProcess = owningScopeKey ? this.processes.get(owningScopeKey) : undefined;
-    const process = owningProcess && !owningProcess.closed
-      ? owningProcess
-      : await this.getProcess(scope);
-    if (owningProcess && !owningProcess.closed) {
+    const reservedProcess = await this.getReservedThreadProcess(thread.id, scope);
+    const process = reservedProcess.process;
+    const owningProcess = process.loadedThreads.has(thread.id) ? process : undefined;
+    if (owningProcess) {
       turnSkillScope = runtimeScopeForTurnSkills(owningProcess.scope, options.skills ?? []);
       scope = turnSkillScope.scope;
     }
     const activeTurnKey = `${thread.scopeKey}\u0000${thread.id}`;
-    const releaseThread = await this.acquireThreadLock(thread.id);
-    const releaseTurn = await process.acquireTurnSlot();
+    let releaseThread: (() => void) | undefined;
+    let releaseTurn: (() => void) | undefined;
+    try {
+      releaseThread = await this.acquireThreadLock(thread.id);
+      releaseTurn = await process.acquireTurnSlot();
+    } catch (error) {
+      releaseThread?.();
+      throw error;
+    } finally {
+      reservedProcess.release();
+    }
     const queue = new AsyncEventQueue<CodexStreamEvent>();
     let turnId: string | undefined;
     let completed = false;
@@ -1604,10 +1680,6 @@ class CodexAppServerManager {
         await process.request("skills/extraRoots/set", { extraRoots: [] });
       }
 
-      const switchedProcess = this.threadProcessScopes.get(threadProcessKey) !== process.scopeKey;
-      if (switchedProcess) {
-        process.loadedThreads.delete(thread.id);
-      }
       if (!process.loadedThreads.has(thread.id)) {
         await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
         process.loadedThreads.add(thread.id);
@@ -1668,8 +1740,8 @@ class CodexAppServerManager {
       if (activeTurn && activeTurn.turnId === turnId && activeTurn.scopeKey === thread.scopeKey) {
         this.activeTurnsByThread.delete(activeTurnKey);
       }
-      releaseTurn();
-      releaseThread();
+      releaseTurn?.();
+      releaseThread?.();
     }
   }
 
@@ -1692,52 +1764,108 @@ class CodexAppServerManager {
     return acceptedTurnId;
   }
 
-  private async getProcess(scope: RuntimeScope): Promise<CodexAppServerProcess> {
+  private async getReservedProcess(
+    scope: RuntimeScope
+  ): Promise<{ process: CodexAppServerProcess; release: () => void }> {
+    return await this.reserveProcess(() => this.selectProcessLocked(scope));
+  }
+
+  private async getReservedThreadProcess(
+    threadId: string,
+    fallbackScope: RuntimeScope
+  ): Promise<{ process: CodexAppServerProcess; release: () => void }> {
+    return await this.reserveProcess(
+      async () => this.findThreadOwner(threadId) ?? await this.selectProcessLocked(fallbackScope)
+    );
+  }
+
+  private async reserveProcess(
+    select: () => CodexAppServerProcess | Promise<CodexAppServerProcess>
+  ): Promise<{ process: CodexAppServerProcess; release: () => void }> {
+    const reserved = await this.withProcessPoolLock(async () => {
+      const process = await select();
+      return { process, release: process.reserve() };
+    });
+    try {
+      await reserved.process.start();
+      return reserved;
+    } catch (error) {
+      reserved.release();
+      await reserved.process.stopAndWait("failed to start").catch(() => undefined);
+      await this.withProcessPoolLock(() => this.forgetProcess(reserved.process));
+      throw error;
+    }
+  }
+
+  private async selectProcessLocked(scope: RuntimeScope): Promise<CodexAppServerProcess> {
     const existing = this.processes.get(scope.key);
     if (existing && !existing.closed) {
       existing.lastUsedAt = Date.now();
-      await existing.start();
       return existing;
     }
     if (existing?.closed) {
-      await existing.waitForExit();
-      this.processes.delete(scope.key);
-      for (const key of this.skillRefreshFingerprints.keys()) {
-        if (key.startsWith(`${scope.key}\u0000`)) this.skillRefreshFingerprints.delete(key);
-      }
+      await existing.stopAndWait("replaced after exit");
+      this.forgetProcess(existing);
     }
-    await this.ensureCapacity();
-    const process = new CodexAppServerProcess(scope);
-    this.processes.set(scope.key, process);
-    await process.start();
-    return process;
+    await this.ensureCapacityLocked();
+    const created = new CodexAppServerProcess(scope);
+    this.processes.set(scope.key, created);
+    return created;
   }
 
-  private async ensureCapacity(): Promise<void> {
+  private async ensureCapacityLocked(): Promise<void> {
     const maxProcesses = parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_PROCESSES, DEFAULT_MAX_PROCESSES);
     if (this.processes.size < maxProcesses) return;
     const idle = [...this.processes.values()]
-      .filter((process) => process.activeTurns === 0)
+      .filter((process) => !process.busy)
       .sort((left, right) => left.lastUsedAt - right.lastUsedAt)[0];
     if (!idle) {
       throw new Error(`Codex app-server capacity reached (${maxProcesses}) and no idle process can be evicted`);
     }
     await idle.stopAndWait("evicted by LRU capacity policy");
-    this.processes.delete(idle.scopeKey);
+    this.forgetProcess(idle);
+  }
+
+  private findThreadOwner(threadId: string): CodexAppServerProcess | undefined {
+    return [...this.processes.values()]
+      .filter((process) => !process.closed && process.loadedThreads.has(threadId))
+      .sort((left, right) => right.lastUsedAt - left.lastUsedAt)[0];
+  }
+
+  private forgetProcess(process: CodexAppServerProcess): void {
+    if (this.processes.get(process.scopeKey) === process) {
+      this.processes.delete(process.scopeKey);
+    }
     for (const key of this.skillRefreshFingerprints.keys()) {
-      if (key.startsWith(`${idle.scopeKey}\u0000`)) this.skillRefreshFingerprints.delete(key);
+      if (key.startsWith(`${process.scopeKey}\u0000`)) this.skillRefreshFingerprints.delete(key);
+    }
+    for (const [key, scopeKey] of this.threadProcessScopes) {
+      if (scopeKey === process.scopeKey) this.threadProcessScopes.delete(key);
     }
   }
 
-  stopAll(reason = "stopped"): void {
-    for (const process of this.processes.values()) {
-      void process.stopAndWait(reason);
+  private async withProcessPoolLock<T>(action: () => T | Promise<T>): Promise<T> {
+    const previous = this.processPoolTail;
+    let release!: () => void;
+    this.processPoolTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    try {
+      return await action();
+    } finally {
+      release();
     }
+  }
+
+  async stopAll(reason = "stopped"): Promise<void> {
+    const processes = [...this.processes.values()];
     this.processes.clear();
     this.activeTurnsByThread.clear();
     this.skillRefreshFingerprints.clear();
     this.capabilityManifestCache.clear();
     this.threadProcessScopes.clear();
+    await Promise.allSettled(processes.map((process) => process.stopAndWait(reason)));
   }
 
   private async acquireThreadLock(threadId: string): Promise<() => void> {
@@ -1852,6 +1980,6 @@ export function isAppServerRuntimeEnabled(): boolean {
   return value === TOML_DRIVER_APP_SERVER || value === "app-server" || value === "appserver";
 }
 
-export function shutdownCodexAppServerRuntime(reason = "shutdown"): void {
-  appServerManager.stopAll(reason);
+export async function shutdownCodexAppServerRuntime(reason = "shutdown"): Promise<void> {
+  await appServerManager.stopAll(reason);
 }

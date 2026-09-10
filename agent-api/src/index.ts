@@ -14310,18 +14310,22 @@ if (runsAdminService) {
 
 if (runsChatService && isAppServerRuntimeEnabled()) {
   process.once("exit", () => {
-    shutdownCodexAppServerRuntime("node process exiting");
+    void shutdownCodexAppServerRuntime("node process exiting");
     void closeCodexThreadRuntimeLeasePool();
   });
   process.once("SIGTERM", () => {
-    shutdownCodexAppServerRuntime("received SIGTERM");
-    void closeCodexThreadRuntimeLeasePool();
-    process.exit(0);
+    void (async () => {
+      await shutdownCodexAppServerRuntime("received SIGTERM");
+      await closeCodexThreadRuntimeLeasePool();
+      process.exit(0);
+    })();
   });
   process.once("SIGINT", () => {
-    shutdownCodexAppServerRuntime("received SIGINT");
-    void closeCodexThreadRuntimeLeasePool();
-    process.exit(130);
+    void (async () => {
+      await shutdownCodexAppServerRuntime("received SIGINT");
+      await closeCodexThreadRuntimeLeasePool();
+      process.exit(130);
+    })();
   });
 }
 

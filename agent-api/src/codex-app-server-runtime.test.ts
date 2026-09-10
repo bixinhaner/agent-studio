@@ -30,9 +30,19 @@ async function writeFakeAppServer(): Promise<void> {
   await fs.writeFile(
     fakeBinaryPath,
     `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import readline from "node:readline";
 
 const startupArgs = process.argv.slice(2);
+if (process.env.FAKE_APP_SERVER_START_LOG) {
+  appendFileSync(process.env.FAKE_APP_SERVER_START_LOG, process.pid + "\\n");
+}
+if (process.env.FAKE_APP_SERVER_CHILD_LOG) {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  appendFileSync(process.env.FAKE_APP_SERVER_CHILD_LOG, child.pid + "\\n");
+  child.unref();
+}
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 let nextThreadId = 1;
 let nextTurnId = 1;
@@ -524,6 +534,24 @@ function restoreEnv(): void {
   }
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitForPidExit(pid: number, timeoutMs = 3_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  return !isPidAlive(pid);
+}
+
 describe("Codex app-server runtime", () => {
   beforeEach(async () => {
     await writeFakeAppServer();
@@ -538,8 +566,8 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0,0";
   });
 
-  afterEach(() => {
-    shutdownCodexAppServerRuntime("test cleanup");
+  afterEach(async () => {
+    await shutdownCodexAppServerRuntime("test cleanup");
     restoreEnv();
   });
 
@@ -549,6 +577,100 @@ describe("Codex app-server runtime", () => {
     expect(resolveCodexAppServerBinaryPath()).toBe(
       path.resolve(process.cwd(), "node_modules/.bin/codex")
     );
+  });
+
+  it("creates only one app-server when the same scope is requested concurrently", async () => {
+    const startLog = path.join(testTempDir, "concurrent-starts.log");
+    await fs.rm(startLog, { force: true });
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-concurrent-start"),
+        FAKE_APP_SERVER_START_LOG: startLog
+      }
+    });
+    const threadOptions = {
+      model: "gpt-5.5",
+      reasoningEffort: "high" as const,
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: 8 }, () => runtime.startThreadWithOptions(threadOptions))
+    );
+
+    const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean);
+    expect(starts).toHaveLength(1);
+  });
+
+  it("terminates the full app-server process group before reusing LRU capacity", async () => {
+    process.env.CODEX_APP_SERVER_MAX_PROCESSES = "1";
+    const childLog = path.join(testTempDir, "evicted-child-pids.log");
+    await fs.rm(childLog, { force: true });
+    const firstRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-evicted-a"),
+        FAKE_APP_SERVER_CHILD_LOG: childLog
+      }
+    });
+    const secondRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-evicted-b")
+      }
+    });
+    const threadOptions = {
+      model: "gpt-5.5",
+      reasoningEffort: "high" as const,
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    };
+    let childPid: number | undefined;
+
+    try {
+      await firstRuntime.startThreadWithOptions(threadOptions);
+      childPid = Number((await fs.readFile(childLog, "utf8")).trim().split("\n")[0]);
+      expect(isPidAlive(childPid)).toBe(true);
+
+      await secondRuntime.startThreadWithOptions(threadOptions);
+
+      expect(await waitForPidExit(childPid)).toBe(true);
+    } finally {
+      if (childPid && isPidAlive(childPid)) process.kill(childPid, "SIGKILL");
+    }
+  });
+
+  it("waits for the full app-server process group during runtime shutdown", async () => {
+    const childLog = path.join(testTempDir, "shutdown-child-pids.log");
+    await fs.rm(childLog, { force: true });
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-shutdown-tree"),
+        FAKE_APP_SERVER_CHILD_LOG: childLog
+      }
+    });
+    let childPid: number | undefined;
+
+    try {
+      await runtime.startThreadWithOptions({
+        model: "gpt-5.5",
+        reasoningEffort: "high",
+        workspace: testTempDir
+      });
+      childPid = Number((await fs.readFile(childLog, "utf8")).trim().split("\n")[0]);
+      expect(isPidAlive(childPid)).toBe(true);
+
+      await shutdownCodexAppServerRuntime("shutdown process-tree test");
+
+      expect(isPidAlive(childPid)).toBe(false);
+    } finally {
+      if (childPid && isPidAlive(childPid)) process.kill(childPid, "SIGKILL");
+    }
   });
 
   it("streams agent deltas, image-generation items, and usage from app-server", async () => {
@@ -1317,6 +1439,42 @@ describe("Codex app-server runtime", () => {
       events.push(event);
     }
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
+  it("keeps the real thread owner after a Skill-scoped resume", async () => {
+    const startLog = path.join(testTempDir, "skill-resume-owner-starts.log");
+    await fs.rm(startLog, { force: true });
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-skill-resume-owner"),
+        FAKE_APP_SERVER_START_LOG: startLog
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const skills = [{
+      name: "surge-vpn-manage",
+      path: "/skills/surge-vpn-manage/SKILL.md"
+    }];
+
+    const restored = await runtime.resumeThreadWithOptions({
+      threadId: thread.id,
+      model: thread.options.model,
+      reasoningEffort: thread.options.reasoningEffort,
+      workspace: thread.options.workspace,
+      skills
+    });
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(restored, "runtime-skill-scope", { skills })) {
+      events.push(event);
+    }
+
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean);
+    expect(starts).toHaveLength(1);
   });
 
   it("drops stale pre-start events from a previous turn before accepting the new turn", async () => {
