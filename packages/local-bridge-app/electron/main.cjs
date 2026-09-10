@@ -93,5 +93,5 @@ ipcMain.handle('bridge:get-state', () => state());
 ipcMain.handle('bridge:pair', (_event, code) => pair(String(code)));
 ipcMain.handle('bridge:choose-root', () => chooseRoot());
 ipcMain.handle('bridge:portal', () => shell.openExternal(PORTAL_URL));
-ipcMain.handle('bridge:pause', async () => { config.paused = !config.paused; await saveConfig(); if (config.paused) await stopPolling(); else void startPolling(); emit(); return state(); });
+ipcMain.handle('bridge:pause', async () => { config.paused = !config.paused; await saveConfig(); if (config.paused) { status = { connected: false, error: '' }; emit(); await stopPolling(); } else void startPolling(); emit(); return state(); });
 ipcMain.handle('bridge:disconnect', async () => { await stopPolling(); config.token = ''; config.deviceId = ''; config.roots = []; config.paused = false; await saveConfig(); emit(); return state(); });

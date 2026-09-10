@@ -123,5 +123,5 @@ export function LocalWorkspaceDialogs() {
 }
 export function LocalBridgeDownloads({ compact = false }: { compact?: boolean }) {
   const [expanded, setExpanded] = useState(!compact);
-  return <div className="local-downloads">{compact ? <Button block size="large" icon={<Download size={16} />} onClick={() => setExpanded(!expanded)}>下载桌面客户端</Button> : null}{expanded ? <div className="local-download-options">{[['macOS · Apple 芯片', 'mac-arm64.dmg'], ['macOS · Intel', 'mac-x64.dmg'], ['Windows', 'Windows-x64.exe'], ['Linux', 'Linux-x86_64.AppImage']].map(([label, file]) => <a key={file} href={`/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-${file}`} download><Download size={15} />{label}</a>)}<small>版本 0.2.0</small></div> : null}</div>;
+  return <div className="local-downloads">{compact ? <Button block size="large" icon={<Download size={16} />} onClick={() => setExpanded(!expanded)}>下载桌面客户端</Button> : null}{expanded ? <div className="local-download-options">{[['macOS · Apple 芯片', 'mac-arm64.dmg'], ['macOS · Intel', 'mac-x64.dmg'], ['Windows', 'Windows-x64.exe'], ['Linux', 'Linux-x86_64.AppImage']].map(([label, file]) => <a key={file} href={`/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-${file}`} download><Download size={15} />{label}</a>)}<small>版本 0.2.1</small></div> : null}</div>;
 }

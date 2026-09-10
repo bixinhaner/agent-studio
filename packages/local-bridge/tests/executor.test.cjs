@@ -68,3 +68,8 @@ test('rename/delete operate on the symlink itself, not its target', async () => 
   assert.equal((await f.call('delete', { path: 'renamed-link' })).ok, true);
   assert.equal(await fs.readFile(outside, 'utf8'), 'keep');
 });
+test('pausing during a poll never starts the late-arriving command', async () => {
+  const controller = new AbortController(); let executions = 0;
+  await runTransport({signal:controller.signal, api:async()=>{controller.abort();return {command:{id:'late'}};}, executor:{execute:async()=>{executions++;return {ok:true};}}});
+  assert.equal(executions,0);
+});

@@ -7,6 +7,7 @@ async function runTransport({ api, executor, signal, onStatus = () => {} }) {
       if (delivery) { await api('/api/local-bridge/agent/result', { method: 'POST', body: JSON.stringify(delivery) }); delivery = undefined; }
       if (signal.aborted) break;
       const body = await api('/api/local-bridge/agent/poll', { method: 'POST', body: '{}' });
+      if (signal.aborted) break;
       onStatus({ connected: true, error: '' });
       if (body.command) {
         delivery = { id: body.command.id, lease: body.command.lease, result: await executor.execute(body.command) };

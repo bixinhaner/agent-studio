@@ -15,6 +15,8 @@ export async function runLocalBridgeClient(options: LocalBridgeClientOptions): P
     if (!response.ok) throw new Error(result.detail || `Relay ${response.status}`);
     return result;
   };
+  const stop = () => executor.stopAll();
+  options.signal.addEventListener("abort", stop, { once: true });
   try { await runTransport({ api, executor, signal: options.signal, onStatus: options.onStatus }); }
-  finally { executor.stopAll(); }
+  finally { options.signal.removeEventListener("abort", stop); executor.stopAll(); }
 }
