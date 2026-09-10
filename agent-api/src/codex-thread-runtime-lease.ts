@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 
 import { getDbEnv } from "./db/env.js";
@@ -7,7 +8,7 @@ const ACQUIRE_TIMEOUT_MS = 30_000;
 const RETRY_DELAY_MS = 250;
 
 let pool: Pool | undefined;
-const heldLeases = new Set<string>();
+const leaseContext = new AsyncLocalStorage<ReadonlySet<string>>();
 
 function getPool(): Pool {
   if (!pool) {
@@ -44,7 +45,8 @@ async function acquire(client: PoolClient, key: string): Promise<void> {
 
 export async function withCodexThreadRuntimeLease<T>(threadId: string, action: () => Promise<T>): Promise<T> {
   const key = lockKey(threadId);
-  if (heldLeases.has(key)) return await action();
+  const inheritedLeases = leaseContext.getStore();
+  if (inheritedLeases?.has(key)) return await action();
   const client = await getPool().connect();
   try {
     await acquire(client, key);
@@ -52,11 +54,11 @@ export async function withCodexThreadRuntimeLease<T>(threadId: string, action: (
     client.release();
     throw error;
   }
-  heldLeases.add(key);
+  const activeLeases = new Set(inheritedLeases);
+  activeLeases.add(key);
   try {
-    return await action();
+    return await leaseContext.run(activeLeases, action);
   } finally {
-    heldLeases.delete(key);
     await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [`${LOCK_NAMESPACE}:${key}`]).catch(() => undefined);
     client.release();
   }
