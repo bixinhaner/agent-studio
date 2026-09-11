@@ -1,0 +1,63 @@
+.portal-inline-input-wrap { position: relative; width: 100%; min-width: 0; }
+.portal-inline-editor { box-sizing: border-box; width: 100%; min-height: 52px; max-height: 176px; overflow-y: auto; padding: 8px; color: var(--workbench-text, #172033); font: inherit; font-size: 16px; line-height: 34px; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+.portal-workbench-root .thread-wrap .aui-composer-root:focus-within { border-color: var(--portal-accent, #ff4614); }
+.portal-inline-placeholder { position: absolute; top: 11px; left: 8px; color: var(--workbench-muted, #8b909a); font-size: 16px; pointer-events: none; }
+.portal-inline-paragraph { margin: 0; padding: 0; }
+.inline-file-node { display: inline; white-space: normal; }
+.inline-file-chip { display: inline-flex; vertical-align: baseline; align-items: center; gap: 6px; max-width: min(290px, 95%); min-height: 28px; margin: 0 3px; padding: 2px 8px; box-sizing: border-box; border: 1px solid var(--workbench-border, #e7e9ef); border-radius: 8px; background: var(--workbench-surface-muted, #f5f6fa); color: var(--workbench-text, #172033); font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; user-select: none; }
+.inline-file-chip:hover { background: var(--workbench-hover, #eef1f7); }
+.inline-file-chip:focus-visible, .inline-file-actions button:focus-visible { outline: 2px solid var(--portal-accent, #ff4614); outline-offset: 2px; }
+.inline-file-name { display: inline-flex; min-width: 0; overflow: hidden; white-space: nowrap; }
+.inline-file-stem { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.inline-file-extension { flex: none; }
+.inline-file-selection.is-selected .inline-file-chip { outline: 2px solid var(--portal-accent, #ff4614); outline-offset: 1px; }
+.inline-file-chip svg, .inline-file-chip small { flex-shrink: 0; }
+.inline-file-chip small { font-size: 11px; }
+.inline-file-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 3px; flex-shrink: 0; }
+.inline-file-sheet { color: var(--portal-success, #219653); }
+.inline-file-image { color: var(--portal-info, #4a7bca); }
+.inline-file-document { color: var(--portal-info, #368c9b); }
+.inline-file-chip.is-failed { color: var(--portal-danger, #c53d3d); background: var(--portal-danger-soft, #fff5f4); }
+.inline-file-spinner { animation: inline-file-spin 1.4s linear infinite; }
+@keyframes inline-file-spin { to { transform: rotate(360deg); } }
+.inline-file-details { width: 280px; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.inline-file-details strong, .inline-file-details p { overflow-wrap: anywhere; }
+.inline-file-details small { color: var(--workbench-muted, #778091); font-size: 12px; }
+.inline-file-details p { margin: 0; font-size: 12px; }
+.inline-file-preview { max-height: 180px; width: 100%; object-fit: contain; border-radius: 6px; background: var(--workbench-surface-muted, #f5f6fa); }
+.inline-file-actions { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; border-top: 1px solid var(--workbench-border, #e7e9ef); padding-top: 8px; }
+.inline-file-actions button { display: inline-flex; gap: 6px; align-items: center; border: 0; background: transparent; color: inherit; padding: 6px; font: inherit; font-size: 13px; cursor: pointer; min-height: 32px; }
+.portal-inline-draft-notice { color: var(--workbench-muted, #778091); font-size: 12px; }
+.portal-inline-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.portal-workbench-root .portal-composer-tools-left { flex-wrap: nowrap; min-width: 0; }
+.portal-workbench-root .portal-composer-tools-left .local-workspace-controls { margin: 0; padding: 0; max-width: min(320px, 45vw); flex-shrink: 1; }
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger { min-height: 40px; font-family: inherit; font-size: 14px; max-width: 100%; }
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.is-offline small { display: inline; }
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection { color: var(--portal-accent, #d8441c); }
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger { flex-shrink: 0; min-height: 40px; }
+.portal-composer-tools-left .local-workspace-error { position: absolute; bottom: 100%; background: var(--workbench-surface, white); border: 1px solid var(--workbench-border, #eee); border-radius: 8px; max-width: min(400px, 90vw); }
+.aui-edit-composer-root .portal-inline-input-wrap { min-width: 0; }
+.portal-workbench-root .thread-wrap .aui-composer-root { border-radius: 24px; padding: 12px; }
+.portal-workbench-root .portal-composer-tools-row { border-top: 1px solid var(--workbench-border, #e7e9ef); padding-top: 8px; }
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger { border-radius: 10px; font-family: inherit; font-weight: 500; font-size: 14px; }
+.portal-workbench-root .portal-composer-skill-trigger-text { font: inherit; }
+.portal-workbench-root .thread-wrap .portal-composer-tools-row .aui-composer-attach,
+.portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-upload-send { width: 40px !important; min-width: 40px !important; height: 40px !important; min-height: 40px !important; flex-basis: 40px !important; }
+@media (max-width: 760px) {
+  .portal-inline-editor { min-height: 52px; max-height: min(224px, 30dvh); padding: 6px 4px; line-height: 46px; }
+  .portal-inline-placeholder { left: 4px; font-size: 16px; }
+  .inline-file-chip { max-width: min(200px, 88%); padding: 2px 6px; min-height: 44px; }
+  .portal-workbench-root .thread-wrap .aui-composer-root { border-radius: 20px; }
+  .inline-file-details { width: 100%; padding-bottom: env(safe-area-inset-bottom); }
+  .inline-file-actions button { min-height: 44px; }
+  .inline-file-sheet-panel .ant-drawer-content { border-radius: 16px 16px 0 0; }
+  .portal-workbench-root .portal-composer-tools-left { gap: 4px; }
+  .portal-workbench-root .portal-composer-tools-left .local-workspace-controls { max-width: min(145px, 37vw); }
+  .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger { min-height: 44px; padding: 5px 6px; gap: 4px; }
+  .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger { min-height: 44px; padding: 5px 7px; gap: 4px; }
+  .portal-workbench-root .thread-wrap .portal-composer-tools-row .aui-composer-attach,
+  .portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-upload-send,
+  .portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-stop-btn { width: 44px !important; min-width: 44px !important; height: 44px !important; min-height: 44px !important; flex-basis: 44px !important; }
+  .portal-workbench-root .portal-composer-tools-row:has(.portal-running-composer-actions) { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { .inline-file-spinner { animation: none; } }

@@ -584,11 +584,13 @@ export function usePortalComposerWorkflow() {
 export function usePortalComposerDraftPersistence(input: {
   text: string;
   threadId: string;
+  runtimeThreadId?: string;
   readDraft(): string;
   writeDraft(text: string): void;
   restoreText(text: string): void;
 }) {
-  const { text, threadId, readDraft, writeDraft, restoreText } = input;
+  const { text, threadId, runtimeThreadId, readDraft, writeDraft, restoreText } = input;
+  const previousScope = useRef<{ runtimeThreadId?: string; threadId: string; writeDraft(text: string): void }>();
   const textByThreadRef = useRef<Record<string, string>>({});
   const persistTimerRef = useRef<number | null>(null);
   const hydrationRef = useRef<{ threadId: string; expected: string; pending: boolean }>({
@@ -613,12 +615,17 @@ export function usePortalComposerDraftPersistence(input: {
 
   useEffect(() => {
     if (!threadId) return undefined;
-    const savedDraft = readDraft();
+    const previous = previousScope.current;
+    // Uploading the first file creates a remote task without changing the local conversation.
+    const promoted = runtimeThreadId && previous?.runtimeThreadId === runtimeThreadId && previous.threadId !== threadId;
+    const savedDraft = promoted ? text : readDraft();
+    if (promoted) { previous.writeDraft(""); writeDraft(savedDraft); }
+    previousScope.current = { runtimeThreadId, threadId, writeDraft };
     hydrationRef.current = { threadId, expected: savedDraft, pending: text !== savedDraft };
     textByThreadRef.current[threadId] = savedDraft;
     if (text !== savedDraft) restoreText(savedDraft);
     return flush;
-  }, [flush, readDraft, restoreText, threadId]);
+  }, [flush, readDraft, restoreText, runtimeThreadId, threadId, writeDraft]);
 
   useEffect(() => {
     if (!threadId) return;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import { inlineAttachmentPlainText } from "../portal/inline-attachments";
 
 import { useAuth } from "../auth/AuthProvider";
 import { isInternalPortalExperience } from "../auth/portal-experience";
@@ -244,11 +245,12 @@ function extractPublicShareToken(pathname: string): string {
 }
 
 function collectMessageText(message: PublicShareSnapshotMessage): string {
-  return message.parts
+  const text = message.parts
     .filter((part): part is Extract<PublicShareSnapshotMessage["parts"][number], { type: "text" }> => part.type === "text")
     .map((part) => part.text)
     .join("\n\n")
     .trim();
+  return message.role === "user" ? inlineAttachmentPlainText(text) : text;
 }
 
 function sanitizeFileNameSegment(value: string): string {

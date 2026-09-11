@@ -40,6 +40,7 @@ import {
   BranchPicker,
   Composer,
   UserMessage,
+  UserActionBar,
   ThreadWelcome,
   ThreadList,
   makeMarkdownText
@@ -203,7 +204,8 @@ import {
   PreviewWorkbenchPanel
 } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
-import { PortalSelectedSkillBar, PortalSkillPicker } from "./workbench/SkillPicker";
+import { PortalSkillPicker } from "./workbench/SkillPicker";
+import { inlineAttachmentPlainText, inlineAttachmentIds, missingInlineAttachments, parseInlineAttachments, takeAttachmentId, uploadedAttachmentHint, AttachmentUploadAttempts, type InlineAttachment } from "./inline-attachments";
 import {
   closeWorkbenchDrawer,
   createInitialLayoutState,
@@ -231,6 +233,7 @@ import {
   type PortalWorkspaceTask
 } from "./workspace";
 import "./workbench/workbench.css";
+import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
 
 type SessionOut = {
   session_id: string;
@@ -1840,11 +1843,7 @@ function uploadThreadAttachment(
 }
 
 function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
-  return [
-    `<uploaded_file id=${JSON.stringify(meta.id)} name=${JSON.stringify(meta.name)} path=${JSON.stringify(meta.path)} relativePath=${JSON.stringify(meta.relativePath)} mimeType=${JSON.stringify(meta.mimeType)} bytes=${meta.size}>`,
-    "The file has been uploaded to the workspace. Use filesystem tools to read this path instead of assuming the content is already in context.",
-    "</uploaded_file>"
-  ].join("\n");
+  return uploadedAttachmentHint(meta);
 }
 
 const UPLOADED_FILE_ATTR_PATTERN = /([A-Za-z_][A-Za-z0-9_]*)=("(?:\\.|[^"\\])*"|[^\s>]+)/g;
@@ -1957,17 +1956,16 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
   public accept = "*";
 
   private readonly uploadedByAttachmentId = new Map<string, UploadedAttachmentMeta>();
-  private readonly abortUploadByAttachmentId = new Map<string, () => void>();
-  private readonly cancelledAttachmentIds = new Set<string>();
+  private readonly uploadAttempts = new AttachmentUploadAttempts();
 
   constructor(private readonly resolveThreadId: () => Promise<string>) {}
 
   public async *add(state: { file: File }): AsyncGenerator<PendingAttachment, void> {
     const name = fileNameFromUnknown(state.file.name, "Untitled file");
-    const id =
+    const id = takeAttachmentId(state.file) ?? (
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
-        : `${name}-${Date.now()}`;
+        : `${name}-${Date.now()}`);
     const baseAttachment: WorkspacePendingAttachment = {
       id,
       type: guessAttachmentType(state.file),
@@ -1987,6 +1985,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
       return;
     }
 
+    const attempt = this.uploadAttempts.start(id);
     yield baseAttachment;
 
     const progressQueue = createUploadProgressQueue();
@@ -1995,27 +1994,26 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
       if (!threadId) {
         throw createUploadFailure("session", "Failed to initialize the current session.");
       }
-      if (this.cancelledAttachmentIds.has(id)) {
+      if (attempt.cancelled) {
         throw createUploadFailure("cancelled", "Attachment upload was cancelled.");
       }
       return uploadThreadAttachment(threadId, state.file, {
         onProgress: (progress) => progressQueue.push(progress),
         onRequestStart: (request) => {
-          this.abortUploadByAttachmentId.set(id, () => request.abort());
+          attempt.setAbort(() => request.abort());
         }
       });
     })().finally(() => {
       progressQueue.close();
-      this.abortUploadByAttachmentId.delete(id);
     });
 
     let lastProgress = 0;
     while (true) {
       const progress = await progressQueue.next();
       if (progress === null) break;
-      if (this.cancelledAttachmentIds.has(id)) {
+      if (attempt.cancelled) {
         await uploadPromise.catch(() => undefined);
-        this.cancelledAttachmentIds.delete(id);
+        attempt.finish();
         return;
       }
       if (progress < 1 && progress - lastProgress < 0.01) continue;
@@ -2028,7 +2026,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
 
     try {
       const uploaded = await uploadPromise;
-      if (this.cancelledAttachmentIds.has(id)) return;
+      if (attempt.cancelled) return;
       this.uploadedByAttachmentId.set(id, uploaded);
       yield {
         ...baseAttachment,
@@ -2037,7 +2035,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
         status: { type: "requires-action", reason: "composer-send" }
       } as WorkspacePendingAttachment;
     } catch (error) {
-      if (this.cancelledAttachmentIds.has(id)) return;
+      if (attempt.cancelled) return;
       const failure = uploadFailureFromUnknown(error);
       yield {
         ...baseAttachment,
@@ -2046,7 +2044,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
         status: { type: "incomplete", reason: "error" }
       } as WorkspacePendingAttachment;
     } finally {
-      this.cancelledAttachmentIds.delete(id);
+      attempt.finish();
     }
   }
 
@@ -2079,11 +2077,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
   }
 
   public async remove(attachment: Attachment) {
-    if (attachment.status.type === "running") {
-      this.cancelledAttachmentIds.add(attachment.id);
-    }
-    this.abortUploadByAttachmentId.get(attachment.id)?.();
-    this.abortUploadByAttachmentId.delete(attachment.id);
+    this.uploadAttempts.cancel(attachment.id);
     this.uploadedByAttachmentId.delete(attachment.id);
   }
 }
@@ -2345,16 +2339,16 @@ function useComposerMultilineRef(composerText: string) {
   const syncMultilineState = useCallback(() => {
     const wrap = composerWrapRef.current;
     if (!wrap) return;
-    const textarea = wrap.querySelector("textarea");
+    const textarea = wrap.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
     if (!textarea) return;
-    const hasMultipleLines = composerTextRef.current.includes("\n") || textarea.scrollHeight > 44;
+    const hasMultipleLines = composerTextRef.current.includes("\n") || textarea.scrollHeight > (textarea.isContentEditable ? 60 : 44);
     wrap.dataset.multiline = String(hasMultipleLines);
   }, []);
 
   useEffect(() => {
     const wrap = composerWrapRef.current;
     if (!wrap) return;
-    const textarea = wrap.querySelector("textarea");
+    const textarea = wrap.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
     if (!textarea) return;
 
     let animationFrame: number | null = null;
@@ -2402,7 +2396,7 @@ function useLargeTextPasteAttachmentGuard(input: {
   useEffect(() => {
     const wrap = composerWrapRef.current;
     if (!wrap || !enabled) return;
-    const textarea = wrap.querySelector("textarea");
+    const textarea = wrap.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
     if (!textarea) return;
 
     const handlePaste = (event: ClipboardEvent) => {
@@ -2431,8 +2425,8 @@ function useLargeTextPasteAttachmentGuard(input: {
       });
     };
 
-    textarea.addEventListener("paste", handlePaste);
-    return () => textarea.removeEventListener("paste", handlePaste);
+    textarea.addEventListener("paste", handlePaste, true);
+    return () => textarea.removeEventListener("paste", handlePaste, true);
   }, [aui, composerWrapRef, enabled, onNotice, t]);
 }
 
@@ -2465,19 +2459,8 @@ const SkillComposerControls: FC = () => {
   );
 };
 
-const SelectedSkillContextBar: FC = () => {
-  const { availableSkills, enabledSkillIds, setSkills } = useContext(SkillComposerContext);
-  return (
-    <PortalSelectedSkillBar
-      availableSkills={availableSkills}
-      enabledSkillIds={enabledSkillIds}
-      onEnabledSkillIdsChange={setSkills}
-    />
-  );
-};
-
 function usePortalComposerKeyDown(threadRunning: boolean) {
-  return useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+  return useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
     const action = resolvePortalComposerKeyDownAction({
       key: event.key,
       keyCode: event.nativeEvent.keyCode,
@@ -2503,30 +2486,23 @@ const UploadAwareComposer: FC = () => {
   const localWorkspaceReadiness = useLocalWorkspaceReadiness();
   const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
   const threadRunning = useAuiState((state) => state.thread.isRunning);
-  const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
+  const runtimeThreadId = useAuiState(state => state.threadListItem.id);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
   const composerAttachments = useAuiState((state) => state.composer.attachments);
-  const failedUploadDetails = useMemo(
-    () =>
-      composerAttachments
-        .filter((attachment) => attachment.status.type === "incomplete")
-        .map((attachment) => {
-          const failedAttachment = attachment as Attachment & {
-            uploadError?: string;
-            uploadFailureCode?: UploadFailureCode;
-          };
-          return {
-            id: attachment.id,
-            name: attachment.name,
-            message: localizedUploadFailureMessage(failedAttachment, t)
-          };
-        }),
-    [composerAttachments, t]
-  );
-  const sendBlockedByUpload = uploadBlockReason !== "";
+  const missingAttachments = missingInlineAttachments(composerText, composerAttachments);
+  const requestPreview = useContext(PreviewRequestContext);
+  const previewInlineAttachment = useCallback((attachment: InlineAttachment) => {
+    const meta = attachment.uploadedMeta
+      ? normalizeUploadedAttachmentDownloadMeta(attachment.uploadedMeta)
+      : uploadedAttachmentDownloadMetaFromAttachment(attachment);
+    if (!meta) return;
+    const href = buildUploadedAttachmentDownloadHref(workflow.threadId, meta);
+    requestPreview(meta.relativePath, { contentUrl: href, downloadUrl: href, displayName: meta.name, mimeType: meta.mimeType });
+  }, [requestPreview, workflow.threadId]);
+  const sendBlockedByUpload = uploadBlockReason !== "" || missingAttachments;
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
   const sendBlockedByRuntime = runtimeReadiness.status !== "ready";
   const sendDisabled =
@@ -2537,7 +2513,7 @@ const UploadAwareComposer: FC = () => {
       ? runtimeReadiness.notice
     : uploadBlockReason === "uploading"
       ? t("thread.waitUploads")
-      : uploadBlockReason === "failed"
+      : uploadBlockReason === "failed" || missingAttachments
         ? t("thread.fixUploads")
         : sendBlockedByLargeText
           ? t("thread.errorMessageTooLarge")
@@ -2588,6 +2564,7 @@ const UploadAwareComposer: FC = () => {
   const { clearStoredDraft } = usePortalComposerDraftPersistence({
     text: composerText,
     threadId: workflow.threadId,
+    runtimeThreadId,
     readDraft: workflow.readDraft,
     writeDraft: workflow.writeDraft,
     restoreText: setComposerText
@@ -2690,7 +2667,6 @@ const UploadAwareComposer: FC = () => {
     <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
       <Composer.Root onSubmit={preventBlockedSubmit}>
         <PortalQueueTray threadRunning={threadRunning} onContinueAnswer={continueAnswer} onContinueQueue={continueQueue} />
-        <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
         {accessBlock.blocked ? (
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
             {accessBlock.notice}
@@ -2708,14 +2684,6 @@ const UploadAwareComposer: FC = () => {
           <div className="portal-upload-composer-hint" role="status">
             {uploadBlockReason === "uploading" ? (
               t("thread.uploadingHelp")
-            ) : failedUploadDetails.length > 0 ? (
-              <div className="portal-upload-failure-list">
-                {failedUploadDetails.map((item) => (
-                  <div className="portal-upload-failure-item" key={item.id}>
-                    <strong>{item.name}:</strong> {item.message}
-                  </div>
-                ))}
-              </div>
             ) : (
               t("thread.uploadFailedHelp")
             )}
@@ -2733,22 +2701,19 @@ const UploadAwareComposer: FC = () => {
             {workflowNotice}
           </p>
         ) : null}
-        <SelectedSkillContextBar />
-        <LocalWorkspaceControls />
         <div className="portal-composer-input-row">
-          <Composer.Input
+          <InlineAttachmentComposer
+            key={`${workflow.userId}:${runtimeThreadId}`}
+            draftKey={`${workflow.userId}:${workflow.threadId}`}
+            threadId={workflow.threadId}
             autoFocus={!isMobileWorkbench}
-            cancelOnEscape={false}
-            submitMode="none"
-            onKeyDown={handleComposerKeyDown}
-            unstable_focusOnRunStart={!isMobileWorkbench}
-            unstable_focusOnScrollToBottom={!isMobileWorkbench}
-            unstable_focusOnThreadSwitched={!isMobileWorkbench}
+            onPreview={previewInlineAttachment}
           />
         </div>
         <div className="portal-composer-tools-row">
           <div className="portal-composer-tools-left">
-            <Composer.AddAttachment />
+            <Composer.AddAttachment><PlusIcon /></Composer.AddAttachment>
+            <LocalWorkspaceControls />
             <SkillComposerControls />
           </div>
           {threadRunning ? (
@@ -2815,6 +2780,7 @@ const MobileAwareComposer: FC = () => {
   const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
+  const runtimeThreadId = useAuiState(state => state.threadListItem.id);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
@@ -2836,6 +2802,7 @@ const MobileAwareComposer: FC = () => {
   const { clearStoredDraft } = usePortalComposerDraftPersistence({
     text: composerText,
     threadId: workflow.threadId,
+    runtimeThreadId,
     readDraft: workflow.readDraft,
     writeDraft: workflow.writeDraft,
     restoreText: setComposerText
@@ -2941,8 +2908,6 @@ const MobileAwareComposer: FC = () => {
         ) : workflowNotice ? (
           <p className="portal-upload-composer-hint" role="status">{workflowNotice}</p>
         ) : null}
-        <SelectedSkillContextBar />
-        <LocalWorkspaceControls />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
@@ -2956,6 +2921,7 @@ const MobileAwareComposer: FC = () => {
         </div>
         <div className="portal-composer-tools-row">
           <div className="portal-composer-tools-left">
+            <LocalWorkspaceControls />
             <SkillComposerControls />
           </div>
           {threadRunning ? (
@@ -3485,7 +3451,7 @@ function userTextFromUnknownMessage(message: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  return text;
+  return inlineAttachmentPlainText(text);
 }
 
 function isLikelyHttpUrl(value: string): boolean {
@@ -3804,7 +3770,17 @@ function extractLatestPrompt(messages: unknown): string {
     const content = (msg as { content?: unknown }).content;
     if (Array.isArray(content)) {
       for (const part of content) {
-        collectPromptPart(bucket, part);
+        const partObject = asRecord(part);
+        if (partObject?.type === "text" && typeof partObject.text === "string") {
+          const attachments = sanitizeUserAttachments((msg as { attachments?: unknown }).attachments);
+          const resolved = parseInlineAttachments(partObject.text).map(piece => {
+            if (piece.type === "text") return piece.text;
+            const attachment = attachments.find(item => item.id === piece.id);
+            const meta = uploadedAttachmentDownloadMetaFromAttachment(attachment);
+            return meta ? `${meta.name} (uploaded_file_id=${meta.id})` : piece.name;
+          }).join("");
+          collectPromptPart(bucket, { ...partObject, text: resolved });
+        } else collectPromptPart(bucket, part);
       }
     }
 
@@ -5216,7 +5192,44 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
   );
 };
 
+function useInlineAttachmentPreview() {
+  const requestPreview = useContext(PreviewRequestContext);
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const external = useContext(ExternalPortalUserContext);
+  const preview = useCallback((attachment: InlineAttachment) => {
+    const meta = attachment.uploadedMeta ? normalizeUploadedAttachmentDownloadMeta(attachment.uploadedMeta)
+      : uploadedAttachmentDownloadMetaFromAttachment(attachment);
+    if (!meta) return;
+    const href = buildUploadedAttachmentDownloadHref(activeThreadId, meta);
+    requestPreview(meta.relativePath, { contentUrl: href, downloadUrl: href, displayName: meta.name, mimeType: meta.mimeType });
+  }, [activeThreadId, requestPreview]);
+  return external ? undefined : preview;
+}
+const InlineUserMessageText: FC = () => {
+  const { text } = useMessagePartText();
+  const attachments = useAuiState(state => state.message.attachments) as readonly InlineAttachment[];
+  const preview = useInlineAttachmentPreview();
+  return <span className="portal-inline-message-text">{parseInlineAttachments(text).map((part, index) =>
+    part.type === "text" ? <span key={index}>{part.text}</span> :
+      <InlineFileChip key={index} id={part.id} name={part.name} attachment={attachments.find(item => item.id === part.id)} onPreview={preview} readOnly />
+  )}</span>;
+};
+const InlineEditComposer: FC = () => {
+  const messageId = useAuiState(state => state.message.id);
+  const preview = useInlineAttachmentPreview();
+  const threadId = useContext(ActiveThreadIdContext);
+  const auth = useAuth();
+  return <InlineAttachmentEditComposer draftKey={"edit:" + auth.user?.id + ":" + messageId} threadId={threadId} onPreview={preview} />;
+};
+
+const UnreferencedMessageAttachment: FC = () => {
+  const attachment = useAttachment();
+  const referenced = useAuiState(state => state.message.content.some(part => part.type === "text" && inlineAttachmentIds(part.text).has(attachment.id)));
+  return referenced ? null : <UploadAwareAttachment />;
+};
 const AgentUserMessage: FC = () => {
+  const inline = useAuiState(state => state.message.content.some(part => part.type === "text" && inlineAttachmentIds(part.text).size > 0));
+  if (inline) return <ThreadPublicShareMessageShell tone="user"><UserMessage.Root><MessagePrimitive.Attachments components={{ Attachment: UnreferencedMessageAttachment }} /><UserActionBar /><UserMessage.Content components={{ Text: InlineUserMessageText }} /><BranchPicker /></UserMessage.Root></ThreadPublicShareMessageShell>;
   return (
     <ThreadPublicShareMessageShell tone="user">
       <MessagePrimitive.If hasAttachments>
@@ -8742,6 +8755,11 @@ export function PortalShell(props: {
           });
         } catch (error) {
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
+          if (latestUserMessage) window.dispatchEvent(new CustomEvent("bailey-restore-composer", { detail: {
+            threadId,
+            text: latestUserMessage.message.content.filter(part => part.type === "text").map(part => (part as { text: string }).text).join("\n"),
+            attachments: latestUserMessage.message.attachments
+          } }));
           setErrorText(notice);
           stopRunningStageWaitTimers();
           updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
@@ -10392,7 +10410,7 @@ export function PortalShell(props: {
   }, [canUseCustomerBilling, dismissedSubscriptionReminderKey, subscriptionReminderKey]);
 
   const threadViewKey = `thread-view-${String(
-    activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty"
+    activeThreadIdentity.localId || activeThreadIdentity.remoteId || "empty"
   )}`;
   const threadContent = (
     <div
@@ -10511,6 +10529,7 @@ export function PortalShell(props: {
               components={{
                 Composer: trainingReadOnly ? ReadOnlyComposer : canUpload ? UploadAwareComposer : MobileAwareComposer,
                 UserMessage: AgentUserMessage,
+                EditComposer: InlineEditComposer,
                 AssistantMessage: AgentAssistantMessage,
                 MessagesFooter: PortalSteerEventsFooter,
                 ThreadWelcome: DraftOnlyThreadWelcome
