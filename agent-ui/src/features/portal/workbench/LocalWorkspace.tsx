@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Modal, Popover } from 'antd';
-import { Check, ChevronDown, Cloud, Computer, Download, Folder, FolderPlus, LoaderCircle, Monitor, Terminal, Unplug } from 'lucide-react';
-import { fetchLocalBridgeDevices, localBridgeApi, type LocalBridgeDevice } from '../api';
+import { Check, ChevronDown, Cloud, Computer, Download, Ellipsis, Folder, FolderPlus, LoaderCircle, Monitor, Terminal, Trash2, X } from 'lucide-react';
+import { fetchLocalBridgeDevices, localBridgeApi, revokeLocalBridgeDevice, type LocalBridgeDevice } from '../api';
 import { usePortalI18n } from '../i18n';
 import './local-workspace.css';
 export type LocalSelection = { id: string; thread_id?: string; root_id: string; path: string; label: string; device_id: string; device_name: string; status: 'online' | 'offline' };
@@ -23,17 +23,38 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
   const threadRef = useRef(threadId); threadRef.current = threadId;
   const generation = useRef(0);
   const selectionRevision = useRef(0);
-  const refresh = useCallback(async () => { const next = await fetchLocalBridgeDevices(); setDevices(next); }, []);
+  const removedDevices = useRef(new Set<string>());
+  const removing = useRef(false);
+  const [removingDeviceId, setRemovingDeviceId] = useState<string | null>(null);
+  const applyDevices = useCallback((next: LocalBridgeDevice[]) => {
+    const visible = next.filter(device => !removedDevices.current.has(device.id));
+    setDevices(visible);
+    setSelection(old => old ? { ...old, status: visible.find(device => device.id === old.device_id)?.status || 'offline' } : old);
+  }, []);
+  const refresh = useCallback(async () => { applyDevices(await fetchLocalBridgeDevices()); }, [applyDevices]);
+  const removeDevice = useCallback(async (deviceId: string) => {
+    if (removing.current) return;
+    removing.current = true;
+    setRemovingDeviceId(deviceId); setError('');
+    try {
+      await revokeLocalBridgeDevice(deviceId);
+      removedDevices.current.add(deviceId);
+      setDevices(old => old.filter(device => device.id !== deviceId));
+      // Preserve the current location as unavailable until the user explicitly chooses another workspace.
+      setSelection(old => old?.device_id === deviceId ? { ...old, status: 'offline' } : old);
+    } catch (error) { setError(translate.current('localWorkspace.removeFailed')); throw error; }
+    finally { removing.current = false; setRemovingDeviceId(null); }
+  }, []);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     const update = async () => {
-      try { const next = await fetchLocalBridgeDevices(); if (!alive) return; setDevices(next); setSelection(old => old ? { ...old, status: next.find(d => d.id === old.device_id)?.status || 'offline' } : old); }
+      try { const next = await fetchLocalBridgeDevices(); if (!alive) return; applyDevices(next); }
       catch { if (alive) setSelection(old => old ? { ...old, status: 'offline' } : old); }
     };
     void update(); const timer = selection?.device_id || dialog ? window.setInterval(() => void update(), 5000) : undefined;
     return () => { alive = false; window.clearInterval(timer); };
-  }, [enabled, selection?.device_id, dialog]);
+  }, [enabled, selection?.device_id, dialog, applyDevices]);
   useEffect(() => {
     const ticket = ++generation.current;
     const selectionVersion = selectionRevision.current;
@@ -95,9 +116,9 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
     void update(); const timer = window.setInterval(() => void update(), 1200);
     return () => { alive = false; window.clearInterval(timer); };
   }, [connection, dialog, refresh, select]);
-  return { bindingLoadFailed, reloadBinding: () => setLoadRevision(v => v + 1), selection, selectionRef, devices, busy, error, dialog, connection, select, refresh, begin, launch, close, enabled, offline: selection?.status === 'offline' };
+  return { bindingLoadFailed, reloadBinding: () => setLoadRevision(v => v + 1), selection, selectionRef, devices, busy: busy || removingDeviceId !== null, removingDeviceId, removeDevice, removedSelection: !!selection && removedDevices.current.has(selection.device_id), error, dialog, connection, select, refresh, begin, launch, close, enabled, offline: selection?.status === 'offline' };
 }
-type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { showEntry: boolean; running: boolean; manage(): void };
+type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { showEntry: boolean; running: boolean };
 export const LocalWorkspaceContext = createContext<WorkspaceContext | null>(null);
 export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; notice: string; actionLabel?: string; retry(): Promise<void> } | null {
   const { t } = usePortalI18n();
@@ -105,6 +126,7 @@ export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; not
   if (!local?.enabled) return null;
   if (local.bindingLoadFailed) return { status: 'error' as const, notice: t("localWorkspace.bindingFailed"), retry: async () => local.reloadBinding() };
   if (local.busy) return { status: 'loading' as const, notice: t("localWorkspace.updating"), retry: async () => {} };
+  if (local.removedSelection) return { status: 'error' as const, notice: t('localWorkspace.removedSelection'), actionLabel: t('localWorkspace.addFolder'), retry: async () => local.begin() };
   if (local.offline && local.devices.find(device => device.id === local.selection?.device_id)?.platform === 'linux-cli') return { status: 'error' as const, notice: t("localWorkspace.linuxOffline"), actionLabel: t("localWorkspace.connectionHelp"), retry: async () => local.begin() };
   if (local.offline) return { status: 'error' as const, notice: t("localWorkspace.desktopOffline"), actionLabel: t("localWorkspace.openApp"), retry: async () => { window.location.href = 'agent-studio://connect'; } };
   return null;
@@ -113,13 +135,47 @@ export function LocalWorkspaceControls() {
   const { t } = usePortalI18n();
   const local = useContext(LocalWorkspaceContext);
   const [open, setOpen] = useState(false);
+  const [moreDeviceId, setMoreDeviceId] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const deviceTriggers = useRef<Record<string, HTMLButtonElement | null>>({});
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
   useEffect(() => { const query = window.matchMedia('(max-width: 768px)'); const listener = () => setMobile(query.matches); query.addEventListener('change', listener); return () => query.removeEventListener('change', listener); }, []);
+  useEffect(() => { if (!local?.showEntry) { setOpen(false); setMoreDeviceId(null); } }, [local?.showEntry]);
   if (!local?.enabled || !local.showEntry) return null;
-  const choose = async (value: LocalSelection | null) => { try { await local.select(value); setOpen(false); } catch {} };
-  const content = <div className="local-folder-menu"><div className="local-folder-menu-title">{t("localWorkspace.title")}</div><p className="local-section-label">{t("localWorkspace.recent")}</p><div className="local-folder-list">{local.devices.flatMap(d => d.roots.map(r => <button type="button" className={`local-folder-row${local.selection?.root_id === r.id ? ' selected' : ''}`} key={r.id} disabled={local.running || local.busy} title={r.path} onClick={() => void choose({ id: `selection-${r.id}`, root_id: r.id, path: r.path, label: r.label || r.path.split(/[\\/]/).pop() || r.path, device_id: d.id, device_name: d.name, status: d.status })}><Folder size={21} /><span><strong>{r.label || r.path.split(/[\\/]/).pop()}</strong><small><i className={`local-status-dot ${d.status}`} />{d.name} · {d.status === 'online' ? t("localWorkspace.connected") : t("localWorkspace.offline")}</small></span>{local.selection?.root_id === r.id ? <Check size={17} /> : null}</button>))}{!local.devices.some(d => d.roots.length) ? <p className="local-no-folders">{t("localWorkspace.emptyFolders")}</p> : null}</div><div className="local-folder-menu-actions"><button type="button" disabled={local.running || local.busy} onClick={() => { setOpen(false); local.begin(); }}><FolderPlus size={17} />{t("localWorkspace.otherFolder")}</button><button type="button" onClick={() => { setOpen(false); local.manage(); }}><Computer size={17} />{t("localWorkspace.myComputer")}</button>{local.selection ? <button type="button" disabled={local.running || local.busy} onClick={() => void choose(null)}><Unplug size={17} />{t("localWorkspace.unbind")}</button> : null}</div>{local.running ? <p className="local-menu-hint">{t("localWorkspace.runningHint")}</p> : null}</div>;
-  const trigger = <button type="button" className={`local-workspace-trigger${local.selection ? ' has-selection' : ''}${local.offline ? ' is-offline' : ''}`} aria-label={t("localWorkspace.title")} aria-expanded={open} title={local.selection ? `${local.selection.device_name}\n${local.selection.path}` : t("localWorkspace.cloudHint")} onClick={() => setOpen(!open)}>{local.selection ? <Folder size={16} /> : <Cloud size={16} />}<span>{local.selection ? t("localWorkspace.localLabel", { name: local.selection.label }) : t("localWorkspace.cloud")}</span>{local.offline ? <small>{t("localWorkspace.offline")}</small> : null}<ChevronDown size={13} /></button>;
-  return <div className="local-workspace-controls">{mobile ? <>{trigger}<Drawer title={null} closable={false} placement="bottom" open={open} height="auto" onClose={() => setOpen(false)} rootClassName="local-folder-sheet" styles={{ body: { padding: 0 } }}>{content}</Drawer></> : <Popover trigger="click" placement="topLeft" content={content} open={open} onOpenChange={setOpen} overlayClassName="local-folder-popover">{trigger}</Popover>}{local.error && !local.dialog ? <div className="local-workspace-error" role="alert">{local.error}</div> : null}</div>;
+  const changeOpen = (next: boolean) => { setOpen(next); if (!next) setMoreDeviceId(null); };
+  const close = () => { changeOpen(false); triggerRef.current?.focus(); };
+  const choose = async (value: LocalSelection | null) => { try { await local.select(value); close(); } catch {} };
+  const disabled = local.running || local.busy;
+  const devices = [...local.devices].sort((a, b) => Number(b.id === local.selection?.device_id) - Number(a.id === local.selection?.device_id));
+  const content = <div className="local-folder-menu" onKeyDown={event => {
+    if (event.key === 'Escape') { event.stopPropagation(); close(); }
+  }}>
+    <div className="local-folder-menu-heading"><strong>{t('localWorkspace.menuTitle')}</strong>{mobile ? <button type="button" className="local-menu-close" onClick={close} aria-label={t('common.close')}><X size={19} /></button> : null}</div>
+    <button type="button" className={`local-folder-row local-cloud-row${!local.selection ? ' selected' : ''}`} disabled={disabled} aria-pressed={!local.selection} onClick={() => void choose(null)}><Cloud size={21} /><span>{t('localWorkspace.cloud')}</span>{!local.selection ? <Check size={17} /> : null}</button>
+    <div className="local-folder-list">
+      {devices.map(device => <section className="local-folder-device" key={device.id} aria-label={device.name}>
+        <div className="local-folder-device-heading">
+          {device.platform === 'linux-cli' ? <Terminal size={21} /> : <Computer size={21} />}
+          <strong title={device.name}>{device.name}</strong>
+          <span className="local-folder-device-status"><i className={`local-status-dot ${device.status}`} />{device.status === 'online' ? t('localWorkspace.connected') : t('localWorkspace.offline')}</span>
+          <Popover trigger="click" destroyOnHidden placement={mobile ? 'topRight' : 'rightTop'} open={moreDeviceId === device.id} onOpenChange={next => setMoreDeviceId(next ? device.id : null)} overlayClassName="local-device-action-popover" content={
+            <div className="local-device-action-menu" role="menu" aria-label={t('localWorkspace.deviceActions', { name: device.name })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMoreDeviceId(null); deviceTriggers.current[device.id]?.focus(); } }}>
+              <button type="button" role="menuitem" autoFocus disabled={disabled} onClick={async () => { try { await local.removeDevice(device.id); setMoreDeviceId(null); triggerRef.current?.focus(); } catch {} }}>
+                {local.removingDeviceId === device.id ? <LoaderCircle size={17} className="local-spinner" /> : <Trash2 size={17} />}<span>{t('localWorkspace.removeConnection')}</span>
+              </button>
+              <p>{t('localWorkspace.removeConnectionHint')}</p>
+            </div>
+          }><button ref={node => { deviceTriggers.current[device.id] = node; }} type="button" className="local-device-more" aria-label={t('localWorkspace.deviceActions', { name: device.name })} aria-haspopup="menu" aria-expanded={moreDeviceId === device.id} disabled={disabled} title={local.running ? t('localWorkspace.runningHint') : undefined} onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setMoreDeviceId(device.id); } }}><Ellipsis size={20} /></button></Popover>
+        </div>
+        <div className="local-folder-device-roots">{device.roots.map(root => <button type="button" className={`local-folder-row${local.selection?.root_id === root.id ? ' selected' : ''}`} key={root.id} disabled={disabled} title={root.path} aria-pressed={local.selection?.root_id === root.id} onClick={() => void choose({ id: `selection-${root.id}`, root_id: root.id, path: root.path, label: root.label || root.path.split(/[\\/]/).pop() || root.path, device_id: device.id, device_name: device.name, status: device.status })}><Folder size={21} /><span>{root.label || root.path.split(/[\\/]/).pop() || root.path}</span>{local.selection?.root_id === root.id ? <Check size={17} /> : null}</button>)}{!device.roots.length ? <p className="local-no-device-folders">{t('localWorkspace.noDeviceFolders')}</p> : null}</div>
+      </section>)}
+      {!devices.length ? <p className="local-no-folders">{t('localWorkspace.emptyFolders')}</p> : null}
+    </div>
+    <div className="local-folder-menu-actions"><button type="button" disabled={disabled} onClick={() => { changeOpen(false); local.begin(); }}><FolderPlus size={21} /><span>{t('localWorkspace.addFolder')}</span></button></div>
+    {local.running ? <p className="local-menu-hint">{t('localWorkspace.runningHint')}</p> : null}
+  </div>;
+  const trigger = <button ref={triggerRef} type="button" className={`local-workspace-trigger${local.selection ? ' has-selection' : ''}${local.offline ? ' is-offline' : ''}`} aria-label={t('localWorkspace.title')} aria-expanded={open} title={local.selection ? `${local.selection.device_name}\n${local.selection.path}` : t('localWorkspace.cloudHint')} onClick={() => changeOpen(!open)}>{local.selection ? <Folder size={16} /> : <Cloud size={16} />}<span>{local.selection ? t('localWorkspace.localLabel', { name: local.selection.label }) : t('localWorkspace.cloud')}</span>{local.offline ? <small>{t('localWorkspace.offline')}</small> : null}<ChevronDown size={13} /></button>;
+  return <div className="local-workspace-controls">{mobile ? <>{trigger}<Drawer title={null} closable={false} placement="bottom" open={open} height="auto" onClose={close} rootClassName="local-folder-sheet" styles={{ body: { padding: 0 } }}>{content}</Drawer></> : <Popover trigger="click" placement="topLeft" content={content} open={open} onOpenChange={changeOpen} overlayClassName="local-folder-popover">{trigger}</Popover>}{local.error && !local.dialog ? <div className="local-workspace-error" role="alert">{local.error}</div> : null}</div>;
 }
 export function LocalWorkspaceDialogs() {
   const { t } = usePortalI18n();

@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchLocalBridgeDevices, localBridgeApi } from '../api';
+import { fetchLocalBridgeDevices, localBridgeApi, revokeLocalBridgeDevice } from '../api';
 import { PortalI18nProvider } from '../i18n';
 import { LocalWorkspaceContext, LocalWorkspaceDialogs, useLocalWorkspace, type LocalSelection } from './LocalWorkspace';
-vi.mock('../api', () => ({ fetchLocalBridgeDevices: vi.fn(), localBridgeApi: vi.fn() }));
+vi.mock('../api', () => ({ fetchLocalBridgeDevices: vi.fn(), localBridgeApi: vi.fn(), revokeLocalBridgeDevice: vi.fn() }));
 const folder: LocalSelection = { id:'binding',root_id:'root',path:'/local/folder',label:'目录',device_id:'device',device_name:'电脑',status:'online' };
 afterEach(cleanup);
 beforeEach(() => { vi.resetAllMocks(); window.history.replaceState({}, '', '/'); vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{id:'device',name:'电脑',status:'online',roots:[{id:'root',path:'/local/folder',label:'目录'}]}]); vi.mocked(localBridgeApi).mockResolvedValue({binding:null}); });
@@ -17,7 +17,7 @@ describe('local task directory state', () => {
       if (url.endsWith('/connections/linux-connection')) return { status: completed ? 'completed' : 'pending', selection: completed ? folder : null } as any;
       return { binding: init?.method === 'PUT' ? folder : null } as any;
     });
-    function View() { const local = useLocalWorkspace('task', true); return <LocalWorkspaceContext.Provider value={{ ...local, showEntry: true, running: false, manage: () => {} }}><button onClick={local.begin}>连接测试</button><span data-testid="selected">{local.selection?.root_id}</span><LocalWorkspaceDialogs /></LocalWorkspaceContext.Provider>; }
+    function View() { const local = useLocalWorkspace('task', true); return <LocalWorkspaceContext.Provider value={{ ...local, showEntry: true, running: false }}><button onClick={local.begin}>连接测试</button><span data-testid="selected">{local.selection?.root_id}</span><LocalWorkspaceDialogs /></LocalWorkspaceContext.Provider>; }
     render(<PortalI18nProvider defaultLocale="zh-CN" languageSwitcherEnabled={false}><View /></PortalI18nProvider>); fireEvent.click(screen.getByText('连接测试'));
     fireEvent.click(screen.getByRole('button', { name: 'Linux 命令行' }));
     await screen.findByLabelText('Linux 连接命令');
@@ -62,5 +62,20 @@ describe('local task directory state', () => {
     vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{id:'device',name:'电脑',status:'offline',roots:[]}]);
     vi.mocked(localBridgeApi).mockResolvedValue({binding:{...folder,thread_id:'task',status:'offline'}});
     const {result}=renderHook(()=>useLocalWorkspace('task',true)); await waitFor(()=>expect(result.current.selection?.root_id).toBe('root')); expect(result.current.offline).toBe(true);
+  });
+  it('removing the current computer blocks local work without silently selecting cloud, including after stale refreshes', async () => {
+    const { result } = renderHook(() => useLocalWorkspace('', true));
+    await act(async () => { await result.current.select(folder); });
+    await act(async () => { await result.current.removeDevice('device'); });
+    expect(revokeLocalBridgeDevice).toHaveBeenCalledWith('device');
+    expect(result.current.selection?.root_id).toBe('root');
+    expect(result.current.offline).toBe(true);
+    expect(result.current.removedSelection).toBe(true);
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.devices).toEqual([]);
+    expect(result.current.offline).toBe(true);
+    await act(async () => { await result.current.select(null); });
+    expect(result.current.removedSelection).toBe(false);
+    expect(result.current.selection).toBeNull();
   });
 });
