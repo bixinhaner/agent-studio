@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { AssistantRuntimeProvider, ComposerPrimitive, ThreadPrimitive, ActionBarPrimitive, useAui, useAuiState, useLocalRuntime, type ChatModelAdapter, type CreateAttachment } from "@assistant-ui/react";
-import { InlineAttachmentComposer, InlineAttachmentEditComposer } from "./InlineAttachmentComposer";
+import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
 import { $getRoot, getNearestEditorFromDOMNode } from "lexical";
 import { attachmentReference, makeAttachmentDraft, writeAttachmentDraft, missingInlineAttachments } from "./inline-attachments";
 import { usePortalComposerDraftPersistence } from "./composer-workflow";
@@ -145,5 +145,16 @@ describe("inline attachment editor with the existing composer runtime", () => {
     const user = state().messages.find((m: { role: string }) => m.role === "user");
     expect(user.content[0].text).toBe(sentence);
     expect(user.attachments[0].content).toEqual(file.content);
+  });
+});
+
+
+describe("inline attachment error translations", () => {
+  it.each(["en", "zh-CN"] as const)("shows actionable upload errors in %s", async locale => {
+    render(<PortalI18nProvider defaultLocale={locale} languageSwitcherEnabled={false}><InlineFileChip id="error-file" name="failed.md" attachment={{ id: "error-file", name: "failed.md", file: new File(["test"], "failed.md"), type: "document", contentType: "text/markdown", status: { type: "incomplete", reason: "error" }, uploadError: "Raw upload failure", uploadFailureCode: "network" }} /></PortalI18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: /failed.md/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(locale === "en" ? "Check your connection and try again." : "上传过程中连接中断，请检查网络后重试。");
+    expect(alert.textContent).not.toContain("Raw upload failure");
   });
 });

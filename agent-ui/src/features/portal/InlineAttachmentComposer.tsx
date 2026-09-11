@@ -25,6 +25,7 @@ import {
   readAttachmentDraft, writeAttachmentDraft, makeAttachmentDraft, reserveAttachmentId,
   missingInlineAttachments, type InlineAttachment
 } from "./inline-attachments";
+import { localizedUploadFailureMessage } from "./attachment-upload-messages";
 import { usePortalI18n } from "./i18n";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import "./inline-composer.css";
@@ -50,7 +51,7 @@ export function InlineFileChip({ id, name, attachment: supplied, onPreview, read
 }) {
   const context = useContext(AttachmentActions);
   const attachment = supplied ?? context.attachments.find(item => item.id === id);
-  const { locale } = usePortalI18n();
+  const { locale, t } = usePortalI18n();
   const en = locale === "en";
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -88,7 +89,7 @@ export function InlineFileChip({ id, name, attachment: supplied, onPreview, read
     {url ? <img className="inline-file-preview" src={url} alt={name} /> : <FileGlyph name={name} />}
     <strong>{name}</strong>
     <small>{extension.slice(1).toUpperCase() || (en ? "File" : "文件")}{attachment?.file?.size ? " · " + Math.ceil(attachment.file.size / 1024) + " KB" : ""}</small>
-    {status ? <p role={failed ? "alert" : "status"}>{status}{failed && attachment?.uploadError ? " · " + attachment.uploadError : ""}</p> : null}
+    {status ? <p role={failed ? "alert" : "status"}>{status}{failed && attachment ? " · " + localizedUploadFailureMessage(attachment, t) : ""}</p> : null}
     <div className="inline-file-actions">
       {!failed && !running && attachment && preview ? <button type="button" onClick={() => { setOpen(false); preview(attachment); }}><Eye size={16} />{en ? "Preview" : "预览"}</button> : null}
       {!readOnly && failed && attachment?.file ? <button type="button" onClick={() => { setOpen(false); context.retry(id); }}><RotateCcw size={16} />{en ? "Retry" : "重试"}</button> : null}
@@ -327,7 +328,11 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
   }, [editor]);
   return <PlainTextPlugin contentEditable={<ContentEditable className="portal-inline-editor" aria-label={locale === "en" ? "Message" : "消息"} aria-placeholder={placeholder}
     placeholder={<div className="portal-inline-placeholder">{placeholder}</div>}
-    onDrop={event => {
+    onDropCapture={event => {
+      // The surrounding assistant-ui dropzone handles files during capture.
+      // Respect that event so dropping into the editor does not upload twice.
+      // Capture also runs before Lexical's native drop handler in standalone editors.
+      if (event.defaultPrevented) return;
       const files = Array.from(event.dataTransfer.files);
       if (!files.length) return;
       event.preventDefault(); event.stopPropagation();

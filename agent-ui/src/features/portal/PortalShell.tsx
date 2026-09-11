@@ -233,6 +233,7 @@ import {
   type PortalWorkspaceTask
 } from "./workspace";
 import "./workbench/workbench.css";
+import { localizedUploadFailureMessage, THREAD_ATTACHMENT_MAX_BYTES } from "./attachment-upload-messages";
 import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
 
 type SessionOut = {
@@ -1637,7 +1638,6 @@ type WorkspacePendingAttachment = PendingAttachment & {
   uploadedMeta?: UploadedAttachmentMeta;
 };
 
-const THREAD_ATTACHMENT_MAX_BYTES = 512 * 1024 * 1024;
 
 function createUploadFailure(code: UploadFailureCode, message: string, status?: number): UploadFailure {
   const failure = new Error(message) as UploadFailure;
@@ -2101,35 +2101,6 @@ function uploadStatusLabel(attachment: Attachment & { uploadError?: string }): s
   return "Uploaded";
 }
 
-function localizedUploadFailureMessage(
-  attachment: Pick<WorkspacePendingAttachment, "uploadError" | "uploadFailureCode">,
-  t: ReturnType<typeof usePortalI18n>["t"]
-): string {
-  switch (attachment.uploadFailureCode) {
-    case "too-large":
-      return t("thread.uploadTooLarge", { limit: formatFileSize(THREAD_ATTACHMENT_MAX_BYTES) });
-    case "size-mismatch":
-      return t("thread.uploadSizeMismatch");
-    case "network":
-      return t("thread.uploadNetworkError");
-    case "timeout":
-      return t("thread.uploadTimeout");
-    case "cancelled":
-      return t("thread.uploadCancelled");
-    case "auth":
-      return t("thread.uploadAuthError");
-    case "server":
-      return t("thread.uploadServerError");
-    case "session":
-      return t("thread.uploadSessionError");
-    case "invalid-response":
-      return t("thread.uploadResponseError");
-    case "request":
-      return t("thread.uploadRequestError");
-    default:
-      return t("thread.uploadFailedHelp");
-  }
-}
 
 const UploadAwareAttachment: FC = () => {
   const aui = useAui();

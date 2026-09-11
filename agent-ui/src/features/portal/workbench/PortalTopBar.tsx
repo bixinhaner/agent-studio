@@ -104,7 +104,7 @@ export function PortalTopBar(props: {
       props.onOpenLocalBridge
         ? {
             key: "local-bridge",
-            label: "我的电脑",
+            label: t("localWorkspace.myComputer"),
             icon: <Computer size={18} />,
             onClick: () => { setMobileActionsOpen(false); props.onOpenLocalBridge?.(); }
           }
@@ -273,8 +273,8 @@ export function PortalTopBar(props: {
               </Tooltip>
             ) : null}
             {!isMobile && props.onOpenLocalBridge ? (
-              <Tooltip title="我的电脑" placement="bottom">
-                <Button type="text" className="portal-topbar-ghost-btn" icon={<Computer size={18} />} onClick={props.onOpenLocalBridge} style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label="我的电脑" />
+              <Tooltip title={t("localWorkspace.myComputer")} placement="bottom">
+                <Button type="text" className="portal-topbar-ghost-btn" icon={<Computer size={18} />} onClick={props.onOpenLocalBridge} style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label={t("localWorkspace.myComputer")} />
               </Tooltip>
             ) : null}
             {!isMobile && props.onOpenAdmin ? (
