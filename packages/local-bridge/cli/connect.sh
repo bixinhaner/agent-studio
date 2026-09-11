@@ -3,7 +3,8 @@ set -euo pipefail
 # Installs only in the current user's data directory. Never changes the caller's cwd.
 if [ "$(uname -s)" != Linux ]; then echo '此命令用于 Linux；macOS / Windows 请使用桌面客户端。' >&2; exit 1; fi
 case "$(uname -m)" in x86_64) bridge_arch=x64 ;; aarch64|arm64) bridge_arch=arm64 ;; *) echo '暂不支持此 CPU 架构。' >&2; exit 1 ;; esac
-if ! ldd --version 2>&1 | head -1 | grep -Eiq 'glibc|GNU libc'; then echo '需要 glibc 2.28 或更新版本（如 Ubuntu 20.04+、Debian 10+）；暂不支持 Alpine。' >&2; exit 1; fi
+bridge_libc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+if [[ "$bridge_libc" != "glibc "* ]]; then echo '需要 glibc 2.28 或更新版本（如 Ubuntu 20.04+、Debian 10+）；暂不支持 Alpine。' >&2; exit 1; fi
 for bridge_tool in curl tar sha256sum; do command -v "$bridge_tool" >/dev/null || { echo "请先安装 $bridge_tool，再运行此命令。" >&2; exit 1; }; done
 bridge_download="${BAILEY_DOWNLOAD_URL:-https://bailey.baicells.com/downloads/local-bridge}"
 bridge_home="${XDG_DATA_HOME:-$HOME/.local/share}/bailey-local-bridge"
