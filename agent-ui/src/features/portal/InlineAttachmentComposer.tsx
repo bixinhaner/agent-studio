@@ -19,15 +19,18 @@ import {
   type LexicalNode, type NodeKey, type SerializedLexicalNode, type RangeSelection
 } from "lexical";
 import { Drawer, Popover } from "antd";
-import { AlertCircle, File, FileText, FileSpreadsheet, Image, LoaderCircle, Eye, Trash2, RotateCcw } from "lucide-react";
+import { AlertCircle, File, FileText, FileSpreadsheet, Presentation, Image, LoaderCircle, Eye, Trash2, RotateCcw } from "lucide-react";
 import {
-  attachmentReference, parseInlineAttachments, inlineAttachmentIds, inlineAttachmentPlainText, completedAttachment,
+  attachmentReference, inlineAttachmentIds, completedAttachment,
   readAttachmentDraft, writeAttachmentDraft, makeAttachmentDraft, reserveAttachmentId,
   missingInlineAttachments, type InlineAttachment
 } from "./inline-attachments";
 import { localizedUploadFailureMessage } from "./attachment-upload-messages";
 import { usePortalI18n } from "./i18n";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
+import { parseInlineReferences, inlineReferencePlainText, inlineSkillIds, hasInlineComposerRequest } from "./inline-references";
+import { InlineSkillActions, InlineSkillNode, type InlineSkillBinding } from "./InlineSkillChip";
+import { InlineSkillsPlugin } from "./InlineSkillsPlugin";
 import "./inline-composer.css";
 
 type EditorActions = {
@@ -41,6 +44,7 @@ const AttachmentActions = createContext<EditorActions>({ attachments: [], remove
 function FileGlyph({ name, imageUrl }: { name: string; imageUrl?: string }) {
   if (imageUrl) return <img className="inline-file-thumb" src={imageUrl} alt="" />;
   if (/\.(xlsx?|csv|ods)$/i.test(name)) return <FileSpreadsheet className="inline-file-sheet" size={20} />;
+  if (/\.(pptx?|odp)$/i.test(name)) return <Presentation className="inline-file-presentation" size={20} />;
   if (/\.(png|jpe?g|webp|gif|svg)$/i.test(name)) return <Image className="inline-file-image" size={20} />;
   if (/\.(md|txt|pdf|docx?)$/i.test(name)) return <FileText className="inline-file-document" size={20} />;
   return <File size={20} />;
@@ -136,8 +140,9 @@ function replaceEditorText(text: string) {
   const lines = text.split("\n");
   for (const [index, line] of lines.entries()) {
     if (index > 0) paragraph.append($createLineBreakNode());
-    for (const part of parseInlineAttachments(line)) {
-      paragraph.append(part.type === "text" ? $createTextNode(part.text) : new InlineAttachmentNode(part.id, part.name));
+    for (const part of parseInlineReferences(line)) {
+      paragraph.append(part.type === "text" ? $createTextNode(part.text) : part.type === "skill"
+        ? new InlineSkillNode(part.id, part.name) : new InlineAttachmentNode(part.id, part.name));
     }
   }
   root.append(paragraph);
@@ -146,11 +151,14 @@ function replaceEditorText(text: string) {
 type ComposerProps = {
   draftKey: string; threadId: string; autoFocus?: boolean;
   onPreview?(attachment: InlineAttachment): void;
+  skills?: InlineSkillBinding;
 };
 function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
   const [editor] = useLexicalComposerContext();
   const aui = useAui();
   const actions = useContext(AttachmentActions);
+  const skillActions = useContext(InlineSkillActions);
+  const availableSkills = useRef(skillActions.binding?.availableSkills); availableSkills.current = skillActions.binding?.availableSkills;
   const { locale } = usePortalI18n();
   const placeholder = locale === "en" ? "Ask a question or describe a task…" : "输入问题或描述任务…";
   const text = useAuiState(state => state.composer.text);
@@ -239,7 +247,7 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
     const removeSelected = (backward: boolean, event: globalThis.KeyboardEvent | null) => {
       const current = $getSelection();
       if ($isNodeSelection(current)) {
-        const nodes = current.getNodes().filter(node => node instanceof InlineAttachmentNode);
+        const nodes = current.getNodes().filter(node => node instanceof InlineAttachmentNode || node instanceof InlineSkillNode);
         if (!nodes.length) return false;
         event?.preventDefault();
         const parent = nodes[0].getParent();
@@ -259,7 +267,7 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
         const children = "getChildren" in node ? (node as ReturnType<typeof $createParagraphNode>).getChildren() : [];
         neighbor = children[backward ? anchor.offset - 1 : anchor.offset] ?? null;
       }
-      if (!(neighbor instanceof InlineAttachmentNode)) return false;
+      if (!(neighbor instanceof InlineAttachmentNode) && !(neighbor instanceof InlineSkillNode)) return false;
       event?.preventDefault();
       const selected = $createNodeSelection(); selected.add(neighbor.getKey()); $setSelection(selected);
       return true;
@@ -270,7 +278,7 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
       if (!current) return false;
       const value = current.getTextContent();
       event.preventDefault();
-      event.clipboardData.setData("text/plain", inlineAttachmentPlainText(value));
+      event.clipboardData.setData("text/plain", inlineReferencePlainText(value));
       event.clipboardData.setData("application/x-bailey-inline", value);
       if (cut && $isRangeSelection(current)) current.removeText();
       else if (cut && $isNodeSelection(current)) current.getNodes().forEach(node => node.remove());
@@ -301,8 +309,9 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
         if (!rich) return false;
         event.preventDefault();
         const current = $getSelection();
-        if ($isRangeSelection(current)) current.insertNodes(parseInlineAttachments(rich).map(part =>
+        if ($isRangeSelection(current)) current.insertNodes(parseInlineReferences(rich).map(part =>
           part.type === "attachment" && cache.current.has(part.id) ? new InlineAttachmentNode(part.id, part.name)
+            : part.type === "skill" && availableSkills.current?.some(skill => skill.id === part.id) ? new InlineSkillNode(part.id, part.name)
             : $createTextNode(part.type === "text" ? part.text : part.name)));
         return true;
       }, COMMAND_PRIORITY_LOW)
@@ -313,18 +322,20 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
     if (!root) return;
     const handle = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
+      const skill = event.type === "bailey-remove-skill";
       editor.update(() => {
         for (const paragraph of $getRoot().getChildren()) {
           if (!("getChildren" in paragraph)) continue;
           for (const child of (paragraph as ReturnType<typeof $createParagraphNode>).getChildren()) {
-            if (child instanceof InlineAttachmentNode && child.__id === id) child.remove();
+            if ((skill ? child instanceof InlineSkillNode : child instanceof InlineAttachmentNode) && (child as InlineAttachmentNode | InlineSkillNode).__id === id) child.remove();
           }
         }
       }, { tag: HISTORY_PUSH_TAG });
       editor.focus();
     };
     root.addEventListener("bailey-remove-attachment", handle);
-    return () => root.removeEventListener("bailey-remove-attachment", handle);
+    root.addEventListener("bailey-remove-skill", handle);
+    return () => { root.removeEventListener("bailey-remove-attachment", handle); root.removeEventListener("bailey-remove-skill", handle); };
   }, [editor]);
   return <PlainTextPlugin contentEditable={<ContentEditable className="portal-inline-editor" aria-label={locale === "en" ? "Message" : "消息"} aria-placeholder={placeholder}
     placeholder={<div className="portal-inline-placeholder">{placeholder}</div>}
@@ -351,6 +362,7 @@ export function InlineAttachmentComposer(props: ComposerProps) {
   const wrapper = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [draftError, setDraftError] = useState(false);
+  const restoringDraftText = useRef<string | null>(null);
   const previousDraftKey = useRef(props.draftKey);
   const snapshot = useRef(makeAttachmentDraft(text, attachments));
   snapshot.current = makeAttachmentDraft(text, attachments);
@@ -368,6 +380,7 @@ export function InlineAttachmentComposer(props: ComposerProps) {
       if (composer.getState().attachments.length) return;
       // Existing text persistence owns newer edits; only restore the matching draft.
       if (composer.getState().text && composer.getState().text !== draft.text) return;
+      restoringDraftText.current = draft.text;
       composer.setText(draft.text);
       for (const item of draft.attachments) {
         if (!active) return;
@@ -377,6 +390,15 @@ export function InlineAttachmentComposer(props: ComposerProps) {
     }).catch(() => setDraftError(true)).finally(() => { if (active) setReady(true); });
     return () => { active = false; };
   }, [aui, props.draftKey]);
+  useEffect(() => {
+    if (!ready || restoringDraftText.current === null) return;
+    if (text === restoringDraftText.current || hasInlineComposerRequest(text)) {
+      restoringDraftText.current = null;
+    } else {
+      // The first runtime mount may defer setText. Restore prose before inserting selected skills.
+      aui.composer().setText(restoringDraftText.current);
+    }
+  }, [aui, ready, text]);
   useEffect(() => {
     if (!ready) return;
     const save = () => { void writeAttachmentDraft(props.draftKey, snapshot.current).catch(() => setDraftError(true)); };
@@ -392,7 +414,7 @@ export function InlineAttachmentComposer(props: ComposerProps) {
   useEffect(() => {
     const restore = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId: string; text: string; attachments: InlineAttachment[] }>).detail;
-      if (detail.threadId !== props.threadId || aui.composer().getState().text || aui.composer().getState().attachments.length) return;
+      if (detail.threadId !== props.threadId || hasInlineComposerRequest(aui.composer().getState().text, aui.composer().getState().attachments.length)) return;
       aui.composer().setText(detail.text);
       for (const attachment of detail.attachments) {
         const complete = completedAttachment(attachment);
@@ -403,6 +425,7 @@ export function InlineAttachmentComposer(props: ComposerProps) {
     return () => window.removeEventListener("bailey-restore-composer", restore);
   }, [aui, props.threadId]);
   const remove = useCallback((id: string) => wrapper.current?.querySelector("[contenteditable]")?.dispatchEvent(new CustomEvent("bailey-remove-attachment", { detail: id })), []);
+  const removeSkill = useCallback((id: string) => wrapper.current?.querySelector("[contenteditable]")?.dispatchEvent(new CustomEvent("bailey-remove-skill", { detail: id })), []);
   const retry = useCallback(async (id: string) => {
     const file = aui.composer().getState().attachments.find(item => item.id === id)?.file;
     if (!file) return;
@@ -411,22 +434,23 @@ export function InlineAttachmentComposer(props: ComposerProps) {
     await aui.composer().addAttachment(file);
   }, [aui]);
   const actions = useMemo(() => ({ attachments, remove, retry, preview: props.onPreview }), [attachments, props.onPreview, remove, retry]);
-  return <AttachmentActions.Provider value={actions}>
+  return <AttachmentActions.Provider value={actions}><InlineSkillActions.Provider value={{ binding: props.skills, remove: removeSkill }}>
     <div className="portal-inline-input-wrap" ref={wrapper} data-draft-ready={ready}>
       <LexicalComposer initialConfig={{
-        namespace: "BaileyComposer", nodes: [InlineAttachmentNode], onError: error => { throw error; },
+        namespace: "BaileyComposer", nodes: [InlineAttachmentNode, InlineSkillNode], onError: error => { throw error; },
         theme: { paragraph: "portal-inline-paragraph" }
       }}>
         <HistoryPlugin />
         <EditorBridge autoFocus={props.autoFocus} />
+        <InlineSkillsPlugin binding={props.skills} ready={ready && (restoringDraftText.current === null || text === restoringDraftText.current)} text={text} />
       </LexicalComposer>
     </div>
     {draftError ? <small className="portal-inline-draft-notice" role="status">{locale === "en" ? "This browser cannot save attachment drafts. Keep this page open until you send." : "当前浏览器无法保存附件草稿，请保持页面打开直至发送。"}</small> : null}
-  </AttachmentActions.Provider>;
+  </InlineSkillActions.Provider></AttachmentActions.Provider>;
 }
 
 export function InlineAttachmentEditComposer(props: ComposerProps) {
-  const initialInline = useRef(useAuiState(state => inlineAttachmentIds(state.composer.text).size > 0));
+  const initialInline = useRef(useAuiState(state => inlineAttachmentIds(state.composer.text).size > 0 || inlineSkillIds(state.composer.text).size > 0));
   const text = useAuiState(state => state.composer.text);
   const attachments = useAuiState(state => state.composer.attachments);
   const { t } = usePortalI18n();

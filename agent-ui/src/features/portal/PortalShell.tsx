@@ -204,7 +204,9 @@ import {
 } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
 import { PortalSkillPicker } from "./workbench/SkillPicker";
-import { inlineAttachmentPlainText, inlineAttachmentIds, missingInlineAttachments, parseInlineAttachments, takeAttachmentId, uploadedAttachmentHint, AttachmentUploadAttempts, type InlineAttachment } from "./inline-attachments";
+import { inlineAttachmentIds, missingInlineAttachments, takeAttachmentId, uploadedAttachmentHint, AttachmentUploadAttempts, type InlineAttachment } from "./inline-attachments";
+import { inlineReferencePlainText, parseInlineReferences, hasInlineComposerRequest } from "./inline-references";
+import { InlineMessageReferences } from "./InlineMessageReferences";
 import {
   closeWorkbenchDrawer,
   createInitialLayoutState,
@@ -233,7 +235,7 @@ import {
 } from "./workspace";
 import "./workbench/workbench.css";
 import { localizedUploadFailureMessage, THREAD_ATTACHMENT_MAX_BYTES } from "./attachment-upload-messages";
-import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
+import { InlineAttachmentComposer, InlineAttachmentEditComposer } from "./InlineAttachmentComposer";
 
 type SessionOut = {
   session_id: string;
@@ -554,12 +556,16 @@ const SkillComposerContext = createContext<{
   enabledSkillIds: string[];
   recentSkillIds: string[];
   setSkills: (skillIds: string[]) => Promise<void> | void;
+  ready: boolean;
+  busy: boolean;
 }>({
   availableSkills: [],
   automaticSkills: [],
   enabledSkillIds: [],
   recentSkillIds: [],
-  setSkills: () => undefined
+  setSkills: () => undefined,
+  ready: true,
+  busy: false
 });
 type PortalActiveRun = {
   sessionId: string;
@@ -2458,7 +2464,8 @@ const UploadAwareComposer: FC = () => {
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const runtimeThreadId = useAuiState(state => state.threadListItem.id);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
-  const composerEmpty = useAuiState((state) => state.composer.isEmpty);
+  const composerEmpty = useAuiState((state) => !hasInlineComposerRequest(state.composer.text, state.composer.attachments.length));
+  const composerSkills = useContext(SkillComposerContext);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
   const composerAttachments = useAuiState((state) => state.composer.attachments);
@@ -2476,7 +2483,7 @@ const UploadAwareComposer: FC = () => {
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
   const sendBlockedByRuntime = runtimeReadiness.status !== "ready";
   const sendDisabled =
-    !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime;
+    !composerEditing || composerEmpty || composerSkills.busy || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime;
   const sendTitle = accessBlock.blocked
     ? accessBlock.notice
     : sendBlockedByRuntime
@@ -2544,7 +2551,7 @@ const UploadAwareComposer: FC = () => {
   usePortalQueueDispatcher({
     workflow,
     threadRunning,
-    blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments,
+    blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments || composerSkills.busy,
     getComposerText,
     setComposerText,
     send: sendComposer
@@ -2557,7 +2564,7 @@ const UploadAwareComposer: FC = () => {
 
   const enqueueCurrent = useCallback(() => {
     const text = getComposerText().trim();
-    if (!text || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
+    if (!hasInlineComposerRequest(text) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
     if (hasAttachments) {
       showWorkflowNotice(t("thread.queueTextOnly"));
       return;
@@ -2570,11 +2577,11 @@ const UploadAwareComposer: FC = () => {
     } catch {
       showWorkflowNotice(t("thread.queueLimit"));
     }
-  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, clearStoredDraft, composerSkills.busy, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const steerCurrent = useCallback(async () => {
     const text = getComposerText().trim();
-    if (!text || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
+    if (!hasInlineComposerRequest(text) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
     if (hasAttachments) {
       showWorkflowNotice(t("thread.queueTextOnly"));
       return;
@@ -2588,7 +2595,7 @@ const UploadAwareComposer: FC = () => {
     } catch {
       // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
-  }, [accessBlock.blocked, clearStoredDraft, getComposerText, hasAttachments, notifyUserSendIntent, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, clearStoredDraft, composerSkills.busy, getComposerText, hasAttachments, notifyUserSendIntent, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const continueAnswer = useCallback(() => {
     if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
@@ -2610,7 +2617,7 @@ const UploadAwareComposer: FC = () => {
       enqueueCurrent();
       return;
     }
-    if (sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked || sendBlockedByRuntime) {
+    if (sendDisabled) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2678,6 +2685,8 @@ const UploadAwareComposer: FC = () => {
             threadId={workflow.threadId}
             autoFocus={!isMobileWorkbench}
             onPreview={previewInlineAttachment}
+            skills={{ availableSkills: composerSkills.availableSkills, enabledSkillIds: composerSkills.enabledSkillIds,
+              ready: composerSkills.ready, busy: composerSkills.busy, onChange: composerSkills.setSkills }}
           />
         </div>
         <div className="portal-composer-tools-row">
@@ -3421,7 +3430,7 @@ function userTextFromUnknownMessage(message: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  return inlineAttachmentPlainText(text);
+  return inlineReferencePlainText(text);
 }
 
 function isLikelyHttpUrl(value: string): boolean {
@@ -3743,8 +3752,9 @@ function extractLatestPrompt(messages: unknown): string {
         const partObject = asRecord(part);
         if (partObject?.type === "text" && typeof partObject.text === "string") {
           const attachments = sanitizeUserAttachments((msg as { attachments?: unknown }).attachments);
-          const resolved = parseInlineAttachments(partObject.text).map(piece => {
+          const resolved = parseInlineReferences(partObject.text).map(piece => {
             if (piece.type === "text") return piece.text;
+            if (piece.type === "skill") return piece.name;
             const attachment = attachments.find(item => item.id === piece.id);
             const meta = uploadedAttachmentDownloadMetaFromAttachment(attachment);
             return meta ? `${meta.name} (uploaded_file_id=${meta.id})` : piece.name;
@@ -5179,10 +5189,7 @@ const InlineUserMessageText: FC = () => {
   const { text } = useMessagePartText();
   const attachments = useAuiState(state => state.message.attachments) as readonly InlineAttachment[];
   const preview = useInlineAttachmentPreview();
-  return <span className="portal-inline-message-text">{parseInlineAttachments(text).map((part, index) =>
-    part.type === "text" ? <span key={index}>{part.text}</span> :
-      <InlineFileChip key={index} id={part.id} name={part.name} attachment={attachments.find(item => item.id === part.id)} onPreview={preview} readOnly />
-  )}</span>;
+  return <InlineMessageReferences text={text} attachments={attachments} onPreview={preview} />;
 };
 const InlineEditComposer: FC = () => {
   const messageId = useAuiState(state => state.message.id);
@@ -7009,6 +7016,7 @@ export function PortalShell(props: {
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
   const [enabledSkillIds, setEnabledSkillIds] = useState<string[]>([]);
+  const [skillSelectionPendingCount, setSkillSelectionPendingCount] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -7055,7 +7063,7 @@ export function PortalShell(props: {
         client_run_id: run.runId,
         thread_id: run.threadId,
         client_steer_id: clientSteerId,
-        message
+        message: inlineReferencePlainText(message)
       }
     });
     return portalSteerEventFromOut(out.steer_event);
@@ -8031,6 +8039,7 @@ export function PortalShell(props: {
 
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
     if (!threadId) return;
+    setSkillSelectionPendingCount(count => count + 1);
     try {
       await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}/skills`, {
         method: "PUT",
@@ -8040,11 +8049,16 @@ export function PortalShell(props: {
         }
       });
     } catch (error) {
-      enabledSkillIdsRef.current = previousIds;
-      setEnabledSkillIds(previousIds);
       const message = error instanceof Error ? error.message : "Skill 保存失败，请重试";
-      setErrorText(message);
+      // A late response from another task must not overwrite the current task's selection.
+      if (activeRemoteThreadIdRef.current === threadId) {
+        enabledSkillIdsRef.current = previousIds;
+        setEnabledSkillIds(previousIds);
+        setErrorText(message);
+      }
       throw new Error(message);
+    } finally {
+      setSkillSelectionPendingCount(count => Math.max(0, count - 1));
     }
   }, [activeThreadIdentity.remoteId, availableModeSkills, effectiveRuntimeMode, isExternalPortalUser]);
   const skillComposerContext = useMemo(
@@ -8053,9 +8067,11 @@ export function PortalShell(props: {
       automaticSkills: automaticModeSkills,
       enabledSkillIds,
       recentSkillIds: runtimeOptions?.recentSkillIds ?? [],
-      setSkills: setEnabledSkills
+      setSkills: setEnabledSkills,
+      ready: !activeThreadIdentity.remoteId || hydratedSkillThreadIdRef.current === activeThreadIdentity.remoteId,
+      busy: skillSelectionPendingCount > 0
     }),
-    [automaticModeSkills, availableModeSkills, enabledSkillIds, runtimeOptions?.recentSkillIds, setEnabledSkills]
+    [automaticModeSkills, availableModeSkills, enabledSkillIds, runtimeOptions?.recentSkillIds, setEnabledSkills, activeThreadIdentity.remoteId, skillSelectionPendingCount]
   );
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const handleKnowledgeSetChange = useCallback((ids: string[]) => {

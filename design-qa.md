@@ -69,3 +69,17 @@ final result: passed
 - 验证：11 个相关测试文件、68 项测试全部通过；构建通过；`git diff --check` 通过。与构建并发的首次广泛测试出现超时，构建结束后单 worker 重跑全部通过，未放宽测试超时。日志为 `temp/workspace-menu-verified-tests.log` 与 `temp/workspace-menu-build.log`。
 - 控制台仅出现既有连接 Modal 的 `destroyOnClose` 弃用提示；未发现本轮业务错误。对照后没有未解决的 P0/P1/P2 视觉问题。
 - 交付范围：仅修改 `agent-ui` 业务代码和本文档。删除顶栏及独立“我的电脑”抽屉，将管理入口移入工作区菜单；沿用现有设备移除接口、后台名单与连接协议。采用前端专用部署；生产版本、进程与页面验收补充记录在 `temp/workspace-menu-production-acceptance.md`。
+
+## Skill 行内展示与消息引用验收（2026-09-11）
+
+final result: passed
+
+- 选定设计：`/Users/like/.codex/generated_images/01a08c3f-0d99-79a1-9bf6-5959937cd866/exec-db4991fb-1a6b-4648-9d2a-fe7d16e05687.png`，1513 × 1039。实际业务组件截图为 `agent-ui/temp/inline-skills-orange.png`，1440 × 1024；同一输入对照为 `temp/inline-skills-comparison.png`，同时包含完整参考、实际组件及统一尺寸的气泡/输入区裁切。
+- 范围：使用实际 `InlineAttachmentComposer`、`InlineMessageReferences`、`PortalSkillPicker`，周边页面及模型/API 为测试夹具。延续已有输入框尺寸和 Lucide 图标，不将测试夹具外壳作为产品改版。按用户补充要求保留 Skill 选择器原有高亮、勾选和数字；仅保留一个上传入口。这两点与示意图的差异是明确的实现要求。
+- 字体与间距：正文继续 16px、输入标签 14px，技能名称与附件共享尺寸和行内基线；桌面标签至少 28px 高，手机至少 44px。长名称视觉省略、完整名称通过可访问标签和详情显示，手机自然换行。375/768/1024/1440px 检查无横向溢出，手机截图为 `temp/inline-skills-mobile.png`。
+- 颜色：草稿的技能及演示文稿图标使用现有品牌变量。发送后的引用继承气泡文字颜色，使用 10% 透明背景、细边框及文件名下划线，去掉突兀的白底。通过实际 `applyDocumentBranding` 验证橙、蓝、绿三组配置，气泡渐变、图标和焦点颜色同步变化；没有修改生产品牌配置，也没有扩大承诺为任意浅色主题均满足对比度标准。
+- 交互：浏览器确认已选名称可见，选择器仍显示 `Skills 2`、选中卡片和勾选；可从标签打开详情、移除及撤销恢复。手机使用底部抽屉，桌面浮层支持 Escape 和焦点恢复。中英文详情和只读历史引用均有对应文案。发送后的引用不提供修改历史技能配置的入口。
+- 行为修复：真实 assistant-ui + Lexical 测试发现，IndexedDB 恢复草稿时运行时尚未接受文本，技能同步可能提前覆盖正文。现等待草稿恢复被运行时确认后再同步技能，保留已存在的正文、附件和标签位置。快速删除/撤销按顺序保存，失败恢复原选择，其他任务的迟到失败响应不会回滚当前任务。
+- 验证：11 个相关测试文件、76 项测试通过，包含技能与附件协议、真实编辑器集成、首次远程任务创建、拖放、草稿/队列、Skill 选择器及工作区显隐。完整 TypeScript/Vite 构建通过，`git diff --check` 通过。日志为 `temp/inline-skills-regression.log` 和 `temp/inline-skills-build-final.log`。Chrome 开发日志未发现业务错误。
+- 同屏对照后没有未解决的 P0/P1/P2 视觉问题。现有图标库的演示文稿轮廓与参考图字母图标存在非阻断差异。内置浏览器截图缩放异常，因此最终对照采用 Chrome。
+- 交付边界：业务变更仅在 `agent-ui`。技能执行继续使用现有线程技能接口，内部引用在构建提示、队列展示和分享文本时转为可读名称；后端、数据库、本机客户端与后台开放名单均未改变。生产使用前端专用部署，真实业务验收及运行进程记录在 `temp/inline-skills-production-acceptance.md`。

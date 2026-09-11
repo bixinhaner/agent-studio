@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import { inlineAttachmentPlainText } from "../portal/inline-attachments";
+import { inlineReferencePlainText } from "../portal/inline-references";
 
 import { useAuth } from "../auth/AuthProvider";
 import { isInternalPortalExperience } from "../auth/portal-experience";
@@ -250,7 +250,7 @@ function collectMessageText(message: PublicShareSnapshotMessage): string {
     .map((part) => part.text)
     .join("\n\n")
     .trim();
-  return message.role === "user" ? inlineAttachmentPlainText(text) : text;
+  return message.role === "user" ? inlineReferencePlainText(text) : text;
 }
 
 function sanitizeFileNameSegment(value: string): string {

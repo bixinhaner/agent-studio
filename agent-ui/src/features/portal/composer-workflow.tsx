@@ -34,6 +34,7 @@ import {
   type PortalQueuePauseReason
 } from "./composer-workflow-state";
 import { usePortalI18n } from "./i18n";
+import { inlineReferencePlainText } from "./inline-references";
 
 type QueueState = Pick<PortalComposerStoredState, "queue" | "pausedReason">;
 
@@ -735,7 +736,7 @@ export function PortalSteerEventList(props: {
             role={event.status === "failed" ? "alert" : "status"}
           >
             <div className="portal-steer-event-label">{t("thread.steerLabel")}</div>
-            <p className="portal-steer-event-message">{event.message}</p>
+            <p className="portal-steer-event-message">{inlineReferencePlainText(event.message)}</p>
             <div className="portal-steer-event-footer">
               <div className="portal-steer-event-status">
                 {pending ? (
@@ -925,7 +926,7 @@ export function PortalQueueTray(props: {
                       aria-label={t("thread.queueEditLabel")}
                     />
                   ) : (
-                    <span className="portal-queue-text">{item.text}</span>
+                    <span className="portal-queue-text">{inlineReferencePlainText(item.text)}</span>
                   )}
                   <div className="portal-queue-row-actions">
                     {editing ? (
@@ -970,7 +971,7 @@ export function PortalQueueTray(props: {
                           disabled={busy}
                           onClick={() => {
                             setEditingId(item.id);
-                            setEditingText(item.text);
+                            setEditingText(inlineReferencePlainText(item.text));
                           }}
                           aria-label={t("thread.queueEdit")}
                         >
