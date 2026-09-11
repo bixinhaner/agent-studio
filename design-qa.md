@@ -1,134 +1,46 @@
-# Product Feedback Reply Design QA
-
-## Comparison Target
-
-- Source visual truth:
-  - `temp/design/product-feedback-reply/06-image-selection.png`
-  - `temp/design/product-feedback-reply/07-preview-with-image.png`
-- Browser-rendered implementation:
-  - `temp/design/product-feedback-reply/implementation-02-edit.png`
-  - `temp/design/product-feedback-reply/implementation-03-preview.png`
-  - `temp/design/product-feedback-reply/implementation-04-success.png`
-  - `temp/design/product-feedback-reply/implementation-05-failure.png`
-- Combined comparison evidence:
-  - `temp/design/product-feedback-reply/design-comparison-focused.png`
-- Local implementation URL: `http://127.0.0.1:5191/`
-- Browser: Chrome, existing user browser session
-- CSS viewport: 1680 × 1058, device density 1
-- Source pixels: 1672 × 941
-- Implementation pixels: 1680 × 1058
-- Normalization: implementation captures were center-cropped to 1672 × 941 for equal-pixel full-view comparison; focused comparisons use centered 900 × 900 crops from both source and normalized implementation.
-- States: initial feedback detail, reply editor, original-image selection, HTML email preview with inline image, successful send/resolved, failed send/pending.
-
-## Findings
-
-No actionable P0, P1, or P2 findings remain.
-
-- Fonts and typography: the implementation uses the existing Admin Console PingFang/SF/Helvetica stack and Ant Design control typography. Heading, label, helper, and body hierarchy remain readable at the target viewport. The HTML email uses the existing experience-follow-up Arial/Helvetica mail-safe stack.
-- Spacing and layout rhythm: the final modal is 720 px wide, matching the existing Experience Follow-up email modal. Form sections follow the existing 12–14 px vertical rhythm. Persistent actions remain visible while the body scrolls on shorter viewports.
-- Colors and visual tokens: the implementation intentionally uses the existing Admin Console blue primary token instead of the ImageGen mock's orange action color. Orange remains inside the recipient-facing Bailey email template. This preserves current Admin Console action semantics and keeps the email visually consistent with Experience Follow-up.
-- Image quality and asset fidelity: feedback screenshots render from the original uploaded image, not a placeholder or redrawn asset. Email preview images keep aspect ratio, border, radius, and caption; SMTP delivery uses the same selected bytes as CID attachments.
-- Copy and content: the editor explains HTML styling and plaintext fallback, image limits are explicit, and the status rule states that only confirmed email delivery resolves the feedback. Chinese and English templates are both available.
-
-## Intentional Differences From ImageGen
-
-- Admin actions use the existing blue Admin Console primary token; the mock used Bailey orange.
-- The modal is 720 px rather than the mock's narrower approximation because it reuses the current Experience Follow-up modal width and must support a readable HTML preview.
-- Original feedback images start unselected. This avoids silently including potentially sensitive screenshots; the mock illustrated a post-selection state.
-- The recipient is read-only and comes from the feedback submitter, preventing the feature from becoming an arbitrary outbound-email relay.
-
-## Comparison History
-
-1. Initial edit implementation
-   - Finding: [P2] The first implementation used a 760 px modal, drifting from the existing 720 px Experience Follow-up email modal.
-   - Fix: changed `ProductFeedbackReplyModal` width to 720 px.
-   - Post-fix evidence: `implementation-02-edit.png` and the focused edit comparison in `design-comparison-focused.png`.
-2. Initial vertical layout
-   - Finding: [P2] A content-heavy editor could push persistent actions below the viewport on shorter screens.
-   - Fix: capped modal body height at `calc(100vh - 190px)` with body scrolling, leaving the action footer persistent.
-   - Post-fix evidence: final edit and failure captures show the action footer visible while content remains scrollable.
-3. Final comparison
-   - Result: no remaining P0/P1/P2 visual or interaction findings.
-
-## Primary Interactions Tested
-
-- Open Reply and Resolve from the feedback detail header.
-- Switch between Chinese and English template controls.
-- Select an eligible original feedback screenshot.
-- Open the real file chooser, add a supplemental PNG, and confirm the combined counter reaches 2/3.
-- Generate and inspect the styled HTML email preview with one inline image.
-- Send successfully, close the modal, show success feedback, record the reply, and update status to Resolved.
-- Simulate SMTP failure, keep the modal content intact, show an actionable error, and keep feedback status Pending.
-- Confirm recipient, subject, body, image count, language, and delivery status appear in reply history.
-
-## Console Check
-
-- No application console errors were observed during the tested flow.
-- Chrome reported one unrelated Immersive Translate extension version-mismatch error; it is outside the application and did not affect the flow.
-
-## Implementation Checklist
-
-- [x] Reuse Experience Follow-up HTML email style.
-- [x] Provide Chinese and English email templates.
-- [x] Support original feedback images and supplemental uploads.
-- [x] Enforce 3-image, 2 MB, PNG/JPG/GIF limits in UI and API.
-- [x] Send CID inline images with plaintext fallback.
-- [x] Record reply metadata without duplicating image bytes.
-- [x] Resolve only after confirmed SMTP delivery.
-- [x] Preserve pending status and editor contents on failure.
-- [x] Verify success, failure, and preview states in Chrome.
-
-## Follow-up Polish
-
-- [P3] If Admin Console gains a global locale switch later, move the modal's administrative labels into that shared i18n layer. The recipient-facing email content is already bilingual.
+# Portal 正文内附件输入框验收
 
 final result: passed
 
----
+## 对照依据与范围
 
-# Design QA: 私有 Skill 成员共享
+- 选定设计：`/Users/like/Desktop/baicells/Trae/agent-studio/temp/composer-design-2026-09-11/inline-attachments.png`，1536 × 1024。
+- 实际业务组件：`http://127.0.0.1:5186/temp/composer.html`，周边页面、上传和模型适配器为本地测试夹具；输入组件、目录入口、Skill 选择器为业务代码。
+- 桌面截图：`temp/composer-desktop-final.png`，1440 × 900 CSS/PNG，输入框宽 1072px、高 125px。
+- 手机截图：`temp/composer-mobile-final.png`，390 × 844 CSS/PNG。
+- 浮层/抽屉：`temp/composer-desktop-preview.png`、`temp/composer-mobile-preview.png`。
+- 同一对照输入：`temp/design-compare-final.png`，1280 × 1000，devicePixelRatio=1；同时呈现设计和实现。
+- 对照页面：`agent-ui/temp/compare.html`。桌面裁切至同一输入区并统一为 1040px 宽；手机统一为 339px 宽。没有将设计板页眉与测试夹具页眉作视觉比较。
+- 内容状态：正文与 welcome.md、测试台账.xlsx、界面截图.png 混排；已选目录和一个 Skill；附件上传完成。桌面最终截图保留了键盘焦点环，这与设计板无焦点状态的差异是预期的。
 
-## Source of truth
+## 发现与修订
 
-- 所有者入口：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-000f4d32-e6b8-4a25-bb89-3ffd191618ff.png`（1486×1059）
-- 成员选择：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-4bcbcb3e-701f-4c90-a9e8-d36682634cd2.png`（1485×1059）
-- 保存结果：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-8b92a30d-ecb4-4ea6-bd0f-82fbc68258b4.png`（1485×1059）
+1. 第一轮对照 `temp/design-compare-before.png`：输入区多了一层焦点框；缺少正文与底栏分隔线；上传入口仍是旧回形针。评级 P2。
+2. 已修复：使用整个输入框的焦点边框，增加细分隔线，上传入口改为加号；统一底栏字体，并提高目录与 Skills 控件高度。
+3. 第二轮对照 `temp/design-compare-final.png`：以上差异已消除，未留下可行动的 P0/P1/P2 视觉问题。
+4. 键盘验收发现第二次 Backspace 没有删除已选标签，已增加显式节点删除，并用自动化测试验证实际附件也被删除及撤销恢复。
+5. 状态验收覆盖首次上传创建远程任务，修复了临时任务转正式任务时的草稿切换问题；以稳定的本地任务身份保持输入组件和文本。
 
-## Implementation captures
+## 五项视觉检查
 
-- Portal 所有者入口：`tmp/skill-sharing-preview/picker-final2.png`（1440×1000）
-- Portal 成员选择：`tmp/skill-sharing-preview/saved-final2.png`（1440×1000）
-- Portal 保存后持久状态：`tmp/skill-sharing-preview/postsave-final.png`（1440×1000）
-- Admin 归属与共享成员：`tmp/skill-sharing-preview/admin-final2.png`（1440×1000）
-- 同屏对照：`tmp/skill-sharing-preview/comparison.png`
+- 字体：沿用 Portal 的 PingFang SC / Microsoft YaHei 回退字体。正文 16px、附件 14px，保持现有应用字号；设计板是较大字号的演示图，未把整个应用放大。长文件名省略主体并保留扩展名。手机正文与标签自然换行。
+- 间距：正文和单行底栏层级清晰。桌面三附件示例高 125px，手机三附件示例约 237px；去掉独立附件托盘、Skill 已启用横条和设备名行。375、390、1024、1440px 下均无横向溢出；手机主要点击控件 CSS 最小高度 44px。
+- 颜色：沿用既有 Portal 品牌和状态变量；浅橙色目录、蓝色 Skills、橙色发送按钮；上传、错误和键盘焦点状态可区分。
+- 图像与图标：使用仓库既有 Lucide 标准图标体系。实际本地图片附件支持 Blob 缩略图；恢复后的完成附件使用文件类型图标。没有将设计图烘焙成页面，也没有替换生产品牌图标。测试夹具顶栏不属于交付界面。
+- 文案：底栏显示“本机 · 目录名”或“云端工作区”；完整路径与设备信息按需显示；详情含预览、重试、移除。未增加审批、修改记录或目录沙箱承诺。
 
-本地验证页直接渲染生产组件 `PortalSkillPicker` 和 `SkillCatalogManagementView`，仅替换网络响应为本地固定数据。截图使用真实 Chrome 1440×1000 视口；同屏对照将效果图与实现按状态并列。
+## 功能证据
 
-## Iteration history
+浏览器完成：光标位置上传、上传中禁止发送、上传完成、长文件名保留 .csv、失败详情与原位置重试、移除、撤销后恢复真实文件、刷新恢复附件位置、任务间隔离、Enter 发送、发送后清空草稿、手机底部抽屉、桌面浮层、Escape 关闭。
 
-### Pass 1
+25 项专项回归：7 项真实编辑器/assistant-ui 集成、10 项附件协议/IndexedDB/取消竞态、8 项既有草稿和队列流程。覆盖中文输入法 Enter 不发送、双退格删除、保存失败恢复、首次上传创建任务、历史消息重编辑保留真实附件。
 
-- P1：成员弹窗信息密度低于效果图，缺少所有者、共享不复制的说明和已选成员标签。
-- P2：保存后的临时反馈和持久状态未分开取证。
+全量前端测试曾完成 260 项中的 258 项，两个无关管理页面用例因 5 秒超时失败，随后以单 worker 独立执行通过；本次又增加了两个编辑器回归用例。没有修改既有测试超时阈值。
 
-处理：补齐所有者与邮箱、无副本说明、可移除的已选成员标签；分别捕获操作弹窗和刷新后的持久状态。
+浏览器开发日志中的重复 createRoot 警告来自修改临时验收夹具触发的 HMR，完整重载后检查未发现业务组件新增错误。没有将测试夹具视为线上上传/Agent 文件读取验收。
 
-### Pass 2
+## 交付边界
 
-- P0：无。
-- P1：无。
-- P2：实现验证数据只有 3 个 Skill，而效果图展示 6 个；这是验证夹具的数据量差异，不影响布局、交互或信息层级。
+全部业务修改位于 agent-ui。未改变服务端接口、数据库、Agent 工具执行、Local Bridge 客户端或后台名单配置。旧消息保留原显示方式；新消息按正文内附件显示；公开分享的文字导出使用可读文件名。
 
-Portal 的分栏比例、范围标签、成员入口、二级弹窗、品牌色按钮、成员勾选态和保存后“已共享给 N 人 / 管理共享”状态与效果图一致。Admin 使用原有高密度表格与右侧详情，不引入审批层级。
-
-## Interaction and accessibility checks
-
-- 实际浏览器完成：打开 Picker → 打开“共享给成员” → 选择成员 → 保存共享。
-- 保存后弹窗关闭，卡片和详情更新为“已共享给 1 人”，入口更新为“管理共享”。
-- 成员项使用完整按钮命中区，选中状态有边框、底色与勾选图标；按钮及搜索框均可从可访问性树识别。
-- 关闭弹窗、取消、删除已选成员和保存均有独立可访问按钮。
-- 本地浏览器执行未发现页面脚本错误；Chrome 仅输出无头显示环境的系统级 `CVDisplayLink` 警告。
-
-## Final result
-
-passed
+本次是本地代码、构建、自动化回归和业务组件浏览器验收；尚未部署生产，也未声称已经完成生产环境文件上传/Agent 读取的端到端验证。
