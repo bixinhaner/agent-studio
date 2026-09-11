@@ -158,7 +158,7 @@ export function LocalWorkspaceControls() {
           {device.platform === 'linux-cli' ? <Terminal size={21} /> : <Computer size={21} />}
           <strong title={device.name}>{device.name}</strong>
           <span className="local-folder-device-status"><i className={`local-status-dot ${device.status}`} />{device.status === 'online' ? t('localWorkspace.connected') : t('localWorkspace.offline')}</span>
-          <Popover trigger="click" destroyOnHidden placement={mobile ? 'topRight' : 'rightTop'} open={moreDeviceId === device.id} onOpenChange={next => setMoreDeviceId(next ? device.id : null)} overlayClassName="local-device-action-popover" content={
+          <Popover trigger="click" destroyOnHidden placement={mobile ? 'topRight' : 'rightTop'} open={open && moreDeviceId === device.id} onOpenChange={next => setMoreDeviceId(next && open ? device.id : null)} overlayClassName="local-device-action-popover" content={
             <div className="local-device-action-menu" role="menu" aria-label={t('localWorkspace.deviceActions', { name: device.name })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMoreDeviceId(null); deviceTriggers.current[device.id]?.focus(); } }}>
               <button type="button" role="menuitem" autoFocus disabled={disabled} onClick={async () => { try { await local.removeDevice(device.id); setMoreDeviceId(null); triggerRef.current?.focus(); } catch {} }}>
                 {local.removingDeviceId === device.id ? <LoaderCircle size={17} className="local-spinner" /> : <Trash2 size={17} />}<span>{t('localWorkspace.removeConnection')}</span>
@@ -175,7 +175,8 @@ export function LocalWorkspaceControls() {
     {local.running ? <p className="local-menu-hint">{t('localWorkspace.runningHint')}</p> : null}
   </div>;
   const trigger = <button ref={triggerRef} type="button" className={`local-workspace-trigger${local.selection ? ' has-selection' : ''}${local.offline ? ' is-offline' : ''}`} aria-label={t('localWorkspace.title')} aria-expanded={open} title={local.selection ? `${local.selection.device_name}\n${local.selection.path}` : t('localWorkspace.cloudHint')} onClick={() => changeOpen(!open)}>{local.selection ? <Folder size={16} /> : <Cloud size={16} />}<span>{local.selection ? t('localWorkspace.localLabel', { name: local.selection.label }) : t('localWorkspace.cloud')}</span>{local.offline ? <small>{t('localWorkspace.offline')}</small> : null}<ChevronDown size={13} /></button>;
-  return <div className="local-workspace-controls">{mobile ? <>{trigger}<Drawer title={null} closable={false} placement="bottom" open={open} height="auto" onClose={close} rootClassName="local-folder-sheet" styles={{ body: { padding: 0 } }}>{content}</Drawer></> : <Popover trigger="click" placement="topLeft" content={content} open={open} onOpenChange={changeOpen} overlayClassName="local-folder-popover">{trigger}</Popover>}{local.error && !local.dialog ? <div className="local-workspace-error" role="alert">{local.error}</div> : null}</div>;
+  // Update closing content before unmounting it: Popover's default cache can keep the nested portal open.
+  return <div className="local-workspace-controls">{mobile ? <>{trigger}<Drawer title={null} closable={false} placement="bottom" open={open} height="auto" onClose={close} destroyOnHidden rootClassName="local-folder-sheet" styles={{ body: { padding: 0 } }}>{content}</Drawer></> : <Popover trigger="click" placement="topLeft" content={content} open={open} onOpenChange={changeOpen} fresh destroyOnHidden overlayClassName="local-folder-popover">{trigger}</Popover>}{local.error && !local.dialog ? <div className="local-workspace-error" role="alert">{local.error}</div> : null}</div>;
 }
 export function LocalWorkspaceDialogs() {
   const { t } = usePortalI18n();

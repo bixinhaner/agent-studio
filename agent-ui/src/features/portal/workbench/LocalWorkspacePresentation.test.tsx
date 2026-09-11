@@ -91,6 +91,55 @@ describe("unified local workspace menu", () => {
     expect(screen.getByRole('region', { name: 'Crest' })).toBeTruthy();
     await waitFor(() => expect((screen.getByRole('menuitem', { name: 'Remove Computer Connection' }) as HTMLButtonElement).disabled).toBe(false));
   });
+  it.each(['outside', 'trigger', 'folder'] as const)('dismisses the device menu when its parent closes via %s', async cause => {
+    vi.mocked(fetchLocalBridgeDevices).mockResolvedValue(devices);
+    render(view(true));
+    const trigger = screen.getByRole('button', { name: 'Use a Computer Folder' });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for My MacBook' }));
+    await screen.findByRole('menuitem', { name: 'Remove Computer Connection' });
+    if (cause === 'outside') {
+      fireEvent.pointerDown(document.body);
+      fireEvent.mouseDown(document.body);
+      fireEvent.click(document.body);
+    } else if (cause === 'trigger') fireEvent.click(trigger);
+    else fireEvent.click(screen.getByRole('button', { name: 'Second folder' }));
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Remove Computer Connection' })).toBeNull());
+    expect(revokeLocalBridgeDevice).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    expect((await screen.findByRole('button', { name: 'More actions for My MacBook' })).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('menuitem', { name: 'Remove Computer Connection' })).toBeNull();
+  });
+  it('dismisses the child menu with Escape before closing the workspace menu', async () => {
+    vi.mocked(fetchLocalBridgeDevices).mockResolvedValue(devices);
+    render(view(true));
+    const trigger = screen.getByRole('button', { name: 'Use a Computer Folder' });
+    fireEvent.click(trigger);
+    const more = await screen.findByRole('button', { name: 'More actions for My MacBook' });
+    fireEvent.click(more);
+    fireEvent.keyDown(await screen.findByRole('menuitem', { name: 'Remove Computer Connection' }), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Remove Computer Connection' })).toBeNull());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(more);
+    fireEvent.keyDown(more, { key: 'Escape' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(trigger);
+  });
+  it('dismisses the device menu when the mobile workspace sheet closes', async () => {
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) });
+    vi.mocked(fetchLocalBridgeDevices).mockResolvedValue(devices);
+    render(view(true));
+    const trigger = screen.getByRole('button', { name: 'Use a Computer Folder' });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for My MacBook' }));
+    await screen.findByRole('menuitem', { name: 'Remove Computer Connection' });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Remove Computer Connection' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(revokeLocalBridgeDevice).not.toHaveBeenCalled();
+  });
   it('disables location changes and device removal while the task is running', async () => {
     vi.mocked(fetchLocalBridgeDevices).mockResolvedValue(devices);
     render(view(true, 'en', true));
