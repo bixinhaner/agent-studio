@@ -3,3 +3,5 @@
 /* Keep connection controls visible when folders fill the default desktop window. */
 .shell{height:100vh;min-height:0}aside{flex-shrink:0}.content{height:100vh;overflow:auto;min-width:0;padding:28px 40px 0}footer{position:sticky;bottom:0;background:#fff;padding:12px 0;box-shadow:0 -8px 12px #ffffff}header .device-icon{margin-bottom:12px}header p{margin-bottom:20px}.device{padding:16px}.section-title{margin-top:20px}.actions{margin-top:18px}.trust{margin-top:12px}
 @media(max-height:600px){header .device-icon{display:none}.content{padding-top:20px}header p{margin-bottom:16px}.section-title{margin-top:12px}.folder{padding:12px 0}}
+
+.brand img{object-fit:contain;flex:none}

@@ -1,11 +1,13 @@
 import { useContext, useState } from 'react';
-import { Check, File, LoaderCircle, Monitor, SquareArrowOutUpRight, AlertCircle } from 'lucide-react';
+import { Check, File, LoaderCircle, Monitor, SquareArrowOutUpRight, AlertCircle, Copy } from 'lucide-react';
 import { localBridgeApi } from '../api';
 import { LocalWorkspaceContext } from './LocalWorkspace';
 export function LocalToolCard(props: { toolName?: string; result?: unknown; isError?: boolean; status?: { type?: string }; args?: Record<string, unknown> }) {
   const local = useContext(LocalWorkspaceContext);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const headless = local?.devices?.find(device => device.id === local.selection?.device_id)?.platform === 'linux-cli';
   if (!props.toolName?.includes('local_computer') && !props.toolName?.startsWith('local_')) return null;
   const op = props.toolName.split('.').pop()?.replace(/^local_/, '') || '';
   let output: any = props.result;
@@ -16,10 +18,12 @@ export function LocalToolCard(props: { toolName?: string; result?: unknown; isEr
   const label = verbs[op] || '处理本机任务';
   const filePath = ['write', 'edit', 'move'].includes(op) && output?.ok && typeof output.path === 'string' ? output.path : null;
   const open = async () => {
-    if (!local?.selection?.thread_id || !filePath) return;
+    if (!filePath) return;
+    if (headless) { try { await navigator.clipboard.writeText(filePath); setCopied(true); setError(''); } catch { setError('未能复制路径，请从任务回复中复制。'); } return; }
+    if (!local?.selection?.thread_id) return;
     setOpening(true); setError('');
     try { const out = await localBridgeApi<{ ok: boolean; error?: string; pending?: boolean }>(`/api/local-bridge/threads/${local.selection.thread_id}/open`, { method: 'POST', json: { path: filePath } }); if (!out.ok) throw new Error(out.pending ? '电脑尚未返回结果，恢复连接后查看。' : out.error || '打开失败'); }
     catch (e) { setError(e instanceof Error ? e.message : '无法打开文件'); } finally { setOpening(false); }
   };
-  return <div className="local-tool-card"><div className="local-tool-status"><Monitor size={17} /><span>{running ? '正在' : failed ? '' : '已在'}{local?.selection?.device_name || '用户电脑'}上{label}{failed ? '未完成' : ''}</span>{running ? <LoaderCircle size={15} className="local-spinner" /> : failed ? <AlertCircle size={15} /> : <Check size={15} />}</div>{filePath ? <div className="local-tool-file"><File size={18} /><strong title={filePath}>{filePath.split(/[\\/]/).pop()}</strong><button type="button" onClick={() => void open()} disabled={opening || local?.offline || !local?.selection?.thread_id}>{opening ? '正在打开…' : '在电脑上打开'}<SquareArrowOutUpRight size={13} /></button></div> : null}{error || failed ? <p role="status">{error || (output?.pending ? '等待电脑返回结果' : output?.error || '电脑操作未完成，请检查连接后继续。')}</p> : null}</div>;
+  return <div className="local-tool-card"><div className="local-tool-status"><Monitor size={17} /><span>{running ? '正在' : failed ? '' : '已在'}{local?.selection?.device_name || '用户电脑'}上{label}{failed ? '未完成' : ''}</span>{running ? <LoaderCircle size={15} className="local-spinner" /> : failed ? <AlertCircle size={15} /> : <Check size={15} />}</div>{filePath ? <div className="local-tool-file"><File size={18} /><strong title={filePath}>{filePath.split(/[\\/]/).pop()}</strong><button type="button" onClick={() => void open()} disabled={opening || (!headless && (local?.offline || !local?.selection?.thread_id))}>{headless ? copied ? '已复制' : '复制路径' : opening ? '正在打开…' : '在电脑上打开'}{headless ? <Copy size={13} /> : <SquareArrowOutUpRight size={13} />}</button></div> : null}{error || failed ? <p role="status">{error || (output?.pending ? '等待电脑返回结果' : output?.error || '电脑操作未完成，请检查连接后继续。')}</p> : null}</div>;
 }

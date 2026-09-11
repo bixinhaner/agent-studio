@@ -71,12 +71,14 @@ else {
     try { const saved = JSON.parse(await fs.readFile(configPath(), 'utf8')); config = { ...config, ...saved }; if (saved.encryptedToken) config.token = safeStorage.decryptString(Buffer.from(saved.encryptedToken, 'base64')); } catch {}
     executor = createExecutor({ getRoots: () => config.roots, journalDir: path.join(app.getPath('userData'), 'requests'), chooseRoot, openPath: async target => { const error = await shell.openPath(target); if (error) throw new Error(error); } });
     if (process.defaultApp) app.setAsDefaultProtocolClient('agent-studio', process.execPath, [path.resolve(process.argv[1])]); else app.setAsDefaultProtocolClient('agent-studio');
-    mainWindow = new BrowserWindow({ width: 900, height: 680, minWidth: 680, minHeight: 540, title: 'Agent Studio · 我的电脑', backgroundColor: '#ffffff', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    const brandIcon = nativeImage.createFromPath(path.join(__dirname, '../renderer/brand.png'));
+    if (process.platform === 'darwin') app.dock?.setIcon(brandIcon);
+    mainWindow = new BrowserWindow({ width: 900, height: 680, minWidth: 680, minHeight: 540, title: 'Agent Studio · 我的电脑', icon: brandIcon, backgroundColor: '#ffffff', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     mainWindow.webContents.on('will-navigate', event => event.preventDefault());
     mainWindow.on('close', event => { if (!quitting) { event.preventDefault(); mainWindow.hide(); } });
     await mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-    const icon = nativeImage.createFromPath(path.join(__dirname, '../renderer/tray.png')); icon.setTemplateImage(true);
+    const icon = nativeImage.createFromPath(path.join(__dirname, '../renderer/tray.png')).resize({ width: 22, height: 22 });
     tray = new Tray(icon); tray.setToolTip('Agent Studio · 我的电脑'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开我的电脑', click: showWindow }, { label: '打开 Portal', click: () => shell.openExternal(PORTAL_URL) }, { type: 'separator' }, { label: '退出', click: () => app.quit() }])); tray.on('click', showWindow);
     // Upgrade only roots already selected in the local 0.1 client.
     if (config.token) for (const old of config.roots.filter(r => typeof r === 'string')) { try { const { root } = await api('/api/local-bridge/agent/roots', { method: 'POST', body: JSON.stringify({ path: old, label: path.basename(old) }) }); config.roots = config.roots.map(r => r === old ? root : r); } catch {} }

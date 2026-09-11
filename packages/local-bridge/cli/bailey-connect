@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+bridge_executable=$(readlink -f -- "${BASH_SOURCE[0]}")
+bridge_package=$(dirname "$(dirname "$bridge_executable")")
+exec "$bridge_package/bin/node" "$bridge_package/cli/bailey-connect.cjs" "$@"

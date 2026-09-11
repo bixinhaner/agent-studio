@@ -1,12 +1,32 @@
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchLocalBridgeDevices, localBridgeApi } from '../api';
-import { useLocalWorkspace, type LocalSelection } from './LocalWorkspace';
+import { LocalWorkspaceContext, LocalWorkspaceDialogs, useLocalWorkspace, type LocalSelection } from './LocalWorkspace';
 vi.mock('../api', () => ({ fetchLocalBridgeDevices: vi.fn(), localBridgeApi: vi.fn() }));
 const folder: LocalSelection = { id:'binding',root_id:'root',path:'/local/folder',label:'目录',device_id:'device',device_name:'电脑',status:'online' };
 afterEach(cleanup);
 beforeEach(() => { vi.resetAllMocks(); window.history.replaceState({}, '', '/'); vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{id:'device',name:'电脑',status:'online',roots:[{id:'root',path:'/local/folder',label:'目录'}]}]); vi.mocked(localBridgeApi).mockResolvedValue({binding:null}); });
 describe('local task directory state', () => {
+  it('Linux mode generates a command and automatically selects the completed connection folder', async () => {
+    let completed = false;
+    const copy = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+    vi.mocked(localBridgeApi).mockImplementation(async (url, init) => {
+      if (url === '/api/local-bridge/connections') return { id: 'linux-connection', code: 'ABCDEF1234', launch_url: 'agent-studio://connect?code=ABCDEF1234' } as any;
+      if (url.endsWith('/connections/linux-connection')) return { status: completed ? 'completed' : 'pending', selection: completed ? folder : null } as any;
+      return { binding: init?.method === 'PUT' ? folder : null } as any;
+    });
+    function View() { const local = useLocalWorkspace('task', true); return <LocalWorkspaceContext.Provider value={{ ...local, showEntry: true, running: false, manage: () => {} }}><button onClick={local.begin}>连接测试</button><span data-testid="selected">{local.selection?.root_id}</span><LocalWorkspaceDialogs /></LocalWorkspaceContext.Provider>; }
+    render(<View />); fireEvent.click(screen.getByText('连接测试'));
+    fireEvent.click(screen.getByRole('button', { name: 'Linux 命令行' }));
+    await screen.findByLabelText('Linux 连接命令');
+    fireEvent.click(screen.getByRole('button', { name: '复制连接命令' }));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(expect.stringContaining('bash -s -- --code ABCDEF1234')));
+    expect(window.location.protocol).not.toBe('agent-studio:');
+    completed = true;
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('root'), { timeout: 4000 });
+    expect(localBridgeApi).toHaveBeenCalledWith('/api/local-bridge/threads/task/binding', { method: 'PUT', json: { root_id: 'root' } });
+  });
   it('selects a draft without an API task mutation and loads each existing task separately', async () => {
     const {result,rerender}=renderHook(({id})=>useLocalWorkspace(id,true),{initialProps:{id:''}});
     await act(async()=>{await result.current.select(folder);});

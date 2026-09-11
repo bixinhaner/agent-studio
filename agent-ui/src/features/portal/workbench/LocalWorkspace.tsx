@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Modal, Popover } from 'antd';
-import { Check, ChevronDown, Computer, Download, Folder, FolderPlus, LoaderCircle, Monitor, Unplug } from 'lucide-react';
+import { Check, ChevronDown, Computer, Download, Folder, FolderPlus, LoaderCircle, Monitor, Terminal, Unplug } from 'lucide-react';
 import { fetchLocalBridgeDevices, localBridgeApi, type LocalBridgeDevice } from '../api';
 import './local-workspace.css';
 export type LocalSelection = { id: string; thread_id?: string; root_id: string; path: string; label: string; device_id: string; device_name: string; status: 'online' | 'offline' };
@@ -85,7 +85,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
         const out = await localBridgeApi<{ status: string; selection: LocalSelection | null }>(`/api/local-bridge/connections/${connection.id}`);
         if (!alive) return;
         if (out.status === 'completed' && out.selection) { alive = false; await select(out.selection); setConnection(null); setDialog(false); await refresh(); }
-        else if (out.status === 'expired' || out.status === 'cancelled') { setConnection(null); setError(out.status === 'expired' ? '连接已过期，重新打开客户端即可。' : '尚未选择文件夹，可以重新选择。'); }
+        else if (out.status === 'expired' || out.status === 'cancelled') { setConnection(null); setError(out.status === 'expired' ? '连接已过期，请重新连接。' : '尚未选择文件夹，可以重新选择。'); }
       } catch (e) { if (alive) setError(e instanceof Error ? e.message : '正在重试连接'); }
       finally { pending = false; }
     };
@@ -101,6 +101,7 @@ export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; not
   if (!local?.enabled) return null;
   if (local.bindingLoadFailed) return { status: 'error' as const, notice: '无法确认任务的工作目录，请重试。', retry: async () => local.reloadBinding() };
   if (local.busy) return { status: 'loading' as const, notice: '正在更新工作目录…', retry: async () => {} };
+  if (local.offline && local.devices.find(device => device.id === local.selection?.device_id)?.platform === 'linux-cli') return { status: 'error' as const, notice: 'Linux 暂时离线，请在目标目录重新运行 ~/.local/bin/bailey-connect。', actionLabel: '查看连接方式', retry: async () => local.begin() };
   if (local.offline) return { status: 'error' as const, notice: '电脑暂时离线，打开客户端后继续。', actionLabel: '打开客户端', retry: async () => { window.location.href = 'agent-studio://connect'; } };
   return null;
 }
@@ -118,10 +119,36 @@ export function LocalWorkspaceControls() {
 export function LocalWorkspaceDialogs() {
   const local = useContext(LocalWorkspaceContext);
   const [codeVisible, setCodeVisible] = useState(false);
+  const [linux, setLinux] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
+  useEffect(() => { setCopied(false); setCopyError(''); }, [local?.connection?.id, local?.dialog]);
+  const command = local?.connection ? `curl -fsSL https://bailey.baicells.com/downloads/local-bridge/connect.sh | bash -s -- --code ${local.connection.code}` : '';
+  const copy = async () => { try { await navigator.clipboard.writeText(command); setCopied(true); setCopyError(''); } catch { setCopyError('未能自动复制，请选中上方命令复制。'); } };
   if (!local?.showEntry) return null;
-  return <Modal open={local.dialog} onCancel={local.close} footer={null} width={480} title="使用电脑文件夹" className="local-connect-modal" destroyOnClose><div className="local-connect-body"><div className="local-connect-icon">{local.connection ? <LoaderCircle className="local-spinner" size={32} /> : <Monitor size={32} />}</div><h3>{local.connection ? '正在等待选择文件夹' : '连接你的电脑'}</h3><p>{local.connection ? '在桌面客户端选择文件夹，完成后会自动回到任务。' : '打开桌面客户端，选择要处理的文件夹。'}</p>{local.error ? <Alert type="warning" message={local.error} showIcon /> : null}<Button block type="primary" size="large" loading={local.busy} onClick={() => { setCodeVisible(false); void local.launch(); }}>{local.connection ? '重新打开客户端' : '打开客户端并选择'}</Button><LocalBridgeDownloads compact /><button type="button" className="local-text-button" onClick={() => { setCodeVisible(true); if (!local.connection) void local.launch(true); }}>使用配对码连接</button>{codeVisible && local.connection ? <div className="local-pair-code"><strong>{local.connection.code}</strong><Button onClick={() => void navigator.clipboard.writeText(local.connection!.code)}>复制</Button><small>在桌面客户端输入，10 分钟内有效</small></div> : null}</div></Modal>;
+  return <Modal open={local.dialog} onCancel={local.close} footer={null} width={520} title="使用电脑文件夹" className="local-connect-modal" destroyOnClose>
+    <div className="local-connect-mode" role="group" aria-label="连接方式">
+      <Button type={linux ? 'text' : 'default'} onClick={() => { setLinux(false); local.close(); local.begin(); }}><Monitor size={16} />桌面客户端</Button>
+      <Button type={linux ? 'default' : 'text'} onClick={() => { setLinux(true); setCodeVisible(false); void local.launch(true); }} loading={linux && local.busy}><Terminal size={16} />Linux 命令行</Button>
+    </div>
+    <div className="local-connect-body">
+      <div className="local-connect-icon">{local.connection ? <LoaderCircle className="local-spinner" size={32} /> : linux ? <Terminal size={32} /> : <Monitor size={32} />}</div>
+      <h3>{linux ? '在目标目录执行一条命令' : local.connection ? '正在等待选择文件夹' : '连接你的电脑'}</h3>
+      <p>{linux ? '进入要处理的目录，粘贴运行下方命令。连接后，本任务会自动选中该目录。' : local.connection ? '在桌面客户端选择文件夹，完成后会自动回到任务。' : '打开桌面客户端，选择要处理的文件夹。'}</p>
+      {local.error ? <Alert type="warning" message={local.error} showIcon /> : null}
+      {linux ? <>
+        {command ? <><pre className="local-linux-command" tabIndex={0} aria-label="Linux 连接命令">{command}</pre><Button block type="primary" size="large" onClick={() => void copy()}>{copied ? '已复制，粘贴到 Linux 终端运行' : '复制连接命令'}</Button><small className="local-linux-help">命令 10 分钟内有效。无需 sudo、Node.js 或桌面环境。<br />连接后保持终端打开，按 Ctrl+C 断开。</small>{copyError ? <Alert type="info" message={copyError} /> : null}</> : null}
+        <Button block type={command ? 'text' : 'primary'} loading={local.busy} onClick={() => void local.launch(true)}>{command ? '重新生成命令' : '生成连接命令'}</Button>
+      </> : <>
+        <Button block type="primary" size="large" loading={local.busy} onClick={() => { setCodeVisible(false); void local.launch(); }}>{local.connection ? '重新打开客户端' : '打开客户端并选择'}</Button>
+        <LocalBridgeDownloads compact />
+        <button type="button" className="local-text-button" onClick={() => { setCodeVisible(true); if (!local.connection) void local.launch(true); }}>使用配对码连接</button>
+        {codeVisible && local.connection ? <div className="local-pair-code"><strong>{local.connection.code}</strong><Button onClick={() => void navigator.clipboard.writeText(local.connection!.code)}>复制</Button><small>在桌面客户端输入，10 分钟内有效</small></div> : null}
+      </>}
+    </div>
+  </Modal>;
 }
 export function LocalBridgeDownloads({ compact = false }: { compact?: boolean }) {
   const [expanded, setExpanded] = useState(!compact);
-  return <div className="local-downloads">{compact ? <Button block size="large" icon={<Download size={16} />} onClick={() => setExpanded(!expanded)}>下载桌面客户端</Button> : null}{expanded ? <div className="local-download-options">{[['macOS · Apple 芯片', 'mac-arm64.dmg'], ['macOS · Intel', 'mac-x64.dmg'], ['Windows', 'Windows-x64.exe'], ['Linux', 'Linux-x86_64.AppImage']].map(([label, file]) => <a key={file} href={`/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-${file}`} download><Download size={15} />{label}</a>)}<small>版本 0.2.2</small></div> : null}</div>;
+  return <div className="local-downloads">{compact ? <Button block size="large" icon={<Download size={16} />} onClick={() => setExpanded(!expanded)}>下载桌面客户端</Button> : null}{expanded ? <div className="local-download-options">{[['macOS · Apple 芯片', 'mac-arm64.dmg'], ['macOS · Intel', 'mac-x64.dmg'], ['Windows', 'Windows-x64.exe'], ['Linux 桌面版', 'Linux-x86_64.AppImage']].map(([label, file]) => <a key={file} href={`/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-${file}`} download><Download size={15} />{label}</a>)}<small>版本 0.2.3</small></div> : null}</div>;
 }

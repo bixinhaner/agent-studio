@@ -5,7 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { createExecutor } = require('../runtime/executor.cjs');
 const { runTransport } = require('../runtime/transport.cjs');
-const work = path.resolve(__dirname, '../../../temp/local-bridge-tests');
+const work = path.resolve(__dirname, '../../../temp/local-bridge-tests', randomUUID());
 let serial = 0;
 async function fixture() {
   const dir = path.join(work, String(++serial)); await fs.mkdir(dir, { recursive: true });
@@ -49,7 +49,9 @@ test('trusted Shell can access outside cwd, output streams and cancellation kill
   const f = await fixture(); await fs.writeFile(path.join(f.dir, 'outside'), 'available');
   assert.match((await f.call('exec', { command: 'cat ../outside' })).output, /available/);
   const p = await f.call('exec', { command: 'printf ready; sleep 30; echo wrong > late.txt', yield_ms: 100 });
-  assert.equal(p.running, true); assert.match(p.output, /ready/);
+  assert.equal(p.running, true);
+  const ready = p.output.includes('ready') ? p : await f.call('process', { process_id: p.process_id, wait_ms: 2000 });
+  assert.match(ready.output, /ready/);
   assert.equal((await f.call('process', { process_id: p.process_id }, { threadId: 'other' })).ok, false);
   await f.call('cancel_task', {});
   const end = await f.call('process', { process_id: p.process_id, wait_ms: 2000, cursor: p.cursor });

@@ -1,6 +1,6 @@
 {
   "name": "@agent-studio/local-bridge-app",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Agent Studio Local Bridge desktop companion",
   "main": "electron/main.cjs",
@@ -27,14 +27,16 @@
       ],
       "category": "public.app-category.developer-tools",
       "artifactName": "Agent-Studio-Local-Bridge-latest-mac-${arch}.${ext}",
-      "identity": "-"
+      "identity": "-",
+      "icon": "build/icon.icns"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
       ],
-      "artifactName": "Agent-Studio-Local-Bridge-latest-Windows-${arch}.${ext}"
+      "artifactName": "Agent-Studio-Local-Bridge-latest-Windows-${arch}.${ext}",
+      "icon": "build/icon.ico"
     },
     "linux": {
       "target": [
@@ -44,7 +46,8 @@
       "category": "Development",
       "artifactName": "Agent-Studio-Local-Bridge-latest-Linux-${arch}.${ext}",
       "maintainer": "Agent Studio",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "icon": "build/icon.png"
     },
     "extraResources": [
       {

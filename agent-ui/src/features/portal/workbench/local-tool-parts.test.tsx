@@ -31,3 +31,13 @@ it('renders a cancelled call without a result instead of crashing', () => {
   render(<LocalToolCard toolName="local_computer.local_exec" status={{type:'incomplete'}} />);
   expect(screen.getByRole('status').textContent).toContain('电脑操作未完成');
 });
+
+it('copies headless Linux result paths without requesting a desktop open', async () => {
+  vi.mocked(localBridgeApi).mockClear();
+  const copy = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+  render(<LocalWorkspaceContext.Provider value={{selection:{thread_id:'task',device_id:'linux',device_name:'Linux'},devices:[{id:'linux',platform:'linux-cli'}],offline:true} as any}><LocalToolCard toolName="local_computer.local_write" result={{ok:true,path:'/work/result.txt'}} /></LocalWorkspaceContext.Provider>);
+  fireEvent.click(screen.getByRole('button',{name:'复制路径'}));
+  await waitFor(() => expect(copy).toHaveBeenCalledWith('/work/result.txt'));
+  expect(localBridgeApi).not.toHaveBeenCalled();
+});
