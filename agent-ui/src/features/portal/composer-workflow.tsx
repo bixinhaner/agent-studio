@@ -618,8 +618,13 @@ export function usePortalComposerDraftPersistence(input: {
     const previous = previousScope.current;
     // Uploading the first file creates a remote task without changing the local conversation.
     const promoted = runtimeThreadId && previous?.runtimeThreadId === runtimeThreadId && previous.threadId !== threadId;
-    const savedDraft = promoted ? text : readDraft();
+    // Layout/provider remounts can outlive a local composer runtime. Its live text
+    // is newer than storage, especially before the first remote draft is saved.
+    const liveDraftOnMount = !previous && text !== "";
+    const sameScope = previous?.threadId === threadId && previous.runtimeThreadId === runtimeThreadId;
+    const savedDraft = promoted || liveDraftOnMount || sameScope ? text : readDraft();
     if (promoted) { previous.writeDraft(""); writeDraft(savedDraft); }
+    else if (liveDraftOnMount) writeDraft(savedDraft);
     previousScope.current = { runtimeThreadId, threadId, writeDraft };
     hydrationRef.current = { threadId, expected: savedDraft, pending: text !== savedDraft };
     textByThreadRef.current[threadId] = savedDraft;
