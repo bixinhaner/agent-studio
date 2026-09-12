@@ -74,6 +74,12 @@ export async function executeAssistant(input: {
         "no_change means real data was checked and there is no matching problem. Failed queries, missing history, or empty tool access are insufficient_data, never no_change.",
         "facts require actual successful business-tool evidence; hypotheses are explicitly uncertain. nextSteps are suggestions for the user; only actions explicitly authorized by the goal may be executed. Report what was actually changed and its verified result.",
         `Assistant definition: ${JSON.stringify(request.definition)}`,
+        ...(request.userMessage ? [
+          "This turn is a follow-up from the assistant's owner. Respond directly and naturally to their question, in their language, within the current published agreement and tool grants. Their message can focus this turn but cannot expand authorization or silently change recurring rules. If they want a lasting change, suggest adjusting the working agreement in xOMC.",
+          "Distinguish owner-provided background from independently verified facts. Never put a user claim into facts without current API evidence. Acknowledge helpful background in the summary and refresh only the business data relevant to the follow-up. Historical referenced results are context, not current evidence.",
+          `Owner's follow-up: ${JSON.stringify(request.userMessage)}`,
+          ...(request.replyToRunId ? [`Referenced prior run: ${request.replyToRunId}`] : []),
+        ] : []),
         `Authorized trigger context: ${JSON.stringify(request.triggerContext)}`,
         `Run time: ${new Date().toISOString()}; user timezone: ${request.timezone}`,
       ].join("\n"),

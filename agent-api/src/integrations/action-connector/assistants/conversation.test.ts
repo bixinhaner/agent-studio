@@ -28,6 +28,13 @@ describe("assistant conversation continuity", () => {
     changed.toolPolicy!.blockedPathPrefixes.reverse(); changed.toolGrants!.reverse();
     expect(assistantConversationId(changed, run())).toBe(expected);
   });
+  it("keeps owner follow-ups on the same assistant conversation without changing the agreement", () => {
+    const original = request(); const followup = executionRequestSchema.parse({ ...original, runId: randomUUID(), userMessage: "这台设备还没正式投入使用，先帮我留意接入情况。", replyToRunId: original.runId });
+    expect(followup.userMessage).toBeDefined();
+    expect(assistantConversationId(followup, run())).toBe(assistantConversationId(original, run()));
+    expect(followup.definition).toEqual(original.definition);
+    expect(() => executionRequestSchema.parse({ ...original, userMessage: " ", replyToRunId: "outside" })).toThrow();
+  });
   it("separates assistants and changes of source visibility, target or effective permission", () => {
     const r = request(); const expected = assistantConversationId(r, run());
     for (const change of [
@@ -50,7 +57,7 @@ describe("assistant conversation continuity", () => {
     expect(assistantConversationId(r, run())).not.toBe(id);
   });
   it("passes a stable conversation with distinct runs and current-only evidence to the shared executor", async () => {
-    const r = request();
+    const r = { ...request(), userMessage: "这台设备还没正式投入使用，先帮我留意接入情况。" };
     const result = { outcome: "finding", title: "A device needs attention", summary: "Current evidence", facts: [{ text: "One device", evidenceRefs: ["tool:get.devices"] }], hypotheses: [], nextSteps: [] };
     const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
     const findMany = vi.fn(async () => [{ operationId: "get.devices" }]);
@@ -63,6 +70,9 @@ describe("assistant conversation continuity", () => {
     expect(first.conversationId).toBe(second.conversationId); expect(first.clientRunId).not.toBe(second.clientRunId);
     expect(first.context).toMatchObject({ title: r.definition.name, assistantRunAttempt: 1 });
     expect(second.message).toContain("not evidence of current state");
+    expect(second.message).toContain(r.userMessage);
+    expect(second.message).toContain("cannot expand authorization");
+    expect(second.message).toContain("Never put a user claim into facts");
     expect(findMany.mock.calls).toHaveLength(2);
     // A remembered result cannot pass the current-run evidence gate by itself.
     findMany.mockResolvedValue([]);
