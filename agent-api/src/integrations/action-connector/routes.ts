@@ -53,6 +53,11 @@ export function createActionConnectorRuntimeRouter(options: {
     try { res.status(202).json(await options.proactive.submitAssistantRun(req.params.connectorId, req.body)); }
     catch (error) { assistantError(res, error); }
   });
+  router.post("/:connectorId/assistant-runs/:runId/cancel", requireService, async (req: Request, res: Response) => {
+    if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
+    try { res.json(await options.proactive.cancelAssistantRequest(req.params.connectorId, req.params.runId, req.body)); }
+    catch (error) { assistantError(res, error); }
+  });
   router.get("/:connectorId/assistant-runs/:runId", requireService, async (req: Request, res: Response) => {
     if (!options.proactive) return void res.status(503).json({ error: { code: "PROACTIVE_RUNTIME_UNAVAILABLE" } });
     try { res.json(await options.proactive.assistantRun(req.params.connectorId, req.params.runId)); }

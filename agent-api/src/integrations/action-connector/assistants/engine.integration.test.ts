@@ -34,6 +34,28 @@ suite("PostgreSQL assistant lifecycle (real database + tool protocol, fixture mo
     await service.cancelRun(connectorId, r.runId);
     expect((await service.submitAssistantRun(connectorId, r)).status).toBe("CANCELLED");
   });
+  it("records cancellation before submission and rejects conflicting cancellation identity", async () => {
+    let called = false;
+    const service = new ProactiveActionConnectorService(db, new DurableActionConnectorToolBridge(db), async () => { called = true; });
+    const r = request();
+    expect((await service.cancelAssistantRequest(connectorId, r.runId, r)).status).toBe("CANCELLED");
+    expect((await service.submitAssistantRun(connectorId, r)).status).toBe("CANCELLED");
+    await expect(service.cancelAssistantRequest(connectorId, r.runId, { ...r, revision: 2 })).rejects.toThrow("CONFLICT");
+    await expect(service.cancelAssistantRequest(connectorId, randomUUID(), r)).rejects.toThrow("CONFLICT");
+    await expect(service.cancelAssistantRequest("other-connector", r.runId, r)).rejects.toThrow();
+    await service.start(); service.stop();
+    expect(called).toBe(false);
+  });
+  it("converges racing submission and cancellation to one cancelled record without changing completed work", async () => {
+    const service = new ProactiveActionConnectorService(db, new DurableActionConnectorToolBridge(db), async () => undefined);
+    const r = request();
+    await Promise.all([service.submitAssistantRun(connectorId, r), service.cancelAssistantRequest(connectorId, r.runId, r)]);
+    expect((await service.assistantRun(connectorId, r.runId)).status).toBe("CANCELLED");
+    expect(await db.proactiveAgentRun.count({ where: { id: r.runId } })).toBe(1);
+    const completed = request(); await service.submitAssistantRun(connectorId, completed);
+    await db.proactiveAgentRun.update({ where: { id: completed.runId }, data: { status: "COMPLETED", completedAt: new Date(), output: noData } });
+    expect((await service.cancelAssistantRequest(connectorId, completed.runId, completed)).status).toBe("COMPLETED");
+  });
   it("executes real persistent tool leasing and validates evidence before returning a result", async () => {
     const bridge = new DurableActionConnectorToolBridge(db); const leases = new ProactiveLeaseService(db);
     const runner: ActionConnectorCodexRunner = async (input) => {

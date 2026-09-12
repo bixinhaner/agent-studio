@@ -50,23 +50,38 @@ export class ProactiveActionConnectorService {
   async planAssistant(connectorId: string, input: unknown, signal?: AbortSignal) { return this.planner.plan(connectorId, input, signal); }
 
   async submitAssistantRun(connectorId: string, raw: unknown) {
+    return this.ensureAssistantRun(connectorId, raw, false);
+  }
+
+  async cancelAssistantRequest(connectorId: string, runId: string, raw: unknown) {
+    const request = executionRequestSchema.parse(raw);
+    if (request.runId !== runId) throw new Error("ASSISTANT_RUN_CONFLICT");
+    return this.ensureAssistantRun(connectorId, request, true);
+  }
+
+  // A cancellation can arrive before an uncertain submission. Persisting the
+  // same immutable identity as a terminal record prevents a late retry from
+  // starting work after the caller has withdrawn authorization.
+  private async ensureAssistantRun(connectorId: string, raw: unknown, cancelled: boolean) {
     const request = executionRequestSchema.parse(raw);
     const connector = await this.db.integrationInstance.findUnique({ where: { id: connectorId } });
-    if (!connector || connector.type !== "action_connector" || connector.status !== "active") throw new Error("CONNECTOR_NOT_ACTIVE");
+    if (!connector || connector.type !== "action_connector" || (connector.status !== "active" && !cancelled)) throw new Error("CONNECTOR_NOT_ACTIVE");
     const fingerprint = createHash("sha256").update(canonical(request)).digest("hex");
     const replay = async () => {
       const existing = await this.db.proactiveAgentRun.findUnique({ where: { id: request.runId } });
       if (!existing) return undefined;
       const snapshot = record(existing.scenarioSnapshot);
       if (existing.connectorId !== connectorId || snapshot.kind !== ASSISTANT_SNAPSHOT_KIND || snapshot.fingerprint !== fingerprint) throw new Error("ASSISTANT_RUN_CONFLICT");
+      if (cancelled) await this.cancelRun(connectorId, existing.id);
       return this.assistantRun(connectorId, existing.id);
     };
     const previous = await replay();
     if (previous) return previous;
     const pending = await this.db.proactiveAgentRun.count({ where: { connectorId, status: { in: ["QUEUED", ...activeStatuses] } } });
-    if (pending >= 100) throw new Error("ASSISTANT_QUEUE_FULL");
+    if (!cancelled && pending >= 100) throw new Error("ASSISTANT_QUEUE_FULL");
     try {
       await this.db.proactiveAgentRun.create({ data: {
+        ...(cancelled ? { status: "CANCELLED" as const, completedAt: new Date(), error: { code: "CANCELLED_BY_USER", retryable: false } } : {}),
         id: request.runId, connectorId, scenarioKey: `assistant:${request.assistantId}`,
         scenarioVersion: request.revision, packageDigest: request.definitionDigest, handbookDigest: request.handbookDigest,
         resourceScope: [], scenarioSnapshot: { kind: ASSISTANT_SNAPSHOT_KIND, fingerprint, request } as unknown as Prisma.InputJsonValue,
