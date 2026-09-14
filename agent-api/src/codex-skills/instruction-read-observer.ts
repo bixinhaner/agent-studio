@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { collectAbsoluteSkillMdPaths as collectSkillMdPaths, normalizeComparablePath } from "./skill-md-paths.js";
+
 import type { RuntimeStreamEvent } from "../live-runtime-session.js";
 import type { CodexTurnSkill } from "../codex-runtime.js";
 
@@ -46,33 +48,6 @@ function hasNonEmptyOutput(value: unknown): boolean {
   const record = asRecord(value);
   if (!record) return false;
   return [record.text, record.output, record.content, record.contentItems, record.result].some(hasNonEmptyOutput);
-}
-
-function normalizeComparablePath(value: string): string {
-  return value
-    .trim()
-    .replace(/^['"]|['"]$/g, "")
-    .replace(/\\ /g, " ")
-    .replace(/\\(['"])/g, "$1")
-    .replace(/\\\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-}
-
-function collectSkillMdPaths(command: string): string[] {
-  const paths = new Set<string>();
-  const add = (value: string | undefined) => {
-    if (!value) return;
-    const normalized = normalizeComparablePath(value);
-    if (!/(^|\/)SKILL\.md$/i.test(normalized)) return;
-    paths.add(normalized);
-  };
-
-  const quotedPatterns = [/"([^"\n]*\/SKILL\.md)"/gi, /'([^'\n]*\/SKILL\.md)'/gi];
-  for (const pattern of quotedPatterns) {
-    for (const match of command.matchAll(pattern)) add(match[1]);
-  }
-  for (const match of command.matchAll(/((?:\\.|[^\s'"`;|&<>])+\/SKILL\.md)/gi)) add(match[1]);
-  return [...paths];
 }
 
 function collectRelativeSkillMdPath(command: string, argumentsValue: unknown): string | undefined {

@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { collectAbsoluteSkillMdPaths, normalizeComparablePath } from "./skill-md-paths.js";
+
 import type { CodexInstructionRead, CodexInstructionReadKind } from "./instruction-read-observer.js";
 
 export type HistoricalInstructionReadTurn = {
@@ -69,29 +71,14 @@ function serializedText(value: unknown): string | undefined {
   }
 }
 
-function normalizeComparablePath(value: string): string {
-  return value
-    .trim()
-    .replace(/^['"]|['"]$/g, "")
-    .replace(/\\ /g, " ")
-    .replace(/\\(['"])/g, "$1")
-    .replace(/\\\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-}
-
 function collectSkillMdPaths(command: string): string[] {
-  const paths = new Set<string>();
+  const paths = new Set(collectAbsoluteSkillMdPaths(command));
   const add = (value: string | undefined) => {
     if (!value) return;
     const normalized = normalizeComparablePath(value);
     if (!/(^|\/)SKILL\.md$/i.test(normalized)) return;
     paths.add(normalized);
   };
-
-  for (const pattern of [/"([^"\n]*\/SKILL\.md)"/gi, /'([^'\n]*\/SKILL\.md)'/gi]) {
-    for (const match of command.matchAll(pattern)) add(match[1]);
-  }
-  for (const match of command.matchAll(/((?:\\.|[^\s'"`;|&<>])+\/SKILL\.md)/gi)) add(match[1]);
 
   if (/(?:^|[\s'"`;|&<>])SKILL\.md(?:$|[\s'"`;|&<>])/i.test(command)) {
     const workdir = command.match(/\bworkdir\s*:\s*["']([^"']+)["']/i)?.[1]

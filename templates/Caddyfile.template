@@ -7,6 +7,19 @@
   # additional setup while co-hosted applications survive future deploys.
   import /etc/caddy/includes/*.routes
 
+  # Probe the chat event loop independently of the admin API. Bound both
+  # connection and response time so a live-but-stuck process cannot hang probes.
+  handle /healthz/chat {
+    rewrite * /healthz
+    header Cache-Control "no-store"
+    reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT} {
+      transport http {
+        dial_timeout 2s
+        response_header_timeout 3s
+      }
+    }
+  }
+
   @chat_api path /api/local-bridge/threads/* /api/chat/* /api/session /api/threads /api/threads/* /api/portal/* /api/fs/* /api/ai-response-reviews /api/ai-response-reviews/* /api/integrations/crest/* /api/integrations/zendesk/* /api/action-connectors/* /openai/* /public-api/thread-shares/* /public-api/thread-shares
   handle @chat_api {
     reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT}

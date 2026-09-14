@@ -32,6 +32,7 @@ FRONTEND_BUILD_NODE_OPTIONS="${FRONTEND_BUILD_NODE_OPTIONS:---max-old-space-size
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
 SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
+REFRESH_CADDY="${REFRESH_CADDY:-0}"
 SKIP_AGENT_DRAIN="${SKIP_AGENT_DRAIN:-0}"
 AGENT_DRAIN_TIMEOUT_SECONDS="${AGENT_DRAIN_TIMEOUT_SECONDS:-900}"
 AGENT_DRAIN_POLL_SECONDS="${AGENT_DRAIN_POLL_SECONDS:-5}"
@@ -81,6 +82,7 @@ Options:
   --skip-git-pull        Rebuild current checkout without fetching or pulling
   --skip-rbac-seed       Skip built-in RBAC seed step
   --skip-caddy-reload    Skip rendering/reloading Caddy
+  --refresh-caddy        Also refresh Caddy during an admin-only or chat-only deploy
   --skip-agent-drain     Restart immediately without deployment drain/wait
   --drain-timeout <sec>  Seconds to wait for active agent runs before restart [default: $AGENT_DRAIN_TIMEOUT_SECONDS]
   -h, --help             Show this help text
@@ -185,6 +187,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-caddy-reload)
       SKIP_CADDY_RELOAD=1
+      shift
+      ;;
+    --refresh-caddy)
+      REFRESH_CADDY=1
       shift
       ;;
     --skip-agent-drain)
@@ -297,7 +303,7 @@ deploy_restarts_chat() {
 }
 
 deploy_refreshes_caddy() {
-  [[ "$DEPLOY_SCOPE" == "all" ]]
+  [[ "$DEPLOY_SCOPE" == "all" || "$REFRESH_CADDY" == "1" ]]
 }
 
 require_repo_checkout() {
@@ -997,6 +1003,24 @@ restart_pm2_targets() {
   run_as_app_user_shell "pm2 save"
 }
 
+verify_api_health() {
+  local health_host="$API_HOST"
+  case "$health_host" in
+    0.0.0.0) health_host="127.0.0.1" ;;
+    ::) health_host="[::1]" ;;
+  esac
+  local attempt
+  for attempt in {1..12}; do
+    if node "$script_dir/check-api-health.mjs" \
+      --admin-url "http://$health_host:$ADMIN_API_PORT/healthz" \
+      --chat-url "http://$health_host:$CHAT_API_PORT/healthz"; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "Admin or chat API health check failed after restart"
+}
+
 main() {
   require_command git
   require_command npm
@@ -1046,6 +1070,8 @@ main() {
   if deploy_restarts_admin || deploy_restarts_chat; then
     disable_deploy_drain
     trap - EXIT
+    log_step "Checking admin and chat API health independently"
+    verify_api_health
   fi
 
   log_step "Deploy complete"
