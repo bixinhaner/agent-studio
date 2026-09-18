@@ -72,7 +72,8 @@ const commonAgent = {
   agentMode: "external-operations",
   runtimeClass: "background-analysis",
   skills: ["omc-operations@1.2.0"],
-  timeoutSeconds: 120,
+  // Leave time for handbook discovery, evidence queries, and the final report.
+  timeoutSeconds: 300,
   maxToolCalls: 18,
   maxOutputBytes: 65_536
 };
