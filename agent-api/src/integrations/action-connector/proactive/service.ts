@@ -235,12 +235,16 @@ export class ProactiveActionConnectorService {
         if (event.type === "error") runtimeError = new Error(event.error.code);
       };
       const sourceEvent = connectorEventSchema.parse(run.input);
+      // The connector snapshots its system report language when the event occurs.
+      // Preserve the old default for connectors that have not supplied this policy yet.
+      const reportLocale = sourceEvent.data.reportLocale === "en-US" ? "en-US" : "zh-CN";
+      const reportLanguage = reportLocale === "en-US" ? "English" : "Simplified Chinese";
       await this.runtime.streamChat({
         connectorId: run.connectorId, delegationHeaderValue: `Bearer proactive:${run.id}`,
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(spec.agent.timeoutSeconds * 1000)]),
         request: {
-          message: `${spec.agent.prompt}\n\n触发事件：${JSON.stringify(sourceEvent)}`, clientRunId: run.id,
-          conversationId: `proactive-${run.id}-${run.runAttempt}`, mode: "execute", locale: "zh-CN", timezone: "Asia/Shanghai", attachments: [],
+          message: `${spec.agent.prompt}\n\n触发事件：${JSON.stringify(sourceEvent)}\n\nWrite every human-readable report field in ${reportLanguage}, including title, summary, facts, hypotheses, detail values, and action labels. Keep JSON keys, enum values, resource identifiers, and verbatim evidence unchanged.`, clientRunId: run.id,
+          conversationId: `proactive-${run.id}-${run.runAttempt}`, mode: "execute", locale: reportLocale, timezone: "Asia/Shanghai", attachments: [],
           context: { proactive: true, scenarioKey: run.scenarioKey, sourceEvent, externalIdentity: {
             externalUserId: "xomc-proactive-service", metadata: { sourceSystem: "omc", apiHandbook: record(sourceEvent.data).apiHandbook },
           } },
@@ -251,6 +255,7 @@ export class ProactiveActionConnectorService {
       const validating = await this.db.proactiveAgentRun.updateMany({ where: guard, data: { status: "VALIDATING" } });
       if (!validating.count) return;
       const finding = findingSchema.parse(parseModelJSON(text));
+      finding.presentation = { ...finding.presentation, locale: reportLocale };
       if (finding.scenarioKey !== run.scenarioKey || finding.scenarioVersion !== spec.version) throw new Error("FINDING_SCENARIO_MISMATCH");
       if (!resourcesWithinScope(finding.resourceRefs, run.resourceScope as unknown as ConnectorEventEnvelope["resources"])) throw new Error("FINDING_RESOURCE_SCOPE_VIOLATION");
       await this.db.$transaction(async (tx) => {
