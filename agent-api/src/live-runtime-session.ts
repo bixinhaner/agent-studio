@@ -1,3 +1,4 @@
+import { sumInvocations } from "./operations/codex-usage-ledger.js";
 import type { ReasoningEffort } from "./model-config.js";
 import type { CodexSkillRefresh, CodexTurnSkill } from "./codex-runtime.js";
 
@@ -14,9 +15,14 @@ export type RuntimeUsageSnapshot = {
   codexThreadId?: string;
   modelContextWindow?: number;
   modelInvocations?: RuntimeModelInvocationUsage[];
+  codexTurnId?: string;
+  codexTurnIds?: string[];
+  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation";
 };
 
 export type RuntimeModelInvocationUsage = {
+  key?: string;
+  model?: string;
   inputTokens: number;
   cachedInputTokens: number;
   cacheWriteTokens?: number;
@@ -236,8 +242,11 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
   const eventType = trimOrUndefined(typeof event.type === "string" ? event.type : undefined);
 
   const raw = asRecord(event.raw);
+  if (eventType === "usage.reconciled" && raw?.snapshot) return raw.snapshot as RuntimeUsageSnapshot;
   if (eventType === "token_count" || raw?.type === "token_count") {
-    return parseTokenCountUsage(event, raw);
+    const usage = parseTokenCountUsage(event, raw);
+    const turnId = raw?.turn_id ?? event.turn_id;
+    return usage ? { ...usage, ...(typeof turnId === "string" ? { codexTurnId: turnId } : {}) } : undefined;
   }
   if (eventType !== "turn.completed") return undefined;
 
@@ -266,6 +275,19 @@ export async function collectRuntimeCompletion(input: {
   let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
   const modelInvocations: RuntimeModelInvocationUsage[] = [];
+  const accountedTurns = new Map<string, RuntimeUsageSnapshot>();
+  let notificationTurnId: string | undefined;
+  const combineTurns = (snapshot: RuntimeUsageSnapshot): RuntimeUsageSnapshot => {
+    if (!snapshot.codexTurnId) return snapshot;
+    if (snapshot.kind !== "turn_delta") return { ...snapshot, accountingSource: "pending_reconciliation" };
+    accountedTurns.set(snapshot.codexTurnId, snapshot);
+    const turns = [...accountedTurns.values()];
+    const calls = turns.flatMap(t => t.modelInvocations ?? []);
+    const source = turns.some(t => !["response_id", "legacy_token_count"].includes(t.accountingSource ?? "")) ? "pending_reconciliation"
+      : turns.every(t => t.accountingSource === "response_id") ? "response_id" : "legacy_token_count";
+    return { ...snapshot, ...sumInvocations(turns), kind: "turn_delta", modelInvocations: calls,
+      codexTurnId: [...accountedTurns.keys()][0], codexTurnIds: [...accountedTurns.keys()], accountingSource: source };
+  };
   const seenCumulativeUsage = new Set<string>();
   const textMode = input.textMode ?? "append";
   const iterator = input.events[Symbol.asyncIterator]();
@@ -277,6 +299,17 @@ export async function collectRuntimeCompletion(input: {
       const event = next.value;
       const extractedUsage = extractRuntimeUsageFromStreamEvent(event);
       if (extractedUsage) {
+        if (event.type === "usage.reconciled") {
+          latestUsage = combineTurns(extractedUsage);
+          await input.onUsage?.(latestUsage, event);
+          await input.onEvent?.(event);
+          continue;
+        }
+        if (extractedUsage.codexTurnId && notificationTurnId !== extractedUsage.codexTurnId) {
+          modelInvocations.length = 0;
+          seenCumulativeUsage.clear();
+          notificationTurnId = extractedUsage.codexTurnId;
+        }
         const usageKey = cumulativeUsageKey(extractedUsage);
         const shouldCaptureInvocations = !usageKey || !seenCumulativeUsage.has(usageKey);
         if (usageKey) seenCumulativeUsage.add(usageKey);
@@ -287,8 +320,17 @@ export async function collectRuntimeCompletion(input: {
           ...extractedUsage,
           ...(modelInvocations.length > 0 ? { modelInvocations: [...modelInvocations] } : {})
         };
-        latestUsage = usage;
-        await input.onUsage?.(usage, event);
+        // The live notifications are a provisional estimate. A terminal rollout
+        // snapshot replaces them with response-ID-deduplicated calls.
+        const accounted = usage.codexTurnId && modelInvocations.length ? {
+          ...usage, ...sumInvocations(modelInvocations), kind: "turn_delta" as const,
+          cumulativeInputTokens: extractedUsage.inputTokens,
+          cumulativeCachedInputTokens: extractedUsage.cachedInputTokens,
+          cumulativeOutputTokens: extractedUsage.outputTokens,
+          accountingSource: "pending_reconciliation" as const
+        } : usage;
+        latestUsage = combineTurns(accounted);
+        await input.onUsage?.(latestUsage, event);
       }
       const completedAgentText = completedAgentMessageText(event);
       const completedTurnText = completedTurnFinalAnswerText(event);
@@ -353,7 +395,7 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   await input.onDone(completion);
 
   if (completion.usage && input.recordUsage) {
-    void Promise.resolve()
+    await Promise.resolve()
       .then(() => input.recordUsage?.(completion.usage!, "success"))
       .catch((error) => {
         input.onTelemetryError?.(error);

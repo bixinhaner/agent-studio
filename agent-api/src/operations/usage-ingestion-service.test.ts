@@ -18,6 +18,28 @@ const profile: CostProfileRecord = {
 };
 
 describe("UsageIngestionService", () => {
+  it("persists canonical call receipts with a durable turn key instead of the high-water path", async () => {
+    let stored: any;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return profile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create() { throw new Error("must use turn key"); },
+        async createCodexCumulative() { throw new Error("must not subtract high-water"); },
+        async createCodexTurn(input) { stored = input; return { ...input, createdAt: "2026-09-20T10:00:00Z" } as any; }
+      }
+    });
+    await service.recordCodexRuntimeUsage({ model: "gpt-5.4", featureType: "chat", codexThreadId: "thread", codexTurnId: "turn",
+      codexRuntimeUsageKind: "turn_delta", accountingSource: "response_id", inputTokens: 120, cachedInputTokens: 60, cacheWriteTokens: 0, outputTokens: 4,
+      codexRuntimeCumulativeUsage: { inputTokens: 20, cachedInputTokens: 10, outputTokens: 2 },
+      codexRuntimeModelInvocations: [{ inputTokens: 120, cachedInputTokens: 60, cacheWriteTokens: 0, outputTokens: 4 }]
+    });
+    expect(stored.id).toMatch(/^codex-turn-/);
+    expect(stored.inputTokens).toBe(120);
+    expect(stored.metadata._usageAccounting).toMatchObject({ status: "complete", source: "response_id", turnId: "turn" });
+    expect(stored.metadata._usageAccounting.invocations).toHaveLength(1);
+  });
+
   it("prices Astra cache writes and crosses the long-context boundary only above 272K", () => {
     const astra: CostProfileRecord = {...profile, model: "gpt-6-astra",
       inputTokenPrice: "10", cachedInputTokenPrice: "1", cacheWriteTokenPrice: "12.5", outputTokenPrice: "50",

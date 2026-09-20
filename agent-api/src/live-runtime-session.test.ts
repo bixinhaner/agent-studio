@@ -238,6 +238,33 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
     }), "failed");
   });
 
+  it("retains the usage of both turns when a service retry starts another turn", async () => {
+    const onDone = vi.fn();
+    const canonical = (id: string, inputTokens: number) => ({ type: "usage.reconciled", raw: { snapshot: {
+      inputTokens, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 1, kind: "turn_delta",
+      codexThreadId: "thread", codexTurnId: id, accountingSource: "response_id",
+      modelInvocations: [{ key: id, inputTokens, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 1 }]
+    } } });
+    await streamRuntimeCompletionWithBestEffortUsage({ events: events([canonical("turn-one", 60), canonical("turn-two", 40)]), onEvent: vi.fn(), onDone });
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ usage: expect.objectContaining({
+      inputTokens: 100, outputTokens: 2, codexTurnId: "turn-one", codexTurnIds: ["turn-one", "turn-two"], accountingSource: "response_id"
+    }) }));
+  });
+
+  it("replaces provisional counters with canonical receipts without adding them twice", async () => {
+    const onDone = vi.fn();
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: events([
+        { type: "token_count", raw: { type: "token_count", thread_id: "thread", turn_id: "turn", info: {
+          total_token_usage: { input_tokens: 1000000, cached_input_tokens: 900000, output_tokens: 10000 },
+          last_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 2 }
+        } } },
+        { type: "usage.reconciled", raw: { snapshot: { inputTokens: 120, cachedInputTokens: 60, outputTokens: 4, kind: "turn_delta", codexThreadId: "thread", codexTurnId: "turn", accountingSource: "response_id" } } }
+      ]), onEvent: vi.fn(), onDone
+    });
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ usage: expect.objectContaining({ inputTokens: 120, outputTokens: 4, accountingSource: "response_id" }) }));
+  });
+
   it("collects and deduplicates per-model-call usage for pricing while retaining cumulative totals", async () => {
     const onDone = vi.fn();
     const tokenCount = (totalInput: number, totalOutput: number, lastInput: number, lastOutput: number) => ({

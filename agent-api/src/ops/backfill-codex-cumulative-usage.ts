@@ -148,6 +148,7 @@ async function rebuildRollups(db: PrismaClient, corrections: Correction[]): Prom
 
 async function main(): Promise<void> {
   const { apply } = parseArgs(process.argv.slice(2));
+  if (apply) throw new Error("Cumulative high-water backfill is retired. Use reconcile-codex-usage --apply-plan after a dry-run.");
   const db = createDbClient();
   try {
     const usageEvents = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);

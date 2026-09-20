@@ -339,7 +339,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function hasIncompleteCost(metadata: unknown): boolean {
   const costProfile = asRecord(asRecord(metadata)?._costProfile);
-  return costProfile?.costCompleteness === "partial_missing_cache_write_tokens";
+  return costProfile?.costCompleteness === "partial_missing_cache_write_tokens" ||
+    asRecord(asRecord(metadata)?._usageAccounting)?.status === "pending_reconciliation";
 }
 
 function toNumber(value: unknown): number {

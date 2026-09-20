@@ -85,9 +85,11 @@ type UsageEventRow = {
 };
 
 type UsageEventTable = {
+  update?(args: { where: { id: string }; data: Record<string, unknown> }): Promise<UsageEventRow>;
   create(args: { data: Record<string, unknown> }): Promise<UsageEventRow>;
   findMany(args?: {
     where?: {
+      id?: string;
       organizationId?: string | null;
       userId?: string;
       departmentIdSnapshot?: string;
@@ -190,6 +192,36 @@ export class UsageEventRepository {
   async create(input: CreateUsageEventInput): Promise<UsageEventRecord> {
     const created = await this.db.usageEvent.create({ data: this.createData(input) });
     return mapUsageEvent(created);
+  }
+
+  async createCodexTurn(input: CreateUsageEventInput): Promise<UsageEventRecord> {
+    if (!input.id || !this.db.$transaction) throw new Error("durable turn usage requires id and transaction");
+    return this.db.$transaction(async transaction => {
+      await transaction.$queryRawUnsafe('SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtextextended($1, 0))', input.id);
+      const previous = (await transaction.usageEvent.findMany({ where: { id: input.id }, take: 1 }))[0];
+      if (!previous) return this.createWithTable(transaction.usageEvent, input);
+      if ((previous.organizationId ?? undefined) !== input.organizationId || previous.model !== input.model || previous.featureType !== input.featureType) {
+        throw new Error("turn usage ownership conflict");
+      }
+      const oldMetadata = previous.metadata as Record<string, any> | undefined;
+      const metadata = input.metadata as Record<string, any> | undefined;
+      const wasExact = oldMetadata?._usageAccounting?.status === "complete";
+      const isExact = metadata?._usageAccounting?.status === "complete";
+      if (wasExact) {
+        if (isExact && (previous.inputTokens !== input.inputTokens || previous.cachedInputTokens !== input.cachedInputTokens || previous.outputTokens !== input.outputTokens || previous.cacheWriteTokens !== input.cacheWriteTokens)) {
+          throw new Error("conflicting complete turn usage");
+        }
+        return mapUsageEvent(previous);
+      }
+      if (!isExact || !transaction.usageEvent.update) return mapUsageEvent(previous);
+      // Upgrade a provisional record in place; retain business identity and time.
+      return mapUsageEvent(await transaction.usageEvent.update({ where: { id: input.id! }, data: {
+        inputTokens: input.inputTokens, cachedInputTokens: input.cachedInputTokens,
+        cacheWriteTokens: input.cacheWriteTokens, outputTokens: input.outputTokens,
+        estimatedCost: input.estimatedCost, internalCost: input.internalCost,
+        metadata: { ...oldMetadata, ...metadata }
+      } }));
+    });
   }
 
   async createCodexCumulative(input: CreateCodexCumulativeUsageInput): Promise<UsageEventRecord> {

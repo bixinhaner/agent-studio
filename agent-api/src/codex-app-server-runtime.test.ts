@@ -139,7 +139,7 @@ rl.on("line", (line) => {
     return;
   }
   if (message.method === "thread/start") {
-    const threadId = "thread-" + nextThreadId++;
+    const threadId = process.env.FAKE_USAGE_THREAD_ID || "thread-" + nextThreadId++;
     threads.add(threadId);
     configByThread.set(threadId, params.config || {});
     skillRefreshCountAtThreadLoad.set(threadId, skillsListCount);
@@ -504,6 +504,16 @@ rl.on("line", (line) => {
         turnId,
         item: { id: "raw-img-1", type: "image_generation_call", status: "completed" }
       });
+      if (process.env.FAKE_USAGE_ROLLOUT) {
+        const usage = { input_tokens: 120, cached_input_tokens: 60, cache_write_tokens: 0, output_tokens: 4 };
+        const rows = [
+          { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+          { type: "turn_context", payload: { turn_id: turnId, model: "gpt-5.6-sol" } },
+          { type: "token_usage_record", payload: { thread_id: threadId, turn_id: turnId, response_id: "response-" + turnId, model: "gpt-5.6-sol", usage } },
+          { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } }
+        ];
+        appendFileSync(process.env.FAKE_USAGE_ROLLOUT, rows.map(row => JSON.stringify({ ...row, timestamp: new Date().toISOString() })).join("\\n") + "\\n");
+      }
       notify("thread/tokenUsage/updated", {
         threadId,
         turnId,
@@ -1398,6 +1408,25 @@ describe("Codex app-server runtime", () => {
     }
 
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
+  it("reads only the new turn rollout tail and emits canonical usage after completion", async () => {
+    const threadId = "01a0a07e-9c29-7502-8a49-b4fc143bb067";
+    const home = path.join(testTempDir, "usage-canonical-home");
+    const day = new Date(parseInt(threadId.replaceAll("-", "").slice(0, 12), 16)).toISOString().slice(0, 10).replaceAll("-", "/");
+    const directory = path.join(home, "sessions", day);
+    await fs.mkdir(directory, { recursive: true });
+    const rollout = path.join(directory, `rollout-${threadId}.jsonl`);
+    await fs.writeFile(rollout, JSON.stringify({ type: "session_meta", payload: { id: threadId } }) + "\n");
+    const runtime = new CodexRuntime({ envOverrides: { CODEX_HOME: home, FAKE_USAGE_THREAD_ID: threadId, FAKE_USAGE_ROLLOUT: rollout } });
+    const thread = await runtime.startThreadWithOptions({ model: "gpt-5.6-sol", reasoningEffort: "medium", workspace: testTempDir });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const received: CodexStreamEvent[] = [];
+      for await (const event of runtime.runStreamed(thread, "hello")) received.push(event);
+      const final = received.at(-1);
+      expect(final).toMatchObject({ type: "usage.reconciled", raw: { snapshot: { inputTokens: 120, outputTokens: 4, kind: "turn_delta", accountingSource: "response_id" } } });
+      expect((final?.raw as any).snapshot.modelInvocations).toHaveLength(1);
+    }
   });
 
   it("reuses the owning process when restoring a thread with a different computed scope", async () => {

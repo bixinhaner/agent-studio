@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { findThreadRollout, readRolloutUsage, sumInvocations } from "./operations/codex-usage-ledger.js";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -1477,6 +1478,8 @@ class CodexAppServerManager {
     }
     const queue = new AsyncEventQueue<CodexStreamEvent>();
     let turnId: string | undefined;
+    let usageFile: string | undefined;
+    let usageFileStart = 0;
     let completed = false;
     let unsubscribe = () => {};
     let idleTimer: NodeJS.Timeout | undefined;
@@ -1630,6 +1633,33 @@ class CodexAppServerManager {
       }
     };
 
+    const reconciledUsage = async (): Promise<CodexStreamEvent | undefined> => {
+      if (!turnId) return undefined;
+      const home = trimOrUndefined(scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex");
+      try {
+        const file = usageFile ?? await findThreadRollout(home, thread.id);
+        if (!file) return undefined;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const turn = (await readRolloutUsage(file, { start: usageFileStart, threadId: thread.id })).get(turnId);
+          if (turn && !turn.blocked) {
+            const latest = turn.snapshots.at(-1);
+            return { type: "usage.reconciled", raw: { snapshot: {
+              ...sumInvocations(turn.invocations), kind: "turn_delta",
+              codexThreadId: thread.id, codexTurnId: turnId,
+              accountingSource: turn.source, modelInvocations: turn.invocations,
+              cumulativeInputTokens: latest?.inputTokens,
+              cumulativeCachedInputTokens: latest?.cachedInputTokens,
+              cumulativeOutputTokens: latest?.outputTokens
+            } } };
+          }
+          if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.warn("codex usage requires reconciliation", { threadId: thread.id, turnId, error: error instanceof Error ? error.message : String(error) });
+      }
+      return undefined;
+    };
+
     const acceptBufferedEventsForTurn = () => {
       const buffered = bufferedBeforeTurnId.splice(0);
       for (const event of buffered) {
@@ -1705,6 +1735,8 @@ class CodexAppServerManager {
         }
         acceptEvent(event);
       });
+      usageFile = await findThreadRollout(trimOrUndefined(scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"), thread.id);
+      usageFileStart = usageFile ? (await fs.stat(usageFile).catch(() => undefined))?.size ?? 0 : 0;
       const result = await Promise.race([
         process.request("turn/start", turnStartParams(thread.id, message, turnOptions, options.skills ?? [])),
         abortPromise
@@ -1728,7 +1760,11 @@ class CodexAppServerManager {
       if (!completed) {
         throw makeTurnError("Codex app-server turn ended before completion");
       }
+      const finalUsage = await reconciledUsage();
+      if (finalUsage) yield finalUsage;
     } catch (error) {
+      const finalUsage = await reconciledUsage();
+      if (finalUsage) yield finalUsage;
       logFailure(error);
       throw error;
     } finally {

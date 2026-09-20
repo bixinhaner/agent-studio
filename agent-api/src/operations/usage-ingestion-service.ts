@@ -1,3 +1,4 @@
+import { usageTurnKey } from "./codex-usage-ledger.js";
 import type {
   CostProfileRecord,
   CostProfileRepository
@@ -27,6 +28,9 @@ export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "in
     modelContextWindow?: number;
   }>;
   codexThreadId?: string;
+  codexTurnId?: string;
+  codexTurnIds?: string[];
+  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation";
 };
 
 const CODEX_RUNTIME_USAGE_METADATA_KEY = "_codexRuntimeUsage";
@@ -391,7 +395,7 @@ export class UsageIngestionService {
   constructor(
     private readonly dependencies: {
       usageEvents: Pick<UsageEventRepository, "create" | "list"> &
-        Partial<Pick<UsageEventRepository, "createCodexCumulative">>;
+        Partial<Pick<UsageEventRepository, "createCodexCumulative" | "createCodexTurn">>;
       costProfiles: Pick<CostProfileRepository, "getActiveByModel">;
       afterRecord?: (event: UsageEventRecord) => Promise<void>;
     }
@@ -438,8 +442,12 @@ export class UsageIngestionService {
         : "aggregate_request"
     });
 
-    return this.dependencies.usageEvents.create({
+    const create = input.codexThreadId && input.codexTurnId && this.dependencies.usageEvents.createCodexTurn
+      ? this.dependencies.usageEvents.createCodexTurn.bind(this.dependencies.usageEvents)
+      : this.dependencies.usageEvents.create.bind(this.dependencies.usageEvents);
+    return create({
       ...input,
+      ...(input.codexThreadId && input.codexTurnId ? { id: usageTurnKey(input.codexThreadId, input.codexTurnId) } : {}),
       model,
       featureType,
       inputTokens: usage.inputTokens,
@@ -460,6 +468,14 @@ export class UsageIngestionService {
 
   async recordCodexRuntimeUsage(input: RecordUsageInput): Promise<UsageEventRecord> {
     const codexThreadId = trimOrUndefined(input.codexThreadId) ?? codexThreadIdFromMetadata(input.metadata);
+    input = { ...input, metadata: { ...(asRecord(input.metadata) ?? {}), _usageAccounting: {
+      version: 1,
+      status: input.accountingSource && input.accountingSource !== "pending_reconciliation" ? "complete" : "pending_reconciliation",
+      source: input.accountingSource ?? "legacy_cumulative",
+      ...(input.codexTurnId ? { turnId: input.codexTurnId } : {}),
+      ...(input.codexTurnIds ? { turnIds: input.codexTurnIds } : {}),
+      ...(input.codexRuntimeModelInvocations ? { invocations: input.codexRuntimeModelInvocations } : {})
+    } } };
     const cumulativeUsage = input.codexRuntimeCumulativeUsage
       ? sanitizeUsage(input.codexRuntimeCumulativeUsage)
       : undefined;
