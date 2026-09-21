@@ -7,6 +7,15 @@ import { definition, planningInput } from "./fixtures.js";
 const ready = () => planningResponseSchema.parse({ reply: "Ready to test", readiness: "ready", questions: [], missingCapabilities: [], definition: structuredClone(definition) });
 
 describe("assistant plan contract", () => {
+  it("allows explaining a historical draft while keeping prepare strictly validated", () => {
+    const input = { ...planningInput, conversation: { state: "draft" } };
+    const reply = ready();
+    reply.action = "reply";
+    reply.definition!.trigger = { kind: "manual", time: "10:00", timezone: "Asia/Shanghai", conditions: [] };
+    expect(() => validatePlan(input, reply)).not.toThrow();
+    reply.action = "prepare";
+    expect(() => validatePlan(input, reply)).toThrow("ASSISTANT_INVALID_SCHEDULE");
+  });
   it("requires an explicit action for conversation and keeps investigation immutable", () => {
     const input = { ...planningInput, definition, conversation: { state: "draft" } };
     const r = ready();
