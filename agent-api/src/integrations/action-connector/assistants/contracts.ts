@@ -106,6 +106,9 @@ export function parseModelJSON(text: string): unknown {
 
 export function validatePlan(input: PlanningRequest, output: z.infer<typeof planningResponseSchema>): void {
   if (input.conversation && !output.action) throw new Error("ASSISTANT_INVALID_MODEL_OUTPUT");
+  // A reply does not authorize execution or edits. The source system preserves
+  // its saved arrangement, including historical drafts that are not executable.
+  if (input.conversation && output.action === "reply") return;
   if (output.action === "prepare" || output.action === "investigate") {
     if (output.readiness !== "ready" || !output.definition) throw new Error("ASSISTANT_PLAN_NOT_READY");
   }
