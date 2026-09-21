@@ -22,6 +22,7 @@
     "skills:migrate-package-shares": "tsx src/ops/migrate-package-shared-skills-to-private.ts",
     "usage:backfill-long-context": "tsx src/ops/backfill-codex-long-context-costs.ts",
     "usage:backfill-cumulative": "tsx src/ops/backfill-codex-cumulative-usage.ts",
+    "threads:archive-legacy-proactive": "tsx src/ops/archive-legacy-proactive-threads.ts",
     "workspace:migrate": "node dist/ops/migrate-portal-user-workspaces.js",
     "workspace:migrate:dry-run": "tsx src/ops/migrate-portal-user-workspaces.ts --dry-run",
     "prisma:generate": "prisma generate",

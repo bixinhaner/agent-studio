@@ -9,6 +9,7 @@ import { ProactiveScenarioRegistry } from "./scenario-registry.js";
 import { AssistantPlanner } from "../assistants/planner.js";
 import { executionRequestSchema, parseModelJSON } from "../assistants/contracts.js";
 import { ASSISTANT_SNAPSHOT_KIND, assistantRequest, executeAssistant } from "../assistants/engine.js";
+import { legacyProactiveConversationId } from "../conversation-retention.js";
 
 const activeStatuses = ["RUNNING", "WAITING_TOOL", "VALIDATING"] as const;
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -244,7 +245,7 @@ export class ProactiveActionConnectorService {
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(spec.agent.timeoutSeconds * 1000)]),
         request: {
           message: `${spec.agent.prompt}\n\n触发事件：${JSON.stringify(sourceEvent)}\n\nWrite every human-readable report field in ${reportLanguage}, including title, summary, facts, hypotheses, detail values, and action labels. Keep JSON keys, enum values, resource identifiers, and verbatim evidence unchanged.`, clientRunId: run.id,
-          conversationId: `proactive-${run.id}-${run.runAttempt}`, mode: "execute", locale: reportLocale, timezone: "Asia/Shanghai", attachments: [],
+          conversationId: legacyProactiveConversationId(run.id), mode: "execute", locale: reportLocale, timezone: "Asia/Shanghai", attachments: [],
           context: { proactive: true, scenarioKey: run.scenarioKey, sourceEvent, externalIdentity: {
             externalUserId: "xomc-proactive-service", metadata: { sourceSystem: "omc", apiHandbook: record(sourceEvent.data).apiHandbook },
           } },
