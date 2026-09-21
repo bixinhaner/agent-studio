@@ -303,7 +303,6 @@ import { actionConnectorCliSource } from "./integrations/action-connector/cli.js
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import { actionConnectorTurnMessageKey } from "./integrations/action-connector/turn-identity.js";
-import { isLegacyProactiveConversation } from "./integrations/action-connector/conversation-retention.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
   projectActionConnectorRuntimeEvents
@@ -5271,7 +5270,6 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
     delegationHeaderValue: input.delegationHeaderValue,
     emit: input.emit
   });
-  let threadForCleanup: ThreadRecord | undefined;
   try {
     const runtime = await resolveActionConnectorRuntimeOptions(input, {
       runId,
@@ -5306,7 +5304,6 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
       context: input.request.context,
       runtime
     });
-    threadForCleanup = thread;
     const { session, liveThread } = await ensureActionConnectorRuntimeSession({
       runner: input,
       runtime,
@@ -5358,17 +5355,6 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
     };
   } catch (error) {
     bridgeRegistration?.dispose();
-    if (threadForCleanup && isLegacyProactiveConversation(input.request)) {
-      try {
-        await conversationRecords.updateThread(threadForCleanup.id, { status: "archived" });
-      } catch (archiveError) {
-        console.warn("action connector failed to archive legacy proactive setup thread", {
-          threadId: threadForCleanup.id,
-          runId,
-          detail: archiveError instanceof Error ? archiveError.message : String(archiveError)
-        });
-      }
-    }
     throw error;
   }
 }
@@ -5567,7 +5553,6 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
 
 async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
-  const archiveAfterDelivery = isLegacyProactiveConversation(input.request);
   const startedAt = Date.now();
   const acceptedAt = new Date(startedAt).toISOString();
   const explicitCancel = new AbortController();
@@ -5755,17 +5740,6 @@ async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRu
     if (current === activeRun) actionConnectorActiveRuns.delete(prepared.runId);
     mergedAbort.dispose();
     prepared.disposeBridge?.();
-    if (archiveAfterDelivery) {
-      try {
-        await conversationRecords.updateThread(prepared.thread.id, { status: "archived" });
-      } catch (error) {
-        console.warn("action connector failed to archive legacy proactive thread", {
-          threadId: prepared.thread.id,
-          runId: prepared.runId,
-          detail: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
   }
 }
 
