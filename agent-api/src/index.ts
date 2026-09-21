@@ -303,7 +303,7 @@ import { actionConnectorCliSource } from "./integrations/action-connector/cli.js
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import { actionConnectorTurnMessageKey } from "./integrations/action-connector/turn-identity.js";
-import { isLegacyProactiveConversation } from "./integrations/action-connector/conversation-retention.js";
+import { shouldArchiveLegacyProactiveConversation } from "./integrations/action-connector/conversation-retention.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
   projectActionConnectorRuntimeEvents
@@ -5358,7 +5358,7 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
     };
   } catch (error) {
     bridgeRegistration?.dispose();
-    if (threadForCleanup && isLegacyProactiveConversation(input.request)) {
+    if (threadForCleanup && shouldArchiveLegacyProactiveConversation(input.request)) {
       try {
         await conversationRecords.updateThread(threadForCleanup.id, { status: "archived" });
       } catch (archiveError) {
@@ -5567,7 +5567,7 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
 
 async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
-  const archiveAfterDelivery = isLegacyProactiveConversation(input.request);
+  const archiveAfterDelivery = shouldArchiveLegacyProactiveConversation(input.request);
   const startedAt = Date.now();
   const acceptedAt = new Date(startedAt).toISOString();
   const explicitCancel = new AbortController();

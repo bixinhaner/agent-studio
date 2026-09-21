@@ -101,6 +101,28 @@ describe("ActionConnectorRuntimeService", () => {
     expect(db.integrationInstance.findUnique).not.toHaveBeenCalled();
   });
 
+  it("binds proactive conversations to the connector's live authorization policy", async () => {
+    const db = createDbMock();
+    const runner = vi.fn(async (_input: ActionConnectorCodexRunnerInput) => undefined);
+    const runtime = new ActionConnectorRuntimeService(db as never, fetch, runner);
+    await runtime.streamChat({
+      connectorId: "connector-1",
+      delegationHeaderValue: "Bearer proactive:run-1",
+      request: {
+        message: "report",
+        conversationId: "proactive-severe-alarm-explanation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mode: "execute",
+        locale: "zh-CN",
+        timezone: "Asia/Shanghai",
+        context: { proactive: true, scenarioKey: "severe-alarm-explanation" }
+      },
+      emit: () => undefined
+    });
+    const delegated = runner.mock.calls[0]![0].request;
+    expect(delegated.context.authorizationDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(delegated.conversationId).toMatch(/-[a-f0-9]{16}$/);
+  });
+
   it("loads the generic connector and delegates the turn to the Codex runner", async () => {
     const fetchImpl = vi.fn(async (url, init) => {
       void url;

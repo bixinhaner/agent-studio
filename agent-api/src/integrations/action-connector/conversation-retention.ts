@@ -23,6 +23,19 @@ export function isLegacyProactiveConversation(request: ActionConnectorChatReques
     && externalIdentity?.externalUserId === LEGACY_PROACTIVE_EXTERNAL_USER_ID;
 }
 
+export function isStableProactiveConversationId(conversationId: string | undefined): boolean {
+  return /^proactive-[a-z0-9-]+-[a-f0-9]{64}(?:-[a-f0-9]{16})?$/.test(conversationId?.trim() ?? "");
+}
+
+/**
+ * Old per-run report conversations are safe to archive after terminal
+ * delivery. A stable conversation must stay reopenable for the next report;
+ * its idle retention is handled separately by the operational cleanup.
+ */
+export function shouldArchiveLegacyProactiveConversation(request: ActionConnectorChatRequest): boolean {
+  return isLegacyProactiveConversation(request) && !isStableProactiveConversationId(request.conversationId);
+}
+
 /**
  * A retry is the same report run. Its attempt number belongs to the durable
  * tool lease, not to the user-visible conversation identity.

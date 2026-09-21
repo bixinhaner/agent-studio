@@ -7,6 +7,11 @@ export const resourceRefSchema = z.object({
   label: z.string().optional()
 });
 
+export const conversationScopeSchema = z.object({
+  partition: z.string().trim().min(1).max(160),
+  authorizationDigest: z.string().trim().min(1).max(160).optional()
+});
+
 export const connectorEventSchema = z.object({
   contractVersion: z.literal("1.0"),
   eventId: z.string().trim().min(1),
@@ -19,6 +24,7 @@ export const connectorEventSchema = z.object({
   }),
   handbookDigest: z.string().trim().min(1),
   tenantRef: z.string().optional(),
+  conversationScope: conversationScopeSchema.optional(),
   resources: z.array(resourceRefSchema).min(1),
   data: z.record(z.string(), z.unknown())
 });

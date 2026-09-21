@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
 import { actionConnectorConfigSchema, type ActionConnectorConfig } from "../center/action-connector-adapter.js";
 import type { ActionConnectorRuntimeInstance } from "./conversation-recorder.js";
@@ -120,6 +121,19 @@ export type ActionConnectorCodexRunnerInput = {
   emit(event: AgentStreamEvent): void;
 };
 
+function policyDigest(policy: ActionConnectorConfig["policy"]): string {
+  const payload = JSON.stringify({
+    allowReadActions: policy.allowReadActions,
+    allowLowRiskActions: policy.allowLowRiskActions,
+    allowHighRiskActions: policy.allowHighRiskActions,
+    allowedMethods: [...new Set(policy.allowedMethods)].sort(),
+    blockedPathPrefixes: [...new Set(policy.blockedPathPrefixes)].sort(),
+    toolTimeoutSeconds: policy.toolTimeoutSeconds,
+    maxResponseBytes: policy.maxResponseBytes
+  });
+  return `sha256:${createHash("sha256").update(payload).digest("hex")}`;
+}
+
 export type ActionConnectorCodexRunner = (input: ActionConnectorCodexRunnerInput) => Promise<void>;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -188,12 +202,25 @@ export class ActionConnectorRuntimeService {
         allowLowRiskActions: writes, allowHighRiskActions: writes,
       };
     }
+    const authorizationDigest = policyDigest(config.policy);
+    const request = input.request.context.proactive === true
+      ? {
+        ...input.request,
+        // The proactive service derives the scenario/resource identity. Add
+        // the connector's live policy here so a permission change rotates the
+        // shared context without trusting event payloads to attest it.
+        conversationId: input.request.conversationId
+          ? `${input.request.conversationId}-${authorizationDigest.slice("sha256:".length, "sha256:".length + 16)}`
+          : input.request.conversationId,
+        context: { ...input.request.context, authorizationDigest }
+      }
+      : input.request;
     await this.codexRunner({
       connector: instance,
       config,
       bridge: this.bridge,
       delegationHeaderValue: input.delegationHeaderValue,
-      request: input.request,
+      request,
       signal: input.signal,
       emit: input.emit
     });
