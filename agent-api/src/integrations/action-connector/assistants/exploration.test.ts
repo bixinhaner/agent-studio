@@ -20,6 +20,18 @@ function bridgeFixture(explore = true) {
 }
 
 describe("assistant API exploration", () => {
+  it.each([
+    { refs: ["tool:get.devices"], accepted: true },
+    { refs: [], accepted: false },
+    { refs: ["tool:get.agent.catalog"], accepted: false },
+    { refs: ["tool:get.unqueried"], accepted: false },
+  ])("requires actual business references for useful but incomplete ongoing work: $refs", async ({ refs, accepted }) => {
+    const request = executionRequestSchema.parse({ contractVersion: "1.0", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
+    const result = { outcome: "finding", title: "Observed resources", summary: "Some resources have stale samples; full coverage is unknown", facts: [{ text: "One visible resource has a current sample", evidenceRefs: ["tool:get.devices"] }], hypotheses: [], nextSteps: [], continuation: { status: "ready", reason: "Current samples support the authorized recurring check; coverage limits remain in each report", evidenceRefs: refs } };
+    const args = { db: { connectorToolInvocation: { findMany: async () => [{ operationId: "get.devices" }, { operationId: "get.agent.catalog" }] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
+    if (accepted) await expect(executeAssistant(args as never)).resolves.toMatchObject(result);
+    else await expect(executeAssistant(args as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
+  });
   it.each([true, false])("requires business evidence before continuing an empty check: %s", async (withEvidence) => {
     const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition: { ...definition, apiAccess: "discover" }, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u", toolGrants: [{ operationId: "get.devices", method: "GET" }], toolPolicy: { allowedMethods: ["GET"], blockedPathPrefixes: [], toolTimeoutSeconds: 30, maxResponseBytes: 262144 } });
     const result = { outcome: "insufficient_data", title: "Waiting for samples", summary: "No samples in the selected interval", facts: [], hypotheses: [], nextSteps: [], continuation: { status: "retryable", reason: "Correct source is temporarily empty", evidenceRefs: ["tool:get.devices"] } };
