@@ -40,6 +40,7 @@ export const definitionSchema = z.object({
   cooldownMinutes: z.number().int().min(0).max(10080),
 });
 export const planningRequestSchema = z.object({
+  conversation: z.object({ state: z.string(), publishedDefinition: definitionSchema.nullable().optional(), referencedResult: z.unknown().optional() }).optional(),
   message: z.string().trim().min(1).max(8000),
   definition: definitionSchema.nullable().optional(),
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(8000) })).max(20).default([]),
@@ -50,6 +51,7 @@ export const planningRequestSchema = z.object({
   externalUserId: z.string().min(1).max(160),
 });
 export const planningResponseSchema = z.object({
+  action: z.enum(["reply", "prepare", "investigate", "pause", "resume"]).optional(),
   reply: z.string().min(1).max(8000),
   readiness: z.enum(["ready", "needs_input", "unsupported"]),
   questions: z.array(z.string().min(1).max(500)).max(3),
@@ -81,6 +83,7 @@ export const executionRequestSchema = z.object({
   }).default({}),
 });
 export const resultSchema = z.object({
+  continuation: z.object({ status: z.enum(["ready", "retryable", "blocked"]), reason: z.string().min(1).max(1000), evidenceRefs: z.array(z.string().max(180)).max(20).optional() }).optional(),
   outcome: z.enum(["finding", "no_change", "insufficient_data"]),
   title: z.string().min(1).max(240),
   summary: z.string().min(1).max(8000),
@@ -102,6 +105,11 @@ export function parseModelJSON(text: string): unknown {
 }
 
 export function validatePlan(input: PlanningRequest, output: z.infer<typeof planningResponseSchema>): void {
+  if (input.conversation && !output.action) throw new Error("ASSISTANT_INVALID_MODEL_OUTPUT");
+  if (output.action === "prepare" || output.action === "investigate") {
+    if (output.readiness !== "ready" || !output.definition) throw new Error("ASSISTANT_PLAN_NOT_READY");
+  }
+  if (["pause", "resume", "investigate"].includes(output.action ?? "") && JSON.stringify(input.definition) !== JSON.stringify(output.definition)) throw new Error("ASSISTANT_INVALID_MODEL_OUTPUT");
   if (output.readiness !== "ready") return;
   if (!output.definition || output.questions.length || output.missingCapabilities.length) throw new Error("ASSISTANT_PLAN_NOT_READY");
   const plan = output.definition;
@@ -115,6 +123,7 @@ export function validatePlan(input: PlanningRequest, output: z.infer<typeof plan
     throw new Error("ASSISTANT_SCOPE_NOT_RESOLVED");
   }
   const trigger = plan.trigger;
+  if (trigger.kind === "manual" && (trigger.time || trigger.timezone || trigger.weekdays?.length || trigger.intervalMinutes || trigger.eventType || trigger.conditions.length)) throw new Error("ASSISTANT_INVALID_SCHEDULE");
   if (trigger.kind === "interval" && !trigger.intervalMinutes) throw new Error("ASSISTANT_INVALID_SCHEDULE");
   if (trigger.kind === "schedule") {
     if (!trigger.time || !trigger.timezone || !trigger.weekdays?.length) throw new Error("ASSISTANT_INVALID_SCHEDULE");
