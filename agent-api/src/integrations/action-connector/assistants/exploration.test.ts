@@ -20,6 +20,13 @@ function bridgeFixture(explore = true) {
 }
 
 describe("assistant API exploration", () => {
+  it.each([true, false])("requires business evidence before continuing an empty check: %s", async (withEvidence) => {
+    const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition: { ...definition, apiAccess: "discover" }, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u", toolGrants: [{ operationId: "get.devices", method: "GET" }], toolPolicy: { allowedMethods: ["GET"], blockedPathPrefixes: [], toolTimeoutSeconds: 30, maxResponseBytes: 262144 } });
+    const result = { outcome: "insufficient_data", title: "Waiting for samples", summary: "No samples in the selected interval", facts: [], hypotheses: [], nextSteps: [], continuation: { status: "retryable", reason: "Correct source is temporarily empty", evidenceRefs: ["tool:get.devices"] } };
+    const args = { db: { connectorToolInvocation: { findMany: async () => withEvidence ? [{ operationId: "get.devices" }] : [] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
+    if (withEvidence) await expect(executeAssistant(args as never)).resolves.toMatchObject(result);
+    else await expect(executeAssistant(args as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
+  });
   it("discovers APIs outside planning hints and forwards configured writes without rewriting method/body", async () => {
     const f = bridgeFixture();
     await f.request("get.agent.catalog", "GET", "/api/v1/agent/catalog");
