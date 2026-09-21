@@ -8,6 +8,8 @@ xOMC owns assistant identity, owner/role, capability publication, editable draft
 
 New assistants do not depend on the four built-in xOMC scenario names. Those scenarios remain on their existing compatibility path. They are not migrated by this PR; limitations of the old Finding projection and background identity are not presented as fixed by the new private-assistant path.
 
+Built-in xOMC reports remain independent per run so unrelated alarms, tasks, and resources never share model context. Their internal Action Connector threads are archived after a terminal delivery and therefore do not accumulate in the user's active Studio thread list. A retry of the same durable run reuses its own conversation ID, while different runs remain isolated. To archive legacy terminal threads created before this behavior was deployed, run `npm run threads:archive-legacy-proactive` for a read-only preview and add `-- --apply` only after reviewing the candidate count.
+
 ## Request flow
 
 ```
