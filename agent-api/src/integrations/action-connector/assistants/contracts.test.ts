@@ -7,6 +7,21 @@ import { definition, planningInput } from "./fixtures.js";
 const ready = () => planningResponseSchema.parse({ reply: "Ready to test", readiness: "ready", questions: [], missingCapabilities: [], definition: structuredClone(definition) });
 
 describe("assistant plan contract", () => {
+  it("requires an explicit action for conversation and keeps investigation immutable", () => {
+    const input = { ...planningInput, definition, conversation: { state: "draft" } };
+    const r = ready();
+    expect(() => validatePlan(input, r)).toThrow("INVALID_MODEL_OUTPUT");
+    r.action = "investigate";
+    expect(() => validatePlan(input, r)).not.toThrow();
+    r.definition!.goal = "Different ongoing goal";
+    expect(() => validatePlan(input, r)).toThrow("INVALID_MODEL_OUTPUT");
+  });
+  it("rejects contradictory manual schedules and incomplete preparation", () => {
+    const r = ready(); r.definition!.trigger.time = "10:00";
+    expect(() => validatePlan(planningInput, r)).toThrow("INVALID_SCHEDULE");
+    r.definition = null; r.action = "prepare"; r.readiness = "needs_input";
+    expect(() => validatePlan(planningInput, r)).toThrow("NOT_READY");
+  });
   it("supports goals outside any built-in scenario", () => expect(() => validatePlan(planningInput, ready())).not.toThrow());
   it("does not accept invented operations", () => { const r = ready(); r.definition!.operations = ["post.devices.reboot"]; expect(() => validatePlan(planningInput, r)).toThrow("UNKNOWN_CAPABILITY"); });
   it("does not claim ready with unanswered questions", () => { const r = ready(); r.questions = ["Which device?"]; expect(() => validatePlan(planningInput, r)).toThrow("NOT_READY"); });
