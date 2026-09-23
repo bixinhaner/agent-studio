@@ -1,0 +1,6 @@
+发布范围：Portal 低分辨率布局优化，仅 6 个 agent-ui 文件。
+基线：origin/main 3cece9c30aa7f1504f49a7824298c93fe123d168。
+验证：47 项相关测试通过，TypeScript 与 Vite 构建通过；375、768、1024、1093、1366、1440 宽度页面视口通过。
+兼容性：保留现有内联附件及 Skill 输入功能；后端接口、数据库、依赖清单均未修改。
+部署方式：scripts/deploy-agent-studio.sh --frontend-only --ref main。
+边界：布局验证使用本地合成数据；Windows Edge 真机缩放尚未验收。
