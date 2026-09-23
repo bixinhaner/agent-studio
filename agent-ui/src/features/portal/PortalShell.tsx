@@ -209,13 +209,12 @@ import { inlineReferencePlainText, parseInlineReferences, hasInlineComposerReque
 import { InlineMessageReferences } from "./InlineMessageReferences";
 import {
   closeWorkbenchDrawer,
-  createInitialLayoutState,
   openWorkbenchDrawer,
-  switchWorkbenchTab,
-  toggleSessionRail
+  switchWorkbenchTab
 } from "./workbench/layout-state";
+import { useWorkbenchLayout } from "./workbench/use-workbench-layout";
 import { createPortalAntdTheme } from "./workbench/theme";
-import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
@@ -5167,7 +5166,7 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
     >
       {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
       {children}
-      <MessageTimestamp />
+      {tone === "user" ? <MessageTimestamp /> : null}
     </div>
   );
 };
@@ -5454,7 +5453,7 @@ const AgentAssistantAnswerFeedback: FC = () => {
 const AgentAssistantActionBar: FC = () => {
   const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
   return (
-    <AssistantActionBar.Root hideWhenRunning autohide="not-last" autohideFloat="single-branch">
+    <AssistantActionBar.Root hideWhenRunning autohide="never" autohideFloat="never">
       <AssistantActionBar.Copy />
       {!mutationReadOnly ? (
         <>
@@ -5507,7 +5506,7 @@ const PortalSteerEventsForAssistantMessage: FC = () => {
 const AgentAssistantMessage: FC = () => {
   return (
     <ThreadPublicShareMessageShell tone="assistant">
-      <AssistantMessage.Root>
+      <AssistantMessage.Root className="portal-assistant-message-root">
         <AssistantMessage.Avatar />
         <AssistantMessage.Content
           components={{
@@ -5518,9 +5517,12 @@ const AgentAssistantMessage: FC = () => {
             data: { Fallback: ProcessDataFallback as any }
           }}
         />
-        <BranchPicker />
+        <div className="portal-assistant-message-footer">
+          <MessageTimestamp />
+          <BranchPicker />
+          <AgentAssistantActionBar />
+        </div>
         <AgentAssistantAnswerFeedback />
-        <AgentAssistantActionBar />
       </AssistantMessage.Root>
       <PortalSteerEventsForAssistantMessage />
     </ThreadPublicShareMessageShell>
@@ -6810,14 +6812,7 @@ export function PortalShell(props: {
   const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(false);
   const [subscriptionStatusError, setSubscriptionStatusError] = useState("");
   const [runtimeMode, setRuntimeMode] = useState("");
-  const [layoutState, setLayoutState] = useState(() => {
-    const initial = createInitialLayoutState();
-    if (!isNarrowScreen(768)) return initial;
-    return {
-      ...initial,
-      isSessionRailCollapsed: true
-    };
-  });
+  const { layoutState, setLayoutState, toggleRail } = useWorkbenchLayout(props.currentUser?.id);
   const isMobile = useIsNarrowScreen(768);
   const isCompactDesktop = useIsNarrowScreen(1279) && !isMobile;
 
@@ -10678,7 +10673,7 @@ export function PortalShell(props: {
             <span>{selectedWorkspaceFolderName}</span>
           </button>
           <ChevronRight size={14} />
-          <strong>
+          <strong title={workspaceThreads.find((thread) => thread.id === activeRemoteThreadId)?.title || t("workspace.newTask")}>
             {workspaceThreads.find((thread) => thread.id === activeRemoteThreadId)?.title ||
               t("workspace.newTask")}
           </strong>
@@ -10741,7 +10736,7 @@ export function PortalShell(props: {
             <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>
               <PortalTopBar
                 sessionRailCollapsed={layoutState.isSessionRailCollapsed}
-                onToggleRail={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                onToggleRail={toggleRail}
                 onOpenAdvancedSettings={() =>
                   setLayoutState((prev) =>
                     isExternalPortalUser
@@ -10789,7 +10784,7 @@ export function PortalShell(props: {
                       closeIcon={<ChevronLeft size={22} />}
                       push={false}
                       rootClassName="workbench-mobile-session-drawer"
-                      onClose={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                      onClose={() => setLayoutState((prev) => ({ ...prev, isSessionRailCollapsed: true }))}
                     >
                       <ThreadList.Root>{workspaceRail}</ThreadList.Root>
                     </Drawer>

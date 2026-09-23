@@ -157,6 +157,7 @@ export function PortalTopBar(props: {
               onClick={props.onToggleRail}
               style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
               aria-label={props.sessionRailCollapsed ? t("topbar.expandSessions") : t("topbar.collapseSessions")}
+              aria-expanded={!props.sessionRailCollapsed}
             />
           </Tooltip>
 

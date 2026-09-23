@@ -1727,6 +1727,54 @@ body.access-request-route #root {
   pointer-events: auto;
 }
 
+/* Reserve one stable row for message metadata and actions, including while streaming. */
+.thread-wrap .portal-assistant-message-root {
+  grid-template-rows: auto auto auto;
+  padding-bottom: 6px;
+}
+
+.thread-wrap .portal-assistant-message-footer {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.thread-wrap .portal-assistant-message-footer .portal-message-timestamp {
+  flex: 1;
+  margin: 0;
+  white-space: nowrap;
+  transform: none;
+}
+
+.thread-wrap .portal-assistant-message-footer .aui-branch-picker-root {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root {
+  position: static;
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  transform: none;
+}
+
+.thread-wrap .portal-assistant-message-root > .assistant-answer-feedback {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  margin: 4px 0 0;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .thread-wrap :where(.aui-assistant-message-root) > .aui-avatar-root,
 .thread-wrap .aui-assistant-avatar {
   margin-right: 0;
@@ -3610,7 +3658,7 @@ body.access-request-route #root {
     grid-template-columns: 1fr;
   }
 
-  .thread-wrap .aui-thread-root {
+  body:not(.portal-workbench-mode) .thread-wrap .aui-thread-root {
     --aui-thread-max-width: 100%;
     --portal-thread-leading-gap: 50px;
     height: 72vh;
