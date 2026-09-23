@@ -33,7 +33,9 @@ function parseUsageRecord(value, kind, options = {}) {
   if (!usage2) return void 0;
   const inputTokens = toTokenCount(usage2.input_tokens);
   const cachedInputTokens = toTokenCount(usage2.cached_input_tokens);
-  const cacheWriteTokens = toTokenCount(usage2.cache_write_tokens ?? usage2.cacheWriteTokens);
+  const cacheWriteTokens = toTokenCount(
+    usage2.cache_write_input_tokens ?? usage2.cache_write_tokens ?? usage2.cacheWriteInputTokens ?? usage2.cacheWriteTokens
+  );
   const outputTokens = toTokenCount(usage2.output_tokens);
   if (inputTokens === void 0 || cachedInputTokens === void 0 || outputTokens === void 0) {
     return void 0;
@@ -78,8 +80,11 @@ function extractRuntimeUsageFromStreamEvent(value) {
   if (!event) return void 0;
   const eventType = trimOrUndefined(typeof event.type === "string" ? event.type : void 0);
   const raw = asRecord(event.raw);
+  if (eventType === "usage.reconciled" && raw?.snapshot) return raw.snapshot;
   if (eventType === "token_count" || raw?.type === "token_count") {
-    return parseTokenCountUsage(event, raw);
+    const usage3 = parseTokenCountUsage(event, raw);
+    const turnId = raw?.turn_id ?? event.turn_id;
+    return usage3 ? { ...usage3, ...typeof turnId === "string" ? { codexTurnId: turnId } : {} } : void 0;
   }
   if (eventType !== "turn.completed") return void 0;
   const usage2 = asRecord(raw?.usage ?? event.usage ?? asRecord(raw?.turn)?.usage);
@@ -227,6 +232,8 @@ var MODEL_NOTES_SOURCE_URLS = [
 ];
 var PRICING = {
   standard: {
+    "gpt-6-sol": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }),
+    "gpt-6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 }),
     "gpt-5.6-sol": withLongContext({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
     "gpt-5.6-terra": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 }),
     "gpt-5.6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 }),
@@ -253,6 +260,8 @@ var PRICING = {
     "o3-mini": { input: 1.1, cachedInput: 0.55, output: 4.4 }
   },
   batch: {
+    "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
+    "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 5e-3, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
     "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
     "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
@@ -277,6 +286,8 @@ var PRICING = {
     "o4-mini": { input: 0.55, output: 2.2 }
   },
   flex: {
+    "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
+    "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 5e-3, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
     "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
     "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
@@ -295,6 +306,8 @@ var PRICING = {
     "o4-mini": { input: 0.55, cachedInput: 0.138, output: 2.2 }
   },
   priority: {
+    "gpt-6-sol": withLongContext({ input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 }),
+    "gpt-6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1 }),
     "gpt-5.6-sol": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 60 },
     "gpt-5.6-terra": { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 24 },
     "gpt-5.6-luna": { input: 0.4, cachedInput: 0.04, cacheWrite: 0.5, output: 2.4 },
@@ -528,6 +541,8 @@ function localDateTime(date, timezone) {
 function normalizeModel(model) {
   const normalized = model.trim();
   for (const base of [
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -563,7 +578,7 @@ function costProfileFor(model, tier) {
       cachedInputTokenPrice: String(price.cachedInput ?? price.input),
       cacheWriteTokenPrice: String(price.cacheWrite ?? 0),
       outputTokenPrice: String(price.output),
-      longContextThresholdTokens: tier === "priority" ? void 0 : price.longContextThreshold,
+      longContextThresholdTokens: price.longContextThreshold,
       longContextInputMultiplier: price.longContext ? "2" : "1",
       longContextOutputMultiplier: price.longContext ? "1.5" : "1",
       internalCostMultiplier: "1",

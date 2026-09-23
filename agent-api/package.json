@@ -34,7 +34,7 @@
     "brands:migrate:v2": "tsx src/ops/migrate-public-brands-v2.ts"
   },
   "dependencies": {
-    "@openai/codex-sdk": "0.153.4",
+    "@openai/codex-sdk": "0.156.0",
     "@prisma/client": "^6.6.0",
     "chardet": "^2.2.0",
     "cors": "^2.8.5",

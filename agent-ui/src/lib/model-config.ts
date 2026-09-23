@@ -54,6 +54,20 @@ const DEFAULT_MODEL_OPTION: ModelOption = {
 export const MODEL_OPTIONS: ModelOption[] = [
   DEFAULT_MODEL_OPTION,
   {
+    value: "gpt-6-sol",
+    label: "GPT-6 Sol",
+    reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,
+    defaultReasoningEffort: "medium",
+    contextLimit: 1_050_000
+  },
+  {
+    value: "gpt-6-luna",
+    label: "GPT-6 Luna",
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultReasoningEffort: "medium",
+    contextLimit: 1_050_000
+  },
+  {
     value: "gpt-6-astra",
     label: "GPT-6 Astra",
     reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,

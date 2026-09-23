@@ -109,6 +109,8 @@ const MODEL_NOTES_SOURCE_URLS = [
 
 const PRICING: PricingByTier = {
   standard: {
+    "gpt-6-sol": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }),
+    "gpt-6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 }),
     "gpt-5.6-sol": withLongContext({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
     "gpt-5.6-terra": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 }),
     "gpt-5.6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 }),
@@ -135,6 +137,8 @@ const PRICING: PricingByTier = {
     "o3-mini": { input: 1.1, cachedInput: 0.55, output: 4.4 }
   },
   batch: {
+    "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
+    "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 0.005, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
     "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
     "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
@@ -159,6 +163,8 @@ const PRICING: PricingByTier = {
     "o4-mini": { input: 0.55, output: 2.2 }
   },
   flex: {
+    "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
+    "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 0.005, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
     "gpt-5.6-terra": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
     "gpt-5.6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.6 }),
@@ -177,6 +183,8 @@ const PRICING: PricingByTier = {
     "o4-mini": { input: 0.55, cachedInput: 0.138, output: 2.2 }
   },
   priority: {
+    "gpt-6-sol": withLongContext({ input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 }),
+    "gpt-6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1 }),
     "gpt-5.6-sol": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 60 },
     "gpt-5.6-terra": { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 24 },
     "gpt-5.6-luna": { input: 0.4, cachedInput: 0.04, cacheWrite: 0.5, output: 2.4 },
@@ -432,6 +440,8 @@ function localDateTime(date: Date, timezone: string): string {
 function normalizeModel(model: string): string {
   const normalized = model.trim();
   for (const base of [
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -471,7 +481,7 @@ function costProfileFor(model: string, tier: ServiceTier): {
       cachedInputTokenPrice: String(price.cachedInput ?? price.input),
       cacheWriteTokenPrice: String(price.cacheWrite ?? 0),
       outputTokenPrice: String(price.output),
-      longContextThresholdTokens: tier === "priority" ? undefined : price.longContextThreshold,
+      longContextThresholdTokens: price.longContextThreshold,
       longContextInputMultiplier: price.longContext ? "2" : "1",
       longContextOutputMultiplier: price.longContext ? "1.5" : "1",
       internalCostMultiplier: "1",

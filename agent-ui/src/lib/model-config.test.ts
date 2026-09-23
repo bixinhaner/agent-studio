@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { MODEL_OPTIONS, modelOptionsFromCatalog, contextLimitForModel, normalizeReasoningEffortForModel } from "./model-config";
 
 describe("model-config", () => {
+  it("preserves Codex-specific Sol and Luna efforts", () => {
+    expect(MODEL_OPTIONS.map(model => model.value)).toEqual(expect.arrayContaining(["gpt-6-sol", "gpt-6-luna"]));
+    expect(normalizeReasoningEffortForModel("gpt-6-sol", "ultra")).toBe("ultra");
+    expect(normalizeReasoningEffortForModel("gpt-6-luna", "ultra")).toBe("medium");
+    expect(contextLimitForModel("gpt-6-luna")).toBe(1050000);
+  });
+
   it("keeps Astra capacity when the runtime catalog omits contextWindow", () => {
     const models = modelOptionsFromCatalog({source: "app_server", fetchedAt: "2026-09-08T00:00:00Z", models: [{
       id: "gpt-6-astra", label: "GPT-6 Astra", hidden: false, isDefault: true,

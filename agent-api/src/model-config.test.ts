@@ -6,6 +6,12 @@ import {
 } from "./model-config.js";
 
 describe("model-config", () => {
+  it.each(["gpt-6-sol", "gpt-6-luna"])("offers %s without changing defaults", (id) => {
+    expect(fallbackModelCatalog().models.find(model => model.id === id)).toMatchObject({isDefault:false, defaultReasoningEffort:"medium", contextLimit:1050000});
+    expect(normalizeReasoningEffortForModel(id, "max")).toBe("max");
+    expect(normalizeReasoningEffortForModel(id, "minimal")).toBe("medium");
+  });
+
   it("offers Astra without changing the default model and rejects unsupported efforts", () => {
     const catalog = fallbackModelCatalog();
     expect(catalog.models.find((model) => model.id === "gpt-6-astra")).toMatchObject({
