@@ -7102,33 +7102,123 @@ button.session-rail-new-btn:active,
   animation: portal-message-enter var(--portal-motion-slow) var(--portal-ease-enter) both;
 }
 
-/* Edit action sits in its own column just left of the bubble: showing it never adds a row,
-   so hovering a message cannot shift the layout. */
-.portal-workbench-root .thread-wrap .aui-user-message-root {
-  grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr) auto fit-content(88%);
+/* ---- Message footers: time + actions sit right next to the message ---- */
+.portal-workbench-root .thread-wrap .portal-user-message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 28px;
+  margin-top: -8px;
+  opacity: 0;
+  transition: opacity var(--portal-motion-fast) var(--portal-ease-standard);
 }
 
-.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-message-content {
-  grid-column: 4;
-  grid-row: 2;
-  max-width: 100%;
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-user:hover .portal-user-message-footer,
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-user:focus-within .portal-user-message-footer {
+  opacity: 1;
 }
 
-.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-message-attachments,
-.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-branch-picker-root,
-.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-branch-picker {
-  grid-column: 2 / -1;
-  justify-self: end;
+.portal-workbench-root .thread-wrap .portal-user-message-footer .portal-message-timestamp,
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .portal-message-timestamp {
+  flex: none;
+  margin: 0 6px;
+  opacity: 1;
+  transform: none;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 400;
 }
 
-.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-action-bar-root {
-  grid-column: 3;
-  grid-row: 2;
-  align-self: end;
-  justify-self: end;
-  flex-direction: row;
-  margin: 0 6px 2px 0;
-  animation: portal-fade-in var(--portal-motion-fast) var(--portal-ease-standard) both;
+.portal-workbench-root .thread-wrap .portal-user-message-actions {
+  display: inline-flex;
+  align-items: center;
+}
+
+.portal-workbench-root .thread-wrap .portal-message-action-btn,
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root .aui-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition:
+    background var(--portal-motion-fast) var(--portal-ease-standard),
+    color var(--portal-motion-fast) var(--portal-ease-standard);
+}
+
+.portal-workbench-root .thread-wrap .portal-message-action-btn:hover,
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root .aui-button-icon:hover {
+  background: #f4f4f5;
+  color: var(--portal-text-strong);
+}
+
+.portal-workbench-root .thread-wrap .portal-message-action-btn:focus-visible,
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root .aui-button-icon:focus-visible {
+  outline: 2px solid var(--brand-primary, #FF4614);
+  outline-offset: 1px;
+}
+
+.portal-workbench-root .thread-wrap .portal-message-action-btn .portal-copied-icon,
+.portal-workbench-root .thread-wrap .portal-message-action-btn[data-copied] .portal-copy-icon {
+  display: none;
+}
+
+.portal-workbench-root .thread-wrap .portal-message-action-btn[data-copied] .portal-copied-icon {
+  display: inline-block;
+  color: #16a34a;
+}
+
+/* Assistant: actions first, then branch picker and time, left aligned under the answer. */
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer {
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 30px;
+  margin-left: -6px;
+  opacity: 0;
+  transition: opacity var(--portal-motion-fast) var(--portal-ease-standard);
+}
+
+.portal-workbench-root .thread-wrap .portal-assistant-message-root.is-last:not(.is-running) .portal-assistant-message-footer,
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-assistant:hover .portal-assistant-message-footer,
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-assistant:focus-within .portal-assistant-message-footer {
+  opacity: 1;
+}
+
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .aui-assistant-action-bar-root {
+  order: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.portal-workbench-root .thread-wrap .portal-assistant-message-footer .aui-branch-picker-root {
+  margin: 0 2px;
+}
+
+/* Nothing to act on while the answer is still being produced. */
+.portal-workbench-root .thread-wrap .portal-assistant-message-root.is-running .portal-assistant-message-footer {
+  visibility: hidden;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .portal-workbench-root .thread-wrap .portal-user-message-footer,
+  .portal-workbench-root .thread-wrap .portal-assistant-message-footer {
+    opacity: 1;
+  }
 }
 
 /* Sent image attachments render as real thumbnails. */
@@ -7215,17 +7305,6 @@ button.session-rail-new-btn:active,
   pointer-events: none;
 }
 
-/* Live step line while nothing has streamed yet. */
-.assistant-process-live {
-  display: flex;
-  max-width: min(100%, 680px);
-  align-items: center;
-  gap: 10px;
-  min-height: 28px;
-  font-size: 14px;
-}
-
-.assistant-process-live-text,
 .portal-workbench-root .assistant-running-title,
 .portal-workbench-root .assistant-running-phase {
   background: linear-gradient(
@@ -7244,18 +7323,7 @@ button.session-rail-new-btn:active,
   font-weight: 450;
 }
 
-.assistant-process-live-text {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
 
-.assistant-process-live-count {
-  color: #9ca3af;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Running placeholder (before any output): calm card, no animated border or sweep bar. */
 .portal-workbench-root .assistant-running-card {
@@ -7398,12 +7466,19 @@ button.session-rail-new-btn:active,
   animation: portal-fade-in var(--portal-motion-base) var(--portal-ease-standard) both;
 }
 
+.assistant-process-thoughts {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
 .assistant-process-thoughts p {
   margin: 0;
+  white-space: pre-wrap;
 }
 
 .assistant-process-thoughts p + p {
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .assistant-process-steps {
@@ -7412,35 +7487,91 @@ button.session-rail-new-btn:active,
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .assistant-process-step {
-  position: relative;
-  padding-left: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4b5563;
+  animation: portal-fade-in var(--portal-motion-base) var(--portal-ease-standard) both;
 }
 
-.assistant-process-step::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 0.62em;
-  width: 6px;
-  height: 6px;
+.assistant-process-step-icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  height: 1.6em;
+  color: #16a34a;
+}
+
+.assistant-process-step.is-error .assistant-process-step-icon {
+  color: #9ca3af;
+}
+
+.assistant-process-step-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: #d4d4d8;
+  background: var(--portal-ai);
+  animation: portal-ai-caret 1.1s ease-in-out infinite;
 }
 
-.assistant-process-step.is-error::before {
-  background: #f04438;
+.assistant-process-step-text {
+  display: inline;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.assistant-process-step details summary {
+.assistant-process-step-action {
+  color: #374151;
+}
+
+.assistant-process-step-action.is-live {
+  background: linear-gradient(
+    90deg,
+    var(--portal-shimmer-base) 0%,
+    var(--portal-shimmer-base) 40%,
+    var(--portal-shimmer-highlight) 50%,
+    var(--portal-shimmer-base) 60%,
+    var(--portal-shimmer-base) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: portal-ai-shimmer 2.2s linear infinite;
+}
+
+.assistant-process-step-subject {
+  color: #6b7280;
+}
+
+.assistant-process-step-subject::before {
+  content: "：";
+}
+
+:lang(en) .assistant-process-step-subject::before {
+  content: ": ";
+}
+
+.assistant-process-step-raw summary {
   cursor: pointer;
+  list-style: none;
 }
 
-.assistant-process-step pre {
-  margin: 6px 0 4px;
+.assistant-process-step-raw summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-process-step-raw pre {
+  margin: 6px 0 2px;
   padding: 8px 10px;
   max-height: 240px;
   overflow: auto;
@@ -7449,6 +7580,77 @@ button.session-rail-new-btn:active,
   color: #374151;
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.assistant-process-earlier {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9ca3af;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.assistant-process-earlier:hover {
+  color: #4b5563;
+}
+
+.assistant-process-step.is-earlier {
+  padding-left: 24px;
+}
+
+.assistant-process-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assistant-process-source {
+  max-width: 240px;
+  overflow: hidden;
+  padding: 2px 8px;
+  border: 1px solid var(--portal-line, #ecebe8);
+  border-radius: 999px;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.6;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-process-source:hover {
+  border-color: #d6d3d1;
+  color: var(--portal-text-strong);
+}
+
+/* Working panel: shown until the answer starts streaming. */
+.assistant-process-working {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(100%, 720px);
+  padding: 2px 0 4px;
+  animation: portal-fade-in var(--portal-motion-base) var(--portal-ease-standard) both;
+}
+
+.assistant-process-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: #9ca3af;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.assistant-process-slow {
+  color: #6b7280;
+}
+
+.assistant-process-summary.is-running .assistant-process-summary-icon {
+  width: 15px;
+  justify-content: center;
 }
 
 /* ---- Composer: quiet focus, a single moving stroke only while running ---- */

@@ -17,6 +17,7 @@ import {
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import {
+  ActionBarPrimitive,
   AttachmentPrimitive,
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -40,7 +41,6 @@ import {
   BranchPicker,
   Composer,
   UserMessage,
-  UserActionBar,
   ThreadWelcome,
   ThreadList,
   makeMarkdownText
@@ -73,7 +73,8 @@ import {
   Folder,
   ChevronRight,
   ChevronLeft,
-  ChevronDownIcon
+  ChevronDownIcon,
+  CopyIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -218,7 +219,13 @@ import { createPortalAntdTheme } from "./workbench/theme";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
-import { SUMMARIZED_PROCESS_PART_NAMES, summarizeAssistantProcess } from "./assistant-process-summary";
+import {
+  SUMMARIZED_PROCESS_PART_NAMES,
+  summarizeAssistantProcess,
+  type AssistantProcessCategory,
+  type AssistantProcessStep,
+  type AssistantProcessSummary
+} from "./assistant-process-summary";
 import { THREAD_USER_NAVIGATE_EVENT } from "./thread-scroll-follow-controller";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
@@ -4086,12 +4093,161 @@ const SummarizedProcessPart: FC<{ data?: unknown; reasoningText?: string }> = ({
   return isFirst ? <AssistantProcessSummaryBlock /> : null;
 };
 
-const AssistantProcessSummaryBlock: FC = () => {
+type ProcessTracePreferences = { showRawDetail: boolean; collapseOnDone: boolean };
+const ProcessTracePreferencesContext = createContext<ProcessTracePreferences>({ showRawDetail: false, collapseOnDone: true });
+
+function useNowTicker(enabled: boolean, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [enabled, intervalMs]);
+  return now;
+}
+
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function formatProcessDuration(ms: number, t: PortalTranslate): string {
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return t("process.seconds", { seconds: totalSeconds });
+  return t("process.minutes", { minutes: Math.floor(totalSeconds / 60), seconds: totalSeconds % 60 });
+}
+
+const PROCESS_CATEGORY_KEYS: Record<AssistantProcessCategory, { done: PortalMessageKey; running: PortalMessageKey; count?: PortalMessageKey }> = {
+  search: { done: "process.step.search", running: "process.step.searchRunning", count: "process.count.search" },
+  command: { done: "process.step.command", running: "process.step.commandRunning", count: "process.count.command" },
+  tool: { done: "process.step.tool", running: "process.step.toolRunning", count: "process.count.tool" },
+  "image-generate": { done: "process.step.imageGenerate", running: "process.step.imageGenerateRunning", count: "process.count.imageGenerate" },
+  "image-inspect": { done: "process.step.imageInspect", running: "process.step.imageInspectRunning", count: "process.count.imageInspect" },
+  plan: { done: "process.step.plan", running: "process.step.planRunning", count: "process.count.plan" },
+  files: { done: "process.step.files", running: "process.step.filesRunning", count: "process.count.files" },
+  agent: { done: "process.step.agent", running: "process.step.agentRunning", count: "process.count.agent" },
+  context: { done: "process.step.context", running: "process.step.contextRunning", count: "process.count.context" },
+  other: { done: "process.stepCount", running: "process.stepCount" }
+};
+
+function processStepLabel(step: AssistantProcessStep, t: PortalTranslate, locale: PortalLocale): { action: string; subject?: string } {
+  if (step.status === "error") return { action: t("process.step.error") };
+  if (step.category === "other") {
+    const title = locale === "zh-CN" ? PROCESS_STEP_TITLE_ZH[step.title] || step.title : step.title;
+    return { action: title };
+  }
+  const keys = PROCESS_CATEGORY_KEYS[step.category];
+  return { action: t(step.status === "running" ? keys.running : keys.done), subject: step.subject };
+}
+
+function processSummarySegments(summary: AssistantProcessSummary, t: PortalTranslate): string[] {
+  const segments: string[] = [];
+  const order: AssistantProcessCategory[] = ["search", "tool", "command", "image-generate", "image-inspect", "files", "agent", "plan", "context"];
+  for (const category of order) {
+    const count = summary.counts[category];
+    const key = PROCESS_CATEGORY_KEYS[category].count;
+    if (count && key) segments.push(t(key, { count }));
+  }
+  const other = summary.counts.other;
+  if (other) segments.push(t(other === 1 ? "process.stepCount" : "process.stepCountPlural", { count: other }));
+  if (summary.sourceCount > 0) segments.push(t("process.sources", { count: summary.sourceCount }));
+  if (summary.durationMs) segments.push(t("process.duration", { duration: formatProcessDuration(summary.durationMs, t) }));
+  return segments;
+}
+
+const ProcessStepRow: FC<{ step: AssistantProcessStep; showRawDetail: boolean; live?: boolean }> = ({ step, showRawDetail, live }) => {
   const { locale, t } = usePortalI18n();
+  const label = processStepLabel(step, t, locale);
+  const running = step.status === "running";
+  const rawDetail = showRawDetail && step.detail && step.category !== "search" ? step.detail : "";
+  const text = (
+    <span className="assistant-process-step-text">
+      <span className={running && live ? "assistant-process-step-action is-live" : "assistant-process-step-action"}>{label.action}</span>
+      {label.subject ? <span className="assistant-process-step-subject">{label.subject}</span> : null}
+    </span>
+  );
+  return (
+    <li className={`assistant-process-step is-${step.status}`}>
+      <span className="assistant-process-step-icon" aria-hidden="true">
+        {step.status === "done" ? <CheckIcon size={13} strokeWidth={2.6} /> : step.status === "error" ? <AlertCircleIcon size={13} /> : <span className="assistant-process-step-pulse" />}
+      </span>
+      {rawDetail ? (
+        <details className="assistant-process-step-raw">
+          <summary>{text}</summary>
+          <pre>{shorten(rawDetail, 1600)}</pre>
+        </details>
+      ) : (
+        text
+      )}
+    </li>
+  );
+};
+
+const ProcessThoughts: FC<{ thoughts: string[] }> = ({ thoughts }) =>
+  thoughts.length > 0 ? (
+    <div className="assistant-process-thoughts">
+      {thoughts.map((line, index) => (
+        <p key={`${index}-${line.slice(0, 16)}`}>{line}</p>
+      ))}
+    </div>
+  ) : null;
+
+/** Before the answer starts: the plan (complete), a growing step list and progress hints. */
+const AssistantWorkingPanel: FC<{ summary: AssistantProcessSummary; startedAt?: number }> = ({ summary, startedAt }) => {
+  const { t } = usePortalI18n();
+  const { showRawDetail } = useContext(ProcessTracePreferencesContext);
+  const [showEarlier, setShowEarlier] = useState(false);
+  const now = useNowTicker(true);
+  const visibleCount = 3;
+  const hiddenCount = showEarlier ? 0 : Math.max(0, summary.steps.length - visibleCount);
+  const visibleSteps = summary.steps.slice(hiddenCount);
+  const elapsedMs = startedAt ? now - startedAt : 0;
+  const meta: string[] = [];
+  if (summary.sourceCount > 0) meta.push(t("process.sources", { count: summary.sourceCount }));
+  if (elapsedMs >= 10_000) meta.push(t("process.live.elapsed", { duration: formatProcessDuration(elapsedMs, t) }));
+  const hasRunningStep = summary.steps.some((step) => step.status === "running");
+
+  return (
+    <div className="assistant-process-working" role="status" aria-live="polite">
+      <ProcessThoughts thoughts={summary.thoughts} />
+      {summary.steps.length > 0 ? (
+        <ol className="assistant-process-steps">
+          {hiddenCount > 0 ? (
+            <li className="assistant-process-step is-earlier">
+              <button type="button" className="assistant-process-earlier" onClick={() => setShowEarlier(true)}>
+                {t("process.live.earlier", { count: hiddenCount })}
+              </button>
+            </li>
+          ) : null}
+          {visibleSteps.map((step) => (
+            <ProcessStepRow key={step.id} step={step} showRawDetail={showRawDetail} live />
+          ))}
+        </ol>
+      ) : null}
+      {!hasRunningStep && summary.steps.length === 0 && summary.thoughts.length === 0 ? (
+        <span className="assistant-process-step-action is-live">{t("trace.thinking")}</span>
+      ) : null}
+      {meta.length > 0 || elapsedMs >= 60_000 ? (
+        <div className="assistant-process-meta">
+          {meta.join(" · ")}
+          {elapsedMs >= 60_000 ? <span className="assistant-process-slow">{t("process.live.slow")}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const AssistantProcessSummaryBlock: FC = () => {
+  const { t } = usePortalI18n();
   const content = useAuiState((s) => s.message.content);
   const isRunning = useAuiState((s) => (s.message as { status?: { type?: string } }).status?.type === "running");
-  const runningStage = useContext(RunningStageTextContext);
-  const summary = useMemo(() => summarizeAssistantProcess(content), [content]);
+  const createdAt = useAuiState((s) => (s.message as ThreadMessage & { createdAt?: unknown }).createdAt);
+  const { showRawDetail, collapseOnDone } = useContext(ProcessTracePreferencesContext);
+  const summary = useMemo(() => summarizeAssistantProcess(content, { running: isRunning }), [content, isRunning]);
   const hasAnswerText = useMemo(
     () =>
       (content as readonly unknown[]).some((part) => {
@@ -4100,30 +4256,16 @@ const AssistantProcessSummaryBlock: FC = () => {
       }),
     [content]
   );
-  const [open, setOpen] = useState(false);
-  const localizeTitle = (title: string) => (locale === "zh-CN" ? PROCESS_STEP_TITLE_ZH[title] || title : title);
+  const [open, setOpen] = useState(() => !collapseOnDone);
+  const startedAt = useMemo(() => coerceDate(createdAt)?.getTime(), [createdAt]);
 
   if (!summary.hasProcess) return null;
+  if (isRunning && !hasAnswerText) return <AssistantWorkingPanel summary={summary} startedAt={startedAt} />;
 
-  if (isRunning) {
-    // While the answer text streams, the text itself is the progress signal.
-    if (hasAnswerText) return null;
-    const live = localizeTitle(summary.liveText) || runningStage.text || t("trace.thinking");
-    return (
-      <div className="assistant-process-live" role="status" aria-live="polite">
-        <span className="assistant-process-live-text">{live}</span>
-        {summary.steps.length > 0 ? (
-          <span className="assistant-process-live-count">
-            {t(summary.steps.length === 1 ? "process.stepCount" : "process.stepCountPlural", { count: summary.steps.length })}
-          </span>
-        ) : null}
-      </div>
-    );
-  }
-
-  const stepCount = summary.steps.length;
+  const segments = processSummarySegments(summary, t);
+  const skillCount = summary.skills.length;
   return (
-    <div className={`assistant-process-summary${summary.hasError ? " has-error" : ""}${open ? " is-open" : ""}`}>
+    <div className={`assistant-process-summary${open ? " is-open" : ""}${isRunning ? " is-running" : ""}`}>
       <button
         type="button"
         className="assistant-process-summary-toggle"
@@ -4131,10 +4273,10 @@ const AssistantProcessSummaryBlock: FC = () => {
         onClick={() => setOpen((value) => !value)}
       >
         <span className="assistant-process-summary-icon" aria-hidden="true">
-          {summary.hasError ? <AlertCircleIcon size={15} /> : <CheckIcon size={15} strokeWidth={2.6} />}
+          {isRunning ? <span className="assistant-process-step-pulse" /> : <CheckIcon size={15} strokeWidth={2.6} />}
         </span>
         <span className="assistant-process-summary-text">
-          {summary.skills.length > 0 ? (
+          {skillCount > 0 ? (
             <span className="assistant-process-summary-segment">
               {t("process.used")}{" "}
               {summary.skills.map((skill, index) => (
@@ -4145,12 +4287,10 @@ const AssistantProcessSummaryBlock: FC = () => {
               ))}
             </span>
           ) : null}
-          {stepCount > 0 ? (
-            <span className="assistant-process-summary-segment">
-              {t(stepCount === 1 ? "process.stepCount" : "process.stepCountPlural", { count: stepCount })}
-            </span>
-          ) : null}
-          {summary.skills.length === 0 && stepCount === 0 ? (
+          {segments.map((segment) => (
+            <span key={segment} className="assistant-process-summary-segment">{segment}</span>
+          ))}
+          {skillCount === 0 && segments.length === 0 ? (
             <span className="assistant-process-summary-segment">{t("process.thoughtOnly")}</span>
           ) : null}
         </span>
@@ -4158,28 +4298,22 @@ const AssistantProcessSummaryBlock: FC = () => {
       </button>
       {open ? (
         <div className="assistant-process-details">
-          {summary.thoughts.length > 0 ? (
-            <div className="assistant-process-thoughts">
-              {summary.thoughts.map((line, index) => (
-                <p key={`${index}-${line.slice(0, 16)}`}>{line}</p>
-              ))}
-            </div>
-          ) : null}
-          {stepCount > 0 ? (
+          <ProcessThoughts thoughts={summary.thoughts} />
+          {summary.steps.length > 0 ? (
             <ol className="assistant-process-steps">
               {summary.steps.map((step) => (
-                <li key={step.id} className={`assistant-process-step is-${step.kind}`}>
-                  {step.detail ? (
-                    <details>
-                      <summary>{localizeTitle(step.title)}</summary>
-                      <pre>{shorten(step.detail, 1600)}</pre>
-                    </details>
-                  ) : (
-                    <span>{localizeTitle(step.title)}</span>
-                  )}
-                </li>
+                <ProcessStepRow key={step.id} step={step} showRawDetail={showRawDetail} />
               ))}
             </ol>
+          ) : null}
+          {summary.sources.length > 0 ? (
+            <div className="assistant-process-sources">
+              {summary.sources.map((source) => (
+                <a key={source.url} className="assistant-process-source" href={source.url} target="_blank" rel="noreferrer" title={source.url}>
+                  {source.title || sourceHostname(source.url)}
+                </a>
+              ))}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -4189,8 +4323,10 @@ const AssistantProcessSummaryBlock: FC = () => {
 
 const SourcePart: FC<any> = ({ url, title }) => {
   const { t } = usePortalI18n();
+  // With a process summary, sources are listed inside it instead of as a long link list.
+  const hasProcessSummary = useAuiState((s) => (s.message.content as readonly unknown[]).some(isSummarizedProcessContentPart));
   const link = typeof url === "string" ? url.trim() : "";
-  if (!link) return null;
+  if (!link || hasProcessSummary) return null;
   const label = typeof title === "string" && title.trim() ? title.trim() : link;
   return (
     <p className="process-source">
@@ -4371,10 +4507,8 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
       aria-label={ariaStatus}
     >
       <div className="assistant-running-head">
-        <AssistantLiveStatus title={isImageStage ? t("thread.preparingImage") : t("thread.working")} />
+        <AssistantLiveStatus title={isImageStage ? t("thread.preparingImage") : t("trace.thinking")} />
       </div>
-      <p className="assistant-running-phase">{runningStage.text}</p>
-      {runningStage.secondaryText ? <p className="assistant-running-secondary">{runningStage.secondaryText}</p> : null}
       {isImageStage ? <p className="assistant-running-hint">{RUNNING_STAGE_IMAGE_HINT_TEXT}</p> : null}
       {isImageStage ? (
         <div className="assistant-image-placeholder" aria-hidden="true">
@@ -5301,11 +5435,36 @@ const ThreadPublicShareTurnCheckbox: FC = () => {
   );
 };
 
+function formatRelativeMessageTime(
+  date: Date,
+  now: number,
+  intlLocale: string,
+  t: PortalTranslate
+): string {
+  const diffSeconds = Math.round((now - date.getTime()) / 1000);
+  if (diffSeconds < 45) return t("time.justNow");
+  const relative = new Intl.RelativeTimeFormat(intlLocale, { numeric: "auto" });
+  if (diffSeconds < 3600) return relative.format(-Math.max(1, Math.round(diffSeconds / 60)), "minute");
+  const time = new Intl.DateTimeFormat(intlLocale, { timeStyle: "short" }).format(date);
+  const today = new Date(now);
+  if (isSameLocalDate(date, today)) return relative.format(-Math.round(diffSeconds / 3600), "hour");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (isSameLocalDate(date, yesterday)) return t("time.yesterday", { time });
+  return new Intl.DateTimeFormat(intlLocale, {
+    ...(date.getFullYear() === today.getFullYear() ? { month: "short", day: "numeric" } : { dateStyle: "medium" }),
+    timeStyle: "short"
+  } as Intl.DateTimeFormatOptions).format(date);
+}
+
 const MessageTimestamp: FC = () => {
+  const { intlLocale, t } = usePortalI18n();
   const createdAt = useAuiState((s) => (s.message as ThreadMessage & { createdAt?: unknown }).createdAt);
   const timestamp = useMemo(() => formatPortalMessageTime(createdAt), [createdAt]);
+  const date = useMemo(() => coerceDate(createdAt), [createdAt]);
+  const now = useNowTicker(Boolean(date), 60_000);
 
-  if (!timestamp) return null;
+  if (!timestamp || !date) return null;
 
   return (
     <time
@@ -5314,8 +5473,24 @@ const MessageTimestamp: FC = () => {
       title={timestamp.fullLabel}
       aria-label={`Sent ${timestamp.fullLabel}`}
     >
-      {timestamp.label}
+      {formatRelativeMessageTime(date, now, intlLocale, t)}
     </time>
+  );
+};
+
+/** User message footer: time + copy, right aligned under the bubble. */
+const UserMessageFooter: FC = () => {
+  const { t } = usePortalI18n();
+  return (
+    <div className="portal-user-message-footer">
+      <MessageTimestamp />
+      <ActionBarPrimitive.Root className="portal-user-message-actions">
+        <ActionBarPrimitive.Copy className="portal-message-action-btn" aria-label={t("message.copy")} title={t("message.copy")}>
+          <CopyIcon className="portal-copy-icon" size={15} aria-hidden="true" />
+          <CheckIcon className="portal-copied-icon" size={15} aria-hidden="true" />
+        </ActionBarPrimitive.Copy>
+      </ActionBarPrimitive.Root>
+    </div>
   );
 };
 
@@ -5343,7 +5518,6 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
     >
       {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
       {children}
-      {tone === "user" ? <MessageTimestamp /> : null}
     </div>
   );
 };
@@ -5382,7 +5556,7 @@ const UnreferencedMessageAttachment: FC = () => {
 };
 const AgentUserMessage: FC = () => {
   const inline = useAuiState(state => state.message.content.some(part => part.type === "text" && inlineAttachmentIds(part.text).size > 0));
-  if (inline) return <ThreadPublicShareMessageShell tone="user"><UserMessage.Root><MessagePrimitive.Attachments components={{ Attachment: UnreferencedMessageAttachment }} /><UserActionBar /><UserMessage.Content components={{ Text: InlineUserMessageText }} /><BranchPicker /></UserMessage.Root></ThreadPublicShareMessageShell>;
+  if (inline) return <ThreadPublicShareMessageShell tone="user"><UserMessage.Root><MessagePrimitive.Attachments components={{ Attachment: UnreferencedMessageAttachment }} /><UserMessage.Content components={{ Text: InlineUserMessageText }} /><BranchPicker /></UserMessage.Root><UserMessageFooter /></ThreadPublicShareMessageShell>;
   return (
     <ThreadPublicShareMessageShell tone="user">
       <MessagePrimitive.If hasAttachments>
@@ -5391,8 +5565,12 @@ const AgentUserMessage: FC = () => {
         </div>
       </MessagePrimitive.If>
       <div className="portal-user-message-default-with-hidden-attachments">
-        <UserMessage />
+        <UserMessage.Root>
+          <UserMessage.Content />
+          <BranchPicker />
+        </UserMessage.Root>
       </div>
+      <UserMessageFooter />
     </ThreadPublicShareMessageShell>
   );
 };
@@ -5688,8 +5866,10 @@ const AgentAssistantMessage: FC = () => {
       return item?.type === "text" && typeof item.text === "string" && item.text.trim().length > 0;
     })
   );
+  const isLastMessage = useAuiState((s) => Boolean((s.message as { isLast?: boolean }).isLast));
   const rootClassName = [
     "portal-assistant-message-root",
+    isLastMessage ? "is-last" : "",
     isRunning ? "is-running" : "",
     isRunning && hasAnswerText ? "is-streaming-text" : ""
   ].filter(Boolean).join(" ");
@@ -5707,9 +5887,9 @@ const AgentAssistantMessage: FC = () => {
           }}
         />
         <div className="portal-assistant-message-footer">
-          <MessageTimestamp />
-          <BranchPicker />
           <AgentAssistantActionBar />
+          <BranchPicker />
+          <MessageTimestamp />
         </div>
         <AgentAssistantAnswerFeedback />
       </AssistantMessage.Root>
@@ -7203,6 +7383,10 @@ export function PortalShell(props: {
   const effectiveShowProcessTrace = isExternalPortalUser ? false : showProcessTrace;
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(() =>
     resolveCollapseFinalTraceOnDonePreference(portalPreferenceUser)
+  );
+  const processTracePreferences = useMemo<ProcessTracePreferences>(
+    () => ({ showRawDetail: effectiveShowProcessTrace, collapseOnDone: collapseFinalTraceOnDone }),
+    [collapseFinalTraceOnDone, effectiveShowProcessTrace]
   );
   const [portalPreferenceSaving, setPortalPreferenceSaving] = useState(false);
   const [portalPreferenceErrorText, setPortalPreferenceErrorText] = useState("");
@@ -10932,6 +11116,7 @@ export function PortalShell(props: {
         <ThreadRuntimeSubscriptionBridge runtime={runtime} />
         <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
         <RunningStageTextContext.Provider value={runningStageContextValue}>
+        <ProcessTracePreferencesContext.Provider value={processTracePreferences}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={portalAntdTheme} locale={antdLocale}>
             <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>
@@ -11472,6 +11657,7 @@ export function PortalShell(props: {
           </div>
         ) : null}
         </MobileWorkbenchContext.Provider>
+        </ProcessTracePreferencesContext.Provider>
         </RunningStageTextContext.Provider>
       </SkillDraftActionContext.Provider>
       </SkillComposerContext.Provider>
