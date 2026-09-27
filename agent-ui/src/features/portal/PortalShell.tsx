@@ -72,7 +72,8 @@ import {
   EyeIcon,
   Folder,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  ChevronDownIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -217,6 +218,7 @@ import { createPortalAntdTheme } from "./workbench/theme";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
+import { SUMMARIZED_PROCESS_PART_NAMES, summarizeAssistantProcess } from "./assistant-process-summary";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
@@ -547,6 +549,8 @@ const DEFAULT_RUNNING_STAGE_CONTEXT_VALUE: RunningStageContextValue = {
   kind: "text"
 };
 const RunningStageTextContext = createContext<RunningStageContextValue>(DEFAULT_RUNNING_STAGE_CONTEXT_VALUE);
+/** Breadcrumb slot for thread-level actions (share), so they never float over messages. */
+const ThreadHeaderActionsSlotContext = createContext<HTMLElement | null>(null);
 const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
 const SkillComposerContext = createContext<{
@@ -1267,6 +1271,18 @@ const AssistantMarkdownText = makeMarkdownText({
   }
 });
 
+/** Built-in translations for branding welcome suggestions that are stored in English. */
+const WELCOME_SUGGESTION_TRANSLATIONS: Record<string, { label: PortalMessageKey; prompt: PortalMessageKey }> = {
+  "Check product & version fit": { label: "welcome.fit", prompt: "welcome.fitPrompt" },
+  "Review deployment plan": { label: "welcome.deployment", prompt: "welcome.deploymentPrompt" },
+  "Analyze alarm or KPI issue": { label: "welcome.alarm", prompt: "welcome.alarmPrompt" },
+  "Recommend solution design": { label: "welcome.solution", prompt: "welcome.solutionPrompt" },
+  "Introduce Product Capabilities": { label: "welcome.productCapabilities", prompt: "welcome.productCapabilitiesPrompt" },
+  "Introduce Solution Approach": { label: "welcome.solutionApproach", prompt: "welcome.solutionApproachPrompt" },
+  "Clarify Customer Requirements": { label: "welcome.customerRequirements", prompt: "welcome.customerRequirementsPrompt" },
+  "Recommend Product Solution": { label: "welcome.productSolution", prompt: "welcome.productSolutionPrompt" }
+};
+
 const DraftOnlyWelcomeSuggestions: FC = () => {
   const { behavior } = useBranding();
   const { locale, t } = usePortalI18n();
@@ -1283,16 +1299,9 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
       {behavior.portalWelcomeSuggestions.map((suggestion, index) => {
         const Icon = icons[index % icons.length];
         const iconClass = classes[index % classes.length];
-        const localizedSuggestion = locale === "zh-CN"
-          ? suggestion.label === "Check product & version fit"
-            ? { label: t("welcome.fit"), prompt: t("welcome.fitPrompt") }
-            : suggestion.label === "Review deployment plan"
-              ? { label: t("welcome.deployment"), prompt: t("welcome.deploymentPrompt") }
-              : suggestion.label === "Analyze alarm or KPI issue"
-                ? { label: t("welcome.alarm"), prompt: t("welcome.alarmPrompt") }
-                : suggestion.label === "Recommend solution design"
-                  ? { label: t("welcome.solution"), prompt: t("welcome.solutionPrompt") }
-                  : suggestion
+        const translated = WELCOME_SUGGESTION_TRANSLATIONS[suggestion.label.trim()];
+        const localizedSuggestion = locale === "zh-CN" && translated
+          ? { label: t(translated.label), prompt: t(translated.prompt) }
           : suggestion;
         return (
           <ThreadPrimitive.Suggestion
@@ -2145,6 +2154,27 @@ const UploadAwareAttachment: FC = () => {
       : "";
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [remoteThumbnailFailed, setRemoteThumbnailFailed] = useState(false);
+  const contentImageUrl = useMemo(() => {
+    if (!isImage) return "";
+    const parts = Array.isArray((attachment as { content?: unknown }).content)
+      ? ((attachment as { content?: unknown[] }).content as unknown[])
+      : [];
+    for (const part of parts) {
+      const item = asRecord(part);
+      if (item?.type === "image" && typeof item.image === "string" && item.image.trim()) return item.image.trim();
+    }
+    return "";
+  }, [attachment, isImage]);
+  // Sent image attachments show a real thumbnail instead of a generic file icon.
+  const remoteThumbnailUrl =
+    isImage && attachment.source === "message" && !isExternalPortalUser && !remoteThumbnailFailed
+      ? contentImageUrl || workspaceContentHref || buildUploadedAttachmentDownloadHref(activeThreadId, downloadMeta)
+      : "";
+  const thumbnailUrl = previewUrl || remoteThumbnailUrl;
+  useEffect(() => {
+    setRemoteThumbnailFailed(false);
+  }, [attachment.id]);
   useEffect(() => {
     if (!isImage || !(attachment.file instanceof File)) {
       setPreviewUrl(null);
@@ -2171,11 +2201,22 @@ const UploadAwareAttachment: FC = () => {
   };
 
   return (
-    <div className="portal-upload-attachment" data-upload-status={status.type}>
+    <div
+      className={`portal-upload-attachment${isImage && thumbnailUrl ? " has-thumbnail" : ""}`}
+      data-upload-status={status.type}
+      title={isImage && thumbnailUrl ? attachment.name : undefined}
+    >
       <div className="portal-upload-card-preview">
-        {isImage && previewUrl ? (
+        {isImage && thumbnailUrl ? (
           <>
-            <img className="portal-upload-card-img" src={previewUrl} alt={attachment.name} />
+            <img
+              className="portal-upload-card-img"
+              src={thumbnailUrl}
+              alt={attachment.name}
+              loading="lazy"
+              decoding="async"
+              onError={previewUrl ? undefined : () => setRemoteThumbnailFailed(true)}
+            />
             {isUploading ? (
               <div className="portal-upload-card-loading">
                 <Loader2Icon className="portal-upload-spinner" size={16} />
@@ -4005,14 +4046,143 @@ function messageTextForSuggestions(message: ThreadMessage): string {
 }
 
 const ReasoningPart: FC<any> = ({ text }) => {
-  const { t } = usePortalI18n();
   const value = typeof text === "string" ? text.trim() : "";
   if (!value) return null;
+  return <SummarizedProcessPart reasoningText={text} />;
+};
+
+const PROCESS_STEP_TITLE_ZH: Record<string, string> = {
+  "Running workspace operation": "正在执行工作区操作",
+  "Workspace operation completed": "工作区操作完成",
+  "Processing step": "处理步骤",
+  "Reasoning summary": "推理摘要",
+  "Tool step completed": "工具步骤完成"
+};
+
+function portalIntoSlot(slot: HTMLElement | null, node: ReactNode): ReactNode {
+  return slot ? createPortal(node, slot) : node;
+}
+
+function isSummarizedProcessContentPart(part: unknown): boolean {
+  const item = asRecord(part);
+  if (!item) return false;
+  if (item.type === "reasoning") return typeof item.text === "string" && item.text.trim().length > 0;
+  return item.type === "data" && typeof item.name === "string" && SUMMARIZED_PROCESS_PART_NAMES.has(item.name);
+}
+
+/**
+ * Commentary, trace, process and "instructions read" parts are folded into one
+ * summary line. Only the first such part of a message renders it; the rest render nothing.
+ */
+const SummarizedProcessPart: FC<{ data?: unknown; reasoningText?: string }> = ({ data, reasoningText }) => {
+  const isFirst = useAuiState((s) => {
+    const content = s.message.content as readonly unknown[];
+    const first = asRecord(content.find(isSummarizedProcessContentPart));
+    if (!first) return false;
+    if (reasoningText !== undefined) return first.type === "reasoning" && first.text === reasoningText;
+    return first.type === "data" && first.data === data;
+  });
+  return isFirst ? <AssistantProcessSummaryBlock /> : null;
+};
+
+const AssistantProcessSummaryBlock: FC = () => {
+  const { locale, t } = usePortalI18n();
+  const content = useAuiState((s) => s.message.content);
+  const isRunning = useAuiState((s) => (s.message as { status?: { type?: string } }).status?.type === "running");
+  const runningStage = useContext(RunningStageTextContext);
+  const summary = useMemo(() => summarizeAssistantProcess(content), [content]);
+  const hasAnswerText = useMemo(
+    () =>
+      (content as readonly unknown[]).some((part) => {
+        const item = asRecord(part);
+        return item?.type === "text" && typeof item.text === "string" && item.text.trim().length > 0;
+      }),
+    [content]
+  );
+  const [open, setOpen] = useState(false);
+  const localizeTitle = (title: string) => (locale === "zh-CN" ? PROCESS_STEP_TITLE_ZH[title] || title : title);
+
+  if (!summary.hasProcess) return null;
+
+  if (isRunning) {
+    // While the answer text streams, the text itself is the progress signal.
+    if (hasAnswerText) return null;
+    const live = localizeTitle(summary.liveText) || runningStage.text || t("trace.thinking");
+    return (
+      <div className="assistant-process-live" role="status" aria-live="polite">
+        <span className="assistant-process-live-text">{live}</span>
+        {summary.steps.length > 0 ? (
+          <span className="assistant-process-live-count">
+            {t(summary.steps.length === 1 ? "process.stepCount" : "process.stepCountPlural", { count: summary.steps.length })}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  const stepCount = summary.steps.length;
   return (
-    <details className="process-block process-reasoning" open={false}>
-      <summary>{t("thread.reasoningSummary")}</summary>
-      <pre>{value}</pre>
-    </details>
+    <div className={`assistant-process-summary${summary.hasError ? " has-error" : ""}${open ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="assistant-process-summary-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="assistant-process-summary-icon" aria-hidden="true">
+          {summary.hasError ? <AlertCircleIcon size={15} /> : <CheckIcon size={15} strokeWidth={2.6} />}
+        </span>
+        <span className="assistant-process-summary-text">
+          {summary.skills.length > 0 ? (
+            <span className="assistant-process-summary-segment">
+              {t("process.used")}{" "}
+              {summary.skills.map((skill, index) => (
+                <span key={skill.id}>
+                  {index > 0 ? "、" : null}
+                  <span className="assistant-process-summary-skill">{skill.name}</span>
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {stepCount > 0 ? (
+            <span className="assistant-process-summary-segment">
+              {t(stepCount === 1 ? "process.stepCount" : "process.stepCountPlural", { count: stepCount })}
+            </span>
+          ) : null}
+          {summary.skills.length === 0 && stepCount === 0 ? (
+            <span className="assistant-process-summary-segment">{t("process.thoughtOnly")}</span>
+          ) : null}
+        </span>
+        <ChevronDownIcon size={14} className="assistant-process-summary-chevron" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="assistant-process-details">
+          {summary.thoughts.length > 0 ? (
+            <div className="assistant-process-thoughts">
+              {summary.thoughts.map((line, index) => (
+                <p key={`${index}-${line.slice(0, 16)}`}>{line}</p>
+              ))}
+            </div>
+          ) : null}
+          {stepCount > 0 ? (
+            <ol className="assistant-process-steps">
+              {summary.steps.map((step) => (
+                <li key={step.id} className={`assistant-process-step is-${step.kind}`}>
+                  {step.detail ? (
+                    <details>
+                      <summary>{localizeTitle(step.title)}</summary>
+                      <pre>{shorten(step.detail, 1600)}</pre>
+                    </details>
+                  ) : (
+                    <span>{localizeTitle(step.title)}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 };
 
@@ -4584,6 +4754,10 @@ const ProcessDataFallback: FC<any> = ({
   }, [activeThreadId, isExternalPortalUser, name]);
 
   if (name === "codex_process_audit") return null;
+
+  if (typeof name === "string" && SUMMARIZED_PROCESS_PART_NAMES.has(name)) {
+    return <SummarizedProcessPart data={data} />;
+  }
 
   if (name === "codex_instruction_reads") {
     const payload = (data && typeof data === "object" ? data : {}) as InstructionReadData;
@@ -5504,9 +5678,21 @@ const PortalSteerEventsForAssistantMessage: FC = () => {
 };
 
 const AgentAssistantMessage: FC = () => {
+  const isRunning = useAuiState((s) => (s.message as { status?: { type?: string } }).status?.type === "running");
+  const hasAnswerText = useAuiState((s) =>
+    (s.message.content as readonly unknown[]).some((part) => {
+      const item = asRecord(part);
+      return item?.type === "text" && typeof item.text === "string" && item.text.trim().length > 0;
+    })
+  );
+  const rootClassName = [
+    "portal-assistant-message-root",
+    isRunning ? "is-running" : "",
+    isRunning && hasAnswerText ? "is-streaming-text" : ""
+  ].filter(Boolean).join(" ");
   return (
     <ThreadPublicShareMessageShell tone="assistant">
-      <AssistantMessage.Root className="portal-assistant-message-root">
+      <AssistantMessage.Root className={rootClassName}>
         <AssistantMessage.Avatar />
         <AssistantMessage.Content
           components={{
@@ -6381,6 +6567,7 @@ const ThreadPublicShareControls: FC<
   );
 
   const shareActionDisabled = !threadId || disabled || threadRunning || allTurnIds.length === 0;
+  const threadHeaderActionsSlot = useContext(ThreadHeaderActionsSlotContext);
 
   return (
     <ThreadPublicShareSelectionContext.Provider value={selectionContext}>
@@ -6393,7 +6580,7 @@ const ThreadPublicShareControls: FC<
           {children}
           <ThreadQuestionNavigator messages={messages} shellRef={shellRef} disabled={selectionMode} />
           {!selectionMode && threadId && !disabled ? (
-            <div className="thread-public-share-toolbar">
+            portalIntoSlot(threadHeaderActionsSlot, <div className={`thread-public-share-toolbar${threadHeaderActionsSlot ? " is-in-header" : ""}`}>
               <button
                 type="button"
                 className="thread-public-share-toolbar-btn"
@@ -6417,7 +6604,7 @@ const ThreadPublicShareControls: FC<
                   <span>{t("share.revoke")}</span>
                 </button>
               ) : null}
-            </div>
+            </div>)
           ) : null}
 
           {selectionMode ? (
@@ -6806,6 +6993,7 @@ export function PortalShell(props: {
     additionalDirectoriesRaw: ""
   });
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
+  const [threadHeaderActionsSlot, setThreadHeaderActionsSlot] = useState<HTMLElement | null>(null);
   const [runtimeOptionsStatus, setRuntimeOptionsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<PortalSubscriptionStatus | null>(null);
@@ -10677,13 +10865,16 @@ export function PortalShell(props: {
             {workspaceThreads.find((thread) => thread.id === activeRemoteThreadId)?.title ||
               t("workspace.newTask")}
           </strong>
+          <span className="workspace-task-breadcrumb-actions" ref={setThreadHeaderActionsSlot} />
         </div>
         <div className="thread-wrap">
-          {canUpload && !threadReadOnly ? (
-            <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
-          ) : (
-            threadContent
-          )}
+          <ThreadHeaderActionsSlotContext.Provider value={threadHeaderActionsSlot}>
+            {canUpload && !threadReadOnly ? (
+              <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+            ) : (
+              threadContent
+            )}
+          </ThreadHeaderActionsSlotContext.Provider>
         </div>
       </div>
     );

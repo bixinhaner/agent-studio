@@ -386,6 +386,14 @@ const EN_MESSAGES = {
   "welcome.solution": "Recommend solution design",
   "welcome.solutionPrompt": "Recommend a product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints.",
   "welcome.answerHelpful": "Was this answer helpful?",
+  "welcome.productCapabilities": "Introduce Product Capabilities",
+  "welcome.productCapabilitiesPrompt": "Introduce the relevant Baicells product capabilities for a customer-facing discussion, including applicable scenarios, core features, key specifications, deployment requirements, and customer value points.",
+  "welcome.solutionApproach": "Introduce Solution Approach",
+  "welcome.solutionApproachPrompt": "Introduce the Baicells solution approach for this customer scenario, including solution architecture, applicable use cases, core product components, deployment model, key advantages, and prerequisites to confirm.",
+  "welcome.customerRequirements": "Clarify Customer Requirements",
+  "welcome.customerRequirementsPrompt": "Help me turn this customer network build or upgrade request into a pre-sales requirement checklist, covering scenario, user scale, spectrum/RAT, backhaul, power, installation environment, and delivery timeline.",
+  "welcome.productSolution": "Recommend Product Solution",
+  "welcome.productSolutionPrompt": "Recommend suitable Baicells products and solution combinations for the following customer scenario, including rationale, fit boundaries, key configuration points, information to confirm with the customer, and main risks.",
   "share.create": "Create public link",
   "share.running": "Thread is running. Create a public link later.",
   "share.selectAll": "Select all",
@@ -490,6 +498,10 @@ const EN_MESSAGES = {
   "trace.debug": "Debug",
   "trace.meta": "Meta",
   "trace.dataEvent": "Data event",
+  "process.used": "Used",
+  "process.stepCount": "{count} step",
+  "process.stepCountPlural": "{count} steps",
+  "process.thoughtOnly": "Thought process",
   "instruction.usedInResponse": "Used in this response",
   "instruction.skill": "Skill",
   "instruction.capability": "Capability",
@@ -1031,14 +1043,22 @@ const ZH_MESSAGES: Record<PortalMessageKey, string> = {
   "welcome.greeting": "你好，我是 {assistant}。",
   "welcome.subtitle": "可以问我产品、版本、部署、告警或故障排查问题。",
   "welcome.fit": "确认产品与版本适配",
-  "welcome.fitPrompt": "请帮我确认这个场景适用的百事德产品线、型号、软件分支和版本范围。如果缺少关键背景，请先询问得出结论所需的最少信息。",
+  "welcome.fitPrompt": "请帮我确认这个场景适用的佰才邦产品线、型号、软件分支和版本范围。如果缺少关键背景，请先询问得出结论所需的最少信息。",
   "welcome.deployment": "审查部署方案",
-  "welcome.deploymentPrompt": "请审查这份百事德部署或配置方案，并依据官方产品指引指出不匹配项、风险和建议的下一步。",
+  "welcome.deploymentPrompt": "请审查这份佰才邦部署或配置方案，并依据官方产品指引指出不匹配项、风险和建议的下一步。",
   "welcome.alarm": "分析告警或 KPI 问题",
-  "welcome.alarmPrompt": "请分析这个百事德告警、KPI、日志或故障现象，说明可能原因、建议的排查路径，以及还需要哪些信息。",
+  "welcome.alarmPrompt": "请分析这个佰才邦告警、KPI、日志或故障现象，说明可能原因、建议的排查路径，以及还需要哪些信息。",
   "welcome.solution": "推荐解决方案",
-  "welcome.solutionPrompt": "请为这个客户场景推荐百事德产品或解决方案，包括合适的产品、部署注意事项和关键限制。",
+  "welcome.solutionPrompt": "请为这个客户场景推荐佰才邦产品或解决方案，包括合适的产品、部署注意事项和关键限制。",
   "welcome.answerHelpful": "这个回答有帮助吗？",
+  "welcome.productCapabilities": "介绍产品能力",
+  "welcome.productCapabilitiesPrompt": "请介绍适合在客户沟通中使用的佰才邦相关产品能力，包括适用场景、核心功能、关键规格、部署要求和客户价值点。",
+  "welcome.solutionApproach": "介绍解决方案思路",
+  "welcome.solutionApproachPrompt": "请介绍佰才邦针对这个客户场景的解决方案思路，包括方案架构、适用场景、核心产品组成、部署模式、主要优势，以及需要确认的前提条件。",
+  "welcome.customerRequirements": "梳理客户需求",
+  "welcome.customerRequirementsPrompt": "请帮我把这个客户的网络建设或升级需求整理成售前需求清单，覆盖场景、用户规模、频谱/制式、回传、供电、安装环境和交付时间。",
+  "welcome.productSolution": "推荐产品方案",
+  "welcome.productSolutionPrompt": "请为下面的客户场景推荐合适的佰才邦产品和方案组合，包括推荐理由、适用边界、关键配置要点、需要与客户确认的信息和主要风险。",
   "share.create": "创建公开链接",
   "share.running": "会话仍在运行，请稍后再创建公开链接。",
   "share.selectAll": "全选",
@@ -1143,6 +1163,10 @@ const ZH_MESSAGES: Record<PortalMessageKey, string> = {
   "trace.debug": "调试",
   "trace.meta": "元数据",
   "trace.dataEvent": "数据事件",
+  "process.used": "已用",
+  "process.stepCount": "{count} 步",
+  "process.stepCountPlural": "{count} 步",
+  "process.thoughtOnly": "思考过程",
   "instruction.usedInResponse": "本次用到",
   "instruction.skill": "技能",
   "instruction.capability": "能力",
@@ -1400,6 +1424,12 @@ function readInitialLocale(options: Required<Omit<PortalI18nProviderProps, "chil
   }
   const stored = normalizePortalLocale(storedLocale);
   return stored ?? resolveConfiguredLocale(options.defaultLocale);
+}
+
+/** Locale for screens rendered outside PortalI18nProvider (sign-in, invite). */
+export function resolvePortalLocaleForBrand(brandKey = "default", defaultLocale: PortalDefaultLocale = "browser"): PortalLocale {
+  if (typeof window === "undefined") return "en";
+  return readInitialLocale({ brandKey, defaultLocale, languageSwitcherEnabled: true });
 }
 
 function persistPortalLocale(brandKey: string, locale: PortalLocale): void {

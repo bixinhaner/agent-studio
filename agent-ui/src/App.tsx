@@ -13,6 +13,8 @@ import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
 import { canAccessPortalTraining } from "./features/portal/training-access";
+import { resolvePortalLocaleForBrand } from "./features/portal/i18n";
+import { localizeBrandingLoginCopy, loginCopy, type LoginCopyKey } from "./features/auth/login-copy";
 import { fetchPublicExternalWebAccessState } from "./features/external-web-access/api";
 import { MaintenancePage } from "./features/external-web-access/MaintenancePage";
 import { EXTERNAL_WEB_MAINTENANCE_EVENT } from "./lib/api";
@@ -174,7 +176,12 @@ function inviteMembershipTypeLabel(value: string | null | undefined): string {
 }
 
 function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string; mode: AuthEntryMode }) {
-  const { brand, branding } = useBranding();
+  const { brand, branding, behavior } = useBranding();
+  const locale = useMemo(
+    () => resolvePortalLocaleForBrand(brand.key || "default", behavior.portalDefaultLocale),
+    [behavior.portalDefaultLocale, brand.key]
+  );
+  const L = (key: LoginCopyKey, values?: Record<string, string>) => loginCopy(locale, key, values);
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   const [inviteLoading, setInviteLoading] = useState(Boolean(props.inviteToken));
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -229,19 +236,17 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const resolvedEmail = email.trim() || fallbackEmail;
   const isInviteFlow = Boolean(props.inviteToken);
   const isInternalMode = props.mode === "internal" && !isInviteFlow;
-  const eyebrow = isInviteFlow ? "Customer Invite" : isInternalMode ? "Internal Employee Sign-In" : "";
+  const eyebrow = isInviteFlow ? L("customerInvite") : isInternalMode ? L("internalSignIn") : "";
   const subtitle = isInviteFlow
-    ? "Use your work email to accept the invitation and enter your organization."
-    : isInternalMode
-      ? branding.internalLoginCopy
-      : branding.externalLoginCopy;
+    ? L("inviteSubtitle")
+    : localizeBrandingLoginCopy(isInternalMode ? branding.internalLoginCopy : branding.externalLoginCopy, locale);
   const inviteStatusText =
     invite?.status === "pending"
-      ? "Pending acceptance"
+      ? L("invitePending")
       : invite?.status === "accepted"
-        ? "Accepted"
+        ? L("inviteAccepted")
         : invite?.status === "expired"
-          ? "Expired"
+          ? L("inviteExpired")
           : "";
 
   async function handleRequestEmailCode() {
@@ -249,7 +254,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     setEntryNotice(null);
     props.auth.clearError();
     if (!resolvedEmail) {
-      setFormError("Enter your email address.");
+      setFormError(L("enterEmail"));
       return;
     }
 
@@ -266,7 +271,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         setCodeRequested(false);
         setCode("");
         setAccessHelpOpen(false);
-        setEntryNotice("This email belongs to an internal employee account. Use DingTalk single sign-on to continue.");
+        setEntryNotice(L("internalEmailNotice"));
         replaceLocationPath(response.redirectPath || "/login/internal");
         return;
       }
@@ -284,7 +289,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         setAccessHelpOpen(true);
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Failed to send verification code");
+      setFormError(error instanceof Error ? error.message : L("sendCodeFailed"));
     } finally {
       setRequestPending(false);
     }
@@ -294,11 +299,11 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     setFormError(null);
     props.auth.clearError();
     if (!resolvedEmail) {
-      setFormError("Enter your email address.");
+      setFormError(L("enterEmail"));
       return;
     }
     if (!code.trim()) {
-      setFormError("Enter the verification code.");
+      setFormError(L("enterCodeError"));
       return;
     }
 
@@ -313,7 +318,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         replaceLocationPath("/");
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Verification failed");
+      setFormError(error instanceof Error ? error.message : L("verifyFailed"));
     } finally {
       setVerifyPending(false);
     }
@@ -334,12 +339,12 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         </div>
 
         {inviteLoading ? (
-          <div className="auth-modern-invite">Loading invitation details...</div>
+          <div className="auth-modern-invite">{L("loadingInvite")}</div>
         ) : invite ? (
           <div className="auth-modern-invite">
             <BuildingIcon size={16} style={{ marginRight: 6 }} />
             <span>
-              <strong>{invite.organization.name}</strong> invited you to join
+              <strong>{invite.organization.name}</strong> {L("invitedYou")}
               {inviteStatusText ? ` (${inviteStatusText})` : ""}
             </span>
           </div>
@@ -353,7 +358,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             <input
               className="auth-modern-input"
               type="email"
-              placeholder="Email address"
+              placeholder={L("emailPlaceholder")}
               autoComplete="email"
               value={email}
               onChange={(e) => {
@@ -368,11 +373,11 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               disabled={requestPending}
               onClick={() => void handleRequestEmailCode()}
             >
-              {requestPending ? "Sending..." : "Continue with Email"}
+              {requestPending ? L("sending") : L("continueWithEmail")}
             </button>
             {!props.inviteToken && brand.accessRequestEnabled ? (
               <button className="auth-modern-dropdown-link" onClick={() => replaceLocationPath("/access/apply")}>
-                Apply for Trial Access
+                {L("applyTrial")}
               </button>
             ) : null}
           </div>
@@ -382,16 +387,16 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               className="auth-modern-sso-btn"
               onClick={() => void props.auth.startSignIn()}
             >
-              Continue with DingTalk
+              {L("continueWithDingTalk")}
             </button>
             <p className="auth-modern-hint">
-              {entryNotice || "Use DingTalk single sign-on to access the internal workspace and control console."}
+              {entryNotice || L("dingTalkHint")}
             </p>
           </div>
         ) : (
           <div className="auth-modern-field auth-modern-fade-enter">
             <p className="auth-modern-hint">
-              {emailHint ? `We sent a code to ${emailHint}` : `Enter the verification code sent to your email.`}
+              {emailHint ? L("codeSentTo", { email: emailHint }) : L("enterCode")}
             </p>
             <input
               className="auth-modern-input"
@@ -409,14 +414,14 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               disabled={verifyPending}
               onClick={() => void handleVerifyEmailCode()}
             >
-              {verifyPending ? "Verifying..." : "Verify & Sign In"}
+              {verifyPending ? L("verifying") : L("verify")}
             </button>
             <button
               className="auth-modern-primary-btn"
               style={{ marginTop: 8 }}
               onClick={() => setCodeRequested(false)}
             >
-              Back
+              {L("back")}
             </button>
           </div>
         )}
@@ -431,19 +436,18 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             onClick={(event) => event.stopPropagation()}
           >
             <div className="auth-access-modal-head">
-              <h2 id="auth-access-modal-title">Access Not Ready</h2>
+              <h2 id="auth-access-modal-title">{L("accessNotReady")}</h2>
               <button
                 type="button"
                 className="auth-access-modal-close"
-                aria-label="Close access help dialog"
+                aria-label={L("closeAccessHelp")}
                 onClick={() => setAccessHelpOpen(false)}
               >
                 ×
               </button>
             </div>
             <p className="auth-access-modal-copy">
-              This email does not have active access yet. Ask your administrator to resend the invite, or apply for
-              trial access.
+              {L("accessNotReadyCopy")}
             </p>
             <div className="auth-access-modal-actions">
               {brand.accessRequestEnabled ? (
@@ -455,7 +459,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
                     replaceLocationPath("/access/apply");
                   }}
                 >
-                  Apply for Trial Access
+                  {L("applyTrial")}
                 </button>
               ) : null}
               <button
@@ -463,7 +467,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
                 className="auth-modern-primary-btn"
                 onClick={() => setAccessHelpOpen(false)}
               >
-                Back to Sign In
+                {L("backToSignIn")}
               </button>
             </div>
           </div>

@@ -7019,3 +7019,642 @@ button.session-rail-new-btn:active,
     animation: none;
   }
 }
+
+/* =========================================================================
+   Portal UX refresh (2026-09)
+   - Calm by default: motion only while the assistant is working, and it stops.
+   - One AI accent (brand orange -> Bailey green) reserved for AI activity.
+   - Process metadata folded into a single summary line.
+   ========================================================================= */
+.portal-workbench-root {
+  --portal-ai-start: var(--brand-primary, #FF4614);
+  --portal-ai-end: #4CAC26;
+  --portal-ai-gradient: linear-gradient(135deg, var(--portal-ai-start), var(--portal-ai-end));
+  --portal-motion-fast: 120ms;
+  --portal-motion-base: 200ms;
+  --portal-motion-slow: 320ms;
+  --portal-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --portal-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --portal-text-strong: #1f2328;
+  --portal-text-muted: #6b7280;
+  --portal-line: #ecebe8;
+}
+
+@property --portal-ai-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes portal-ai-rotate {
+  to { --portal-ai-angle: 360deg; }
+}
+
+@keyframes portal-ai-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@keyframes portal-ai-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes portal-fade-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes portal-message-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- Messages: answer is the protagonist ---- */
+.portal-workbench-root .thread-wrap .aui-assistant-message-content {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 6px 0 2px 4px !important;
+  color: var(--portal-text-strong) !important;
+  line-height: 1.75;
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-content {
+  background: color-mix(in srgb, var(--brand-primary, #FF4614) 7%, #ffffff) !important;
+  color: var(--portal-text-strong) !important;
+  border: 1px solid color-mix(in srgb, var(--brand-primary, #FF4614) 18%, #ffffff) !important;
+  border-radius: 16px 16px 4px 16px !important;
+  box-shadow: none !important;
+  padding: 10px 14px !important;
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-content a {
+  color: color-mix(in srgb, var(--brand-primary, #FF4614) 82%, #000000);
+}
+
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-assistant.is-message-entering .aui-assistant-message-root,
+.portal-workbench-root .thread-wrap .thread-public-share-message-shell-user.is-message-entering .aui-user-message-root {
+  animation: portal-message-enter var(--portal-motion-slow) var(--portal-ease-enter) both;
+}
+
+/* Edit action sits right under the user's own bubble instead of the far left gutter. */
+.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-action-bar-root {
+  grid-column: 2;
+  grid-row: 3;
+  justify-self: end;
+  flex-direction: row;
+  margin: -2px 0 0;
+  opacity: 0;
+  transition: opacity var(--portal-motion-fast) var(--portal-ease-standard);
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-root:hover > .aui-user-action-bar-root,
+.portal-workbench-root .thread-wrap .aui-user-message-root:focus-within > .aui-user-action-bar-root {
+  opacity: 1;
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-root:has(> .aui-user-action-bar-root) > .aui-branch-picker-root {
+  margin-right: 40px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-action-bar-root {
+    opacity: 1;
+  }
+}
+
+/* Sent image attachments render as real thumbnails. */
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail {
+  width: 88px;
+  min-width: 88px;
+  max-width: 88px;
+  height: 88px;
+  border: 1px solid var(--portal-line, #ecebe8);
+  border-radius: 12px;
+  background: #f5f5f4;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail:hover {
+  transform: none;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-card-info {
+  display: none;
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-card-preview {
+  background: transparent;
+}
+
+/* The whole thumbnail opens the preview. */
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-preview {
+  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
+  cursor: zoom-in;
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-preview svg {
+  display: none;
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-preview:focus-visible {
+  outline: 2px solid var(--brand-primary, #FF4614);
+  outline-offset: 2px;
+}
+
+.thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-download {
+  z-index: 3;
+}
+
+/* ---- AI working state: one ring on the avatar ---- */
+.portal-workbench-root .thread-wrap .portal-assistant-message-root > .aui-avatar-root {
+  position: relative;
+  overflow: visible;
+}
+
+.portal-workbench-root .thread-wrap .portal-assistant-message-root.is-running > .aui-avatar-root::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--portal-ai-angle),
+    rgb(255 70 20 / 0) 0deg,
+    var(--portal-ai-start) 110deg,
+    var(--portal-ai-end) 220deg,
+    rgb(76 172 38 / 0) 320deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: portal-ai-rotate 1.8s linear infinite;
+  pointer-events: none;
+}
+
+/* Live step line while nothing has streamed yet. */
+.assistant-process-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: 14px;
+}
+
+.assistant-process-live-text,
+.portal-workbench-root .assistant-running-title,
+.portal-workbench-root .assistant-running-phase {
+  background: linear-gradient(
+    90deg,
+    var(--portal-text-muted) 0%,
+    var(--portal-text-muted) 38%,
+    var(--portal-ai-start) 47%,
+    var(--portal-ai-end) 55%,
+    var(--portal-text-muted) 64%,
+    var(--portal-text-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: portal-ai-shimmer 1.8s linear infinite;
+  font-weight: 500;
+}
+
+.assistant-process-live-count {
+  color: #9ca3af;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Running placeholder (before any output): calm card, no animated border or sweep bar. */
+.portal-workbench-root .assistant-running-card {
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.portal-workbench-root .assistant-running-card .assistant-running-track,
+.portal-workbench-root .assistant-running-spinner,
+.portal-workbench-root .assistant-running-chip {
+  display: none;
+}
+
+.portal-workbench-root .assistant-running-phase {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.portal-workbench-root .assistant-running-secondary {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+/* Streaming caret replaces the blue "Thinking..." pill. */
+.portal-workbench-root .thread-wrap .aui-md-running::after {
+  content: none;
+  animation: none;
+}
+
+.portal-workbench-root .thread-wrap .portal-assistant-message-root.is-streaming-text .aui-md-running > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.portal-workbench-root .thread-wrap .portal-assistant-message-root.is-streaming-text .aui-md-running > :is(ol, ul):last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 0 0 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  vertical-align: middle;
+  background: var(--portal-ai-gradient);
+  animation: portal-ai-caret 900ms ease-in-out infinite;
+}
+
+/* ---- Process summary: one line, details on demand ---- */
+.assistant-process-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  animation: portal-fade-in var(--portal-motion-base) var(--portal-ease-standard) both;
+}
+
+.assistant-process-summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--portal-line, #ecebe8);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #4b5563;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color var(--portal-motion-fast) var(--portal-ease-standard),
+    background var(--portal-motion-fast) var(--portal-ease-standard);
+}
+
+.assistant-process-summary-toggle:hover {
+  border-color: #d6d3d1;
+  background: #fafaf9;
+}
+
+.assistant-process-summary-toggle:focus-visible {
+  outline: 2px solid var(--brand-primary, #FF4614);
+  outline-offset: 2px;
+}
+
+.assistant-process-summary-icon {
+  display: inline-flex;
+  color: #3f8f1f;
+}
+
+.assistant-process-summary.has-error .assistant-process-summary-icon {
+  color: #b42318;
+}
+
+.assistant-process-summary-text {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.assistant-process-summary-segment + .assistant-process-summary-segment::before {
+  content: "·";
+  margin: 0 6px;
+  color: #c4c4c0;
+}
+
+.assistant-process-summary-skill {
+  color: var(--portal-text-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.assistant-process-summary-chevron {
+  flex-shrink: 0;
+  color: #9ca3af;
+  transition: transform var(--portal-motion-base) var(--portal-ease-standard);
+}
+
+.assistant-process-summary.is-open .assistant-process-summary-chevron {
+  transform: rotate(180deg);
+}
+
+.assistant-process-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-left: 14px;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--portal-line, #ecebe8);
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.6;
+  animation: portal-fade-in var(--portal-motion-base) var(--portal-ease-standard) both;
+}
+
+.assistant-process-thoughts p {
+  margin: 0;
+}
+
+.assistant-process-thoughts p + p {
+  margin-top: 2px;
+}
+
+.assistant-process-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.assistant-process-step {
+  position: relative;
+  padding-left: 16px;
+}
+
+.assistant-process-step::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #b8d9a8;
+}
+
+.assistant-process-step.is-error::before {
+  background: #f04438;
+}
+
+.assistant-process-step details summary {
+  cursor: pointer;
+}
+
+.assistant-process-step pre {
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #f5f5f4;
+  color: #374151;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* ---- Composer: quiet focus, a single moving stroke only while running ---- */
+.portal-workbench-root .aui-composer-root:focus-within,
+.portal-workbench-root .portal-composer-wrap[data-multiline="true"] .aui-composer-root:focus-within {
+  animation: none;
+  border-color: color-mix(in srgb, var(--brand-primary, #FF4614) 55%, #ffffff);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.04),
+    0 0 0 3px color-mix(in srgb, var(--brand-primary, #FF4614) 8%, transparent);
+}
+
+.portal-workbench-root .aui-composer-root:has(.portal-stop-btn) {
+  border-color: transparent;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    conic-gradient(
+      from var(--portal-ai-angle),
+      #e5e7eb 0deg,
+      #e5e7eb 190deg,
+      var(--portal-ai-start) 275deg,
+      var(--portal-ai-end) 330deg,
+      #e5e7eb 360deg
+    ) border-box;
+  animation: portal-ai-rotate 2.4s linear infinite;
+}
+
+.portal-composer-wrap.is-sending .aui-composer-root,
+.portal-composer-wrap.is-sending .aui-composer-input {
+  animation: none !important;
+}
+
+.portal-upload-send:not(:disabled) {
+  animation: none !important;
+}
+
+.portal-stop-btn {
+  animation: none !important;
+  background: #1f2328 !important;
+  box-shadow: none !important;
+}
+
+.portal-stop-btn:hover:not(:disabled) {
+  background: #000000 !important;
+}
+
+/* The sidebar "new" button no longer runs a shine sweep. */
+button.session-rail-new-btn::after,
+.session-rail-new-btn::after {
+  animation: none !important;
+  display: none;
+}
+
+/* ---- Share action lives in the breadcrumb row ---- */
+.workspace-task-breadcrumb-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.workspace-task-breadcrumb-actions:empty {
+  display: none;
+}
+
+.workspace-task-breadcrumb-actions .thread-public-share-toolbar.is-in-header {
+  position: static;
+  gap: 6px;
+}
+
+.workspace-task-breadcrumb-actions .thread-public-share-toolbar-btn {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #57606a;
+}
+
+.workspace-task-breadcrumb-actions .thread-public-share-toolbar-btn:hover:not(:disabled) {
+  transform: none;
+  background: #f4f4f5;
+  box-shadow: none;
+  color: var(--portal-text-strong);
+}
+
+/* ---- Welcome ---- */
+.portal-welcome-illustration {
+  -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 58%, transparent 100%);
+  mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 58%, transparent 100%);
+  transform: scale(1.06);
+}
+
+.portal-welcome-illustration-shell::before {
+  background: radial-gradient(
+    ellipse closest-side,
+    color-mix(in srgb, var(--brand-primary, #FF4614) 10%, transparent) 0%,
+    color-mix(in srgb, #4CAC26 6%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+.portal-welcome-suggestion-card {
+  justify-content: flex-start;
+  text-align: left;
+  backdrop-filter: none;
+  background: #ffffff;
+  border-color: var(--portal-line, #ecebe8);
+  box-shadow: none;
+}
+
+.portal-welcome-suggestion-card:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--brand-primary, #FF4614) 35%, #ffffff);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.portal-welcome-suggestion-text {
+  text-align: left;
+}
+
+.portal-welcome-suggestion-icon-wrap.icon-green,
+.portal-welcome-suggestion-icon-wrap.icon-blue,
+.portal-welcome-suggestion-icon-wrap.icon-orange,
+.portal-welcome-suggestion-icon-wrap.icon-purple {
+  color: var(--brand-primary, #FF4614);
+  background: color-mix(in srgb, var(--brand-primary, #FF4614) 8%, #ffffff);
+}
+
+/* Entrance choreography: short and tight (one pass, 40ms steps). */
+.portal-welcome-welcome-container > * {
+  animation-duration: var(--portal-motion-slow);
+}
+.portal-welcome-welcome-container > *:nth-child(1) { animation-delay: 0ms; }
+.portal-welcome-welcome-container > *:nth-child(2) { animation-delay: 60ms; }
+.portal-welcome-welcome-container > *:nth-child(3) { animation-delay: 100ms; }
+.portal-welcome-welcome-container > *:nth-child(4) { animation-delay: 140ms; }
+.portal-welcome-suggestion-grid > * {
+  animation-duration: var(--portal-motion-slow);
+}
+.portal-welcome-suggestion-grid > *:nth-child(1) { animation-delay: 160ms; }
+.portal-welcome-suggestion-grid > *:nth-child(2) { animation-delay: 200ms; }
+.portal-welcome-suggestion-grid > *:nth-child(3) { animation-delay: 240ms; }
+.portal-welcome-suggestion-grid > *:nth-child(4) { animation-delay: 280ms; }
+.session-rail-list > * {
+  animation-duration: var(--portal-motion-base);
+}
+.session-rail-list > *:nth-child(n) { animation-delay: 0ms; }
+
+/* ---- Skill picker: no stray purple ---- */
+.portal-skill-glyph[data-tone="platform"] {
+  background: #f2f2f0;
+  color: #57606a;
+}
+
+.portal-skill-detail-section ol li > span {
+  background: var(--portal-text-strong);
+}
+
+.portal-skill-example-list > button {
+  background: #f5f5f4;
+  color: #374151;
+}
+
+.portal-skill-example-list > button:hover {
+  background: color-mix(in srgb, var(--brand-primary, #FF4614) 7%, #ffffff);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="violet"] {
+  --skill-icon-color: #57606a;
+  --skill-icon-bg: #f2f2f0;
+  --skill-icon-border: #e7e5e4;
+}
+
+/* ---- Mobile: reclaim space ---- */
+@media (max-width: 640px) {
+  .portal-workbench-root .thread-wrap .aui-thread-root {
+    --portal-thread-leading-gap: 34px;
+  }
+
+  .portal-workbench-root .thread-wrap .portal-assistant-message-root > .aui-avatar-root,
+  .portal-workbench-root .thread-wrap .aui-assistant-avatar {
+    width: 26px;
+    height: 26px;
+  }
+
+  .portal-workbench-root .thread-wrap .aui-user-message-root {
+    margin-top: 4px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .portal-workbench-root .thread-wrap .aui-assistant-message-root {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail {
+    width: 68px;
+    min-width: 68px;
+    max-width: 68px;
+    height: 68px;
+  }
+
+  .thread-wrap .portal-user-message-download-attachments .portal-upload-attachment.has-thumbnail .portal-upload-download {
+    display: none;
+  }
+}
+
+/* ---- Reduced motion: every loop stops, colour still carries state ---- */
+@media (prefers-reduced-motion: reduce) {
+  .portal-workbench-root *,
+  .portal-workbench-root *::before,
+  .portal-workbench-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
