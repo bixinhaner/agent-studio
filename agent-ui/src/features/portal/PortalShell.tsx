@@ -227,6 +227,7 @@ import {
   type AssistantProcessSummary
 } from "./assistant-process-summary";
 import { THREAD_USER_NAVIGATE_EVENT } from "./thread-scroll-follow-controller";
+import { formatRelativeMessageTime } from "./message-time";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
@@ -5435,28 +5436,6 @@ const ThreadPublicShareTurnCheckbox: FC = () => {
   );
 };
 
-function formatRelativeMessageTime(
-  date: Date,
-  now: number,
-  intlLocale: string,
-  t: PortalTranslate
-): string {
-  const diffSeconds = Math.round((now - date.getTime()) / 1000);
-  if (diffSeconds < 45) return t("time.justNow");
-  const relative = new Intl.RelativeTimeFormat(intlLocale, { numeric: "auto" });
-  if (diffSeconds < 3600) return relative.format(-Math.max(1, Math.round(diffSeconds / 60)), "minute");
-  const time = new Intl.DateTimeFormat(intlLocale, { timeStyle: "short" }).format(date);
-  const today = new Date(now);
-  if (isSameLocalDate(date, today)) return relative.format(-Math.round(diffSeconds / 3600), "hour");
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (isSameLocalDate(date, yesterday)) return t("time.yesterday", { time });
-  return new Intl.DateTimeFormat(intlLocale, {
-    ...(date.getFullYear() === today.getFullYear() ? { month: "short", day: "numeric" } : { dateStyle: "medium" }),
-    timeStyle: "short"
-  } as Intl.DateTimeFormatOptions).format(date);
-}
-
 const MessageTimestamp: FC = () => {
   const { intlLocale, t } = usePortalI18n();
   const createdAt = useAuiState((s) => (s.message as ThreadMessage & { createdAt?: unknown }).createdAt);
@@ -5473,7 +5452,10 @@ const MessageTimestamp: FC = () => {
       title={timestamp.fullLabel}
       aria-label={`Sent ${timestamp.fullLabel}`}
     >
-      {formatRelativeMessageTime(date, now, intlLocale, t)}
+      {formatRelativeMessageTime(date, now, intlLocale, {
+        justNow: t("time.justNow"),
+        yesterday: (time) => t("time.yesterday", { time })
+      })}
     </time>
   );
 };
