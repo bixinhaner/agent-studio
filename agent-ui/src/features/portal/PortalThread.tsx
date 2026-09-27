@@ -25,7 +25,7 @@ import {
   resolveReturnToLatestBehavior,
   writeThreadReadingPosition
 } from "./thread-reading-position";
-import { createThreadScrollFollowController } from "./thread-scroll-follow-controller";
+import { createThreadScrollFollowController, THREAD_USER_NAVIGATE_EVENT } from "./thread-scroll-follow-controller";
 
 const THREAD_BOTTOM_THRESHOLD_PX = 2;
 const SCROLLBAR_POINTER_ZONE_PX = 18;
@@ -174,6 +174,21 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
   const stopFollowingBottom = useCallback(() => {
     followControllerRef.current.onUserScrollUp();
   }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const handleUserNavigate = () => {
+      if (scheduledScrollFrameRef.current) {
+        window.cancelAnimationFrame(scheduledScrollFrameRef.current);
+        scheduledScrollFrameRef.current = 0;
+      }
+      stopFollowingBottom();
+      setViewportAtBottom(false);
+    };
+    viewport.addEventListener(THREAD_USER_NAVIGATE_EVENT, handleUserNavigate);
+    return () => viewport.removeEventListener(THREAD_USER_NAVIGATE_EVENT, handleUserNavigate);
+  }, [stopFollowingBottom]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const viewport = viewportRef.current;

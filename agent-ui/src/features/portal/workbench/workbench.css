@@ -7023,13 +7023,16 @@ button.session-rail-new-btn:active,
 /* =========================================================================
    Portal UX refresh (2026-09)
    - Calm by default: motion only while the assistant is working, and it stops.
-   - One AI accent (brand orange -> Bailey green) reserved for AI activity.
+   - AI activity uses the tenant brand colour only (via --brand-primary-rgb).
    - Process metadata folded into a single summary line.
    ========================================================================= */
 .portal-workbench-root {
-  --portal-ai-start: var(--brand-primary, #FF4614);
-  --portal-ai-end: #4CAC26;
-  --portal-ai-gradient: linear-gradient(135deg, var(--portal-ai-start), var(--portal-ai-end));
+  /* AI activity colour is derived from the tenant brand, never hard-coded. */
+  --portal-ai: rgb(var(--brand-primary-rgb, 255 70 20));
+  --portal-ai-soft: rgb(var(--brand-primary-rgb, 255 70 20) / 0.18);
+  --portal-ai-clear: rgb(var(--brand-primary-rgb, 255 70 20) / 0);
+  --portal-shimmer-base: #6b7280;
+  --portal-shimmer-highlight: #d4d4d8;
   --portal-motion-fast: 120ms;
   --portal-motion-base: 200ms;
   --portal-motion-slow: 320ms;
@@ -7099,30 +7102,33 @@ button.session-rail-new-btn:active,
   animation: portal-message-enter var(--portal-motion-slow) var(--portal-ease-enter) both;
 }
 
-/* Edit action sits right under the user's own bubble instead of the far left gutter. */
+/* Edit action sits in its own column just left of the bubble: showing it never adds a row,
+   so hovering a message cannot shift the layout. */
+.portal-workbench-root .thread-wrap .aui-user-message-root {
+  grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr) auto fit-content(88%);
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-message-content {
+  grid-column: 4;
+  grid-row: 2;
+  max-width: 100%;
+}
+
+.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-message-attachments,
+.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-branch-picker-root,
+.portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-branch-picker {
+  grid-column: 2 / -1;
+  justify-self: end;
+}
+
 .portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-action-bar-root {
-  grid-column: 2;
-  grid-row: 3;
+  grid-column: 3;
+  grid-row: 2;
+  align-self: end;
   justify-self: end;
   flex-direction: row;
-  margin: -2px 0 0;
-  opacity: 0;
-  transition: opacity var(--portal-motion-fast) var(--portal-ease-standard);
-}
-
-.portal-workbench-root .thread-wrap .aui-user-message-root:hover > .aui-user-action-bar-root,
-.portal-workbench-root .thread-wrap .aui-user-message-root:focus-within > .aui-user-action-bar-root {
-  opacity: 1;
-}
-
-.portal-workbench-root .thread-wrap .aui-user-message-root:has(> .aui-user-action-bar-root) > .aui-branch-picker-root {
-  margin-right: 40px;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .portal-workbench-root .thread-wrap .aui-user-message-root > .aui-user-action-bar-root {
-    opacity: 1;
-  }
+  margin: 0 6px 2px 0;
+  animation: portal-fade-in var(--portal-motion-fast) var(--portal-ease-standard) both;
 }
 
 /* Sent image attachments render as real thumbnails. */
@@ -7196,21 +7202,23 @@ button.session-rail-new-btn:active,
   padding: 2px;
   background: conic-gradient(
     from var(--portal-ai-angle),
-    rgb(255 70 20 / 0) 0deg,
-    var(--portal-ai-start) 110deg,
-    var(--portal-ai-end) 220deg,
-    rgb(76 172 38 / 0) 320deg
+    var(--portal-ai-clear) 0deg,
+    var(--portal-ai-clear) 140deg,
+    var(--portal-ai-soft) 220deg,
+    var(--portal-ai) 350deg,
+    var(--portal-ai-clear) 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  animation: portal-ai-rotate 1.8s linear infinite;
+  animation: portal-ai-rotate 1.6s linear infinite;
   pointer-events: none;
 }
 
 /* Live step line while nothing has streamed yet. */
 .assistant-process-live {
   display: flex;
+  max-width: min(100%, 680px);
   align-items: center;
   gap: 10px;
   min-height: 28px;
@@ -7222,19 +7230,25 @@ button.session-rail-new-btn:active,
 .portal-workbench-root .assistant-running-phase {
   background: linear-gradient(
     90deg,
-    var(--portal-text-muted) 0%,
-    var(--portal-text-muted) 38%,
-    var(--portal-ai-start) 47%,
-    var(--portal-ai-end) 55%,
-    var(--portal-text-muted) 64%,
-    var(--portal-text-muted) 100%
+    var(--portal-shimmer-base) 0%,
+    var(--portal-shimmer-base) 40%,
+    var(--portal-shimmer-highlight) 50%,
+    var(--portal-shimmer-base) 60%,
+    var(--portal-shimmer-base) 100%
   );
-  background-size: 200% 100%;
+  background-size: 250% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: portal-ai-shimmer 1.8s linear infinite;
-  font-weight: 500;
+  animation: portal-ai-shimmer 2.2s linear infinite;
+  font-weight: 450;
+}
+
+.assistant-process-live-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .assistant-process-live-count {
@@ -7288,7 +7302,7 @@ button.session-rail-new-btn:active,
   border-radius: 999px;
   padding: 0;
   vertical-align: middle;
-  background: var(--portal-ai-gradient);
+  background: var(--portal-ai);
   animation: portal-ai-caret 900ms ease-in-out infinite;
 }
 
@@ -7333,7 +7347,7 @@ button.session-rail-new-btn:active,
 
 .assistant-process-summary-icon {
   display: inline-flex;
-  color: #3f8f1f;
+  color: #16a34a;
 }
 
 .assistant-process-summary.has-error .assistant-process-summary-icon {
@@ -7414,7 +7428,7 @@ button.session-rail-new-btn:active,
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: #b8d9a8;
+  background: #d4d4d8;
 }
 
 .assistant-process-step.is-error::before {
@@ -7454,9 +7468,9 @@ button.session-rail-new-btn:active,
     conic-gradient(
       from var(--portal-ai-angle),
       #e5e7eb 0deg,
-      #e5e7eb 190deg,
-      var(--portal-ai-start) 275deg,
-      var(--portal-ai-end) 330deg,
+      #e5e7eb 200deg,
+      var(--portal-ai-soft) 280deg,
+      var(--portal-ai) 350deg,
       #e5e7eb 360deg
     ) border-box;
   animation: portal-ai-rotate 2.4s linear infinite;
@@ -7535,8 +7549,7 @@ button.session-rail-new-btn::after,
 .portal-welcome-illustration-shell::before {
   background: radial-gradient(
     ellipse closest-side,
-    color-mix(in srgb, var(--brand-primary, #FF4614) 10%, transparent) 0%,
-    color-mix(in srgb, #4CAC26 6%, transparent) 55%,
+    rgb(var(--brand-primary-rgb, 255 70 20) / 0.08) 0%,
     transparent 100%
   );
 }

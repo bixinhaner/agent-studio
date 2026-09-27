@@ -1,3 +1,6 @@
+/** Dispatched on the thread viewport when the user jumps somewhere on purpose (e.g. question navigator). */
+export const THREAD_USER_NAVIGATE_EVENT = "portal-thread-user-navigate";
+
 import {
   resolveThreadScrollFollowMode,
   type ThreadScrollFollowMode

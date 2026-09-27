@@ -219,6 +219,7 @@ import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
 import { SUMMARIZED_PROCESS_PART_NAMES, summarizeAssistantProcess } from "./assistant-process-summary";
+import { THREAD_USER_NAVIGATE_EVENT } from "./thread-scroll-follow-controller";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import {
@@ -4354,7 +4355,9 @@ const AssistantLiveStatus: FC<{ title: string; compact?: boolean }> = ({ title, 
 const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
   const { t } = usePortalI18n();
   const runningStage = useContext(RunningStageTextContext);
-  if (status.type !== "running") return null;
+  // Once commentary/trace parts exist, the process summary line is the single running signal.
+  const hasProcessParts = useAuiState((s) => (s.message.content as readonly unknown[]).some(isSummarizedProcessContentPart));
+  if (status.type !== "running" || hasProcessParts) return null;
   const isImageStage = runningStage.kind === "image";
   const ariaStatus = `${t("thread.assistantProcessing", { status: runningStage.text })}${
     runningStage.secondaryText ? `. ${runningStage.secondaryText}` : ""
@@ -6266,10 +6269,17 @@ const ThreadQuestionNavigator: FC<{
       if (!shell) return;
       const element = findThreadQuestionElement(shell, messageId);
       if (!element) return;
-      element.scrollIntoView({
-        behavior: "smooth",
-        block: "center"
-      });
+      const viewport = shell.querySelector<HTMLElement>(".aui-thread-viewport");
+      if (viewport) {
+        // Leave "follow latest" first, otherwise any content change snaps the view back to the bottom.
+        viewport.dispatchEvent(new CustomEvent(THREAD_USER_NAVIGATE_EVENT));
+        const viewportRect = viewport.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        const top = viewport.scrollTop + rect.top - viewportRect.top - Math.max(16, (viewport.clientHeight - rect.height) / 2);
+        viewport.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      } else {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
       setActiveId(messageId);
       setHoveredId(messageId);
       setPanelOpen(true);
