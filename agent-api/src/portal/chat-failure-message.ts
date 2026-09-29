@@ -1,5 +1,6 @@
 import { portalAutoRecoveryFailureAssistantMessage } from "./chat-auto-recovery.js";
 import type { PortalFailurePresentation } from "./chat-failure-presentation.js";
+import type { PortalPartialAssistantSnapshot } from "./chat-partial-answer.js";
 
 export function portalFailedAssistantMessage(input: {
   id: string;
@@ -7,12 +8,14 @@ export function portalFailedAssistantMessage(input: {
   runId: string;
   presentation: PortalFailurePresentation;
   autoRecoveryAttempted?: boolean;
+  partial?: PortalPartialAssistantSnapshot;
 }) {
   if (input.autoRecoveryAttempted) {
     return portalAutoRecoveryFailureAssistantMessage({
       id: input.id,
       sessionId: input.sessionId || "unavailable",
-      runId: input.runId
+      runId: input.runId,
+      partial: input.partial
     });
   }
   const now = new Date().toISOString();
@@ -20,6 +23,8 @@ export function portalFailedAssistantMessage(input: {
     id: input.id,
     role: "assistant",
     content: [
+      ...(input.partial?.contentParts ?? []),
+      ...(input.partial?.answerText.trim() ? [{ type: "text", text: input.partial.answerText }] : []),
       {
         type: "text",
         text: input.presentation.userMessage

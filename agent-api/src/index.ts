@@ -178,6 +178,8 @@ import {
   type PortalFailurePresentation
 } from "./portal/chat-failure-presentation.js";
 import { portalFailedAssistantMessage } from "./portal/chat-failure-message.js";
+import { createPortalPartialSnapshot, PortalPartialAnswerCollector, type PortalPartialAssistantSnapshot } from "./portal/chat-partial-answer.js";
+import { portalStoppedAssistantMessage } from "./portal/chat-stopped-message.js";
 import {
   portalAutoRecoveryPrompt,
   portalRuntimeEventHasAnySideEffect,
@@ -4515,6 +4517,8 @@ type PortalActiveChatRun = {
   userMessageId?: string;
   assistantMessageId?: string;
   assistantMessageWritten?: boolean;
+  /** Snapshot of what the run has produced so far, kept by a stop so the partial answer survives a refresh. */
+  partialSnapshot?: () => PortalPartialAssistantSnapshot;
   acceptedAt: string;
 };
 
@@ -4649,11 +4653,13 @@ function attachPortalActiveChatRun(input: {
   threadId?: string;
   userMessageId?: string;
   assistantMessageId?: string;
+  partialSnapshot?: () => PortalPartialAssistantSnapshot;
 }): void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return;
   const entry = portalActiveChatRuns.get(sessionId);
   if (!entry || entry.userId !== input.userId) return;
+  entry.partialSnapshot = input.partialSnapshot ?? entry.partialSnapshot;
   entry.session = input.session ?? entry.session;
   entry.threadId = trimOrUndefined(input.threadId) ?? entry.threadId;
   entry.userMessageId = trimOrUndefined(input.userMessageId) ?? entry.userMessageId;
@@ -4792,7 +4798,8 @@ async function cancelPortalActiveChatRun(input: {
       runId: entry.runId,
       assistantMessageId: entry.assistantMessageId,
       reason: "explicit_cancel",
-      acceptedAt: entry.acceptedAt
+      acceptedAt: entry.acceptedAt,
+      partial: safePortalPartialSnapshot(entry.partialSnapshot)
     }).catch((error) => {
       console.warn("portal chat failed to append stopped assistant", {
         threadId,
@@ -9792,55 +9799,6 @@ function portalAssistantMessage(input: {
   };
 }
 
-function portalStoppedAssistantMessage(input: {
-  id: string;
-  sessionId: string;
-  runId: string;
-  reason: string;
-}) {
-  const now = new Date().toISOString();
-  return {
-    id: input.id,
-    role: "assistant",
-    content: [
-      {
-        type: "text",
-        text: "Response stopped."
-      },
-      {
-        type: "data",
-        name: "codex_process_audit",
-        data: {
-          kind: "cancelled",
-          at: now,
-          title: "Stopped",
-          detail: "The response was stopped before it completed.",
-          reason: input.reason
-        }
-      }
-    ],
-    status: {
-      type: "incomplete",
-      reason: "cancelled"
-    },
-    createdAt: now,
-    metadata: {
-      unstable_state: {},
-      unstable_annotations: [],
-      unstable_data: [],
-      steps: [],
-      custom: {
-        channel: "portal",
-        sessionId: input.sessionId,
-        runId: input.runId,
-        serverPersisted: true,
-        stopped: true,
-        stopReason: input.reason
-      }
-    }
-  };
-}
-
 function portalUserMessage(input: {
   id: string;
   message: unknown;
@@ -9992,6 +9950,20 @@ async function ensurePortalStreamUserMessage(input: {
   return userMessageId;
 }
 
+function safePortalPartialSnapshot(
+  snapshot: (() => PortalPartialAssistantSnapshot) | undefined
+): PortalPartialAssistantSnapshot | undefined {
+  if (!snapshot) return undefined;
+  try {
+    return snapshot();
+  } catch (error) {
+    console.warn("portal chat failed to snapshot partial answer", {
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  }
+}
+
 async function appendPortalStoppedAssistant(input: {
   threadId: string;
   userMessageId: string;
@@ -10000,6 +9972,7 @@ async function appendPortalStoppedAssistant(input: {
   assistantMessageId?: string;
   reason: string;
   acceptedAt?: string;
+  partial?: PortalPartialAssistantSnapshot;
 }): Promise<boolean> {
   const assistantId = trimOrUndefined(input.assistantMessageId) ??
     `portal-assistant-cancelled-${createHash("sha256")
@@ -10019,7 +9992,8 @@ async function appendPortalStoppedAssistant(input: {
         id: assistantId,
         sessionId: input.sessionId,
         runId: input.runId,
-        reason: input.reason
+        reason: input.reason,
+        partial: input.partial
       }),
       runConfig: {
         channel: "portal",
@@ -10042,6 +10016,7 @@ async function appendPortalFailedAssistant(input: {
   presentation: PortalFailurePresentation;
   autoRecoveryAttempted?: boolean;
   acceptedAt?: string;
+  partial?: PortalPartialAssistantSnapshot;
 }): Promise<boolean> {
   const assistantId = trimOrUndefined(input.assistantMessageId) ??
     `portal-assistant-failed-${createHash("sha256")
@@ -10062,7 +10037,8 @@ async function appendPortalFailedAssistant(input: {
         sessionId: input.sessionId,
         runId: input.runId,
         presentation: input.presentation,
-        autoRecoveryAttempted: input.autoRecoveryAttempted
+        autoRecoveryAttempted: input.autoRecoveryAttempted,
+        partial: input.partial
       }),
       runConfig: {
         channel: "portal",
@@ -13619,6 +13595,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalFirstAttemptTurnStarted = false;
   let portalRecoveryCompletedEventSent = false;
   let portalLastRunAttempt: 1 | 2 = 1;
+  let portalPartialSnapshot: (() => PortalPartialAssistantSnapshot) | undefined;
   const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
     logPortalStreamLifecycle(stage, {
       trace_id: portalStreamTraceId,
@@ -13856,6 +13833,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
     const portalRunProjection = new CodexRunProjection();
+    const portalPartialAnswer = new PortalPartialAnswerCollector();
     let firstCodexEventSeen = false;
     const portalThread = await timing.time("chat_stream.load_bound_thread", () =>
       getPortalOwnedThread(currentSession.threadId!, currentUser)
@@ -13888,6 +13866,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const portalBrand = await timing.time("chat_stream.resolve_public_brand", () =>
       publicBrands.getForOrganization(currentUser.organizationId)
     );
+    portalPartialSnapshot = createPortalPartialSnapshot({
+      projection: portalRunProjection,
+      answer: portalPartialAnswer,
+      instructionReadPart: () => instructionReadObserver.contentPart(),
+      answerProtected: Boolean(portalBrand?.outputProtectionEnabled)
+    });
+    attachPortalActiveChatRun({
+      sessionId: currentSession.sessionId,
+      userId: currentUser.id,
+      partialSnapshot: portalPartialSnapshot
+    });
     const policyPrompt = portalBrand ? brandRuntimePolicyPrompt(portalBrand) : "";
     const runtimeMessage = policyPrompt
       ? `${policyPrompt}\n\nCustomer request:\n${baseRuntimeMessage}`
@@ -13952,7 +13941,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           }
         },
         onEvent(event) {
-          portalRunProjection.push(event);
+          portalPartialAnswer.push(portalRunProjection.push(event));
           if (attempt === 1 && portalRuntimeEventIndicatesTurnStarted(event)) {
             portalFirstAttemptTurnStarted = true;
           }
@@ -14140,6 +14129,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
       portalAutoRecoveryAttempted = true;
       portalRunProjection.reset();
+      portalPartialAnswer.reset();
       runtimeFileChanges.length = 0;
       logPortalStream("auto_recovery_started", {
         attempt: 2,
@@ -14245,7 +14235,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         runId: portalRunId,
         assistantMessageId: portalAssistantMessageId,
         reason: "explicit_cancel",
-        acceptedAt: portalRunAcceptedAt
+        acceptedAt: portalRunAcceptedAt,
+        partial: safePortalPartialSnapshot(portalPartialSnapshot)
       }).catch((error) => {
         console.warn("portal chat failed to append stopped assistant", {
           threadId: portalThreadId,
@@ -14268,7 +14259,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           locale: portalLocale
         }),
         autoRecoveryAttempted: portalAutoRecoveryAttempted,
-        acceptedAt: portalRunAcceptedAt
+        acceptedAt: portalRunAcceptedAt,
+        partial: safePortalPartialSnapshot(portalPartialSnapshot)
       }).catch((error) => {
         console.warn("portal chat failed to append failed assistant", {
           threadId: portalThreadId,

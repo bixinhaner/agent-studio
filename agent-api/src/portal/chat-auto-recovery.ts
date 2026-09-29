@@ -1,3 +1,5 @@
+import type { PortalPartialAssistantSnapshot } from "./chat-partial-answer.js";
+
 type PortalChatAutoRecoveryInput = {
   error: unknown;
   attempted: boolean;
@@ -99,12 +101,19 @@ export function portalRuntimeEventHasAnySideEffect(event: PortalRuntimeEvent): b
   );
 }
 
-export function portalAutoRecoveryFailureAssistantMessage(input: { id: string; sessionId: string; runId?: string }) {
+export function portalAutoRecoveryFailureAssistantMessage(input: {
+  id: string;
+  sessionId: string;
+  runId?: string;
+  partial?: PortalPartialAssistantSnapshot;
+}) {
   const now = new Date().toISOString();
   return {
     id: input.id,
     role: "assistant",
     content: [
+      ...(input.partial?.contentParts ?? []),
+      ...(input.partial?.answerText.trim() ? [{ type: "text", text: input.partial.answerText }] : []),
       {
         type: "data",
         name: "codex_recovery_failure",
