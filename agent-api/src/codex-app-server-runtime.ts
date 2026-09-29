@@ -1495,6 +1495,10 @@ class CodexAppServerManager {
     let usageFileStart = 0;
     let completed = false;
     let unsubscribe = () => {};
+    let unsubscribeTerminalWatch = () => {};
+    // Set when a client abort starts interrupting/reaping this turn. The reap
+    // outlives the generator, so slots and the terminal watch wait for it.
+    let reapPromise: Promise<void> | undefined;
     let idleTimer: NodeJS.Timeout | undefined;
     let maxTimer: NodeJS.Timeout | undefined;
     let abortReject: ((error: Error) => void) | undefined;
@@ -1618,7 +1622,8 @@ class CodexAppServerManager {
         abortReject?.(error);
       };
       if (error.category === "client_aborted") {
-        void cancelAndReapIfNeeded().finally(settleFailure);
+        reapPromise ??= cancelAndReapIfNeeded().catch(() => undefined);
+        void reapPromise.finally(settleFailure);
         return;
       }
       void bestEffortCancel();
@@ -1756,6 +1761,18 @@ class CodexAppServerManager {
         }
         acceptEvent(event);
       });
+      // The portal abandons the stream on stop, which ends this generator (and
+      // its subscription above) as soon as the first post-interrupt event
+      // arrives. The reap still has to see the terminal turn/completed, so it
+      // watches on its own subscription that lives until the reap is over.
+      unsubscribeTerminalWatch = process.subscribe((notification) => {
+        if (trimOrUndefined(notification.method) !== "turn/completed") return;
+        const params = asRecord(notification.params) ?? {};
+        const eventThreadId = trimOrUndefined(params.threadId) ?? trimOrUndefined(asRecord(params.thread)?.id);
+        const eventTurnId = trimOrUndefined(asRecord(params.turn)?.id) ?? trimOrUndefined(params.turnId);
+        if (eventThreadId !== thread.id || !turnId || eventTurnId !== turnId) return;
+        markTurnTerminal();
+      });
       usageFile = await findThreadRollout(trimOrUndefined(scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"), thread.id);
       usageFileStart = usageFile ? (await fs.stat(usageFile).catch(() => undefined))?.size ?? 0 : 0;
       const result = await Promise.race([
@@ -1797,8 +1814,19 @@ class CodexAppServerManager {
       if (activeTurn && activeTurn.turnId === turnId && activeTurn.scopeKey === thread.scopeKey) {
         this.activeTurnsByThread.delete(activeTurnKey);
       }
-      releaseTurn();
-      releaseThread();
+      // Keep the thread lock and turn slot until an in-flight reap has decided
+      // the fate of the shared app-server, so a resend never picks a process
+      // that this turn's reaper is about to retire.
+      const releaseAfterReap = () => {
+        unsubscribeTerminalWatch();
+        releaseTurn();
+        releaseThread();
+      };
+      if (reapPromise) {
+        void reapPromise.finally(releaseAfterReap);
+      } else {
+        releaseAfterReap();
+      }
     }
   }
 
