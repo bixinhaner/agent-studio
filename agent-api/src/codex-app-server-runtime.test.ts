@@ -22,6 +22,7 @@ const originalEnv = {
   CODEX_APP_SERVER_TURN_MAX_MS: process.env.CODEX_APP_SERVER_TURN_MAX_MS,
   CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS: process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS,
   FAKE_INTERRUPT_NO_TERMINAL: process.env.FAKE_INTERRUPT_NO_TERMINAL,
+  FAKE_INTERRUPT_NO_ACTIVE_TURN: process.env.FAKE_INTERRUPT_NO_ACTIVE_TURN,
   CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS: process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS
 };
 
@@ -53,6 +54,7 @@ const configByThread = new Map();
 const skillRefreshCountAtThreadLoad = new Map();
 const activeTurnByThread = new Map();
 const suppressInterruptCompletion = process.env.FAKE_INTERRUPT_NO_TERMINAL === "1";
+const interruptWithoutActiveTurn = process.env.FAKE_INTERRUPT_NO_ACTIVE_TURN === "1";
 let extraSkillRoots = [];
 let skillsListCount = 0;
 
@@ -230,6 +232,10 @@ rl.on("line", (line) => {
     return;
   }
   if (message.method === "turn/interrupt") {
+    if (interruptWithoutActiveTurn) {
+      write({ id, error: { message: "no active turn to interrupt" } });
+      return;
+    }
     respond(id, {});
     if (suppressInterruptCompletion) return;
     notify("turn/completed", {
@@ -573,6 +579,7 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_TURN_MAX_MS = "";
     process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS = "";
     delete process.env.FAKE_INTERRUPT_NO_TERMINAL;
+    delete process.env.FAKE_INTERRUPT_NO_ACTIVE_TURN;
     process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0,0";
   });
 
@@ -1642,5 +1649,92 @@ describe("Codex app-server runtime", () => {
       if (event.delta) answer += event.delta;
     }
     expect(answer).toBe("Hello");
+  });
+
+  it("resends on a fresh app-server when the stopped turn retires the shared one while the resend waits", async () => {
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "500";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "1000";
+    process.env.CODEX_APP_SERVER_TURN_INTERRUPT_TIMEOUT_MS = "30";
+    process.env.FAKE_INTERRUPT_NO_TERMINAL = "1";
+    const startLog = path.join(testTempDir, "stop-resend-starts.log");
+    await fs.rm(startLog, { force: true });
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-stop-resend"),
+        FAKE_APP_SERVER_START_LOG: startLog
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const abortController = new AbortController();
+    let resend: Promise<{ answer: string } | { error: string }> | undefined;
+
+    const stoppedTurn = (async () => {
+      for await (const event of runtime.runStreamed(thread, "hang", { signal: abortController.signal })) {
+        if (event.type !== "turn.started") continue;
+        abortController.abort();
+        // The user resends immediately, before the stopped turn has finished
+        // retiring the app-server that Codex never released.
+        resend = (async () => {
+          try {
+            let answer = "";
+            for await (const next of runtime.runStreamed(thread, "after-abort")) {
+              if (next.delta) answer += next.delta;
+            }
+            return { answer };
+          } catch (error) {
+            return { error: error instanceof Error ? error.message : String(error) };
+          }
+        })();
+      }
+    })();
+
+    await expect(stoppedTurn).rejects.toThrow(/aborted by client/);
+    await expect(resend).resolves.toEqual({ answer: "Hello" });
+
+    const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").map(Number);
+    expect(starts).toHaveLength(2);
+    // The replacement may only start after the retired process released the thread writer.
+    expect(isPidAlive(starts[0])).toBe(false);
+  });
+
+  it("keeps the shared app-server when Codex reports the stopped turn is no longer active", async () => {
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "500";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "1000";
+    process.env.FAKE_INTERRUPT_NO_ACTIVE_TURN = "1";
+    const startLog = path.join(testTempDir, "stop-no-active-turn-starts.log");
+    await fs.rm(startLog, { force: true });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-stop-no-active-turn"),
+        FAKE_APP_SERVER_START_LOG: startLog
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const abortController = new AbortController();
+
+    await expect(async () => {
+      for await (const event of runtime.runStreamed(thread, "hang", { signal: abortController.signal })) {
+        if (event.type === "turn.started") abortController.abort();
+      }
+    }).rejects.toThrow(/aborted by client/);
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "after-abort")) {
+      if (event.delta) answer += event.delta;
+    }
+    expect(answer).toBe("Hello");
+    // Nothing holds the thread writer, so other threads on this process must not be killed.
+    expect((await fs.readFile(startLog, "utf8")).trim().split("\n")).toHaveLength(1);
+    expect(warnSpy).not.toHaveBeenCalledWith("codex app-server turn interrupt failed", expect.anything());
+    warnSpy.mockRestore();
   });
 });

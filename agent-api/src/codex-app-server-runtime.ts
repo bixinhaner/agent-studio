@@ -229,6 +229,12 @@ function isRetryableRuntimeError(event: CodexStreamEvent): boolean {
   return raw?.willRetry === true;
 }
 
+type TurnInterruptOutcome = "confirmed" | "not_active" | "failed" | "timeout";
+
+function isNoActiveTurnError(error: unknown): boolean {
+  return error instanceof Error && /no active turn/i.test(error.message);
+}
+
 function classifyRuntimeFailure(message: string, raw?: unknown): CodexAppServerFailureCategory {
   const text = `${message}\n${jsonPreview(raw, 1000)}`.toLowerCase();
   if (text.includes("aborted") || text.includes("abort")) return "client_aborted";
@@ -1457,24 +1463,31 @@ class CodexAppServerManager {
       codexRunConfig: options.codexRunConfig ?? thread.options.codexRunConfig
     };
     const threadProcessKey = `${thread.scopeKey}\u0000${thread.id}`;
-    const reservedProcess = await this.getReservedThreadProcess(thread.id, scope);
-    const process = reservedProcess.process;
+    const activeTurnKey = `${thread.scopeKey}\u0000${thread.id}`;
+    // Serialize on the thread before choosing an app-server. A previous turn of
+    // this thread may still be reaping (interrupt, wait for its terminal event,
+    // retire the process). Picking the process first let this turn adopt one
+    // that the previous turn's reaper then stopped underneath it, failing the
+    // resend with the previous turn's "interrupt confirmation timeout".
+    const releaseThread = await this.acquireThreadLock(thread.id);
+    let releaseTurn: () => void;
+    let process: CodexAppServerProcess;
+    try {
+      const reservedProcess = await this.getReservedThreadProcess(thread.id, scope);
+      process = reservedProcess.process;
+      try {
+        releaseTurn = await process.acquireTurnSlot();
+      } finally {
+        reservedProcess.release();
+      }
+    } catch (error) {
+      releaseThread();
+      throw error;
+    }
     const owningProcess = process.loadedThreads.has(thread.id) ? process : undefined;
     if (owningProcess) {
       turnSkillScope = runtimeScopeForTurnSkills(owningProcess.scope, options.skills ?? []);
       scope = turnSkillScope.scope;
-    }
-    const activeTurnKey = `${thread.scopeKey}\u0000${thread.id}`;
-    let releaseThread: (() => void) | undefined;
-    let releaseTurn: (() => void) | undefined;
-    try {
-      releaseThread = await this.acquireThreadLock(thread.id);
-      releaseTurn = await process.acquireTurnSlot();
-    } catch (error) {
-      releaseThread?.();
-      throw error;
-    } finally {
-      reservedProcess.release();
     }
     const queue = new AsyncEventQueue<CodexStreamEvent>();
     let turnId: string | undefined;
@@ -1532,14 +1545,24 @@ class CodexAppServerManager {
       });
     };
 
-    const bestEffortCancel = async (): Promise<boolean> => {
-      if (!turnId) return false;
+    const interruptTurn = async (): Promise<TurnInterruptOutcome> => {
+      if (!turnId) return "failed";
       let timeout: NodeJS.Timeout | undefined;
       try {
         const result = await Promise.race([
           process.request("turn/interrupt", { threadId: thread.id, turnId })
             .then(() => "confirmed" as const)
-            .catch(() => "failed" as const),
+            .catch((error: unknown) => {
+              // Codex no longer has this turn running, so nothing holds the
+              // thread writer and there is nothing to fence.
+              if (isNoActiveTurnError(error)) return "not_active" as const;
+              console.warn("codex app-server turn interrupt failed", {
+                threadId: thread.id,
+                turnId,
+                detail: error instanceof Error ? error.message : String(error)
+              });
+              return "failed" as const;
+            }),
           new Promise<"timeout">((resolve) => {
             timeout = setTimeout(() => resolve("timeout"), scope.turnInterruptTimeoutMs);
             timeout.unref();
@@ -1552,22 +1575,20 @@ class CodexAppServerManager {
             timeoutMs: scope.turnInterruptTimeoutMs
           });
         }
-        return result === "confirmed";
-      } catch (error) {
-        console.warn("codex app-server turn interrupt failed", {
-          threadId: thread.id,
-          turnId,
-          detail: error instanceof Error ? error.message : String(error)
-        });
-        return false;
+        return result;
       } finally {
         if (timeout) clearTimeout(timeout);
       }
     };
 
+    const bestEffortCancel = async (): Promise<boolean> => (await interruptTurn()) === "confirmed";
+
     const cancelAndReapIfNeeded = async () => {
-      const interrupted = await bestEffortCancel();
-      if (!interrupted) {
+      const outcome = await interruptTurn();
+      // The app-server is shared with other threads, so only retire it when this
+      // turn may still hold the thread writer.
+      if (outcome === "not_active") return;
+      if (outcome !== "confirmed") {
         void process.stopAndWait("turn interrupt failed");
         return;
       }
@@ -1776,8 +1797,8 @@ class CodexAppServerManager {
       if (activeTurn && activeTurn.turnId === turnId && activeTurn.scopeKey === thread.scopeKey) {
         this.activeTurnsByThread.delete(activeTurnKey);
       }
-      releaseTurn?.();
-      releaseThread?.();
+      releaseTurn();
+      releaseThread();
     }
   }
 
@@ -1810,9 +1831,23 @@ class CodexAppServerManager {
     threadId: string,
     fallbackScope: RuntimeScope
   ): Promise<{ process: CodexAppServerProcess; release: () => void }> {
-    return await this.reserveProcess(
-      async () => this.findThreadOwner(threadId) ?? await this.selectProcessLocked(fallbackScope)
+    return await this.reserveProcess(async () => {
+      await this.retireClosedThreadOwners(threadId);
+      return this.findThreadOwner(threadId) ?? await this.selectProcessLocked(fallbackScope);
+    });
+  }
+
+  // A stopped app-server keeps the persisted thread writer until it has really
+  // exited. Wait for that before any replacement resumes the thread, otherwise
+  // the resume fails with "already has an active writer".
+  private async retireClosedThreadOwners(threadId: string): Promise<void> {
+    const closedOwners = [...this.processes.values()].filter(
+      (process) => process.closed && process.loadedThreads.has(threadId)
     );
+    for (const process of closedOwners) {
+      await process.stopAndWait("retired thread owner");
+      this.forgetProcess(process);
+    }
   }
 
   private async reserveProcess(
