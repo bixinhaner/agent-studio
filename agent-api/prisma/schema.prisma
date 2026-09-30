@@ -2386,6 +2386,26 @@ model UsageEvent {
   @@map("usage_events")
 }
 
+model CodexQuotaSnapshot {
+  id                   String   @id @default(cuid())
+  credentialHash       String   @map("credential_hash")
+  limitId              String   @default("codex") @map("limit_id")
+  resetAt              DateTime @map("reset_at")
+  windowDurationMins   Int      @map("window_duration_mins")
+  usedPercent          Int      @map("used_percent")
+  remainingPercent     Int      @map("remaining_percent")
+  ordinaryUsageAllowed Boolean  @map("ordinary_usage_allowed")
+  planType             String?  @map("plan_type")
+  creditsAvailable     Boolean? @map("credits_available")
+  creditsBalance       String?  @map("credits_balance")
+  observedAt           DateTime @default(now()) @map("observed_at")
+  sampleBucket         DateTime @map("sample_bucket")
+
+  @@unique([credentialHash, limitId, resetAt, sampleBucket])
+  @@index([resetAt, observedAt])
+  @@map("codex_quota_snapshots")
+}
+
 model UsageDailyRollup {
   id                String   @id @default(cuid())
   /// Global rollups use organizationId = NULL and rely on a partial unique index in SQL migration.

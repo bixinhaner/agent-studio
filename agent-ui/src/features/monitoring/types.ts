@@ -58,6 +58,8 @@ export type OperationsInsightsTrendPoint = {
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  quotaUsedPercent: number | null;
+  quotaDeltaPercent: number | null;
 };
 
 export type OperationsInsightsBreakdownRow = {

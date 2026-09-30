@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type RequestHandler } from "expres
 
 import { buildOperationsInsights, type OperationsInsightsSessionSortKey } from "./operations-insights.js";
 import type { AlertEventRepository } from "../persistence/alert-event-repository.js";
+import type { CodexQuotaSnapshotRepository } from "../persistence/codex-quota-snapshot-repository.js";
 import type { AlertRuleRepository, CreateAlertRuleInput } from "../persistence/alert-rule-repository.js";
 import type { CostProfileRepository, UpsertCostProfileInput } from "../persistence/cost-profile-repository.js";
 import type { DepartmentRepository } from "../persistence/department-repository.js";
@@ -28,6 +29,7 @@ type MonitoringRouterOptions = {
   alertRules: Pick<AlertRuleRepository, "list" | "create" | "getById" | "update">;
   alertEvents: Pick<AlertEventRepository, "list" | "getById" | "update">;
   notificationRecords: Pick<NotificationRecordRepository, "list">;
+  quotaSnapshots: Pick<CodexQuotaSnapshotRepository, "list">;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -195,10 +197,11 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         sessionSortDirection: parseSortDirection(req.query.sessionSortDirection)
       } as const;
 
+      const usageEventsFrom = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
       const usageEvents = await options.usageLedger.listEvents({
         organizationId: filters.organizationId,
         model: filters.model,
-        from: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+        from: usageEventsFrom
       });
 
       const sessionIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.sessionId)).filter(Boolean) as string[])];
@@ -210,11 +213,17 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         ...new Set(usageEvents.map((item) => trimOrUndefined(item.departmentIdSnapshot)).filter(Boolean) as string[])
       ];
 
-      const [sessions, organizations, users, departments] = await Promise.all([
+      const [sessions, organizations, users, departments, quotaSnapshots] = await Promise.all([
         options.sessions.listByIds(sessionIds),
         options.organizations.listByIds(organizationIds),
         Promise.all(userIds.map(async (userId) => [userId, await options.users.getById(userId)] as const)),
-        Promise.all(departmentIds.map(async (departmentId) => [departmentId, await options.departments.getById(departmentId)] as const))
+        Promise.all(departmentIds.map(async (departmentId) => [departmentId, await options.departments.getById(departmentId)] as const)),
+        options.quotaSnapshots
+          .list({
+            // Include one reset window before the requested range so the first day's delta has a baseline.
+            from: new Date(usageEventsFrom.getTime() - 8 * 24 * 60 * 60 * 1000)
+          })
+          .catch(() => [])
       ]);
 
       res.json(
@@ -224,7 +233,8 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
           organizationsById: new Map(organizations.map((item) => [item.id, item] as const)),
           usersById: new Map(users.flatMap(([key, value]) => (value ? [[key, value] as const] : []))),
           departmentsById: new Map(departments),
-          filters
+          filters,
+          quotaSnapshots
         })
       );
     } catch (error) {

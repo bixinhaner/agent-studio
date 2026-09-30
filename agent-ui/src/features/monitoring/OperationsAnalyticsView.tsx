@@ -29,7 +29,16 @@ type SortState<Key extends string> = {
 };
 type TrendSortKey = keyof Pick<
   OperationsInsightsTrendPoint,
-  "day" | "organizationCount" | "userCount" | "sessionCount" | "requestCount" | "totalTokens" | "estimatedCost" | "internalCost"
+  | "day"
+  | "organizationCount"
+  | "userCount"
+  | "sessionCount"
+  | "requestCount"
+  | "totalTokens"
+  | "estimatedCost"
+  | "internalCost"
+  | "quotaUsedPercent"
+  | "quotaDeltaPercent"
 >;
 type OrganizationSortKey =
   | "organization"
@@ -78,6 +87,15 @@ function formatCount(value: number): string {
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatQuotaPercent(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : `${value.toFixed(0)}%`;
+}
+
+function formatQuotaDelta(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(0)} 个百分点`;
 }
 
 function resolveLocalTimeZone(): string {
@@ -256,7 +274,9 @@ const TREND_SORT_ACCESSORS: Record<TrendSortKey, (row: OperationsInsightsTrendPo
   requestCount: (row) => row.requestCount,
   totalTokens: (row) => row.totalTokens,
   estimatedCost: (row) => Number(row.estimatedCost),
-  internalCost: (row) => Number(row.internalCost)
+  internalCost: (row) => Number(row.internalCost),
+  quotaUsedPercent: (row) => row.quotaUsedPercent,
+  quotaDeltaPercent: (row) => row.quotaDeltaPercent
 };
 
 const ORGANIZATION_SORT_ACCESSORS: Record<OrganizationSortKey, (row: OperationsInsightsOrganizationRow) => SortValue> = {
@@ -327,6 +347,12 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
             <th aria-sort={sortAria(sort, "internalCost")}>
               <SortableHeader label="内部价值" sortKey="internalCost" sort={sort} onSort={handleSort} />
             </th>
+            <th aria-sort={sortAria(sort, "quotaUsedPercent")}>
+              <SortableHeader label="周额度已用" sortKey="quotaUsedPercent" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "quotaDeltaPercent")}>
+              <SortableHeader label="当日变化" sortKey="quotaDeltaPercent" sort={sort} onSort={handleSort} />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -340,6 +366,8 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
               <td>{formatCount(row.totalTokens)}</td>
               <td>{formatUsdAmount(row.estimatedCost)}</td>
               <td>{formatUsdAmount(row.internalCost)}</td>
+              <td>{formatQuotaPercent(row.quotaUsedPercent)}</td>
+              <td>{formatQuotaDelta(row.quotaDeltaPercent)}</td>
             </tr>
           ))}
         </tbody>
@@ -849,7 +877,10 @@ export function OperationsAnalyticsView() {
                 key: "overview",
                 label: "趋势总览",
                 children: (
-                  <TableShell title="业务趋势" subtitle="按本地时区回放业务会话、问题次数、tokens 和价值；后台安全审核单独统计。">
+                  <TableShell
+                    title="业务趋势"
+                    subtitle="按本地时区回放业务会话、问题次数、tokens 和价值；周额度来自同一凭据与 reset epoch 的上游小时快照，尚未采集时显示 —。"
+                  >
                     <TrendTable rows={data.trends} />
                   </TableShell>
                 )

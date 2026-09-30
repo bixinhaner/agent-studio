@@ -3,6 +3,7 @@ import type { OrganizationRecord } from "../persistence/organization-repository.
 import type { SessionRecord } from "../persistence/session-repository.js";
 import type { AuthenticatedUser } from "../persistence/user-repository.js";
 import type { UsageEventRecord } from "../persistence/usage-event-repository.js";
+import type { CodexQuotaSnapshotRecord } from "../persistence/codex-quota-snapshot-repository.js";
 import { usageCacheShare, usageTotalTokens } from "../operations/usage-metrics.js";
 
 export type OperationsInsightsFilters = {
@@ -82,6 +83,8 @@ export type OperationsInsightsTrendPoint = {
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  quotaUsedPercent: number | null;
+  quotaDeltaPercent: number | null;
 };
 
 export type OperationsInsightsBreakdownRow = {
@@ -202,6 +205,7 @@ export type BuildOperationsInsightsInput = {
   usersById: Map<string, AuthenticatedUser>;
   departmentsById: Map<string, DepartmentRecord | null>;
   filters: OperationsInsightsFilters;
+  quotaSnapshots?: CodexQuotaSnapshotRecord[];
   now?: Date;
 };
 
@@ -455,6 +459,51 @@ function toDateKeyInTimeZone(value: string | Date, timeZone: string): string {
   } catch {
     return date.toISOString().slice(0, 10);
   }
+}
+
+export function buildQuotaTrendFields(
+  snapshots: CodexQuotaSnapshotRecord[],
+  timeZone: string
+): Map<string, { quotaUsedPercent: number | null; quotaDeltaPercent: number | null }> {
+  type SnapshotWithDay = { snapshot: CodexQuotaSnapshotRecord; day: string; observedAtMs: number };
+  const byDay = new Map<string, SnapshotWithDay[]>();
+  const bySeries = new Map<string, SnapshotWithDay[]>();
+  for (const snapshot of snapshots) {
+    const observedAtMs = Date.parse(snapshot.observedAt);
+    if (!Number.isFinite(observedAtMs)) continue;
+    const item = { snapshot, day: toDateKeyInTimeZone(snapshot.observedAt, timeZone), observedAtMs };
+    const dayItems = byDay.get(item.day) ?? [];
+    dayItems.push(item);
+    byDay.set(item.day, dayItems);
+    const seriesKey = `${snapshot.credentialHash}:${snapshot.resetAt}`;
+    const seriesItems = bySeries.get(seriesKey) ?? [];
+    seriesItems.push(item);
+    bySeries.set(seriesKey, seriesItems);
+  }
+
+  const result = new Map<string, { quotaUsedPercent: number | null; quotaDeltaPercent: number | null }>();
+  for (const [day, items] of byDay) {
+    items.sort((left, right) => left.observedAtMs - right.observedAtMs);
+    const latest = items.at(-1);
+    if (!latest) continue;
+    const latestSeries = `${latest.snapshot.credentialHash}:${latest.snapshot.resetAt}`;
+    const seriesItems = bySeries.get(latestSeries) ?? [];
+    const sameDay = seriesItems.filter((item) => item.day === day).sort((left, right) => left.observedAtMs - right.observedAtMs);
+    const firstOfDay = sameDay[0];
+    if (!firstOfDay) {
+      result.set(day, { quotaUsedPercent: latest.snapshot.usedPercent, quotaDeltaPercent: null });
+      continue;
+    }
+    const previous = [...seriesItems]
+      .filter((item) => item.observedAtMs < firstOfDay.observedAtMs)
+      .sort((left, right) => right.observedAtMs - left.observedAtMs)[0];
+    const delta = latest.snapshot.usedPercent - (previous?.snapshot.usedPercent ?? firstOfDay.snapshot.usedPercent);
+    result.set(day, {
+      quotaUsedPercent: latest.snapshot.usedPercent,
+      quotaDeltaPercent: delta >= 0 ? delta : null
+    });
+  }
+  return result;
 }
 
 function fallbackUserName(userId?: string, user?: AuthenticatedUser): string {
@@ -1080,6 +1129,8 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
   const start = (safePage - 1) * input.filters.sessionPageSize;
   const pagedSessions = sessionRows.slice(start, start + input.filters.sessionPageSize);
 
+  const quotaTrendFields = buildQuotaTrendFields(input.quotaSnapshots ?? [], input.filters.timeZone);
+
   const trends = [...trendBuckets.values()]
     .map((bucket) => ({
       day: bucket.day,
@@ -1089,7 +1140,9 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       requestCount: bucket.requestCount,
       totalTokens: bucket.totalTokens,
       estimatedCost: formatDecimal(bucket.estimatedCost),
-      internalCost: formatDecimal(bucket.internalCost)
+      internalCost: formatDecimal(bucket.internalCost),
+      quotaUsedPercent: quotaTrendFields.get(bucket.day)?.quotaUsedPercent ?? null,
+      quotaDeltaPercent: quotaTrendFields.get(bucket.day)?.quotaDeltaPercent ?? null
     }))
     .sort((left, right) => left.day.localeCompare(right.day));
 

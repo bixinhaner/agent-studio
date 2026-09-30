@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildOperationsInsights } from "./operations-insights.js";
+import { buildOperationsInsights, buildQuotaTrendFields } from "./operations-insights.js";
 import type { SessionRecord } from "../persistence/session-repository.js";
 import type { UsageEventRecord } from "../persistence/usage-event-repository.js";
 
@@ -43,6 +43,32 @@ function makeSession(input: Partial<SessionRecord> & Pick<SessionRecord, "sessio
 }
 
 describe("buildOperationsInsights", () => {
+  it("uses the latest hourly quota snapshot and same-reset daily delta", () => {
+    const snapshots = ([
+      ["2026-04-15T01:00:00.000Z", 20],
+      ["2026-04-15T13:00:00.000Z", 23],
+      ["2026-04-16T01:00:00.000Z", 25]
+    ] as const).map(([observedAt, usedPercent], index) => ({
+      id: `quota-${index}`,
+      credentialHash: "credential-a",
+      limitId: "codex",
+      resetAt: "2026-04-19T01:00:00.000Z",
+      windowDurationMins: 10080,
+      usedPercent,
+      remainingPercent: 100 - usedPercent,
+      ordinaryUsageAllowed: true,
+      observedAt,
+      sampleBucket: observedAt
+    }));
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai")).toEqual(
+      new Map([
+        ["2026-04-15", { quotaUsedPercent: 23, quotaDeltaPercent: 3 }],
+        ["2026-04-16", { quotaUsedPercent: 25, quotaDeltaPercent: 2 }]
+      ])
+    );
+  });
+
   it("aggregates chat and external API usage into user, organization, path, and session views", () => {
     const usageEvents = [
       makeUsageEvent({

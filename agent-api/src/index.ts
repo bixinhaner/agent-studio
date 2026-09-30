@@ -81,6 +81,8 @@ import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { sendBufferContent, sendFileContent } from "./files/raw-content-response.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
+import { CodexQuotaSnapshotService } from "./operations/codex-quota-snapshot-service.js";
+import { CodexQuotaSnapshotRepository, type CodexQuotaSnapshotRepositoryDb } from "./persistence/codex-quota-snapshot-repository.js";
 import { closeCodexThreadRuntimeLeasePool, withCodexThreadRuntimeLease } from "./codex-thread-runtime-lease.js";
 import {
   assertCodexThreadContinuity,
@@ -679,6 +681,11 @@ const subscriptionDenialLogs = new SubscriptionDenialLogRepository(db as never);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
 const usageLedger = new UsageLedgerService({ usageEvents: usageEventRepository });
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
+const codexQuotaSnapshotRepository = new CodexQuotaSnapshotRepository(db as unknown as CodexQuotaSnapshotRepositoryDb);
+const codexQuotaSnapshotService = new CodexQuotaSnapshotService(codexQuotaSnapshotRepository, {
+  codexHome: appConfig.codex.baseHome,
+  logger: console
+});
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
 const quotaPolicies = new QuotaPolicyRepository(db as unknown as QuotaPolicyRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
@@ -11618,7 +11625,8 @@ registerCommonApiRoutes(app, {
     costProfiles,
     alertRules,
     alertEvents,
-    notificationRecords
+    notificationRecords,
+    quotaSnapshots: codexQuotaSnapshotRepository
   }),
   resourcesAdminRouter: createResourcesAdminRouter({
     knowledgeSets,
@@ -14384,6 +14392,9 @@ async function bootstrap() {
     orgSyncScheduler.start();
     zendeskAiReviewEmailReminderScheduler.start();
     conversationSecurityReviewScheduler.start();
+    if (process.env.NODE_ENV === "production") {
+      codexQuotaSnapshotService.start();
+    }
   }
   if (runsChatService) {
     dingtalkBotStream.start();
