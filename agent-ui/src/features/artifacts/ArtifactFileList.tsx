@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { CheckIcon, DownloadIcon, FileIcon } from "lucide-react";
 
 import { usePortalI18n } from "../portal/i18n";
@@ -20,10 +21,16 @@ export type ArtifactFileListProps = {
   resolveActions(change: CodexFileChangeView): ArtifactFileActions;
   onPreview?(change: CodexFileChangeView, actions: ArtifactFileActions): void;
   className?: string;
+  /** True while the producing run is live; files first seen then get a "just generated" badge. */
+  fresh?: boolean;
 };
 
 export function ArtifactFileList(props: ArtifactFileListProps) {
   const { t } = usePortalI18n();
+  const freshKeysRef = useRef<Set<string>>(new Set());
+  if (props.fresh) {
+    for (const change of props.changes) freshKeysRef.current.add(`${change.kind}-${change.path}`);
+  }
 
   if (props.changes.length === 0) return null;
 
@@ -60,13 +67,16 @@ export function ArtifactFileList(props: ArtifactFileListProps) {
           const canDownload = change.canDownload && Boolean(actions.downloadUrl);
           const inlineImageUrl = actions.inlineImageUrl
             || (isImageArtifactFile(change.path) ? actions.previewUrl : "");
+          const isFresh = freshKeysRef.current.has(`${change.kind}-${change.path}`);
 
           return (
             <li
               key={`${change.kind}-${change.path}`}
-              className={inlineImageUrl
-                ? "artifact-file-list-item artifact-file-list-item-with-image"
-                : "artifact-file-list-item"}
+              className={[
+                "artifact-file-list-item",
+                inlineImageUrl ? "artifact-file-list-item-with-image" : "",
+                isFresh ? "is-fresh" : ""
+              ].filter(Boolean).join(" ")}
             >
               {inlineImageUrl && canPreview ? (
                 <button
@@ -89,7 +99,10 @@ export function ArtifactFileList(props: ArtifactFileListProps) {
                     <FileIcon size={18} />
                   </span>
                   <span className="artifact-file-list-details">
-                    <span className="artifact-file-list-name">{displayName}</span>
+                    <span className="artifact-file-list-name">
+                      {displayName}
+                      {isFresh ? <span className="artifact-file-list-fresh">{t("outputs.justGenerated")}</span> : null}
+                    </span>
                     <span className={isReady
                       ? "artifact-file-list-status is-ready"
                       : "artifact-file-list-status"}

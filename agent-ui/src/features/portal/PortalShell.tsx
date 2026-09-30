@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   useContext,
+  type ComponentProps,
   type FC,
   type MutableRefObject,
   type ReactNode,
@@ -63,6 +64,7 @@ import {
   MoreHorizontalIcon,
   PackageIcon,
   SparklesIcon,
+  BrainIcon,
   ClipboardListIcon,
   BotIcon,
   ZapIcon,
@@ -90,7 +92,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { AuiProvider, Derived, useAuiState } from "@assistant-ui/store";
-import { Button, ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
+import { Button, ConfigProvider, Dropdown, Input, Modal, Drawer, Popover } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { ApiError, api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
@@ -216,6 +218,12 @@ import {
 } from "./workbench/layout-state";
 import { useWorkbenchLayout } from "./workbench/use-workbench-layout";
 import { createPortalAntdTheme } from "./workbench/theme";
+import { HomeProfileProvider, useHomeProfile } from "./roadmap/home-profile";
+import { recommendSkills, roleSuggestions } from "./roadmap/role-home";
+import { PortalRoadmapProvider, usePortalRoadmap } from "./roadmap/PortalRoadmapContext";
+import { usePortalTheme } from "./roadmap/use-portal-theme";
+import { dispatchPortalRunFinished, useRunCompletionAttention } from "./roadmap/run-attention";
+import { updatePortalPreferences } from "./roadmap/api";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { orderAssistantContentParts } from "./assistant-content-order";
@@ -223,6 +231,7 @@ import {
   SUMMARIZED_PROCESS_PART_NAMES,
   summarizeAssistantProcess,
   type AssistantProcessCategory,
+  type AssistantProcessSkill,
   type AssistantProcessStep,
   type AssistantProcessSummary
 } from "./assistant-process-summary";
@@ -244,6 +253,9 @@ import {
   type PortalWorkspaceTask
 } from "./workspace";
 import "./workbench/workbench.css";
+import "./roadmap/roadmap.css";
+import "./roadmap/portal-dark.generated.css";
+import "./roadmap/portal-dark.css";
 import { localizedUploadFailureMessage, THREAD_ATTACHMENT_MAX_BYTES } from "./attachment-upload-messages";
 import { InlineAttachmentComposer, InlineAttachmentEditComposer } from "./InlineAttachmentComposer";
 
@@ -1292,9 +1304,71 @@ const WELCOME_SUGGESTION_TRANSLATIONS: Record<string, { label: PortalMessageKey;
   "Recommend Product Solution": { label: "welcome.productSolution", prompt: "welcome.productSolutionPrompt" }
 };
 
+const RoleWelcomeSuggestions: FC<{ roleKey: string }> = ({ roleKey }) => {
+  const { locale, t } = usePortalI18n();
+  const { availableSkills, enabledSkillIds, setSkills } = useContext(SkillComposerContext);
+  const suggestions = roleSuggestions(roleKey, locale);
+  const recommended = recommendSkills(roleKey, availableSkills, 4);
+  const icons = [PackageIcon, ClipboardListIcon, BotIcon, ZapIcon];
+  const classes = ["icon-green", "icon-blue", "icon-orange", "icon-purple"];
+  return (
+    <div className="portal-role-home">
+      <p className="portal-role-home-hint">
+        {t("home.roleHint", { role: t(`home.role.${roleKey}` as PortalMessageKey) })}
+      </p>
+      <div className="portal-welcome-suggestion-grid">
+        {suggestions.map((suggestion, index) => {
+          const Icon = icons[index % icons.length];
+          return (
+            <ThreadPrimitive.Suggestion
+              key={`${roleKey}-${index}`}
+              className="portal-welcome-suggestion-card"
+              prompt={suggestion.prompt}
+              send={false}
+              clearComposer
+            >
+              <div className={`portal-welcome-suggestion-icon-wrap ${classes[index % classes.length]}`}>
+                <Icon size={20} strokeWidth={2.5} />
+              </div>
+              <span className="portal-welcome-suggestion-text">{suggestion.label}</span>
+            </ThreadPrimitive.Suggestion>
+          );
+        })}
+      </div>
+      {recommended.length ? (
+        <div className="portal-role-home-skills" aria-label={t("home.recommendedSkills")}>
+          <span className="portal-role-home-skills-label">{t("home.recommendedSkills")}</span>
+          {recommended.map((skill) => {
+            const active = enabledSkillIds.includes(skill.id);
+            return (
+              <button
+                key={skill.id}
+                type="button"
+                className={`portal-role-home-skill${active ? " is-active" : ""}`}
+                aria-pressed={active}
+                onClick={() =>
+                  void setSkills(active ? enabledSkillIds.filter((id) => id !== skill.id) : [...enabledSkillIds, skill.id])
+                }
+              >
+                <ZapIcon size={13} aria-hidden="true" />
+                {skill.presentation?.displayName || skill.label || skill.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const DraftOnlyWelcomeSuggestions: FC = () => {
   const { behavior } = useBranding();
   const { locale, t } = usePortalI18n();
+  const homeProfile = useHomeProfile();
+
+  if (homeProfile?.audience === "internal") {
+    return <RoleWelcomeSuggestions roleKey={homeProfile.role_key} />;
+  }
 
   if (behavior.portalWelcomeSuggestions.length === 0) {
     return null;
@@ -2690,7 +2764,7 @@ const UploadAwareComposer: FC = () => {
   };
 
   return (
-    <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
+    <div ref={composerWrapRef} data-tour="steer" className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
       <Composer.Root onSubmit={preventBlockedSubmit}>
         <PortalQueueTray threadRunning={threadRunning} onContinueAnswer={continueAnswer} onContinueQueue={continueQueue} />
         {accessBlock.blocked ? (
@@ -2740,9 +2814,9 @@ const UploadAwareComposer: FC = () => {
         </div>
         <div className="portal-composer-tools-row">
           <div className="portal-composer-tools-left">
-            <Composer.AddAttachment><PlusIcon /></Composer.AddAttachment>
+            <Composer.AddAttachment data-tour="attach"><PlusIcon /></Composer.AddAttachment>
             <LocalWorkspaceControls />
-            <SkillComposerControls />
+            <span className="portal-tour-anchor" data-tour="skills"><SkillComposerControls /></span>
           </div>
           {threadRunning ? (
             <div className="portal-running-composer-actions">
@@ -2950,7 +3024,7 @@ const MobileAwareComposer: FC = () => {
         <div className="portal-composer-tools-row">
           <div className="portal-composer-tools-left">
             <LocalWorkspaceControls />
-            <SkillComposerControls />
+            <span className="portal-tour-anchor" data-tour="skills"><SkillComposerControls /></span>
           </div>
           {threadRunning ? (
             <div className="portal-running-composer-actions">
@@ -4079,6 +4153,82 @@ function isSummarizedProcessContentPart(part: unknown): boolean {
   return item.type === "data" && typeof item.name === "string" && SUMMARIZED_PROCESS_PART_NAMES.has(item.name);
 }
 
+/** File cards produced by the live run fade in with a "just generated" badge. */
+const MessageArtifactFileList: FC<ComponentProps<typeof ArtifactFileList>> = (props) => {
+  const running = useAuiState((s) => (s.message as { status?: { type?: string } }).status?.type === "running");
+  return <ArtifactFileList {...props} fresh={running} />;
+};
+
+const MemoryContextChip: FC<{ data?: unknown }> = ({ data }) => {
+  const { t } = usePortalI18n();
+  const roadmap = usePortalRoadmap();
+  const record = asRecord(data);
+  const count = typeof record?.item_count === "number" ? record.item_count : 0;
+  if (count <= 0) return null;
+  return (
+    <div className="assistant-memory-chip" role="note">
+      <BrainIcon size={14} aria-hidden="true" />
+      <span title={t("memory.usedDetail", { count })}>{t("memory.used")}</span>
+      {roadmap?.personalFeaturesEnabled ? (
+        <button type="button" className="assistant-memory-chip-link" onClick={() => roadmap.openMemory()}>
+          {t("memory.manage")}
+        </button>
+      ) : null}
+    </div>
+  );
+};
+
+/** Skill tags pinned above the answer; clicking one reveals what the skill does. */
+const AssistantSkillTags: FC<{ skills: AssistantProcessSkill[]; onShowSteps?: () => void }> = ({ skills, onShowSteps }) => {
+  const { t } = usePortalI18n();
+  const { availableSkills, automaticSkills } = useContext(SkillComposerContext);
+  if (skills.length === 0) return null;
+  const find = (name: string) => {
+    const key = name.trim().toLowerCase();
+    const match = (skill: RuntimeSkillOption) =>
+      [skill.name, skill.label, skill.id, skill.presentation?.displayName].some((value) => value?.trim().toLowerCase() === key);
+    const automatic = automaticSkills.find(match);
+    return { skill: automatic ?? availableSkills.find(match), automatic: Boolean(automatic) };
+  };
+  return (
+    <div className="assistant-skill-tags" role="group" aria-label={t("skillTag.used")}>
+      {skills.map((item) => {
+        const { skill, automatic } = find(item.name);
+        const displayName = skill?.presentation?.displayName || item.name;
+        const steps = skill?.presentation?.usageSteps ?? [];
+        const content = (
+          <div className="assistant-skill-tag-popover">
+            <strong>{displayName}</strong>
+            {skill?.presentation?.summary ? <p>{skill.presentation.summary}</p> : null}
+            {steps.length ? (
+              <>
+                <span className="assistant-skill-tag-popover-label">{t("skillTag.steps")}</span>
+                <ol>
+                  {steps.map((step, index) => (
+                    <li key={`${index}-${step.slice(0, 12)}`}>{step}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
+            {skill ? <small>{automatic ? t("skillTag.automatic") : t("skillTag.selected")}</small> : null}
+          </div>
+        );
+        return (
+          <Popover key={item.id} content={content} trigger="click" placement="bottomLeft" onOpenChange={(open) => open && !steps.length && onShowSteps?.()}>
+            <button type="button" className={`assistant-skill-tag is-${item.kind}`}>
+              <span className="assistant-skill-tag-icon" aria-hidden="true">
+                {item.kind === "capability" ? <SparklesIcon size={13} /> : <PackageIcon size={13} />}
+              </span>
+              <span className="assistant-skill-tag-kind">{t("skillTag.used")}</span>
+              <span className="assistant-skill-tag-name">{displayName}</span>
+            </button>
+          </Popover>
+        );
+      })}
+    </div>
+  );
+};
+
 /**
  * Commentary, trace, process and "instructions read" parts are folded into one
  * summary line. Only the first such part of a message renders it; the rest render nothing.
@@ -4211,9 +4361,12 @@ const AssistantWorkingPanel: FC<{ summary: AssistantProcessSummary; startedAt?: 
   if (summary.sourceCount > 0) meta.push(t("process.sources", { count: summary.sourceCount }));
   if (elapsedMs >= 10_000) meta.push(t("process.live.elapsed", { duration: formatProcessDuration(elapsedMs, t) }));
   const hasRunningStep = summary.steps.some((step) => step.status === "running");
+  const doneSteps = summary.steps.filter((step) => step.status === "done").length;
+  if (summary.steps.length >= 2) meta.unshift(t("process.planProgress", { done: doneSteps, total: summary.steps.length }));
 
   return (
     <div className="assistant-process-working" role="status" aria-live="polite">
+      <AssistantSkillTags skills={summary.skills} />
       <ProcessThoughts thoughts={summary.thoughts} />
       {summary.steps.length > 0 ? (
         <ol className="assistant-process-steps">
@@ -4264,8 +4417,15 @@ const AssistantProcessSummaryBlock: FC = () => {
   if (isRunning && !hasAnswerText) return <AssistantWorkingPanel summary={summary} startedAt={startedAt} />;
 
   const segments = processSummarySegments(summary, t);
-  const skillCount = summary.skills.length;
+  if (!isRunning && summary.durationMs) {
+    const durationSegment = t("process.duration", { duration: formatProcessDuration(summary.durationMs, t) });
+    const index = segments.indexOf(durationSegment);
+    if (index >= 0) segments.splice(index, 1);
+    segments.unshift(t("process.completedIn", { duration: formatProcessDuration(summary.durationMs, t) }));
+  }
   return (
+    <>
+    <AssistantSkillTags skills={summary.skills} onShowSteps={() => setOpen(true)} />
     <div className={`assistant-process-summary${open ? " is-open" : ""}${isRunning ? " is-running" : ""}`}>
       <button
         type="button"
@@ -4277,21 +4437,10 @@ const AssistantProcessSummaryBlock: FC = () => {
           {isRunning ? <span className="assistant-process-step-pulse" /> : <CheckIcon size={15} strokeWidth={2.6} />}
         </span>
         <span className="assistant-process-summary-text">
-          {skillCount > 0 ? (
-            <span className="assistant-process-summary-segment">
-              {t("process.used")}{" "}
-              {summary.skills.map((skill, index) => (
-                <span key={skill.id}>
-                  {index > 0 ? "、" : null}
-                  <span className="assistant-process-summary-skill">{skill.name}</span>
-                </span>
-              ))}
-            </span>
-          ) : null}
           {segments.map((segment) => (
             <span key={segment} className="assistant-process-summary-segment">{segment}</span>
           ))}
-          {skillCount === 0 && segments.length === 0 ? (
+          {segments.length === 0 ? (
             <span className="assistant-process-summary-segment">{t("process.thoughtOnly")}</span>
           ) : null}
         </span>
@@ -4319,6 +4468,7 @@ const AssistantProcessSummaryBlock: FC = () => {
         </div>
       ) : null}
     </div>
+    </>
   );
 };
 
@@ -4847,6 +4997,10 @@ const ProcessDataFallback: FC<any> = ({
     conflict: ManagedSkillInstallConflict;
   }>();
 
+  if (name === "agent_studio_memory_context") {
+    return <MemoryContextChip data={data} />;
+  }
+
   if (name === "codex_connection_recovery") {
     return <PortalChatRecoveryNotice state="recovering" />;
   }
@@ -5110,7 +5264,7 @@ const ProcessDataFallback: FC<any> = ({
     };
     return (
       <>
-        <ArtifactFileList
+        <MessageArtifactFileList
           changes={artifactChanges}
           resolveActions={(item) => {
             const displayName = artifactFileName(item.displayPath);
@@ -7124,10 +7278,6 @@ export function PortalShell(props: {
 }) {
   const auth = useAuth();
   const { brand, branding, behavior } = useBranding();
-  const portalAntdTheme = useMemo(
-    () => createPortalAntdTheme(branding.primaryColor, branding.accentColor),
-    [branding.accentColor, branding.primaryColor]
-  );
   const { locale, intlLocale, antdLocale, t } = usePortalI18n();
   const trainingReadOnly = props.trainingReadOnly ?? false;
   const workspaceDataSource: PortalWorkspaceDataSource = useMemo(
@@ -7147,6 +7297,28 @@ export function PortalShell(props: {
     return t("feedback.impactLow");
   };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
+  const serverThemePreference = portalPreferenceUser?.portalPreferences?.theme;
+  const portalTheme = usePortalTheme(
+    serverThemePreference === "light" || serverThemePreference === "dark" || serverThemePreference === "system"
+      ? serverThemePreference
+      : undefined
+  );
+  const portalAntdTheme = useMemo(
+    () => createPortalAntdTheme(branding.primaryColor, branding.accentColor, portalTheme.resolved),
+    [branding.accentColor, branding.primaryColor, portalTheme.resolved]
+  );
+  const setPortalThemePreference = portalTheme.setPreference;
+  const portalThemeApi = useMemo(
+    () => ({
+      preference: portalTheme.preference,
+      resolved: portalTheme.resolved,
+      setPreference: (next: "light" | "dark" | "system") => {
+        setPortalThemePreference(next);
+        void updatePortalPreferences({ theme: next }).catch(() => undefined);
+      }
+    }),
+    [portalTheme.preference, portalTheme.resolved, setPortalThemePreference]
+  );
   const canUseLocalBridge = Boolean(portalPreferenceUser?.id) && !trainingReadOnly;
   const showLocalBridgeEntry = useLocalBridgeEntryVisibility(canUseLocalBridge ? portalPreferenceUser?.id : undefined);
   const isExternalPortalUser = !isInternalPortalExperience({
@@ -7448,6 +7620,47 @@ export function PortalShell(props: {
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const enabledSkillIdsRef = useRef(enabledSkillIds);
   const selectedWorkspaceFolderIdRef = useRef(selectedWorkspaceFolderId);
+  const roadmapSkills = useMemo(
+    () =>
+      (findRuntimeMode(runtimeOptions, runtimeMode)?.availableSkills ?? []).map((skill) => ({
+        id: skill.id,
+        label: skill.presentation?.displayName || skill.label || skill.name
+      })),
+    [runtimeMode, runtimeOptions]
+  );
+  const scheduledTaskContext = useMemo(
+    () => ({
+      skills: roadmapSkills,
+      runSnapshot: () => {
+        const cfg = appliedConfigRef.current;
+        const folderId = selectedWorkspaceFolderIdRef.current;
+        return {
+          mode_id: runtimeModeRef.current,
+          model: cfg.model,
+          reasoning_effort: cfg.reasoningEffort,
+          run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
+          folder_id: folderId && !folderId.startsWith("__") ? folderId : null
+        };
+      }
+    }),
+    [roadmapSkills]
+  );
+  const roadmapModeLabel = useCallback(
+    (modeId: string | null) => (modeId ? findRuntimeMode(runtimeOptionsRef.current, modeId)?.label : undefined),
+    []
+  );
+  const serverLocalePreference = portalPreferenceUser?.portalPreferences?.locale;
+  const syncedLocaleRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!portalPreferenceUser?.id || trainingReadOnly) return;
+    const known = syncedLocaleRef.current ?? serverLocalePreference;
+    if (known === locale) return;
+    const timer = window.setTimeout(() => {
+      syncedLocaleRef.current = locale;
+      void updatePortalPreferences({ locale }).catch(() => undefined);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [locale, portalPreferenceUser?.id, serverLocalePreference, trainingReadOnly]);
   const portalWorkspaceRef = useRef<PortalWorkspaceSummary | null>(portalWorkspace);
   const hydratedSkillThreadIdRef = useRef("");
   const skillHydrationRef = useRef<{ threadId: string; promise: Promise<void> } | null>(null);
@@ -9544,6 +9757,7 @@ export function PortalShell(props: {
               name !== "codex_file_change" &&
               name !== "skill_draft_status" &&
               name !== "codex_instruction_reads" &&
+              name !== "agent_studio_memory_context" &&
               name !== "codex_connection_recovery" &&
               name !== "codex_recovery_failure"
             ) continue;
@@ -9566,6 +9780,7 @@ export function PortalShell(props: {
               orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
             } else if (
               name === "codex_instruction_reads" ||
+              name === "agent_studio_memory_context" ||
               name === "codex_connection_recovery" ||
               name === "codex_recovery_failure"
             ) {
@@ -9841,6 +10056,17 @@ export function PortalShell(props: {
                 if (content.length > 0) {
                   yield { content };
                 }
+              }
+              continue;
+            }
+
+            if (event === "memory_context") {
+              const contentPart = asRecord(payload?.content_part ?? payload?.contentPart);
+              if (contentPart?.type !== "data" || contentPart.name !== "agent_studio_memory_context") continue;
+              const changed = appendDisplayDataParts([contentPart]);
+              if (changed) {
+                const content = snapshotContent();
+                if (content.length > 0) yield { content };
               }
               continue;
             }
@@ -10462,6 +10688,9 @@ export function PortalShell(props: {
           } else if (portalRunFailed) {
             composerWorkflowController.markRunFailed(threadId);
           }
+          if ((portalRunCompleted || portalRunFailed) && !options.abortSignal.aborted) {
+            dispatchPortalRunFinished({ threadId, status: portalRunCompleted ? "completed" : "failed" });
+          }
           const currentActiveRun = activePortalRunRef.current;
           if (
             currentActiveRun?.sessionId === activeRun.sessionId &&
@@ -10519,6 +10748,15 @@ export function PortalShell(props: {
       setErrorText(error instanceof Error ? error.message : "Failed to open task");
     }
   }, [runtime, selectedWorkspaceFolderId]);
+
+  const attentionThreadsRef = useRef(workspaceThreads);
+  attentionThreadsRef.current = workspaceThreads;
+  const runAttentionHolder = useRunCompletionAttention({
+    enabled: !trainingReadOnly,
+    resolveThreadTitle: (threadId) =>
+      attentionThreadsRef.current.find((thread) => thread.id === threadId || thread.external_id === threadId)?.title ?? undefined,
+    onOpenThread: (threadId) => void openWorkspaceTask({ id: threadId })
+  });
 
   const startWorkspaceTask = useCallback(async () => {
     const folderId = selectedWorkspaceFolderIdRef.current;
@@ -11101,6 +11339,23 @@ export function PortalShell(props: {
         <ProcessTracePreferencesContext.Provider value={processTracePreferences}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={portalAntdTheme} locale={antdLocale}>
+          <HomeProfileProvider enabled={!isExternalPortalUser && !trainingReadOnly} userId={portalPreferenceUser?.id}>
+          <PortalRoadmapProvider
+            personalFeaturesEnabled={!isExternalPortalUser && !trainingReadOnly}
+            tourEnabled={!isExternalPortalUser && !trainingReadOnly}
+            onboardingCompletedAt={portalPreferenceUser?.portalPreferences?.onboardingCompletedAt}
+            userLoaded={Boolean(portalPreferenceUser?.id)}
+            theme={portalThemeApi}
+            scheduledTaskContext={scheduledTaskContext}
+            modeLabel={roadmapModeLabel}
+            onOpenThread={(threadId) => void openWorkspaceTask({ id: threadId })}
+            initialView={
+              typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "scheduled-tasks"
+                ? "scheduled-tasks"
+                : null
+            }
+          >
+            {runAttentionHolder}
             <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>
               <PortalTopBar
                 sessionRailCollapsed={layoutState.isSessionRailCollapsed}
@@ -11537,6 +11792,8 @@ export function PortalShell(props: {
               </AdvancedSettingsPanel>
             ) : null}
           </div>
+          </PortalRoadmapProvider>
+          </HomeProfileProvider>
         </ConfigProvider>
         {pickerOpen ? (
           <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>

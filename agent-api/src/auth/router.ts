@@ -91,13 +91,19 @@ const updatePortalPreferencesSchema = z.object({
     .object({
       show_process_trace: z.boolean().optional(),
       collapse_final_trace_on_done: z.boolean().optional(),
-      dismissed_feature_announcements: z.array(z.string().trim().min(1).max(100)).max(50).optional()
+      dismissed_feature_announcements: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+      onboarding_completed: z.boolean().optional(),
+      theme: z.enum(["light", "dark", "system"]).optional(),
+      locale: z.enum(["en", "zh-CN"]).optional()
     })
     .refine(
       (value) =>
         value.show_process_trace !== undefined ||
         value.collapse_final_trace_on_done !== undefined ||
-        value.dismissed_feature_announcements !== undefined,
+        value.dismissed_feature_announcements !== undefined ||
+        value.onboarding_completed !== undefined ||
+        value.theme !== undefined ||
+        value.locale !== undefined,
       "portal_preferences must include at least one field"
     )
 });
@@ -733,7 +739,15 @@ export function createAuthRouter(options: {
         portalPreferences: {
           showProcessTrace: input.portal_preferences.show_process_trace,
           collapseFinalTraceOnDone: input.portal_preferences.collapse_final_trace_on_done,
-          dismissedFeatureAnnouncements: input.portal_preferences.dismissed_feature_announcements
+          dismissedFeatureAnnouncements: input.portal_preferences.dismissed_feature_announcements,
+          onboardingCompletedAt:
+            input.portal_preferences.onboarding_completed === undefined
+              ? undefined
+              : input.portal_preferences.onboarding_completed
+                ? new Date().toISOString()
+                : "",
+          theme: input.portal_preferences.theme,
+          locale: input.portal_preferences.locale
         }
       });
       req.currentUser = updatedUser;

@@ -45,6 +45,7 @@ import {
 } from "./WorkspaceRail";
 import { CreateWorkspaceFolderModal } from "./CreateWorkspaceFolderModal";
 import { WorkspaceFolderMoreMenu } from "./WorkspaceFolderMoreMenu";
+import { OutputsGallery, OutputTypeTabs, type OutputFilter } from "../roadmap/OutputsGallery";
 
 function fileIconFor(node: PortalWorkspaceNode) {
   if (node.kind === "folder") return <Folder size={21} />;
@@ -105,8 +106,11 @@ export function WorkspaceFolderHome(props: {
   const [dragActive, setDragActive] = useState(false);
   const [showHistoryFiles, setShowHistoryFiles] = useState(false);
   const [taskPage, setTaskPage] = useState(1);
-  const [activeContentTab, setActiveContentTab] = useState<"tasks" | "files">("tasks");
+  const [activeContentTab, setActiveContentTab] = useState<"tasks" | "files">(
+    props.folderId === AGENT_OUTPUTS_WORKSPACE_VIEW ? "files" : "tasks"
+  );
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [outputFilter, setOutputFilter] = useState<OutputFilter>("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recentView = props.folderId === RECENT_WORKSPACE_VIEW;
   const agentOutputsView = props.folderId === AGENT_OUTPUTS_WORKSPACE_VIEW;
@@ -174,7 +178,8 @@ export function WorkspaceFolderHome(props: {
 
   useEffect(() => {
     setTaskPage(1);
-    setActiveContentTab("tasks");
+    setActiveContentTab(props.folderId === AGENT_OUTPUTS_WORKSPACE_VIEW && !searchQuery ? "files" : "tasks");
+    setOutputFilter("all");
   }, [props.folderId, searchQuery]);
 
   useEffect(() => {
@@ -532,7 +537,17 @@ export function WorkspaceFolderHome(props: {
                   <strong>{t("workspace.preview")}</strong>
                 </button>
               ) : null}
-              {!historyView || showHistoryFiles ? <section className="workspace-home-section">
+              {agentOutputsView && nodes.some((node) => node.kind === "file") ? (
+                <section className="workspace-home-section outputs-section">
+                  <OutputTypeTabs nodes={nodes} value={outputFilter} onChange={setOutputFilter} />
+                  <OutputsGallery
+                    nodes={nodes}
+                    filter={outputFilter}
+                    formatDate={(value) => formatLocalDate(value, locale)}
+                    onOpenFile={props.onOpenFile}
+                  />
+                </section>
+              ) : !historyView || showHistoryFiles ? <section className="workspace-home-section">
                 <div className="workspace-section-heading">
                   <div>
                     <h2>{t("workspace.filesAndFolders")}</h2>

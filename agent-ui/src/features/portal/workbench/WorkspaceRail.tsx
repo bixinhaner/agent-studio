@@ -238,7 +238,7 @@ export function WorkspaceRail(props: {
   );
 
   return (
-    <aside className="workspace-rail" aria-label={t("workspace.title")}>
+    <aside className="workspace-rail" data-tour="workspace" aria-label={t("workspace.title")}>
       <div className="workspace-rail-head">
         <div className="workspace-rail-heading-row">
           <h2>{props.title || t("workspace.mine")}</h2>

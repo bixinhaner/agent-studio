@@ -3,7 +3,15 @@ import { Button, Drawer, Dropdown, Space, Tooltip, type MenuProps } from "antd";
 import {
   Check,
   ArrowLeft,
+  BellRing,
   BookOpen,
+  Brain,
+  CalendarClock,
+  Compass,
+  Monitor,
+  Moon,
+  Sparkles,
+  Sun,
   CircleHelp,
   Ellipsis,
   CreditCard,
@@ -19,6 +27,14 @@ import {
 import { BrandMark } from "../../branding/BrandMark";
 import { useBranding } from "../../branding/BrandingProvider";
 import { usePortalI18n, type PortalLocale } from "../i18n";
+import { usePortalRoadmap } from "../roadmap/PortalRoadmapContext";
+import type { PortalThemePreference } from "../roadmap/use-portal-theme";
+
+const THEME_OPTIONS: ReadonlyArray<{ key: PortalThemePreference; icon: JSX.Element }> = [
+  { key: "light", icon: <Sun size={16} /> },
+  { key: "dark", icon: <Moon size={16} /> },
+  { key: "system", icon: <Monitor size={16} /> }
+];
 
 const PORTAL_LANGUAGE_OPTIONS: ReadonlyArray<{ key: PortalLocale; label: string }> = [
   { key: "en", label: "English" },
@@ -53,8 +69,74 @@ export function PortalTopBar(props: {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const roadmap = usePortalRoadmap();
+  const personalEnabled = Boolean(roadmap?.personalFeaturesEnabled);
+  const tourEnabled = Boolean(roadmap?.tourEnabled);
+  const showHelpMenu = Boolean(props.onOpenTraining) || tourEnabled;
+  const personalMenu: MenuProps = {
+    items: [
+      { key: "tasks", icon: <CalendarClock size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.scheduledTasks")}</strong><small>{t("menu.scheduledTasksDetail")}</small></span> },
+      { key: "subs", icon: <BellRing size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.subscriptions")}</strong><small>{t("menu.subscriptionsDetail")}</small></span> },
+      { key: "memory", icon: <Brain size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.memory")}</strong><small>{t("menu.memoryDetail")}</small></span> }
+    ],
+    onClick: ({ key }) => {
+      if (key === "tasks") roadmap?.openScheduledTasks();
+      else if (key === "subs") roadmap?.openSubscriptions();
+      else if (key === "memory") roadmap?.openMemory();
+    }
+  };
+  const themeMenu: MenuProps | null = roadmap
+    ? {
+        items: THEME_OPTIONS.map((option) => ({
+          key: option.key,
+          icon: option.icon,
+          label: (
+            <span className="portal-theme-option">
+              {t(`theme.${option.key}`)}
+              {roadmap.theme.preference === option.key ? <Check size={14} strokeWidth={2.3} aria-hidden="true" /> : null}
+            </span>
+          )
+        })),
+        selectable: true,
+        selectedKeys: [roadmap.theme.preference],
+        onClick: ({ key }) => roadmap.theme.setPreference(key as PortalThemePreference)
+      }
+    : null;
   const mobileActionItems = useMemo(
     () => [
+      personalEnabled
+        ? {
+            key: "tasks",
+            label: t("menu.scheduledTasks"),
+            icon: <CalendarClock size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              roadmap?.openScheduledTasks();
+            }
+          }
+        : null,
+      personalEnabled
+        ? {
+            key: "subs",
+            label: t("menu.subscriptions"),
+            icon: <BellRing size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              roadmap?.openSubscriptions();
+            }
+          }
+        : null,
+      personalEnabled
+        ? {
+            key: "memory",
+            label: t("menu.memory"),
+            icon: <Brain size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              roadmap?.openMemory();
+            }
+          }
+        : null,
       props.trainingMode && props.onExitTraining
         ? {
             key: "exit-training",
@@ -127,9 +209,9 @@ export function PortalTopBar(props: {
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenTraining, props.trainingMode, showAdvancedSettings, t]
+    [personalEnabled, props.onExitTraining, props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, props.onOpenTraining, props.trainingMode, roadmap, showAdvancedSettings, t]
   );
-  const hasOverflowActions = languageSwitcherEnabled || mobileActionItems.length > 0;
+  const hasOverflowActions = languageSwitcherEnabled || Boolean(themeMenu) || mobileActionItems.length > 0;
   const languageMenu: MenuProps = {
     items: PORTAL_LANGUAGE_OPTIONS.map((option) => ({
       key: option.key,
@@ -198,7 +280,14 @@ export function PortalTopBar(props: {
           ) : null}
 
           <Space size={8} className="portal-topbar-action-group">
-            {!isMobile && props.onOpenTraining ? (
+            {!isMobile && personalEnabled ? (
+              <Dropdown trigger={["click"]} placement="bottomRight" menu={personalMenu}>
+                <Button type="text" className="portal-topbar-ghost-btn portal-topbar-personal-btn" icon={<Sparkles size={17} />} aria-haspopup="menu">
+                  {t("menu.personal")}
+                </Button>
+              </Dropdown>
+            ) : null}
+            {!isMobile && showHelpMenu ? (
               <Dropdown
                 trigger={["click"]}
                 placement="bottomRight"
@@ -206,18 +295,36 @@ export function PortalTopBar(props: {
                 onOpenChange={setHelpMenuOpen}
                 menu={{
                   items: [
-                    {
-                      key: "training",
-                      icon: <BookOpen size={17} />,
-                      label: (
-                        <span className="portal-training-help-item">
-                          <strong>{t("training.open")}</strong>
-                          <small>{t("training.openDetail")}</small>
-                        </span>
-                      )
-                    }
-                  ],
-                  onClick: () => props.onOpenTraining?.()
+                    props.onOpenTraining
+                      ? {
+                          key: "training",
+                          icon: <BookOpen size={17} />,
+                          label: (
+                            <span className="portal-training-help-item">
+                              <strong>{t("training.open")}</strong>
+                              <small>{t("training.openDetail")}</small>
+                            </span>
+                          )
+                        }
+                      : null,
+                    tourEnabled
+                      ? {
+                          key: "tour",
+                          icon: <Compass size={17} />,
+                          label: (
+                            <span className="portal-training-help-item">
+                              <strong>{t("menu.tour")}</strong>
+                              <small>{t("menu.tourDetail")}</small>
+                            </span>
+                          )
+                        }
+                      : null
+                  ].filter(Boolean) as NonNullable<MenuProps["items"]>,
+                  onClick: ({ key }) => {
+                    setHelpMenuOpen(false);
+                    if (key === "tour") roadmap?.startTour();
+                    else props.onOpenTraining?.();
+                  }
                 }}
               >
                 <Button
@@ -287,6 +394,17 @@ export function PortalTopBar(props: {
                 />
               </Tooltip>
             ) : null}
+            {!isMobile && themeMenu && roadmap ? (
+              <Dropdown menu={themeMenu} trigger={["click"]} placement="bottomRight" overlayClassName="portal-language-dropdown">
+                <Button
+                  type="text"
+                  className="portal-topbar-ghost-btn"
+                  icon={roadmap.theme.resolved === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+                  aria-label={t("menu.theme")}
+                  aria-haspopup="menu"
+                />
+              </Dropdown>
+            ) : null}
             {!isMobile && languageSwitcherEnabled ? (
               <Dropdown
                 menu={languageMenu}
@@ -321,6 +439,7 @@ export function PortalTopBar(props: {
                   className="portal-topbar-ghost-btn"
                   icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
                   onClick={props.onToggleDrawer}
+                  data-tour="outputs"
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
                   aria-label={t("topbar.togglePanel")}
                 />
@@ -373,6 +492,39 @@ export function PortalTopBar(props: {
                 </Button>
               ))}
             </div>
+            {roadmap ? (
+              <section className="portal-topbar-mobile-language" aria-label={t("menu.theme")}>
+                <p>{t("menu.theme")}</p>
+                <div>
+                  {THEME_OPTIONS.map((option) => (
+                    <Button
+                      key={option.key}
+                      type="default"
+                      className={roadmap.theme.preference === option.key ? "is-selected" : ""}
+                      icon={option.icon}
+                      aria-pressed={roadmap.theme.preference === option.key}
+                      onClick={() => roadmap.theme.setPreference(option.key)}
+                    >
+                      {t(`theme.${option.key}`)}
+                    </Button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            {tourEnabled ? (
+              <Button
+                type="default"
+                className="portal-topbar-mobile-action-btn"
+                icon={<Compass size={18} />}
+                block
+                onClick={() => {
+                  setMobileActionsOpen(false);
+                  roadmap?.startTour();
+                }}
+              >
+                {t("menu.tour")}
+              </Button>
+            ) : null}
             {languageSwitcherEnabled ? <section className="portal-topbar-mobile-language" aria-label={t("language.select")}>
               <p>{t("language.select")}</p>
               <div>

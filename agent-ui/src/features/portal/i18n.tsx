@@ -2,12 +2,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 
+import { ROADMAP_EN_MESSAGES, ROADMAP_ZH_MESSAGES } from "./roadmap-messages";
+
 export type PortalLocale = "en" | "zh-CN";
 
 const LEGACY_PORTAL_LOCALE_STORAGE_KEY = "agent-studio.portal.locale.v1";
 const PORTAL_LOCALE_STORAGE_KEY_PREFIX = "agent-studio.portal.locale.v2";
 
 const EN_MESSAGES = {
+  ...ROADMAP_EN_MESSAGES,
   "localWorkspace.title": "Use a Computer Folder",
   "localWorkspace.menuTitle": "Workspace",
   "localWorkspace.addFolder": "Add Computer Folder…",
@@ -713,6 +716,7 @@ const EN_MESSAGES = {
 export type PortalMessageKey = keyof typeof EN_MESSAGES;
 
 const ZH_MESSAGES: Record<PortalMessageKey, string> = {
+  ...ROADMAP_ZH_MESSAGES,
   "localWorkspace.title": "使用电脑文件夹",
   "localWorkspace.menuTitle": "工作区",
   "localWorkspace.addFolder": "添加电脑文件夹…",

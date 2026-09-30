@@ -7,6 +7,9 @@ export type AuthUserPortalPreferences = {
   showProcessTrace?: boolean;
   collapseFinalTraceOnDone?: boolean;
   dismissedFeatureAnnouncements?: string[];
+  onboardingCompletedAt?: string;
+  theme?: "light" | "dark" | "system";
+  locale?: "en" | "zh-CN";
 };
 
 export type AuthUser = {
@@ -68,6 +71,9 @@ type AuthUserPayload = {
     show_process_trace?: boolean | null;
     collapse_final_trace_on_done?: boolean | null;
     dismissed_feature_announcements?: string[] | null;
+    onboarding_completed_at?: string | null;
+    theme?: "light" | "dark" | "system" | null;
+    locale?: "en" | "zh-CN" | null;
   } | null;
 };
 
@@ -179,7 +185,10 @@ function normalizeAuthUser(user: AuthUserPayload): AuthUser {
     user.portal_preferences &&
     (typeof user.portal_preferences.show_process_trace === "boolean" ||
       typeof user.portal_preferences.collapse_final_trace_on_done === "boolean" ||
-      Array.isArray(user.portal_preferences.dismissed_feature_announcements))
+      Array.isArray(user.portal_preferences.dismissed_feature_announcements) ||
+      typeof user.portal_preferences.onboarding_completed_at === "string" ||
+      typeof user.portal_preferences.theme === "string" ||
+      typeof user.portal_preferences.locale === "string")
       ? {
           ...(typeof user.portal_preferences.show_process_trace === "boolean"
             ? { showProcessTrace: user.portal_preferences.show_process_trace }
@@ -196,6 +205,17 @@ function normalizeAuthUser(user: AuthUserPayload): AuthUser {
                     .filter(Boolean)
                 ))
               }
+            : {}),
+          ...(typeof user.portal_preferences.onboarding_completed_at === "string"
+            ? { onboardingCompletedAt: user.portal_preferences.onboarding_completed_at }
+            : {}),
+          ...(user.portal_preferences.theme === "light" ||
+          user.portal_preferences.theme === "dark" ||
+          user.portal_preferences.theme === "system"
+            ? { theme: user.portal_preferences.theme }
+            : {}),
+          ...(user.portal_preferences.locale === "en" || user.portal_preferences.locale === "zh-CN"
+            ? { locale: user.portal_preferences.locale }
             : {})
         }
       : undefined;

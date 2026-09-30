@@ -33,7 +33,10 @@ export function userOut(user: AuthenticatedUser) {
             typeof user.portalPreferences.collapseFinalTraceOnDone === "boolean"
               ? user.portalPreferences.collapseFinalTraceOnDone
               : null,
-          dismissed_feature_announcements: user.portalPreferences.dismissedFeatureAnnouncements ?? []
+          dismissed_feature_announcements: user.portalPreferences.dismissedFeatureAnnouncements ?? [],
+          onboarding_completed_at: user.portalPreferences.onboardingCompletedAt ?? null,
+          theme: user.portalPreferences.theme ?? null,
+          locale: user.portalPreferences.locale ?? null
         }
       : null
   };

@@ -1,0 +1,65 @@
+/* C1 portal dark mode: hand-tuned tokens layered on top of the generated overrides. */
+:root[data-portal-theme="dark"] {
+  color-scheme: dark;
+  --roadmap-surface: #1c1d21;
+  --roadmap-surface-soft: #232429;
+  --roadmap-line: #2f3137;
+  --roadmap-text: #e7e8eb;
+  --roadmap-muted: #9a9ea8;
+  --roadmap-accent-soft: rgb(var(--brand-primary-rgb, 255 70 20) / 0.16);
+  --roadmap-success: #3fbf74;
+  /* assistant-ui primitives */
+  --aui-background: 228 9% 11%;
+  --aui-foreground: 228 10% 91%;
+  --aui-muted: 228 7% 17%;
+  --aui-muted-foreground: 228 6% 64%;
+  --aui-border: 228 7% 20%;
+  --aui-input: 228 7% 20%;
+  --aui-card: 228 8% 13%;
+  --aui-card-foreground: 228 10% 91%;
+  --aui-popover: 228 8% 13%;
+  --aui-popover-foreground: 228 10% 91%;
+  --aui-accent: 228 7% 19%;
+  --aui-accent-foreground: 228 10% 91%;
+  --aui-secondary: 228 7% 19%;
+  --aui-secondary-foreground: 228 10% 91%;
+}
+
+:root[data-portal-theme="dark"] body,
+:root[data-portal-theme="dark"] .portal-workbench-root {
+  background: #141518;
+  color: #e7e8eb;
+}
+
+:root[data-portal-theme="dark"] ::selection { background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.35); }
+
+:root[data-portal-theme="dark"] * {
+  scrollbar-color: #3a3c43 transparent;
+}
+
+/* Markdown content */
+:root[data-portal-theme="dark"] .aui-md pre,
+:root[data-portal-theme="dark"] .aui-md :not(pre) > code {
+  background: #1f2024;
+  color: #e7e8eb;
+  border-color: #2f3137;
+}
+:root[data-portal-theme="dark"] .aui-md a { color: #7fb0ff; }
+:root[data-portal-theme="dark"] .aui-md table th { background: #232429; }
+:root[data-portal-theme="dark"] .aui-md table th,
+:root[data-portal-theme="dark"] .aui-md table td { border-color: #2f3137; }
+:root[data-portal-theme="dark"] .aui-md blockquote { border-color: #3a3c43; color: #b6b9c1; }
+:root[data-portal-theme="dark"] .aui-md hr { border-color: #2f3137; }
+
+/* Images and document previews keep their own light canvas. */
+:root[data-portal-theme="dark"] .outputs-thumb-pdf,
+:root[data-portal-theme="dark"] .outputs-thumb-sheet { background: #fff; color: #334155; }
+:root[data-portal-theme="dark"] .outputs-thumb-sheet th { background: #f1f5f9; color: #334155; }
+:root[data-portal-theme="dark"] .outputs-thumb-sheet th,
+:root[data-portal-theme="dark"] .outputs-thumb-sheet td { border-color: #e5e7eb; }
+:root[data-portal-theme="dark"] .preview-workbench-viewer iframe,
+:root[data-portal-theme="dark"] .preview-workbench-viewer embed { background: #fff; }
+
+/* Shadows read as haze on dark surfaces. */
+:root[data-portal-theme="dark"] .roadmap-card:hover,
+:root[data-portal-theme="dark"] .outputs-card:hover { box-shadow: 0 8px 22px rgb(0 0 0 / 0.35); }

@@ -51,7 +51,7 @@ type MemoryExtraction = {
 
 type MemoryCandidateStatus = "pending" | "promoted" | "rejected";
 
-type MemoryCandidate = {
+export type MemoryCandidate = {
   id: string;
   key: string;
   status: MemoryCandidateStatus;
@@ -412,7 +412,7 @@ function resolveLlmConfig(
   };
 }
 
-function rawMemoriesFromContent(content: string): string[] {
+export function rawMemoriesFromContent(content: string): string[] {
   return content
     .split(/\n/)
     .map((line) => line.match(/^- memory:\s*(.+)$/)?.[1]?.trim())
@@ -448,7 +448,7 @@ function buildRawMemoriesFromItems(items: string[], completedAt: Date): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-function buildMemorySummary(memories: string[]): string {
+export function buildMemorySummary(memories: string[]): string {
   return [
     "# Memory Summary",
     "",
@@ -459,7 +459,7 @@ function buildMemorySummary(memories: string[]): string {
   ].join("\n");
 }
 
-function uniqueMemoryItems(items: string[]): string[] {
+export function uniqueMemoryItems(items: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const item of items) {
@@ -492,7 +492,7 @@ function tokenizeForSimilarity(value: string): Set<string> {
   return tokens;
 }
 
-function similarityScore(left: string, right: string): number {
+export function similarityScore(left: string, right: string): number {
   const leftTokens = tokenizeForSimilarity(left);
   const rightTokens = tokenizeForSimilarity(right);
   if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
@@ -503,7 +503,7 @@ function similarityScore(left: string, right: string): number {
   return overlap / Math.min(leftTokens.size, rightTokens.size);
 }
 
-function normalizedMemoryKey(value: string): string {
+export function normalizedMemoryKey(value: string): string {
   const tokens = [...tokenizeForSimilarity(value)].sort();
   if (tokens.length > 0) return tokens.slice(0, 18).join("-");
   return safeFileSegment(value.toLowerCase(), "memory");
@@ -594,7 +594,7 @@ function normalizeMemoryCandidate(value: unknown): MemoryCandidate | undefined {
   };
 }
 
-async function readMemoryCandidates(sourceDir: string): Promise<MemoryCandidate[]> {
+export async function readMemoryCandidates(sourceDir: string): Promise<MemoryCandidate[]> {
   const content = await readTextIfExists(path.join(sourceDir, MEMORY_CANDIDATES_FILE_NAME));
   if (!trimOrUndefined(content)) return [];
   try {
@@ -608,7 +608,7 @@ async function readMemoryCandidates(sourceDir: string): Promise<MemoryCandidate[
   }
 }
 
-async function writeMemoryCandidates(sourceDir: string, candidates: MemoryCandidate[]): Promise<void> {
+export async function writeMemoryCandidates(sourceDir: string, candidates: MemoryCandidate[]): Promise<void> {
   const sorted = candidates
     .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
     .slice(0, MAX_MEMORY_CANDIDATES);
@@ -636,7 +636,7 @@ function selectRelatedMemoryCandidates(input: CodexMemoryRunInput, candidates: M
     .map(({ candidate }) => candidate);
 }
 
-async function readCanonicalMemoryItems(sourceDir: string): Promise<string[]> {
+export async function readCanonicalMemoryItems(sourceDir: string): Promise<string[]> {
   const memoryContent =
     await readTextIfExists(path.join(sourceDir, "MEMORY.md")) ||
     await readTextIfExists(path.join(sourceDir, "memory_summary.md"));

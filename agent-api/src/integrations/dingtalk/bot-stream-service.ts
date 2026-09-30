@@ -365,6 +365,50 @@ export class DingTalkBotStreamService {
     return this.getStatuses(instanceId);
   }
 
+  hasProactiveSender(): boolean {
+    return Boolean(this.pickProactiveSender());
+  }
+
+  /**
+   * Sends a one-to-one robot message (markdown or action card) to DingTalk
+   * staff ids. Used by scheduled tasks and subscriptions for proactive pushes.
+   */
+  async sendOneToOneMessage(input: {
+    userIds: string[];
+    msgKey: "sampleMarkdown" | "sampleActionCard" | "sampleText";
+    msgParam: Record<string, unknown>;
+    instanceId?: string;
+  }): Promise<{ instanceId: string; processQueryKey?: string }> {
+    const userIds = [...new Set(input.userIds.map((item) => item.trim()).filter(Boolean))];
+    if (!userIds.length) throw new Error("DingTalk proactive message requires at least one user id");
+    const managed = this.pickProactiveSender(input.instanceId);
+    if (!managed) throw new Error("No DingTalk robot is configured for proactive messages");
+    const payload = await this.requestDingTalkOpenApi(managed, "/v1.0/robot/oToMessages/batchSend", {
+      method: "POST",
+      body: {
+        robotCode: managed.instance.clientId,
+        userIds,
+        msgKey: input.msgKey,
+        msgParam: JSON.stringify(input.msgParam)
+      }
+    });
+    managed.lastReplyAt = new Date().toISOString();
+    return {
+      instanceId: managed.instance.id,
+      processQueryKey: getString(asRecord(payload), ["processQueryKey"])
+    };
+  }
+
+  private pickProactiveSender(instanceId?: string): ManagedClient | undefined {
+    const candidates = [...this.clients.values()].filter(
+      (item) =>
+        (!instanceId || item.instance.id === instanceId) &&
+        item.instance.robot.enabled &&
+        isDingTalkBotConfigured(item.instance)
+    );
+    return candidates.find((item) => item.connected) ?? candidates[0];
+  }
+
   getStatuses(instanceId?: string): DingTalkBotClientStatus[] {
     const items = [...this.clients.values()].filter((item) => !instanceId || item.instance.id === instanceId);
     return items.map(statusFromManaged);

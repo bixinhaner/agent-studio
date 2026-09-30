@@ -2914,3 +2914,104 @@ model LocalBridgeCommand {
   @@index([deadline])
   @@map("local_bridge_commands")
 }
+
+model ScheduledTask {
+  id                  String             @id @default(cuid())
+  organizationId      String             @map("organization_id")
+  userId              String             @map("user_id")
+  title               String
+  prompt              String
+  modeId              String?            @map("mode_id")
+  model               String?
+  reasoningEffort     String?            @map("reasoning_effort")
+  runConfig           Json               @default("{}") @map("run_config")
+  skillIds            Json               @default("[]") @map("skill_ids")
+  folderId            String?            @map("folder_id")
+  sourceThreadId      String?            @map("source_thread_id")
+  frequency           String
+  weekdays            Json               @default("[]")
+  dayOfMonth          Int?               @map("day_of_month")
+  timeOfDay           String             @map("time_of_day")
+  timezone            String             @default("Asia/Shanghai")
+  locale              String             @default("zh-CN")
+  enabled             Boolean            @default(true)
+  notifyDingtalk      Boolean            @default(true) @map("notify_dingtalk")
+  nextRunAt           DateTime?          @map("next_run_at")
+  lastRunAt           DateTime?          @map("last_run_at")
+  lastRunStatus       String?            @map("last_run_status")
+  lastThreadId        String?            @map("last_thread_id")
+  consecutiveFailures Int                @default(0) @map("consecutive_failures")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  runs                ScheduledTaskRun[]
+
+  @@index([userId, createdAt])
+  @@index([enabled, nextRunAt])
+  @@map("scheduled_tasks")
+}
+
+model ScheduledTaskRun {
+  id             String        @id @default(cuid())
+  taskId         String        @map("task_id")
+  userId         String        @map("user_id")
+  trigger        String        @default("schedule")
+  status         String        @default("running")
+  threadId       String?       @map("thread_id")
+  scheduledFor   DateTime?     @map("scheduled_for")
+  startedAt      DateTime      @default(now()) @map("started_at")
+  finishedAt     DateTime?     @map("finished_at")
+  answerPreview  String?       @map("answer_preview")
+  artifactCount  Int           @default(0) @map("artifact_count")
+  error          String?
+  notifyStatus   String?       @map("notify_status")
+  leaseExpiresAt DateTime?     @map("lease_expires_at")
+  task           ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, startedAt])
+  @@index([status, leaseExpiresAt])
+  @@map("scheduled_task_runs")
+}
+
+model NotificationSubscription {
+  id              String    @id @default(cuid())
+  organizationId  String    @map("organization_id")
+  targetType      String    @map("target_type")
+  targetId        String    @map("target_id")
+  sourceType      String    @map("source_type")
+  scenarioKey     String?   @map("scenario_key")
+  connectorId     String?   @map("connector_id")
+  minSeverity     String    @default("high") @map("min_severity")
+  deliveryMode    String    @default("realtime") @map("delivery_mode")
+  digestTime      String?   @map("digest_time")
+  timezone        String    @default("Asia/Shanghai")
+  channel         String    @default("dingtalk")
+  enabled         Boolean   @default(true)
+  cursorAt        DateTime  @default(now()) @map("cursor_at")
+  nextDigestAt    DateTime? @map("next_digest_at")
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  lastError       String?   @map("last_error")
+  createdById     String?   @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([targetType, targetId])
+  @@index([enabled, sourceType])
+  @@map("notification_subscriptions")
+}
+
+model NotificationDelivery {
+  id             String    @id @default(cuid())
+  userId         String    @map("user_id")
+  sourceType     String    @map("source_type")
+  sourceId       String    @map("source_id")
+  subscriptionId String?   @map("subscription_id")
+  channel        String    @default("dingtalk")
+  status         String    @default("pending")
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  deliveredAt    DateTime? @map("delivered_at")
+
+  @@unique([userId, sourceType, sourceId, channel])
+  @@index([createdAt])
+  @@map("notification_deliveries")
+}

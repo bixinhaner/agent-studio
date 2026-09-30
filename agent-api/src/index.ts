@@ -1,5 +1,5 @@
 import cors, { type CorsOptions } from "cors";
-import express, { type Request, type Response } from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -28,6 +28,15 @@ import {
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
+import { classifyPortalRole } from "./portal/role-profile.js";
+import { createPortalMemoryRouter } from "./codex-memory/portal-memory-router.js";
+import { PortalMemoryService } from "./codex-memory/portal-memory-service.js";
+import { DingTalkPushService } from "./notifications/dingtalk-push-service.js";
+import { createNotificationSubscriptionRouter } from "./notifications/subscription-router.js";
+import { NotificationSubscriptionService } from "./notifications/subscription-service.js";
+import { createLoopbackScheduledTurnExecutor } from "./scheduled-tasks/loopback-executor.js";
+import { createScheduledTaskRouter } from "./scheduled-tasks/router.js";
+import { ScheduledTaskService } from "./scheduled-tasks/service.js";
 import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
 import { createAuthEmailSender, createBrandAwareEmailSender } from "./auth/email.js";
 import {
@@ -11716,6 +11725,134 @@ registerCommonApiRoutes(app, {
   })
 });
 
+const scheduledTaskSessionCookies = createSessionCookieManager({
+  cookieName: appConfig.sessionCookie.name,
+  secret: appConfig.sessionCookie.secret,
+  maxAgeMs: 2 * 60 * 60_000,
+  secure: appConfig.sessionCookie.secure,
+  sameSite: "lax"
+});
+const dingtalkPush = new DingTalkPushService(db, dingtalkBotStream, console);
+const scheduledTasks = new ScheduledTaskService({
+  db,
+  executeTurn: createLoopbackScheduledTurnExecutor({
+    baseUrl: `http://127.0.0.1:${appConfig.port}`,
+    // The cookie never leaves this host: it only authenticates the loopback
+    // requests that replay the portal chat flow for the task owner.
+    createSessionCookie: (userId, organizationId) =>
+      scheduledTaskSessionCookies.create(userId, organizationId).split(";")[0]
+  }),
+  push: dingtalkPush,
+  appBaseUrl: appConfig.appBaseUrl,
+  getDrainReason: getDeploymentDrainReason,
+  logger: console
+});
+const notificationSubscriptions = new NotificationSubscriptionService({
+  db,
+  push: dingtalkPush,
+  logger: console
+});
+const portalMemory = new PortalMemoryService({ sessionHomeRoot: appConfig.codex.sessionHomeRoot });
+
+function requireInternalPortalActorForFeature(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (isInternalPortalActor(currentActorFromRequest(req))) {
+      next();
+      return;
+    }
+  } catch {
+    res.status(401).json({ detail: "Authentication required" });
+    return;
+  }
+  res.status(403).json({ detail: "This feature is available to internal members only" });
+}
+
+app.use(
+  "/api/portal/scheduled-tasks",
+  requireInternalPortalActorForFeature,
+  createScheduledTaskRouter({
+    service: scheduledTasks,
+    resolveActor(req) {
+      const actor = currentActorFromRequest(req);
+      return { userId: actor.id, organizationId: actor.organizationId };
+    },
+    isDingTalkAvailable: async (userId) =>
+      dingtalkPush.isAvailable() &&
+      Boolean((await db.user.findUnique({ where: { id: userId }, select: { dingtalkUserId: true } }))?.dingtalkUserId)
+  })
+);
+
+app.use(
+  "/api/portal/notification-subscriptions",
+  requireInternalPortalActorForFeature,
+  createNotificationSubscriptionRouter({
+    service: notificationSubscriptions,
+    push: dingtalkPush,
+    db,
+    resolveViewer(req) {
+      const actor = currentActorFromRequest(req);
+      return { userId: actor.id, organizationId: actor.organizationId, internal: isInternalPortalActor(actor) };
+    },
+    canManageShared: (userId) => hasUserPermission(userId, "integration.write")
+  })
+);
+
+app.use(
+  "/api/portal/memory",
+  createPortalMemoryRouter({
+    service: portalMemory,
+    resolveActor(req) {
+      const actor = currentActorFromRequest(req);
+      return { userId: actor.id };
+    },
+    getSettings: async () =>
+      (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+      createDefaultSystemSettingsPayload().codexMemory
+  })
+);
+
+/** Marks a portal turn that ran with the user's durable memories available. */
+async function resolvePortalMemoryContextPart(
+  codexRunConfig: Record<string, unknown> | undefined
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const settings =
+      (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+      createDefaultSystemSettingsPayload().codexMemory;
+    if (!settings.enabled || !settings.useMemories) return undefined;
+    const itemCount = await portalMemory.countForCodexHome(codexHomeFromRunConfig(codexRunConfig));
+    return itemCount > 0
+      ? { type: "data", name: "agent_studio_memory_context", data: { item_count: itemCount } }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    const internal = isInternalPortalActor(actor);
+    const departmentId = internal ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.id) : undefined;
+    const department = departmentId
+      ? await db.department.findUnique({ where: { id: departmentId }, select: { name: true } })
+      : null;
+    const membership = departmentId
+      ? await db.departmentMembership.findFirst({ where: { userId: actor.id, departmentId }, select: { position: true } })
+      : null;
+    const departmentName = department?.name ?? null;
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({
+      audience: internal ? "internal" : "external",
+      department_name: departmentName,
+      position: membership?.position ?? null,
+      role_key: internal ? classifyPortalRole(departmentName, membership?.position) : "customer"
+    });
+  } catch (error) {
+    res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load home profile" });
+  }
+});
+
 app.use(
   "/api/portal/workspace",
   createPortalWorkspaceRouter({
@@ -13867,6 +14004,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       resolvePortalTurnSkillInputs(turnSkills)
     );
     const instructionReadObserver = new CodexInstructionReadObserver({ selectedSkills: turnSkillInputs });
+    const portalMemoryContextPart = await timing.time("chat_stream.resolve_memory_context", () =>
+      resolvePortalMemoryContextPart(currentSession.codexRunConfig)
+    );
+    if (portalMemoryContextPart) {
+      sendTrackedSSE("memory_context", { content_part: portalMemoryContextPart });
+    }
     const baseRuntimeMessage = withExplicitSkillMentions(
       withSkillActivationPrompts(input.message, turnRunConfig),
       turnSkills
@@ -14054,6 +14197,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             const instructionReadContentPart = instructionReadObserver.contentPart();
             const finalizedProcess = portalRunProjection.finalize({ finalAnswer: completedAnswerText });
             const persistedContentParts = [
+              portalMemoryContextPart,
               instructionReadContentPart,
               ...finalizedProcess.contentParts,
               artifactContentPart
@@ -14398,6 +14542,8 @@ async function bootstrap() {
   }
   if (runsChatService) {
     dingtalkBotStream.start();
+    scheduledTasks.start();
+    notificationSubscriptions.start();
   }
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console

@@ -13,7 +13,7 @@ function assistantContentPartRank(part: unknown): number {
   const type = typeof item.type === "string" ? item.type : "";
   const name = typeof item.name === "string" ? item.name : "";
 
-  if (type === "data" && name === "codex_instruction_reads") return 0;
+  if (type === "data" && (name === "codex_instruction_reads" || name === "agent_studio_memory_context")) return 0;
   if (type === "reasoning" || (type === "data" && name === "codex_commentary")) return 1;
   if (
     type === "tool-call"

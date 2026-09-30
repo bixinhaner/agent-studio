@@ -16,6 +16,9 @@ export type UserPortalPreferences = {
   showProcessTrace?: boolean;
   collapseFinalTraceOnDone?: boolean;
   dismissedFeatureAnnouncements?: string[];
+  onboardingCompletedAt?: string;
+  theme?: "light" | "dark" | "system";
+  locale?: "en" | "zh-CN";
 };
 
 export type UserRecord = AuthenticatedUser & {
@@ -160,17 +163,28 @@ function normalizePortalPreferences(value: unknown): UserPortalPreferences | und
         .filter(Boolean)))
         .slice(0, 50)
     : undefined;
+  const onboardingRaw = record.onboardingCompletedAt ?? record.onboarding_completed_at;
+  const onboardingCompletedAt =
+    typeof onboardingRaw === "string" && !Number.isNaN(Date.parse(onboardingRaw)) ? onboardingRaw : undefined;
+  const theme = record.theme === "light" || record.theme === "dark" || record.theme === "system" ? record.theme : undefined;
+  const locale = record.locale === "en" || record.locale === "zh-CN" ? record.locale : undefined;
   if (
     showProcessTrace === undefined &&
     collapseFinalTraceOnDone === undefined &&
-    dismissedFeatureAnnouncements === undefined
+    dismissedFeatureAnnouncements === undefined &&
+    onboardingCompletedAt === undefined &&
+    theme === undefined &&
+    locale === undefined
   ) {
     return undefined;
   }
   return {
     ...(showProcessTrace !== undefined ? { showProcessTrace } : {}),
     ...(collapseFinalTraceOnDone !== undefined ? { collapseFinalTraceOnDone } : {}),
-    ...(dismissedFeatureAnnouncements !== undefined ? { dismissedFeatureAnnouncements } : {})
+    ...(dismissedFeatureAnnouncements !== undefined ? { dismissedFeatureAnnouncements } : {}),
+    ...(onboardingCompletedAt !== undefined ? { onboardingCompletedAt } : {}),
+    ...(theme !== undefined ? { theme } : {}),
+    ...(locale !== undefined ? { locale } : {})
   };
 }
 
@@ -186,22 +200,10 @@ function mergePreferencesJson(
 ): Record<string, unknown> | null {
   const existing = asRecord(existingValue) ? { ...(asRecord(existingValue) as Record<string, unknown>) } : {};
   const currentPortal = readPortalPreferences(existing) ?? {};
-  const nextPortal: UserPortalPreferences = {
-    ...(currentPortal.showProcessTrace !== undefined ? { showProcessTrace: currentPortal.showProcessTrace } : {}),
-    ...(currentPortal.collapseFinalTraceOnDone !== undefined
-      ? { collapseFinalTraceOnDone: currentPortal.collapseFinalTraceOnDone }
-      : {}),
-    ...(portalPreferences.showProcessTrace !== undefined ? { showProcessTrace: portalPreferences.showProcessTrace } : {}),
-    ...(portalPreferences.collapseFinalTraceOnDone !== undefined
-      ? { collapseFinalTraceOnDone: portalPreferences.collapseFinalTraceOnDone }
-      : {}),
-    ...(currentPortal.dismissedFeatureAnnouncements !== undefined
-      ? { dismissedFeatureAnnouncements: currentPortal.dismissedFeatureAnnouncements }
-      : {}),
-    ...(portalPreferences.dismissedFeatureAnnouncements !== undefined
-      ? { dismissedFeatureAnnouncements: portalPreferences.dismissedFeatureAnnouncements }
-      : {})
-  };
+  const nextPortal: UserPortalPreferences = { ...currentPortal };
+  for (const [key, value] of Object.entries(portalPreferences) as Array<[keyof UserPortalPreferences, unknown]>) {
+    if (value !== undefined) (nextPortal as Record<string, unknown>)[key] = value;
+  }
   if (Object.keys(nextPortal).length > 0) {
     existing.portal = nextPortal;
   } else {
