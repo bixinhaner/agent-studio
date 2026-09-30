@@ -6,6 +6,13 @@ import {
 } from "./model-config.js";
 
 describe("model-config", () => {
+  it("normalizes GPT-6.1 Sol efforts using the verified Codex capabilities", () => {
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "high")).toBe("high");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "ultra")).toBe("ultra");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "none")).toBe("low");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "minimal")).toBe("low");
+  });
+
   it.each(["gpt-6-sol", "gpt-6-luna"])("offers %s without changing defaults", (id) => {
     expect(fallbackModelCatalog().models.find(model => model.id === id)).toMatchObject({isDefault:false, defaultReasoningEffort:"medium", contextLimit:1050000});
     expect(normalizeReasoningEffortForModel(id, "max")).toBe("max");

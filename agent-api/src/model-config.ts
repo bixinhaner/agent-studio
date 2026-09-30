@@ -58,6 +58,12 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
 };
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  "gpt-6.1-sol": {
+    label: "GPT-6.1 Sol",
+    reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,
+    defaultReasoningEffort: "low",
+    contextLimit: 1_050_000
+  },
   "gpt-6-sol": {
     label: "GPT-6 Sol",
     reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,

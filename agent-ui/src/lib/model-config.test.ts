@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { MODEL_OPTIONS, modelOptionsFromCatalog, contextLimitForModel, normalizeReasoningEffortForModel } from "./model-config";
 
 describe("model-config", () => {
+  it("normalizes GPT-6.1 Sol efforts using the verified Codex capabilities", () => {
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "high")).toBe("high");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "ultra")).toBe("ultra");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "none")).toBe("low");
+    expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "minimal")).toBe("low");
+  });
+
   it("preserves Codex-specific Sol and Luna efforts", () => {
     expect(MODEL_OPTIONS.map(model => model.value)).toEqual(expect.arrayContaining(["gpt-6-sol", "gpt-6-luna"]));
     expect(normalizeReasoningEffortForModel("gpt-6-sol", "ultra")).toBe("ultra");

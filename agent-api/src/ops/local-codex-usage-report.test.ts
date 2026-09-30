@@ -43,6 +43,7 @@ function snapshot(input: {
 
 describe("local Codex usage report pricing", () => {
   it.each([
+    ["gpt-6.1-sol", 2, .1, 2.5, 10],
     ["gpt-6-sol", 2, .2, 2.5, 10],
     ["gpt-6-luna", .1, .01, .125, .5]
   ] as const)("prices %s cached reads, writes, snapshots and tiers", (model, input, cached, write, output) => {

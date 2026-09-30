@@ -18,6 +18,18 @@ const profile: CostProfileRecord = {
 };
 
 describe("UsageIngestionService", () => {
+  it("prices GPT-6.1 Sol cached reads separately and preserves the 272K boundary", () => {
+    const sol61: CostProfileRecord = { ...profile, model: "gpt-6.1-sol",
+      inputTokenPrice: "2", cachedInputTokenPrice: "0.1", cacheWriteTokenPrice: "2.5", outputTokenPrice: "10",
+      internalCostMultiplier: "0.1", longContextThresholdTokens: 272000,
+      longContextInputMultiplier: "2", longContextOutputMultiplier: "1.5" };
+    const cost = (inputTokens: number) => calculateEstimatedCost({ profile: sol61, inputTokens,
+      cachedInputTokens: 20000, cacheWriteTokens: 10000, outputTokens: 10000, cacheWriteTelemetryAvailable: true });
+    expect(cost(100000)).toMatchObject({ estimatedCost: "0.267000", internalCost: "0.026700", longContextApplied: false });
+    expect(cost(272000)).toMatchObject({ estimatedCost: "0.611000", longContextApplied: false });
+    expect(cost(272001)).toMatchObject({ estimatedCost: "1.172004", longContextApplied: true });
+  });
+
   it("persists canonical call receipts with a durable turn key instead of the high-water path", async () => {
     let stored: any;
     const service = new UsageIngestionService({

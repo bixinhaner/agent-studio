@@ -54,6 +54,13 @@ const DEFAULT_MODEL_OPTION: ModelOption = {
 export const MODEL_OPTIONS: ModelOption[] = [
   DEFAULT_MODEL_OPTION,
   {
+    value: "gpt-6.1-sol",
+    label: "GPT-6.1 Sol",
+    reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,
+    defaultReasoningEffort: "low",
+    contextLimit: 1_050_000
+  },
+  {
     value: "gpt-6-sol",
     label: "GPT-6 Sol",
     reasoningEfforts: GPT_56_SOL_TERRA_EFFORTS,

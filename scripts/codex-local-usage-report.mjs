@@ -232,6 +232,7 @@ var MODEL_NOTES_SOURCE_URLS = [
 ];
 var PRICING = {
   standard: {
+    "gpt-6.1-sol": withLongContext({ input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 }),
     "gpt-6-sol": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }),
     "gpt-6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 }),
     "gpt-5.6-sol": withLongContext({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
@@ -260,6 +261,7 @@ var PRICING = {
     "o3-mini": { input: 1.1, cachedInput: 0.55, output: 4.4 }
   },
   batch: {
+    "gpt-6.1-sol": withLongContext({ input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 }),
     "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
     "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 5e-3, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
@@ -286,6 +288,7 @@ var PRICING = {
     "o4-mini": { input: 0.55, output: 2.2 }
   },
   flex: {
+    "gpt-6.1-sol": withLongContext({ input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 }),
     "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
     "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 5e-3, cacheWrite: 0.0625, output: 0.25 }),
     "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
@@ -306,6 +309,7 @@ var PRICING = {
     "o4-mini": { input: 0.55, cachedInput: 0.138, output: 2.2 }
   },
   priority: {
+    "gpt-6.1-sol": withLongContext({ input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 }),
     "gpt-6-sol": withLongContext({ input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 }),
     "gpt-6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1 }),
     "gpt-5.6-sol": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 60 },
@@ -541,6 +545,7 @@ function localDateTime(date, timezone) {
 function normalizeModel(model) {
   const normalized = model.trim();
   for (const base of [
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
