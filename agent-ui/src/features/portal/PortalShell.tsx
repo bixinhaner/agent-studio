@@ -220,6 +220,7 @@ import { useWorkbenchLayout } from "./workbench/use-workbench-layout";
 import { createPortalAntdTheme } from "./workbench/theme";
 import { HomeProfileProvider, useHomeProfile } from "./roadmap/home-profile";
 import { recommendSkills, roleSuggestions } from "./roadmap/role-home";
+import { tourTarget } from "./roadmap/OnboardingTour";
 import { PortalRoadmapProvider, usePortalRoadmap } from "./roadmap/PortalRoadmapContext";
 import { usePortalTheme } from "./roadmap/use-portal-theme";
 import { dispatchPortalRunFinished, useRunCompletionAttention } from "./roadmap/run-attention";
@@ -10779,6 +10780,12 @@ export function PortalShell(props: {
     });
   }, [runtime, syncActiveThreadIdentity, t]);
 
+  // The tour points at the composer, which only exists in a task view.
+  const prepareOnboardingTour = useCallback(async () => {
+    if (tourTarget("steer")) return;
+    await startWorkspaceTask();
+  }, [startWorkspaceTask]);
+
   const openWorkspaceFile = useCallback((file: PortalWorkspaceNode) => {
     setSelectedWorkspaceFile(file);
     setRequestedPreviewPath("");
@@ -11349,6 +11356,7 @@ export function PortalShell(props: {
             scheduledTaskContext={scheduledTaskContext}
             modeLabel={roadmapModeLabel}
             onOpenThread={(threadId) => void openWorkspaceTask({ id: threadId })}
+            prepareTour={prepareOnboardingTour}
             initialView={
               typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "scheduled-tasks"
                 ? "scheduled-tasks"

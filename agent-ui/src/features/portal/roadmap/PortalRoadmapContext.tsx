@@ -36,6 +36,8 @@ export function PortalRoadmapProvider(props: {
   modeLabel(modeId: string | null): string | undefined;
   onOpenThread(threadId: string): void;
   initialView?: "scheduled-tasks" | null;
+  /** Switches to a view where the composer targets exist before the tour measures them. */
+  prepareTour?(): void | Promise<unknown>;
 }) {
   const [tasksOpen, setTasksOpen] = useState(false);
   const [prefill, setPrefill] = useState<ScheduledTaskPrefill | null>(null);
@@ -44,6 +46,9 @@ export function PortalRoadmapProvider(props: {
   const [tourOpen, setTourOpen] = useState(false);
   const autoTourDecided = useRef(false);
   const initialViewHandled = useRef(false);
+  const prepareTourRef = useRef(props.prepareTour);
+  prepareTourRef.current = props.prepareTour;
+  const prepareTour = useCallback(() => prepareTourRef.current?.(), []);
 
   useEffect(() => {
     if (autoTourDecided.current || !props.userLoaded) return;
@@ -109,6 +114,7 @@ export function PortalRoadmapProvider(props: {
       {props.tourEnabled ? (
         <OnboardingTour
           open={tourOpen}
+          prepare={prepareTour}
           onClose={() => {
             setTourOpen(false);
             // Skipping also counts: the tour is shown automatically only once.

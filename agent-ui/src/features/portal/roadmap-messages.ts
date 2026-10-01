@@ -140,6 +140,7 @@ export const ROADMAP_EN_MESSAGES = {
   "memory.manage": "Manage",
 
   "tour.skip": "Skip",
+  "tour.close": "Close tour",
   "tour.next": "Next",
   "tour.prev": "Back",
   "tour.finish": "Get started",
@@ -341,6 +342,7 @@ export const ROADMAP_ZH_MESSAGES: Record<RoadmapMessageKey, string> = {
   "memory.manage": "管理",
 
   "tour.skip": "跳过",
+  "tour.close": "关闭引导",
   "tour.next": "下一步",
   "tour.prev": "上一步",
   "tour.finish": "开始使用",
