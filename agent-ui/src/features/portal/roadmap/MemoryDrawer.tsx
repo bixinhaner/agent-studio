@@ -31,7 +31,11 @@ export function MemoryDrawer(props: {
 
   const reload = useCallback(async () => {
     try {
-      const out = await listMemories();
+      const raw = await listMemories();
+      // Each assistant configuration keeps its own memory home; hide the empty ones
+      // so the picker only lists places that actually hold memories.
+      const nonEmpty = raw.scopes.filter((scope) => scope.items.length > 0);
+      const out = { ...raw, scopes: nonEmpty.length ? nonEmpty : raw.scopes.slice(0, 1) };
       setData(out);
       setScopeId((current) => (current && out.scopes.some((scope) => scope.id === current) ? current : out.scopes[0]?.id));
     } catch (error) {
