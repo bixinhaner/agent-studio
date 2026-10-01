@@ -11740,7 +11740,18 @@ const scheduledTasks = new ScheduledTaskService({
     // The cookie never leaves this host: it only authenticates the loopback
     // requests that replay the portal chat flow for the task owner.
     createSessionCookie: (userId, organizationId) =>
-      scheduledTaskSessionCookies.create(userId, organizationId).split(";")[0]
+      scheduledTaskSessionCookies.create(userId, organizationId).split(";")[0],
+    resolveHostHeader: async (organizationId) => {
+      const brand = await publicBrands.getForOrganization(organizationId).catch(() => undefined);
+      for (const candidate of [brand?.primaryBaseUrl, appConfig.appBaseUrl]) {
+        try {
+          if (candidate) return new URL(candidate).host;
+        } catch {
+          // Try the next candidate.
+        }
+      }
+      return undefined;
+    }
   }),
   push: dingtalkPush,
   appBaseUrl: appConfig.appBaseUrl,

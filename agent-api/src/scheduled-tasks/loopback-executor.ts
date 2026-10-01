@@ -1,3 +1,6 @@
+import http from "node:http";
+import { Readable } from "node:stream";
+
 import { randomUUID } from "node:crypto";
 
 export type ScheduledTurnInput = {
@@ -27,8 +30,51 @@ type LoopbackExecutorOptions = {
   baseUrl: string;
   /** Mints a short-lived `name=value` session cookie for the task owner. */
   createSessionCookie(userId: string, organizationId: string): string;
+  /**
+   * Host header the routes should see. Memberships are scoped to the public
+   * brand resolved from Host, so a bare 127.0.0.1 request would look anonymous
+   * for branded organizations.
+   */
+  resolveHostHeader?(organizationId: string): Promise<string | undefined> | string | undefined;
   fetchImpl?: typeof fetch;
 };
+
+type LoopbackFetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<Response>;
+
+/**
+ * WHATWG fetch silently drops a custom Host header, so loopback calls that need
+ * the brand Host go through node:http and are wrapped back into a Response.
+ */
+export function createHostHeaderFetch(hostHeader: string): LoopbackFetch {
+  return (url, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const target = new URL(url);
+      const request = http.request(
+        {
+          protocol: target.protocol,
+          hostname: target.hostname,
+          port: target.port,
+          path: `${target.pathname}${target.search}`,
+          method: init.method,
+          headers: { ...init.headers, host: hostHeader },
+          signal: init.signal
+        },
+        (response) => {
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(response.headers)) {
+            if (Array.isArray(value)) value.forEach((item) => headers.append(key, item));
+            else if (value !== undefined) headers.set(key, String(value));
+          }
+          const status = response.statusCode ?? 502;
+          const body = status === 204 || status === 304 ? null : (Readable.toWeb(response) as ReadableStream<Uint8Array>);
+          resolve(new Response(body, { status, headers }));
+        }
+      );
+      request.on("error", reject);
+      if (init.body !== undefined) request.write(init.body);
+      request.end();
+    });
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -100,9 +146,10 @@ export async function* readSseEvents(
  * workspace sync and message persistence identical to an interactive turn.
  */
 export function createLoopbackScheduledTurnExecutor(options: LoopbackExecutorOptions) {
-  const fetchImpl = options.fetchImpl ?? fetch;
-
   return async function executeScheduledTurn(input: ScheduledTurnInput): Promise<ScheduledTurnResult> {
+    const hostHeader = options.fetchImpl ? undefined : await options.resolveHostHeader?.(input.organizationId);
+    const fetchImpl: LoopbackFetch =
+      (options.fetchImpl as LoopbackFetch | undefined) ?? (hostHeader ? createHostHeaderFetch(hostHeader) : (fetch as LoopbackFetch));
     const cookie = options.createSessionCookie(input.userId, input.organizationId);
     const headers = {
       "content-type": "application/json",
