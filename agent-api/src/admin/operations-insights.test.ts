@@ -45,14 +45,22 @@ function makeSession(input: Partial<SessionRecord> & Pick<SessionRecord, "sessio
 describe("buildOperationsInsights", () => {
   it("uses the latest hourly quota snapshot and same-reset daily delta", () => {
     const snapshots = ([
-      ["2026-04-15T01:00:00.000Z", 20],
-      ["2026-04-15T13:00:00.000Z", 23],
-      ["2026-04-16T01:00:00.000Z", 25]
+      ["2026-04-14T15:00:00.000Z", 42, "2026-04-19T01:00:00.000Z"],
+      ["2026-04-15T01:00:00.000Z", 48, "2026-04-19T01:00:00.000Z"],
+      ["2026-04-15T13:00:00.000Z", 51, "2026-04-19T01:00:01.000Z"],
+      ["2026-04-16T01:00:00.000Z", 0, "2026-04-26T01:00:00.000Z"],
+      ["2026-04-16T13:00:00.000Z", 2, "2026-04-26T01:00:01.000Z"]
     ] as const).map(([observedAt, usedPercent], index) => ({
       id: `quota-${index}`,
       credentialHash: "credential-a",
       limitId: "codex",
-      resetAt: "2026-04-19T01:00:00.000Z",
+      resetAt: [
+        "2026-04-19T01:00:00.000Z",
+        "2026-04-19T01:00:00.000Z",
+        "2026-04-19T01:00:01.000Z",
+        "2026-04-26T01:00:00.000Z",
+        "2026-04-26T01:00:01.000Z"
+      ][index],
       windowDurationMins: 10080,
       usedPercent,
       remainingPercent: 100 - usedPercent,
@@ -63,8 +71,9 @@ describe("buildOperationsInsights", () => {
 
     expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai")).toEqual(
       new Map([
-        ["2026-04-15", { quotaUsedPercent: 23, quotaDeltaPercent: 3 }],
-        ["2026-04-16", { quotaUsedPercent: 25, quotaDeltaPercent: 2 }]
+        ["2026-04-14", { quotaUsedPercent: 42, quotaDeltaPercent: 0 }],
+        ["2026-04-15", { quotaUsedPercent: 51, quotaDeltaPercent: 3 }],
+        ["2026-04-16", { quotaUsedPercent: 2, quotaDeltaPercent: 2 }]
       ])
     );
   });

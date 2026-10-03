@@ -461,6 +461,15 @@ function toDateKeyInTimeZone(value: string | Date, timeZone: string): string {
   }
 }
 
+function quotaSeriesKey(snapshot: CodexQuotaSnapshotRecord): string {
+  const resetAtMs = Date.parse(snapshot.resetAt);
+  if (!Number.isFinite(resetAtMs)) return `${snapshot.credentialHash}:${snapshot.resetAt}`;
+  // The upstream reset epoch can differ by a few seconds between hourly reads.
+  // Minute precision keeps one quota window together without merging real resets.
+  const normalizedResetAt = Math.round(resetAtMs / 60_000);
+  return `${snapshot.credentialHash}:${normalizedResetAt}`;
+}
+
 export function buildQuotaTrendFields(
   snapshots: CodexQuotaSnapshotRecord[],
   timeZone: string
@@ -475,7 +484,7 @@ export function buildQuotaTrendFields(
     const dayItems = byDay.get(item.day) ?? [];
     dayItems.push(item);
     byDay.set(item.day, dayItems);
-    const seriesKey = `${snapshot.credentialHash}:${snapshot.resetAt}`;
+    const seriesKey = quotaSeriesKey(snapshot);
     const seriesItems = bySeries.get(seriesKey) ?? [];
     seriesItems.push(item);
     bySeries.set(seriesKey, seriesItems);
@@ -486,7 +495,7 @@ export function buildQuotaTrendFields(
     items.sort((left, right) => left.observedAtMs - right.observedAtMs);
     const latest = items.at(-1);
     if (!latest) continue;
-    const latestSeries = `${latest.snapshot.credentialHash}:${latest.snapshot.resetAt}`;
+    const latestSeries = quotaSeriesKey(latest.snapshot);
     const seriesItems = bySeries.get(latestSeries) ?? [];
     const sameDay = seriesItems.filter((item) => item.day === day).sort((left, right) => left.observedAtMs - right.observedAtMs);
     const firstOfDay = sameDay[0];
@@ -494,10 +503,7 @@ export function buildQuotaTrendFields(
       result.set(day, { quotaUsedPercent: latest.snapshot.usedPercent, quotaDeltaPercent: null });
       continue;
     }
-    const previous = [...seriesItems]
-      .filter((item) => item.observedAtMs < firstOfDay.observedAtMs)
-      .sort((left, right) => right.observedAtMs - left.observedAtMs)[0];
-    const delta = latest.snapshot.usedPercent - (previous?.snapshot.usedPercent ?? firstOfDay.snapshot.usedPercent);
+    const delta = latest.snapshot.usedPercent - firstOfDay.snapshot.usedPercent;
     result.set(day, {
       quotaUsedPercent: latest.snapshot.usedPercent,
       quotaDeltaPercent: delta >= 0 ? delta : null
