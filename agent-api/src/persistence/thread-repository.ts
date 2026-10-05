@@ -145,6 +145,7 @@ type MessageRow = {
 
 type RuntimeSessionRow = {
   externalId: string | null;
+  threadId?: string | null;
 };
 
 type ThreadTable = {
@@ -168,7 +169,10 @@ type ThreadTable = {
 };
 
 type MessageTable = {
-  findMany(args: { where: { threadId: string }; orderBy?: { position: "asc" | "desc" } }): Promise<MessageRow[]>;
+  findMany(args: {
+    where: { threadId: string | { in: string[] } };
+    orderBy?: { position: "asc" | "desc" } | Array<{ threadId?: "asc" | "desc"; position?: "asc" | "desc" }>;
+  }): Promise<MessageRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<MessageRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<MessageRow>;
   deleteMany(args: { where: { threadId: string } }): Promise<{ count: number }>;
@@ -176,6 +180,11 @@ type MessageTable = {
 
 type RuntimeSessionTable = {
   findFirst(args: { where: { threadId: string; status?: "active" | "ended" | "failed" }; orderBy?: { updatedAt: "asc" | "desc" } }): Promise<RuntimeSessionRow | null>;
+  /** Optional batch lookup; when absent, thread lists fall back to per-thread queries. */
+  findMany?(args: {
+    where: { threadId: { in: string[] }; status?: "active" | "ended" | "failed" };
+    orderBy?: { updatedAt: "asc" | "desc" };
+  }): Promise<RuntimeSessionRow[]>;
   deleteMany(args: { where: { threadId: string } }): Promise<{ count: number }>;
 };
 
@@ -455,6 +464,8 @@ function sanitizeStoredMessageItem(
   };
 }
 
+const THREAD_BATCH_SIZE = 500;
+
 export class ThreadRepository {
   constructor(private readonly db: ThreadRepositoryDb) {}
 
@@ -472,7 +483,7 @@ export class ThreadRepository {
       },
       orderBy: { updatedAt: "desc" }
     });
-    return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
+    return this.loadThreadRecords(this.db, rows);
   }
 
   async listForUser(userId: string, organizationId?: string, includeArchived = false): Promise<ThreadRecord[]> {
@@ -486,7 +497,7 @@ export class ThreadRepository {
       },
       orderBy: { updatedAt: "desc" }
     });
-    return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
+    return this.loadThreadRecords(this.db, rows);
   }
 
   async listForUserInSecurityDomain(
@@ -505,7 +516,7 @@ export class ThreadRepository {
       },
       orderBy: { updatedAt: "desc" }
     });
-    return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
+    return this.loadThreadRecords(this.db, rows);
   }
 
   async create(payload: CreateThreadPayload): Promise<ThreadRecord> {
@@ -1112,6 +1123,38 @@ export class ThreadRepository {
     return this.loadThreadRecord(db, row);
   }
 
+  /**
+   * Loads messages and active sessions for many threads with chunked IN queries
+   * instead of two queries per thread (admin audit lists thousands of threads).
+   */
+  private async loadThreadRecords(db: ThreadRepositoryDb, rows: ThreadRow[]): Promise<ThreadRecord[]> {
+    const findSessions = db.runtimeSession.findMany?.bind(db.runtimeSession);
+    if (!findSessions || rows.length <= 1) {
+      return Promise.all(rows.map(async (row) => this.loadThreadRecord(db, row)));
+    }
+    const messagesByThread = new Map<string, StoredMessageItem[]>();
+    const sessionByThread = new Map<string, RuntimeSessionRow>();
+    for (let index = 0; index < rows.length; index += THREAD_BATCH_SIZE) {
+      const ids = rows.slice(index, index + THREAD_BATCH_SIZE).map((row) => row.id);
+      const [messageRows, sessionRows] = await Promise.all([
+        db.message.findMany({ where: { threadId: { in: ids } }, orderBy: [{ threadId: "asc" }, { position: "asc" }] }),
+        findSessions({ where: { threadId: { in: ids }, status: "active" }, orderBy: { updatedAt: "desc" } })
+      ]);
+      for (const messageRow of messageRows) {
+        const list = messagesByThread.get(messageRow.threadId) ?? [];
+        list.push(mapMessageRow(messageRow));
+        messagesByThread.set(messageRow.threadId, list);
+      }
+      for (const session of sessionRows) {
+        const threadId = session.threadId ?? "";
+        if (threadId && !sessionByThread.has(threadId)) sessionByThread.set(threadId, session);
+      }
+    }
+    return rows.map((row) =>
+      this.buildThreadRecord(row, messagesByThread.get(row.id) ?? [], sessionByThread.get(row.id) ?? null)
+    );
+  }
+
   private async loadThreadRecord(
     db: ThreadRepositoryDb,
     row: ThreadRow,
@@ -1132,6 +1175,10 @@ export class ThreadRepository {
       })
     ]);
 
+    return this.buildThreadRecord(row, messages, activeSession);
+  }
+
+  private buildThreadRecord(row: ThreadRow, messages: StoredMessageItem[], activeSession: RuntimeSessionRow | null): ThreadRecord {
     return {
       id: row.id,
       organizationId: trimOrUndefined(row.organizationId ?? undefined),

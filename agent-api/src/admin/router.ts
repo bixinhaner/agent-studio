@@ -602,12 +602,20 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
 
 async function listUsers(db: AdminDb): Promise<AdminDetailUser[]> {
   const rows = (await db.user.findMany({ orderBy: { createdAt: "asc" } })) as UserRow[];
-  const result: AdminDetailUser[] = [];
-  for (const row of rows) {
-    result.push(await buildUserDetail(db, row));
-  }
+  // Each detail needs several lookups; run a few users at a time instead of strictly one by one.
+  const result: AdminDetailUser[] = new Array(rows.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < rows.length) {
+      const index = next++;
+      result[index] = await buildUserDetail(db, rows[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LIST_USERS_CONCURRENCY, rows.length) }, worker));
   return result;
 }
+
+const LIST_USERS_CONCURRENCY = 8;
 
 async function getUserById(db: AdminDb, userId: string): Promise<UserRow | null> {
   const normalized = trimOrUndefined(userId);
