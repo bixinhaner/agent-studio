@@ -514,6 +514,73 @@ function buildPortalStatus(input: {
   };
 }
 
+export type PortalStatusLocale = "en" | "zh-CN";
+
+const PORTAL_STATUS_ZH: Record<string, string> = {
+  "Access is available": "可正常使用",
+  "Your internal workspace is not currently using a separate subscription limit.": "你所在的内部组织目前没有单独的订阅额度限制。",
+  "You can keep sending AI requests without setting up a personal plan.": "无需开通个人套餐即可继续发起 AI 请求。",
+  "A plan is required": "需要开通套餐",
+  "Your workspace has not enabled access yet.": "你的组织尚未开通使用权限。",
+  "Ask your workspace admin to assign a plan before you send an AI request.": "请先联系组织管理员分配套餐，再发起 AI 请求。",
+  "Contact your workspace admin to enable access.": "请联系组织管理员开通权限。",
+  "Access is unavailable": "暂不可用",
+  "You can send a new AI request.": "你可以发起新的 AI 请求。",
+  "You cannot send a new AI request right now.": "你目前无法发起新的 AI 请求。",
+  "Please contact your workspace admin for help.": "请联系组织管理员协助处理。",
+  "Access is paused": "权限已暂停",
+  "This plan is currently paused for new AI requests.": "该套餐目前已暂停新的 AI 请求。",
+  "You can keep reading earlier chats, but you will need your admin to resume access before sending a new AI request.": "你仍可查看历史对话；如需发起新的 AI 请求，需要管理员恢复权限。",
+  "Ask your workspace admin to resume this plan.": "请联系组织管理员恢复该套餐。",
+  "Access starts soon": "即将生效",
+  "Your plan has been scheduled, but it is not active yet.": "你的套餐已排期，但尚未生效。",
+  "You can send AI requests as soon as the plan begins.": "套餐生效后即可发起 AI 请求。",
+  "If this start date looks wrong, contact your workspace admin.": "如果生效日期有误，请联系组织管理员。",
+  "Your access has ended": "权限已到期",
+  "This plan is no longer active for new AI requests.": "该套餐已不再支持新的 AI 请求。",
+  "Ask your workspace admin to renew access, then try again.": "请联系组织管理员续期后再试。",
+  "Contact your workspace admin for a renewal.": "请联系组织管理员续期。",
+  "This workspace is temporarily unavailable": "当前组织暂时不可用",
+  "This plan has reached its service capacity for the current cycle.": "该套餐本周期的服务容量已用完。",
+  "You can keep reading earlier chats. To send a new AI request, wait for the next reset or ask your admin for more capacity.": "你仍可查看历史对话。如需发起新的 AI 请求，请等待下次重置或联系管理员增加容量。",
+  "Try again after the next cycle reset or contact your workspace admin.": "请在下个周期重置后再试，或联系组织管理员。",
+  "AI request limit reached": "AI 请求次数已用完",
+  "You have used all AI requests included in this cycle.": "本周期包含的 AI 请求次数已全部用完。",
+  "You can keep reading earlier chats. To send a new AI request, wait for the next reset or ask your admin to adjust the plan.": "你仍可查看历史对话。如需发起新的 AI 请求，请等待下次重置或联系管理员调整套餐。",
+  "Access ends soon": "即将到期",
+  "Access is active": "权限有效",
+  "Your plan is active, but it is approaching its end date.": "套餐当前有效，但即将到期。",
+  "You can keep sending AI requests within the current cycle.": "本周期内可继续发起 AI 请求。",
+  "If you need uninterrupted access, contact your workspace admin before it ends.": "如需不间断使用，请在到期前联系组织管理员。",
+  "Your plan is active for AI requests.": "你的套餐当前可用于 AI 请求。",
+  "No AI request limit is currently shown for this plan.": "该套餐目前未显示 AI 请求次数上限。",
+  "Blocked by your personal plan": "受个人套餐限制",
+  "Managed through your personal plan": "由个人套餐提供",
+  "Blocked by your workspace plan": "受组织套餐限制",
+  "Managed through your workspace plan": "由组织套餐提供",
+  "Included by your internal workspace": "内部组织默认包含",
+  "A workspace plan is required": "需要组织套餐"
+};
+
+/** Translates the fixed portal status copy; dynamic messages pass through unchanged. */
+export function localizePortalStatus(status: PortalSubscriptionStatus, locale: PortalStatusLocale = "en"): PortalSubscriptionStatus {
+  if (locale !== "zh-CN") return status;
+  const tr = (value: string | null): string | null => {
+    if (!value) return value;
+    const left = /^(\d+) AI requests? left in this cycle\.$/.exec(value);
+    if (left) return `本周期剩余 ${left[1]} 次 AI 请求。`;
+    return PORTAL_STATUS_ZH[value] ?? value;
+  };
+  return {
+    ...status,
+    sourceLabel: tr(status.sourceLabel) ?? status.sourceLabel,
+    title: tr(status.title) ?? status.title,
+    summary: tr(status.summary) ?? status.summary,
+    detail: tr(status.detail) ?? status.detail,
+    actionLabel: tr(status.actionLabel)
+  };
+}
+
 export function isChatAccessDeniedError(error: unknown): error is ChatAccessDeniedError {
   return error instanceof ChatAccessDeniedError;
 }
@@ -731,6 +798,7 @@ export class SubscriptionEntitlementService {
     currentUser: CurrentActor;
     model: string;
     now?: Date;
+    locale?: PortalStatusLocale;
   }): Promise<PortalSubscriptionStatus> {
     const now = input.now ?? new Date();
     const decision = await this.evaluateAccessForChat({
@@ -738,10 +806,10 @@ export class SubscriptionEntitlementService {
       model: input.model,
       now
     });
-    return buildPortalStatus({
+    return localizePortalStatus(buildPortalStatus({
       decision,
       now
-    });
+    }), input.locale);
   }
 
   private buildPortalDeniedMessage(decision: ChatAccessDecision): string {

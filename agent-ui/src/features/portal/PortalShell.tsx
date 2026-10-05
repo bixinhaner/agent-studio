@@ -7811,7 +7811,7 @@ export function PortalShell(props: {
     }
 
     try {
-      const next = await fetchPortalSubscriptionStatus();
+      const next = await fetchPortalSubscriptionStatus(locale);
       setSubscriptionStatus(next);
       setSubscriptionStatusError("");
     } catch (error) {
@@ -7821,7 +7821,7 @@ export function PortalShell(props: {
         setSubscriptionStatusLoading(false);
       }
     }
-  }, [props.currentUser?.id]);
+  }, [locale, props.currentUser?.id]);
   refreshPortalSubscriptionStatusRef.current = refreshPortalSubscriptionStatus;
 
   const persistPortalPreferences = useCallback(

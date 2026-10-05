@@ -245,7 +245,8 @@ export function createPortalRouter(options: {
           organizationType: req.currentOrganization?.type,
           membershipType: req.currentMembership?.membershipType
         },
-        model: ""
+        model: "",
+        locale: req.query.locale === "zh-CN" ? "zh-CN" : "en"
       });
       res.json({
         status: {

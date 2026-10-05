@@ -196,8 +196,9 @@ function normalizePortalSubscriptionStatus(payload: PortalSubscriptionStatusPayl
   };
 }
 
-export async function fetchPortalSubscriptionStatus(): Promise<PortalSubscriptionStatus> {
-  const response = await api<PortalSubscriptionStatusPayload>("/api/portal/subscription-status");
+export async function fetchPortalSubscriptionStatus(locale?: string): Promise<PortalSubscriptionStatus> {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : "";
+  const response = await api<PortalSubscriptionStatusPayload>(`/api/portal/subscription-status${query}`);
   return normalizePortalSubscriptionStatus(response.status);
 }
 

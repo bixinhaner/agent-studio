@@ -204,10 +204,10 @@ export function UserAccessStatusPanel(props: {
 
   const accessTone = props.accessStatus?.tone || "neutral";
   const accessBadgeLabel = props.accessStatus?.accessState === "blocked"
-    ? "Action needed"
+    ? (locale === "en" ? "Action needed" : "需要处理")
     : accessTone === "caution"
-      ? "Ends soon"
-      : "Active";
+      ? (locale === "en" ? "Ends soon" : "即将到期")
+      : (locale === "en" ? "Active" : "有效");
   const showAiRequestBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
   const hasAccessDetailRows = Boolean(
     props.accessStatus && (
