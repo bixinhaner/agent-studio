@@ -4,6 +4,7 @@ import { fetchRoleDetail, fetchRoleAuditLogs, putRolePermissions, putRoleResourc
 import { PermissionMatrix } from "./PermissionMatrix";
 import { RoleAuditView } from "./RoleAuditView";
 import type { ResourcePolicySummary, RoleDetailResponse } from "./types";
+import { roleDescriptionLabel } from "./labels";
 
 type DetailTab = "permissions" | "resources" | "audit";
 
@@ -91,7 +92,7 @@ export function RoleDetailView(props: { roleId: string }) {
       <div className="admin-section-header">
         <div>
           <h2>{detail.role.name}</h2>
-          <p>{detail.role.slug}</p>
+          <p>{roleDescriptionLabel(detail.role) || detail.role.slug}</p>
         </div>
         <button type="button" className="admin-action-btn" onClick={() => void handleSave()}>
           保存角色配置

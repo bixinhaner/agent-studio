@@ -20,6 +20,7 @@ import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { cloneRole, createRole, disableRole, fetchRoles } from "./api";
 import { RoleDetailView } from "./RoleDetailView";
 import type { RoleSummary } from "./types";
+import { roleDescriptionLabel } from "./labels";
 
 function formatLocalTime(value: string): string {
   const parsed = new Date(value);
@@ -282,7 +283,7 @@ export function RolesView() {
                       textOverflow: "ellipsis"
                     }}
                   >
-                    {role.description || "无描述"}
+                    {roleDescriptionLabel(role) || "无描述"}
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 12 }}>
                     <div style={{ minWidth: 0 }}>
@@ -292,7 +293,7 @@ export function RolesView() {
                       </div>
                     </div>
                     <Tag color={role.isActive ? "success" : "default"} style={{ margin: 0, border: "none", background: "var(--admin-color-bg)" }}>
-                      {role.isActive ? "Active" : "Disabled"}
+                      {role.isActive ? "已启用" : "已停用"}
                     </Tag>
                   </div>
                 </div>

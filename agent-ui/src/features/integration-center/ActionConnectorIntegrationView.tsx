@@ -8,6 +8,7 @@ import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { ActionConnectorConfigDraft, IntegrationDetail } from "./types";
 import { ProactivePushSubscriptionsPanel } from "./ProactivePushSubscriptionsPanel";
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 type ActionConnectorTab = "basic" | "bindings" | "policies" | "push" | "history";
 
@@ -131,7 +132,7 @@ export function ActionConnectorIntegrationView(props: {
             <h3>{props.detail.instance.name}</h3>
             <p>连接外部业务系统，让 agent 通过受控工具请求读取或操作系统能力。</p>
           </div>
-          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
+          <Tag color={status === "active" ? "success" : "default"} title={status}>{resourceStatusLabel(status)}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="Action connector 集成详情标签">

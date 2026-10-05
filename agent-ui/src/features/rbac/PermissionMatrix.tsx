@@ -1,4 +1,5 @@
 import type { PermissionSummary } from "./types";
+import { permissionCategoryLabel, permissionLabel } from "./labels";
 
 export function PermissionMatrix(props: {
   permissions: PermissionSummary[];
@@ -16,7 +17,7 @@ export function PermissionMatrix(props: {
     <div className="rbac-permission-matrix">
       {Array.from(groups.entries()).map(([category, permissions]) => (
         <section key={category} className="rbac-group">
-          <h4>{category}</h4>
+          <h4>{permissionCategoryLabel(category)}</h4>
           <div className="rbac-option-list">
             {permissions.map((permission) => (
               <label key={permission.id} className="rbac-option">
@@ -26,7 +27,7 @@ export function PermissionMatrix(props: {
                   checked={props.selectedPermissionIds.includes(permission.id)}
                   onChange={(event) => props.onToggle(permission.id, event.target.checked)}
                 />
-                <span>{permission.name}</span>
+                <span title={permission.name}>{permissionLabel(permission)}</span>
                 <code>{permission.key}</code>
               </label>
             ))}

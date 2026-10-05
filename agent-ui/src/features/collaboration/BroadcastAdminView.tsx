@@ -405,6 +405,13 @@ function AudienceBuilder(props: {
   );
 }
 
+const DELIVERY_STATUS_LABELS: Record<string, string> = { sent: "已发送", failed: "失败", pending: "发送中" };
+const DELIVERY_EVENT_LABELS: Record<string, string> = {
+  "broadcast.test_email": "测试邮件",
+  "broadcast.email": "正式邮件",
+  "broadcast.published": "站内发布"
+};
+
 export function BroadcastAdminView() {
   const [broadcasts, setBroadcasts] = useState<BroadcastRecord[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -484,10 +491,10 @@ export function BroadcastAdminView() {
   }, [selectedBroadcast?.id]);
 
   const summaryItems = [
-    { label: "触达活动", value: String(broadcasts.length), icon: <Radio size={16} /> },
-    { label: "可发布", value: String(broadcasts.filter((item) => item.status === "draft" && item.testState?.status === "passed").length), icon: <ShieldCheck size={16} /> },
-    { label: "已发送", value: String(broadcasts.filter((item) => item.status === "published").length), icon: <Send size={16} /> },
-    { label: "失败记录", value: String(deliveries.filter((item) => item.status === "failed").length), icon: <BarChart3 size={16} /> }
+    { label: "触达活动", value: String(broadcasts.length), meta: "全部草稿与已发送活动", icon: <Radio size={16} aria-hidden="true" /> },
+    { label: "可发布", value: String(broadcasts.filter((item) => item.status === "draft" && item.testState?.status === "passed").length), meta: "草稿且测试已通过", icon: <ShieldCheck size={16} aria-hidden="true" /> },
+    { label: "已发送", value: String(broadcasts.filter((item) => item.status === "published").length), meta: "已正式发布的活动", icon: <Send size={16} aria-hidden="true" /> },
+    { label: "失败记录", value: String(deliveries.filter((item) => item.status === "failed").length), meta: "当前活动送达失败的记录", icon: <BarChart3 size={16} aria-hidden="true" /> }
   ];
 
   function upsertBroadcast(next: BroadcastRecord) {
@@ -804,7 +811,7 @@ export function BroadcastAdminView() {
           <section key={item.label} className="admin-page-summary-card">
             <div className="admin-page-summary-label">{item.icon}{item.label}</div>
             <div className="admin-page-summary-value">{item.value}</div>
-            <div className="admin-page-summary-meta">本地时区展示</div>
+            <div className="admin-page-summary-meta">{item.meta}</div>
           </section>
         ))}
       </div>
@@ -868,9 +875,12 @@ export function BroadcastAdminView() {
                 {deliveries.length ? deliveries.slice(0, 10).map((delivery) => (
                   <div key={delivery.id}>
                     <Tag color={delivery.status === "sent" ? "success" : delivery.status === "failed" ? "error" : "processing"}>
-                      {delivery.status}
+                      {DELIVERY_STATUS_LABELS[delivery.status] ?? delivery.status}
                     </Tag>
-                    <span>{delivery.eventType}</span>
+                    <span title={delivery.errorMessage || delivery.eventType}>
+                      {DELIVERY_EVENT_LABELS[delivery.eventType] ?? delivery.eventType}
+                      {delivery.targetRef ? ` · ${delivery.targetRef}` : ""}
+                    </span>
                     <small>{formatLocalDateTime(delivery.createdAt)}</small>
                   </div>
                 )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发送记录" />}

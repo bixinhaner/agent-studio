@@ -110,8 +110,8 @@ export function UserIdentitySummary(props: {
       <div className="user-identity-stack">
         <div className="user-identity-copy">
           <p className="user-identity-name" style={{ marginBottom: 4 }}>{name}</p>
-          <p className="user-identity-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-            <span className="user-identity-role">{roleLabel(props.user.role, props.user.userType, locale)}</span>
+          <p className="user-identity-meta" style={{ display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
+            <span className="user-identity-role" style={{ flex: "none" }}>{roleLabel(props.user.role, props.user.userType, locale)}</span>
             <span className="user-identity-divider" aria-hidden="true" style={{ margin: "0 6px" }}>·</span>
             {organizationOptions.length > 1 ? (
               <select
@@ -130,7 +130,9 @@ export function UserIdentitySummary(props: {
                 )}
               </select>
             ) : (
-              <span>{activeOrganizationName}</span>
+              <span title={activeOrganizationName} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {activeOrganizationName}
+              </span>
             )}
           </p>
           <p className="user-identity-meta" style={{ marginTop: 2 }}>

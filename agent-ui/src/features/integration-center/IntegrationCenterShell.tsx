@@ -1,4 +1,4 @@
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Drawer, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from "antd";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
@@ -305,7 +305,7 @@ export function IntegrationCenterShell() {
         <div className="admin-split-master">
           <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
             <Input
-              prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
+              prefix={<SearchOutlined aria-hidden="true" style={{ color: 'var(--admin-color-subtle)' }} />}
               placeholder="搜索实例..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}

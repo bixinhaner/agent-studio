@@ -23,6 +23,7 @@ import {
   Wrench
 } from "lucide-react";
 import { Breadcrumb, Button, Col, ConfigProvider, Drawer, Input, List, Modal, Row, Spin } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -656,7 +657,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   );
 
   return (
-    <ConfigProvider theme={ADMIN_PREMIUM_THEME}>
+    <ConfigProvider theme={ADMIN_PREMIUM_THEME} locale={zhCN}>
       <div className="admin-console-root">
         {!isNarrowScreen ? (
           <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
@@ -723,7 +724,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
             <div className="admin-topbar-right">
               <button className="admin-cmd-trigger" onClick={() => setCmdPaletteOpen(true)}>
                 <Search size={14} />
-                <span className="admin-cmd-label">Search or jump to management workspace...</span>
+                <span className="admin-cmd-label">搜索或跳转到管理页面…</span>
                 <span className="admin-cmd-kbd">⌘K</span>
               </button>
               {props.onOpenPortal ? (
@@ -762,7 +763,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           <div style={{ padding: 16, borderBottom: "1px solid var(--admin-color-border)" }}>
             <Input
               prefix={<Search size={18} style={{ color: "var(--admin-color-subtle)" }} />}
-              placeholder="Search features, settings..."
+              placeholder="搜索功能、设置…"
               variant="borderless"
               size="large"
               autoFocus

@@ -6,6 +6,7 @@ import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { CrestCrmConfigDraft, IntegrationDetail } from "./types";
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 type CrestTab = "basic" | "bindings" | "policies" | "history";
 
@@ -130,7 +131,7 @@ export function CrestCrmIntegrationView(props: {
             <h3>{props.detail.instance.name}</h3>
             <p>连接 Crest CRM 的 SSO、MCP 工具和 Action Catalog，让 Studio agent 以 Crest 用户身份调用 CRM。</p>
           </div>
-          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
+          <Tag color={status === "active" ? "success" : "default"} title={status}>{resourceStatusLabel(status)}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="Crest CRM 集成详情标签">

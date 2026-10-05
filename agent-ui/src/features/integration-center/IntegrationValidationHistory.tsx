@@ -1,4 +1,5 @@
 import type { IntegrationValidationItem } from './types';
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 function formatTimestamp(value: string) {
   const parsed = new Date(value);
@@ -35,7 +36,7 @@ export function IntegrationValidationHistory(props: { items: IntegrationValidati
             <div className="resource-center-summary-grid compact">
               <div>
                 <span className="field-label">状态</span>
-                <p>{item.status}</p>
+                <p>{resourceStatusLabel(item.status)}</p>
               </div>
               <div>
                 <span className="field-label">触发方式</span>

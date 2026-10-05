@@ -828,7 +828,7 @@ export function OperationsAnalyticsView() {
               <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有业务调用的用户" />
               <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="业务会话，不含安全审核" />
               <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`业务请求 · 每会话 ${data.summary.avgRequestsPerSession} 次`} />
-              <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`业务使用 · 平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
+              <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`业务使用 · 平均 ${formatCount(Math.round(data.summary.avgTokensPerRequest))} tokens/问题`} />
               <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="业务使用按模型单价折算" />
               <MetricItem
                 label="内部价值"

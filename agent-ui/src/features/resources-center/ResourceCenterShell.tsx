@@ -1,4 +1,4 @@
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
 import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { resourceStatusLabel } from "../../lib/status-labels";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { createKnowledgeSet, fetchKnowledgeSets } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
@@ -142,7 +143,7 @@ export function ResourceCenterShell() {
     if (Number.isNaN(updatedAt)) return false;
     return Date.now() - updatedAt <= 7 * 24 * 60 * 60 * 1000;
   }).length;
-  const selectionLabel = selectedKnowledgeSet ? `${selectedKnowledgeSet.name} · ${selectedKnowledgeSet.status}` : "未选择资料集";
+  const selectionLabel = selectedKnowledgeSet ? `${selectedKnowledgeSet.name} · ${resourceStatusLabel(selectedKnowledgeSet.status)}` : "未选择资料集";
   const filterScopeLabel = search.trim() ? `搜索“${search.trim()}”` : "全量资料视图";
 
   function handleKnowledgeSetUpdated(updatedKnowledgeSet: KnowledgeSetRecord) {
@@ -265,7 +266,7 @@ export function ResourceCenterShell() {
           <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Input
-                prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
+                prefix={<SearchOutlined aria-hidden="true" style={{ color: 'var(--admin-color-subtle)' }} />}
                 placeholder="搜索资料集..."
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -301,7 +302,7 @@ export function ResourceCenterShell() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                       <strong style={{ fontSize: 14, fontWeight: 600 }}>{knowledgeSet.name}</strong>
                       <Tag color={knowledgeSet.status === "active" ? "success" : "default"} style={{ margin: 0, borderRadius: 4 }}>
-                        {knowledgeSet.status}
+                        {resourceStatusLabel(knowledgeSet.status)}
                       </Tag>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

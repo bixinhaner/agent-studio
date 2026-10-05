@@ -12,6 +12,7 @@ import {
   reasoningOptionsForModel,
   type ReasoningEffort
 } from "../../lib/model-config";
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 type OpenAITab = "basic" | "bindings" | "policies" | "history";
 
@@ -136,7 +137,7 @@ export function OpenAICodexIntegrationView(props: {
             <h3>{props.detail.instance.name}</h3>
             <p>管理模型供应方配置、默认模型和默认推理强度。</p>
           </div>
-          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
+          <Tag color={status === "active" ? "success" : "default"} title={status}>{resourceStatusLabel(status)}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="OpenAI-Codex 详情标签">

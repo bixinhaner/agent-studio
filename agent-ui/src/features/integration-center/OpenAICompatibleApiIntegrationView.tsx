@@ -8,6 +8,7 @@ import type { KnowledgeSetRecord } from "../resources-center/types";
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { ExternalApiUsageView } from "./ExternalApiUsageView";
 import type { IntegrationDetail, OpenAICompatibleApiConfigDraft } from "./types";
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 type ExternalTab = "basic" | "usage";
 
@@ -206,7 +207,7 @@ export function OpenAICompatibleApiIntegrationView(props: {
             <h3>{props.detail.instance.name}</h3>
             <p>给第三方应用提供 OpenAI Chat Completions 兼容入口，Agent Mode 与资料集范围固定在管理端。</p>
           </div>
-          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
+          <Tag color={status === "active" ? "success" : "default"} title={status}>{resourceStatusLabel(status)}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="外部 OpenAI API 详情标签">

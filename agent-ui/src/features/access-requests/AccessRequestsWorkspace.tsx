@@ -441,8 +441,8 @@ export function AccessRequestsWorkspace() {
         width: 180,
         render: (_, record) => (
           <div className="access-admin-cell-subtitle">
-            <div>{record.reviewers.pendingCount} pending</div>
-            <div>{record.reviewers.approvedCount} approved</div>
+            <div>待审 {record.reviewers.pendingCount}</div>
+            <div>已通过 {record.reviewers.approvedCount}</div>
           </div>
         )
       },
@@ -469,6 +469,12 @@ export function AccessRequestsWorkspace() {
 
   return (
     <section className="access-admin-workspace">
+      <div className="admin-page-header">
+        <div>
+          <h1 className="admin-page-title">访问申请</h1>
+          <p className="admin-page-desc">处理公开试用申请、审核路由和开通动作。</p>
+        </div>
+      </div>
       <div className="access-admin-toolbar">
         <Space wrap size={12}>
           <Select

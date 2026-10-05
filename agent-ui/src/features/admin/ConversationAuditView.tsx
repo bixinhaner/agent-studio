@@ -23,7 +23,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { UrlTransform } from "react-markdown";
 
-import { formatUsdAmount } from "../../lib/formatters";
+import { formatListTimestamp, formatUsdAmount, plainTextPreview } from "../../lib/formatters";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { useAuth } from "../auth/AuthProvider";
 import {
@@ -1864,10 +1864,10 @@ function ConversationWorkspace() {
                >
                  <div className="admin-master-header">
                    <span className="admin-master-title">{conv.title}</span>
-                   <span className="admin-master-time">{formatLocalDateTime(conv.updatedAt).split(' ')[1]}</span>
+                   <span className="admin-master-time">{formatListTimestamp(conv.updatedAt)}</span>
                  </div>
                  <div className="admin-master-preview">
-                   {conv.preview.latestText || conv.preview.firstUserText || "无预览"}
+                   {plainTextPreview(conv.preview.latestText || conv.preview.firstUserText) || "无预览"}
                  </div>
                  <div className="conversation-master-meta">
                    <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />

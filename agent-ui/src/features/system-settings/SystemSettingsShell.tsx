@@ -25,17 +25,17 @@ import type {
 import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from "./validation";
 
 const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; group: string }> = [
-  { id: "branding", label: "基本设置", icon: Settings2, group: 'General' },
-  { id: "local-bridge", label: "本机文件夹", icon: HardDrive, group: 'General' },
-  { id: "model-defaults", label: "运行时默认与兜底", icon: Box, group: 'General' },
-  { id: "organization-defaults", label: "组织默认值", icon: Users, group: 'General' },
-  { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
-  { id: "artifact-access", label: "外部文件访问", icon: FileCheck2, group: 'Security & Data' },
-  { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
-  { id: "conversation-security-review", label: "对话安全审查", icon: ScanSearch, group: 'Security & Data' },
-  { id: "usage-governance", label: "用量治理", icon: Gauge, group: 'Operations' },
-  { id: "admin-email-notifications", label: "通知策略", icon: BellRing, group: 'Operations' },
-  { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
+  { id: "branding", label: "基本设置", icon: Settings2, group: '常规' },
+  { id: "local-bridge", label: "本机文件夹", icon: HardDrive, group: '常规' },
+  { id: "model-defaults", label: "运行时默认与兜底", icon: Box, group: '常规' },
+  { id: "organization-defaults", label: "组织默认值", icon: Users, group: '常规' },
+  { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: '安全与数据' },
+  { id: "artifact-access", label: "外部文件访问", icon: FileCheck2, group: '安全与数据' },
+  { id: "safety", label: "安全策略", icon: ShieldCheck, group: '安全与数据' },
+  { id: "conversation-security-review", label: "对话安全审查", icon: ScanSearch, group: '安全与数据' },
+  { id: "usage-governance", label: "用量治理", icon: Gauge, group: '运营' },
+  { id: "admin-email-notifications", label: "通知策略", icon: BellRing, group: '运营' },
+  { id: "publish-history", label: "发布记录", icon: History, group: '系统' }
 ];
 
 function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {

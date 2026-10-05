@@ -194,7 +194,7 @@ export function BrandingSettingsView({
     <section className="resource-center-section">
       <div className="resource-center-section-header">
         <div>
-          <h3>基本设置</h3>
+          <h3>品牌与登录页</h3>
           <p>维护品牌、登录页和行为说明，发布后会应用到用户侧界面。</p>
         </div>
       </div>

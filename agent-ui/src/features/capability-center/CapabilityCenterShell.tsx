@@ -313,8 +313,7 @@ export function CapabilityCenterShell() {
       {contextHolder}
       <header className="agent-page-header">
         <div>
-          <p className="agent-eyebrow">ADMIN CONSOLE</p>
-          <h2>智能体工作室</h2>
+          <h2>智能体配置</h2>
           <p>构建、配置并验证可复用的智能体</p>
         </div>
         <div className="agent-header-actions">

@@ -25,6 +25,7 @@ import type { IntegrationDetail, ZendeskCacheCleanupResult, ZendeskConfigDraft }
 import type { ZendeskDingTalkGroupFallbackRule, ZendeskGroupOption } from "./types";
 import type { ZendeskRunRecord } from "../zendesk/types";
 import "../zendesk/zendesk.css";
+import { resourceStatusLabel } from "../../lib/status-labels";
 
 type ZendeskTab = "basic" | "operations" | "cache" | "bindings" | "policies" | "history";
 
@@ -857,7 +858,7 @@ export function ZendeskIntegrationView(props: {
             <h3>{props.detail.instance.name}</h3>
             <p>管理 Zendesk 站点、Webhook、Agent Mode、资料集和回复策略。</p>
           </div>
-          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
+          <Tag color={status === "active" ? "success" : "default"} title={status}>{resourceStatusLabel(status)}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="Zendesk 详情标签">

@@ -150,6 +150,54 @@ function formatMoney(cents: number | null | undefined, currency?: string | null)
   }).format(amount);
 }
 
+const BILLING_STATUS_LABELS: Record<string, string> = {
+  active: "生效中",
+  paid: "已付款",
+  enabled: "已开启",
+  processed: "已处理",
+  sent: "已发送",
+  pending_payment: "待付款",
+  processing: "处理中",
+  trialing: "试用中",
+  payment_failed: "付款失败",
+  failed: "失败",
+  expired: "已过期",
+  paused: "已暂停",
+  draft: "草稿",
+  canceled: "已取消",
+  cancelled: "已取消",
+  disabled: "已停用",
+  scheduled: "已排期",
+  refunded: "已退款",
+  not_enabled: "未开启",
+  no_order: "无订单",
+  not_open: "未开通",
+  unknown: "未知",
+  attached: "已绑定",
+  requires_action: "需验证",
+  missing: "缺失",
+  pending: "待处理",
+  skipped: "已跳过",
+  ignored: "已忽略",
+  archived: "已归档",
+  inactive: "未启用"
+};
+
+function billingStatusLabel(status?: string | null): string {
+  if (!status) return "—";
+  return BILLING_STATUS_LABELS[status] ?? status;
+}
+
+/** Status chip with a readable label; the raw code stays available as a tooltip for troubleshooting. */
+function StatusTag(props: { status?: string | null; fallback?: string }) {
+  const status = props.status ?? props.fallback ?? null;
+  return (
+    <Tag color={statusColor(props.status)} title={status ?? undefined}>
+      {billingStatusLabel(status)}
+    </Tag>
+  );
+}
+
 function statusColor(status?: string | null): string {
   switch (status) {
     case "active":
@@ -335,8 +383,8 @@ function groupAdminPlans(plans: AdminBillingPlan[]): AdminPlanGroup[] {
 }
 
 function planStatusTag(plan?: AdminBillingPlan | null) {
-  if (!plan) return <Tag color="error">missing</Tag>;
-  return <Tag color={statusColor(plan.billingStatus)}>{plan.billingStatus}</Tag>;
+  if (!plan) return <Tag color="error">缺失</Tag>;
+  return <StatusTag status={plan.billingStatus} />;
 }
 
 function createPromotionFormState(): PromotionFormState {
@@ -408,10 +456,10 @@ function OrderDetailPanel(props: { order: AdminBillingOrder; organizationName: s
   return (
     <div className="admin-billing-drawer-stack">
       <div className="admin-billing-detail-grid">
-        <div><span>Order</span><strong>{props.order.orderNumber}</strong></div>
-        <div><span>Status</span><strong>{props.order.status}</strong></div>
-        <div><span>Customer</span><strong>{props.organizationName}</strong></div>
-        <div><span>Source</span><strong>{props.order.source}</strong></div>
+        <div><span>订单号</span><strong>{props.order.orderNumber}</strong></div>
+        <div><span>状态</span><strong>{props.order.status}</strong></div>
+        <div><span>客户</span><strong>{props.organizationName}</strong></div>
+        <div><span>来源</span><strong>{props.order.source}</strong></div>
       </div>
       <section className="admin-billing-detail-section">
         <h3>金额</h3>
@@ -458,11 +506,11 @@ function AutoRenewalDetailPanel(props: {
     <aside className="admin-billing-detail">
       <div className="admin-billing-detail-head">
         <div>
-          <span className="admin-billing-kicker">Auto renewal</span>
+          <span className="admin-billing-kicker">自动续费</span>
           <h2>{props.account.organization.name}</h2>
           <p>{props.renewal.stripeSubscriptionId ?? "Stripe subscription not created"}</p>
         </div>
-        <Tag color={statusColor(props.renewal.status)}>{props.renewal.status}</Tag>
+        <StatusTag status={props.renewal.status} />
       </div>
       {props.renewal.status === "payment_failed" ? (
         <Alert
@@ -474,10 +522,10 @@ function AutoRenewalDetailPanel(props: {
         />
       ) : null}
       <div className="admin-billing-detail-grid">
-        <div><span>Payment method</span><strong>{props.renewal.paymentMethodStatus}</strong></div>
-        <div><span>Cancel at period end</span><strong>{props.renewal.cancelAtPeriodEnd ? "yes" : "no"}</strong></div>
-        <div><span>Current period</span><strong>{formatLocalTime(props.renewal.currentPeriodEndsAt)}</strong></div>
-        <div><span>Next renewal</span><strong>{formatLocalTime(props.renewal.nextRenewalAt)}</strong></div>
+        <div><span>付款方式</span><strong>{billingStatusLabel(props.renewal.paymentMethodStatus)}</strong></div>
+        <div><span>周期结束后取消</span><strong>{props.renewal.cancelAtPeriodEnd ? "yes" : "no"}</strong></div>
+        <div><span>当前周期</span><strong>{formatLocalTime(props.renewal.currentPeriodEndsAt)}</strong></div>
+        <div><span>下次续费</span><strong>{formatLocalTime(props.renewal.nextRenewalAt)}</strong></div>
       </div>
       <section className="admin-billing-detail-section">
         <h3>下一步</h3>
@@ -663,7 +711,7 @@ export function BillingWorkspace() {
 
   const customerColumns: ColumnsType<AdminBillingCustomerAccount> = [
     {
-      title: "Organization",
+      title: "组织",
       dataIndex: ["organization", "name"],
       width: 240,
       render: (_, record) => (
@@ -674,31 +722,31 @@ export function BillingWorkspace() {
       )
     },
     {
-      title: "Plan",
+      title: "套餐",
       width: 180,
       render: (_, record) => record.grant?.planName ?? "未开通"
     },
     {
-      title: "Expiry",
+      title: "到期时间",
       width: 190,
       render: (_, record) => formatLocalTime(record.grant?.expiresAt)
     },
     {
-      title: "Auto renew",
+      title: "自动续费",
       width: 150,
       render: (_, record) => (
-        <Tag color={statusColor(record.autoRenewal?.status)}>{record.autoRenewal?.status ?? "not_enabled"}</Tag>
+        <StatusTag status={record.autoRenewal?.status} fallback="not_enabled" />
       )
     },
     {
-      title: "Payment",
+      title: "付款",
       width: 140,
       render: (_, record) => (
-        <Tag color={statusColor(record.latestOrder?.status)}>{record.latestOrder?.status ?? "no_order"}</Tag>
+        <StatusTag status={record.latestOrder?.status} fallback="no_order" />
       )
     },
     {
-      title: "Account status",
+      title: "账户状态",
       width: 280,
       render: (_, record) => renderAccountStatusCell(record)
     }
@@ -706,7 +754,7 @@ export function BillingWorkspace() {
 
   const promotionColumns: ColumnsType<AdminPromotionCode> = [
     {
-      title: "Code",
+      title: "优惠码",
       dataIndex: "code",
       width: 150,
       render: (value, record) => (
@@ -716,76 +764,76 @@ export function BillingWorkspace() {
         </button>
       )
     },
-    { title: "Type", dataIndex: "type", width: 130 },
-    { title: "Value", dataIndex: "value", width: 120 },
+    { title: "类型", dataIndex: "type", width: 130 },
+    { title: "数值", dataIndex: "value", width: 120 },
     {
-      title: "Scope",
+      title: "适用范围",
       width: 220,
       render: (_, record) => {
         const scopes = [
-          record.eligiblePlanIds.length ? `${record.eligiblePlanIds.length} plans` : "",
-          record.eligibleOrganizationIds.length ? `${record.eligibleOrganizationIds.length} orgs` : "",
+          record.eligiblePlanIds.length ? `${record.eligiblePlanIds.length} 个套餐` : "",
+          record.eligibleOrganizationIds.length ? `${record.eligibleOrganizationIds.length} 个组织` : "",
           record.eligibleEmailDomains.length ? record.eligibleEmailDomains.join(", ") : ""
         ].filter(Boolean);
-        return scopes.join(" · ") || "all customers";
+        return scopes.join(" · ") || "全部客户";
       }
     },
     {
-      title: "Limit",
+      title: "使用上限",
       width: 140,
-      render: (_, record) => `${record.maxRedemptions ?? "∞"} total / ${record.perCustomerLimit} each`
+      render: (_, record) => `共 ${record.maxRedemptions ?? "∞"} 次 · 每客户 ${record.perCustomerLimit} 次`
     },
     {
-      title: "Expires",
+      title: "过期时间",
       width: 170,
       render: (_, record) => formatLocalTime(record.expiresAt)
     },
     {
-      title: "Status",
+      title: "状态",
       dataIndex: "status",
       width: 110,
-      render: (value) => <Tag color={statusColor(value)}>{value}</Tag>
+      render: (value) => <StatusTag status={value} />
     }
   ];
 
   const orderColumns: ColumnsType<AdminBillingOrder> = [
-    { title: "Order", dataIndex: "orderNumber", width: 160 },
+    { title: "订单号", dataIndex: "orderNumber", width: 160 },
     {
-      title: "Customer",
+      title: "客户",
       width: 220,
       render: (_, record) => data?.customers.find((item) => item.organization.id === record.organizationId)?.organization.name ?? record.organizationId
     },
-    { title: "Plan", dataIndex: "planName", width: 160 },
+    { title: "套餐", dataIndex: "planName", width: 160 },
     {
-      title: "Amount",
+      title: "金额",
       width: 150,
       render: (_, record) => formatMoney(record.amountTotalCents, record.currency)
     },
     {
-      title: "Duration",
+      title: "时长",
       width: 140,
-      render: (_, record) => `${record.durationDays + record.giftDays} days`
+      render: (_, record) => `${record.durationDays + record.giftDays} 天`
     },
     {
-      title: "Auto renew",
+      title: "自动续费",
       dataIndex: "autoRenew",
       width: 120,
-      render: (value) => (value ? <Tag color="success">on</Tag> : <Tag>off</Tag>)
+      render: (value) => (value ? <Tag color="success">开启</Tag> : <Tag>关闭</Tag>)
     },
     {
-      title: "Status",
+      title: "状态",
       dataIndex: "status",
       width: 130,
-      render: (value) => <Tag color={statusColor(value)}>{value}</Tag>
+      render: (value) => <StatusTag status={value} />
     },
     {
-      title: "Created",
+      title: "创建时间",
       dataIndex: "createdAt",
       width: 180,
       render: formatLocalTime
     },
     {
-      title: "Action",
+      title: "操作",
       width: 90,
       render: (_, record) => <Button size="small" onClick={() => setSelectedOrder(record)}>详情</Button>
     }
@@ -1040,8 +1088,8 @@ export function BillingWorkspace() {
       return (
         <div className="admin-billing-product-price missing">
           <span>{label}</span>
-          <strong>Missing</strong>
-          <small>Migration did not create this price item.</small>
+          <strong>缺失</strong>
+          <small>迁移未生成此价格项。</small>
         </div>
       );
     }
@@ -1049,7 +1097,7 @@ export function BillingWorkspace() {
       <div className="admin-billing-product-price">
         <span>{label}</span>
         <strong>{formatMoney(plan.billingPriceCents, plan.billingCurrency)}</strong>
-        <small>{plan.durationDays} days · {plan.slug}</small>
+        <small>{plan.durationDays} 天 · {plan.slug}</small>
         <div>
           {planStatusTag(plan)}
           <Button size="small" icon={<CreditCard size={14} />} onClick={() => openPlanBillingModal(plan)}>
@@ -1064,11 +1112,11 @@ export function BillingWorkspace() {
     <aside className="admin-billing-detail">
       <div className="admin-billing-detail-head">
         <div>
-          <span className="admin-billing-kicker">Selected account</span>
+          <span className="admin-billing-kicker">当前账户</span>
           <h2>{selectedAccount.organization.name}</h2>
           <p>{selectedAccount.billingCustomer?.businessEmail ?? selectedAccount.organization.slug}</p>
         </div>
-        <Tag color={statusColor(selectedAccount.grant?.status)}>{selectedAccount.grant?.status ?? "not_open"}</Tag>
+        <StatusTag status={selectedAccount.grant?.status} fallback="not_open" />
       </div>
       <div className="admin-billing-detail-grid">
         <div>
@@ -1081,11 +1129,11 @@ export function BillingWorkspace() {
         </div>
         <div>
           <span>自动续费</span>
-          <strong>{selectedAccount.autoRenewal?.status ?? "not_enabled"}</strong>
+          <strong>{billingStatusLabel(selectedAccount.autoRenewal?.status ?? "not_enabled")}</strong>
         </div>
         <div>
           <span>支付方式</span>
-          <strong>{selectedAccount.autoRenewal?.paymentMethodStatus ?? "unknown"}</strong>
+          <strong>{billingStatusLabel(selectedAccount.autoRenewal?.paymentMethodStatus ?? "unknown")}</strong>
         </div>
       </div>
       <div className="admin-billing-detail-section">
@@ -1115,7 +1163,7 @@ export function BillingWorkspace() {
         <h3>Stripe</h3>
         <div className="admin-billing-stripe-bind">
           <div>
-            <span>Customer</span>
+            <span>客户</span>
             <strong>{selectedAccount.billingCustomer?.stripeCustomerId ?? "未绑定"}</strong>
           </div>
           <Button
@@ -1257,7 +1305,7 @@ export function BillingWorkspace() {
         items={[
           {
             key: "overview",
-            label: "Overview",
+            label: "概览",
             children: (
               <div className="admin-billing-split">
                 <section className="admin-billing-main">
@@ -1276,13 +1324,13 @@ export function BillingWorkspace() {
           },
           {
             key: "products",
-            label: "Products",
+            label: "产品",
             children: (
               <div className="admin-billing-tab-stack">
                 <section className="admin-billing-product-matrix">
                   <div className="admin-billing-product-head">
                     <div>
-                      <span className="admin-billing-kicker">Production catalog</span>
+                      <span className="admin-billing-kicker">正式价目</span>
                       <h3>正式售卖套餐</h3>
                       <p>套餐名称、周期、额度与价格均来自生产配置；客户侧按套餐档位聚合展示可购买的价格项。</p>
                     </div>
@@ -1298,7 +1346,7 @@ export function BillingWorkspace() {
                         {renderPlanMatrixPrice(group.monthly, "Monthly")}
                         {renderPlanMatrixPrice(group.annual, "Annual")}
                         <div className="admin-billing-product-portal">
-                          <span>Portal status</span>
+                          <span>Portal 状态</span>
                           <strong>{[group.monthly, group.annual].some((plan) => plan?.billingStatus === "active") ? "Visible" : "Hidden"}</strong>
                           <small>{group.monthly?.billingStatus === "active" && group.annual?.billingStatus === "active" ? "Both cycles available" : "Check inactive cycle before launch"}</small>
                         </div>
@@ -1314,14 +1362,14 @@ export function BillingWorkspace() {
                   dataSource={data?.plans ?? []}
                   pagination={false}
                   columns={[
-                    { title: "Plan", dataIndex: "name" },
-                    { title: "Slug", dataIndex: "slug" },
-                    { title: "Price", render: (_, record) => planBillingLabel(record) },
-                    { title: "Duration", render: (_, record) => `${record.durationDays} days` },
-                    { title: "Status", dataIndex: "billingStatus", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                    { title: "AI request limit", dataIndex: "monthlyCompletedTurnLimit", render: (value) => value ?? "不限" },
+                    { title: "套餐", dataIndex: "name" },
+                    { title: "标识", dataIndex: "slug" },
+                    { title: "价格", render: (_, record) => planBillingLabel(record) },
+                    { title: "时长", render: (_, record) => `${record.durationDays} 天` },
+                    { title: "状态", dataIndex: "billingStatus", render: (value) => <StatusTag status={value} /> },
+                    { title: "AI Request 上限", dataIndex: "monthlyCompletedTurnLimit", render: (value) => value ?? "不限" },
                     {
-                      title: "Action",
+                      title: "操作",
                       width: 110,
                       render: (_, record) => (
                         <Button size="small" icon={<CreditCard size={14} />} onClick={() => openPlanBillingModal(record)}>
@@ -1336,7 +1384,7 @@ export function BillingWorkspace() {
           },
           {
             key: "promotions",
-            label: "Promotion codes",
+            label: "优惠码",
             children: (
               <div className="admin-billing-tab-stack">
                 <Alert
@@ -1350,7 +1398,7 @@ export function BillingWorkspace() {
           },
           {
             key: "orders",
-            label: "Orders",
+            label: "订单",
             children: (
               <Table
                 rowKey="id"
@@ -1363,7 +1411,7 @@ export function BillingWorkspace() {
           },
           {
             key: "auto-renewals",
-            label: "Auto-renewals",
+            label: "自动续费",
             children: (
               <div className="admin-billing-split">
                 <section className="admin-billing-main">
@@ -1373,11 +1421,11 @@ export function BillingWorkspace() {
                     dataSource={data?.autoRenewals ?? []}
                     onRow={(record) => ({ onClick: () => setSelectedAutoRenewalId(record.id) })}
                     columns={[
-                      { title: "Organization", render: (_, record) => data?.customers.find((item) => item.organization.id === record.organizationId)?.organization.name ?? record.organizationId },
-                      { title: "Status", dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                      { title: "Payment method", dataIndex: "paymentMethodStatus" },
-                      { title: "Next renewal", dataIndex: "nextRenewalAt", render: formatLocalTime },
-                      { title: "Failed at", dataIndex: "lastPaymentFailedAt", render: formatLocalTime }
+                      { title: "组织", render: (_, record) => data?.customers.find((item) => item.organization.id === record.organizationId)?.organization.name ?? record.organizationId },
+                      { title: "状态", dataIndex: "status", render: (value) => <StatusTag status={value} /> },
+                      { title: "付款方式", dataIndex: "paymentMethodStatus", render: (value) => billingStatusLabel(value) },
+                      { title: "下次续费", dataIndex: "nextRenewalAt", render: formatLocalTime },
+                      { title: "失败时间", dataIndex: "lastPaymentFailedAt", render: formatLocalTime }
                     ]}
                   />
                 </section>
@@ -1397,7 +1445,7 @@ export function BillingWorkspace() {
           },
           {
             key: "customers",
-            label: "Customers",
+            label: "客户",
             children: (
               <Table
                 rowKey={(record) => record.organization.id}
@@ -1418,12 +1466,12 @@ export function BillingWorkspace() {
           },
           {
             key: "email",
-            label: "Email automations",
+            label: "邮件自动化",
             children: (
               <div className="admin-billing-tab-stack">
                 <div className="admin-billing-email-master">
                   <div>
-                    <span className="admin-billing-kicker">Delivery guard</span>
+                    <span className="admin-billing-kicker">发送保护</span>
                     <h3>Billing emails {data?.emailSettings.enabled ? "on" : "off"}</h3>
                     <p>
                       总开关关闭时，临期、过期和扣款失败扫描不会真实发送客户邮件；测试收件人仍可用于模板验证。
@@ -1455,9 +1503,9 @@ export function BillingWorkspace() {
                     value={emailTestScenario}
                     onChange={(scenario) => setEmailTestScenario(scenario)}
                     options={[
-                      { value: "trial", label: "Trial" },
-                      { value: "manual", label: "Manual renewal" },
-                      { value: "automatic", label: "Auto-renew" }
+                      { value: "trial", label: "试用" },
+                      { value: "manual", label: "手动续费" },
+                      { value: "automatic", label: "自动续费" }
                     ]}
                     style={{ minWidth: 170 }}
                   />
@@ -1468,12 +1516,12 @@ export function BillingWorkspace() {
                   size="small"
                   dataSource={data?.emailRules ?? []}
                   columns={[
-                    { title: "Trigger", render: (_, record) => `${record.triggerType} · ${record.offsetDays}d` },
-                    { title: "Status", dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                    { title: "Subject", dataIndex: "subject" },
-                    { title: "Last run", dataIndex: "lastRunAt", render: formatLocalTime },
+                    { title: "触发条件", render: (_, record) => `${record.triggerType} · ${record.offsetDays}d` },
+                    { title: "状态", dataIndex: "status", render: (value) => <StatusTag status={value} /> },
+                    { title: "邮件主题", dataIndex: "subject" },
+                    { title: "上次运行", dataIndex: "lastRunAt", render: formatLocalTime },
                     {
-                      title: "Action",
+                      title: "操作",
                       width: 190,
                       render: (_, record) => (
                         <Space>
@@ -1509,7 +1557,7 @@ export function BillingWorkspace() {
                   pagination={{ pageSize: 10, showSizeChanger: false }}
                   columns={[
                     {
-                      title: "Organization",
+                      title: "组织",
                       width: 220,
                       render: (_, record) => (
                         <div className="admin-billing-email-record">
@@ -1519,7 +1567,7 @@ export function BillingWorkspace() {
                       )
                     },
                     {
-                      title: "Recipients",
+                      title: "收件人",
                       width: 240,
                       render: (_, record) => (
                         <Tooltip title={(record.recipients ?? []).join(", ") || "未记录"}>
@@ -1528,7 +1576,7 @@ export function BillingWorkspace() {
                       )
                     },
                     {
-                      title: "Email",
+                      title: "邮箱",
                       render: (_, record) => (
                         <div className="admin-billing-email-record">
                           <strong>{record.subject ?? record.eventType}</strong>
@@ -1538,7 +1586,7 @@ export function BillingWorkspace() {
                       )
                     },
                     {
-                      title: "Status",
+                      title: "状态",
                       width: 150,
                       filters: [
                         { text: "sent", value: "sent" },
@@ -1549,16 +1597,16 @@ export function BillingWorkspace() {
                       render: (_, record) => (
                         <div className="admin-billing-email-record compact">
                           <span>
-                            <Tag color={statusColor(record.status)}>{record.status}</Tag>
-                            {record.isTest ? <Tag>test</Tag> : null}
+                            <StatusTag status={record.status} />
+                            {record.isTest ? <Tag>测试</Tag> : null}
                           </span>
                           <small>{deliveryLabel(record)}</small>
                         </div>
                       )
                     },
-                    { title: "Created", width: 180, dataIndex: "createdAt", render: formatLocalTime },
+                    { title: "创建时间", width: 180, dataIndex: "createdAt", render: formatLocalTime },
                     {
-                      title: "Error",
+                      title: "错误",
                       width: 220,
                       render: (_, record) => record.errorMessage ? <span className="admin-billing-error-text">{record.errorMessage}</span> : <span className="admin-billing-muted">无</span>
                     }
@@ -1575,7 +1623,7 @@ export function BillingWorkspace() {
                 <section className="admin-billing-config-panel">
                   <div className="admin-billing-config-head">
                     <div>
-                      <span className="admin-billing-kicker">Runtime settings</span>
+                      <span className="admin-billing-kicker">运行设置</span>
                       <h3>Stripe 收款配置</h3>
                       <p>保存后立即用于 checkout、自动续费和 webhook 校验；密钥留空表示保持当前值。</p>
                     </div>
@@ -1589,8 +1637,8 @@ export function BillingWorkspace() {
                         value={stripeForm.mode}
                         onChange={(mode) => setStripeForm((current) => ({ ...current, mode }))}
                         options={[
-                          { value: "test", label: "Test mode" },
-                          { value: "live", label: "Live mode" }
+                          { value: "test", label: "测试模式" },
+                          { value: "live", label: "正式模式" }
                         ]}
                       />
                     </Form.Item>
@@ -1653,7 +1701,7 @@ export function BillingWorkspace() {
                       <ShieldCheck size={18} />
                       <span>{label}</span>
                       <Tag color={typeof ready === "boolean" ? (ready ? "success" : "error") : "processing"}>
-                        {typeof ready === "boolean" ? (ready ? "configured" : "missing") : String(ready)}
+                        {typeof ready === "boolean" ? (ready ? "已配置" : "缺失") : String(ready)}
                       </Tag>
                     </div>
                   ))}
@@ -1661,7 +1709,7 @@ export function BillingWorkspace() {
                 <section className="admin-billing-config-panel compact">
                   <div className="admin-billing-webhook-row">
                     <div>
-                      <span className="admin-billing-kicker">Webhook endpoint</span>
+                      <span className="admin-billing-kicker">Webhook 地址</span>
                       <strong>{stripeWebhookUrl(data?.stripe)}</strong>
                     </div>
                     <Button
@@ -1684,12 +1732,12 @@ export function BillingWorkspace() {
                   dataSource={data?.stripeEvents ?? []}
                   locale={{ emptyText: <Empty description="暂无 Stripe webhook 事件" /> }}
                   columns={[
-                    { title: "Event", dataIndex: "eventType" },
-                    { title: "Stripe id", dataIndex: "stripeEventId" },
-                    { title: "Status", dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                    { title: "Mode", dataIndex: "livemode", render: (value) => (value ? "live" : "test") },
-                    { title: "Processed", dataIndex: "processedAt", render: formatLocalTime },
-                    { title: "Error", dataIndex: "errorMessage" }
+                    { title: "事件", dataIndex: "eventType" },
+                    { title: "Stripe ID", dataIndex: "stripeEventId" },
+                    { title: "状态", dataIndex: "status", render: (value) => <StatusTag status={value} /> },
+                    { title: "模式", dataIndex: "livemode", render: (value) => (value ? "live" : "test") },
+                    { title: "处理时间", dataIndex: "processedAt", render: formatLocalTime },
+                    { title: "错误", dataIndex: "errorMessage" }
                   ]}
                 />
               </div>
@@ -1719,10 +1767,10 @@ export function BillingWorkspace() {
               value={promotionForm.type}
               onChange={(type) => setPromotionForm((current) => ({ ...current, type }))}
               options={[
-                { value: "gift_days", label: "Gift days" },
-                { value: "percent_off", label: "Percent off" },
-                { value: "amount_off", label: "Amount off cents" },
-                { value: "free_access", label: "Free access" }
+                { value: "gift_days", label: "赠送天数" },
+                { value: "percent_off", label: "折扣比例" },
+                { value: "amount_off", label: "减免金额（分）" },
+                { value: "free_access", label: "免费开通" }
               ]}
             />
           </Form.Item>
@@ -1814,10 +1862,10 @@ export function BillingWorkspace() {
         {editingPromotion ? (
           <div className="admin-billing-drawer-stack">
             <div className="admin-billing-detail-grid">
-              <div><span>Code</span><strong>{editingPromotion.code}</strong></div>
-              <div><span>Type</span><strong>{editingPromotion.type}</strong></div>
-              <div><span>Value</span><strong>{editingPromotion.value}</strong></div>
-              <div><span>Status</span><strong>{editingPromotion.status}</strong></div>
+              <div><span>优惠码</span><strong>{editingPromotion.code}</strong></div>
+              <div><span>类型</span><strong>{editingPromotion.type}</strong></div>
+              <div><span>数值</span><strong>{editingPromotion.value}</strong></div>
+              <div><span>状态</span><strong>{editingPromotion.status}</strong></div>
             </div>
             <p>{editingPromotion.note || "无备注"}</p>
             <Space>
