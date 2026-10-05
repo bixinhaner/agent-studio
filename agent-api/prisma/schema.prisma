@@ -1163,6 +1163,8 @@ model Thread {
   workspaceChangeSets WorkspaceChangeSet[] @relation("WorkspaceChangeSetThread")
   localBridgeBinding LocalBridgeBinding?
 
+  auditSummary    ThreadAuditSummary?
+
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
   @@index([securityDomainId, createdAt])
@@ -3014,4 +3016,26 @@ model NotificationDelivery {
   @@unique([userId, sourceType, sourceId, channel])
   @@index([createdAt])
   @@map("notification_deliveries")
+}
+
+/// Precomputed admin conversation-audit summary; recomputed by the API when dirty_seq > clean_seq.
+/// Triggers maintaining dirty_seq and the partial "stale" index live in migration 20261006090000.
+model ThreadAuditSummary {
+  threadId         String    @id @map("thread_id")
+  dirtySeq         BigInt    @default(dbgenerated("nextval('thread_audit_summary_seq'::regclass)")) @map("dirty_seq")
+  cleanSeq         BigInt    @default(0) @map("clean_seq")
+  status           String?
+  audience         String?
+  hasChannel       Boolean   @default(false) @map("has_channel")
+  channelType      String?   @map("channel_type")
+  userId           String?   @map("user_id")
+  feedbackTotal    Int       @default(0) @map("feedback_total")
+  feedbackPositive Int       @default(0) @map("feedback_positive")
+  feedbackNegative Int       @default(0) @map("feedback_negative")
+  searchText       String    @default("") @map("search_text")
+  summary          Json?
+  refreshedAt      DateTime? @map("refreshed_at")
+  thread           Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@map("thread_audit_summaries")
 }

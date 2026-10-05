@@ -40,6 +40,7 @@ import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 import { ConversationRecordService } from "../operations/conversation-record-service.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
+import { ConversationSummaryIndex, type SummaryIndexRawDb } from "./conversation-summary-index.js";
 import {
   PRODUCT_FEEDBACK_REPLY_IMAGE_MIME_TYPES,
   PRODUCT_FEEDBACK_REPLY_MAX_IMAGE_BYTES,
@@ -225,7 +226,7 @@ type ConversationTranscriptMessage = {
   hasRunConfig: boolean;
 };
 
-type ConversationSummary = {
+export type ConversationSummary = {
   id: string;
   externalId: string | null;
   audience: ConversationAudience;
@@ -1744,10 +1745,8 @@ function matchesSourceFilter(summary: ConversationSummary, filter: ConversationS
   return matchesConversationSourceFilter(summary, filter);
 }
 
-function matchesQuery(summary: ConversationSummary, query: string | undefined): boolean {
-  const normalized = trimOrUndefined(query)?.toLowerCase();
-  if (!normalized) return true;
-  const haystack = [
+export function buildConversationSearchText(summary: ConversationSummary): string {
+  return [
     summary.id,
     summary.externalId,
     summary.audience,
@@ -1787,7 +1786,12 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
   ]
     .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
     .join("\n");
-  return haystack.includes(normalized);
+}
+
+function matchesQuery(summary: ConversationSummary, query: string | undefined): boolean {
+  const normalized = trimOrUndefined(query)?.toLowerCase();
+  if (!normalized) return true;
+  return buildConversationSearchText(summary).includes(normalized);
 }
 
 function compareConversationSummary(left: ConversationSummary, right: ConversationSummary, sort: ConversationSort): number {
@@ -1953,6 +1957,8 @@ export function createConversationAuditRouter(options: {
   getDb?: () => ConversationAuditDb;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
   productFeedbackReply?: ProductFeedbackReplyService;
+  /** Serve the conversation list from the thread_audit_summaries table (requires raw SQL support). */
+  summaryIndex?: boolean;
 } = {}): Router {
   const router = Router();
   let cachedDb: ConversationAuditDb | null = options.db ?? null;
@@ -2015,11 +2021,10 @@ export function createConversationAuditRouter(options: {
     return { threads: visible, digests };
   }
 
-  async function listConversationSummaries(): Promise<ConversationSummary[]> {
+  async function loadSummaryLookups(threadIds: string[]) {
     const db = getDb();
     const records = conversationRecords();
-    const [{ threads, digests }, users, integrations, agentModes] = await Promise.all([
-      listThreadsWithDigests(records),
+    const [users, integrations, agentModes, bindings] = await Promise.all([
       db.user.findMany({
         orderBy: { createdAt: "asc" },
         include: {
@@ -2030,28 +2035,93 @@ export function createConversationAuditRouter(options: {
         }
       }),
       db.integrationInstance.findMany(),
-      db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
+      db.agentMode.findMany({ orderBy: { createdAt: "asc" } }),
+      records.listExternalConversationBindingsByThreadIds(threadIds)
     ]);
-    const visibleThreads = threads.filter((thread) => !thread.securityDomainId);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
     const agentModeMap = new Map(agentModes.map((item) => [item.id, item] as const));
-    const bindings = await records.listExternalConversationBindingsByThreadIds(visibleThreads.map((thread) => thread.id));
     const bindingByThreadId = new Map<string, ExternalConversationBindingRecord>();
     for (const binding of bindings) {
       if (!bindingByThreadId.has(binding.threadId)) {
         bindingByThreadId.set(binding.threadId, binding);
       }
     }
-    return visibleThreads.map((thread) =>
+    return (thread: ThreadRecord, digest?: ConversationTranscriptDigest) =>
       buildConversationSummary(
         thread,
         userMap.get(thread.userId ?? "") ?? null,
         buildConversationChannelSummary(bindingByThreadId.get(thread.id), integrationMap),
         agentModeMap,
-        digests.get(thread.id)
-      )
-    );
+        digest
+      );
+  }
+
+  async function listConversationSummaries(): Promise<ConversationSummary[]> {
+    const { threads, digests } = await listThreadsWithDigests(conversationRecords());
+    const visibleThreads = threads.filter((thread) => !thread.securityDomainId);
+    const summarize = await loadSummaryLookups(visibleThreads.map((thread) => thread.id));
+    return visibleThreads.map((thread) => summarize(thread, digests.get(thread.id)));
+  }
+
+  function rawSqlDb(): SummaryIndexRawDb | null {
+    const db = getDb() as unknown as Partial<SummaryIndexRawDb>;
+    if (typeof db.$queryRawUnsafe !== "function" || typeof db.$executeRawUnsafe !== "function") return null;
+    return db as SummaryIndexRawDb;
+  }
+
+  const summaryIndex = new ConversationSummaryIndex<ConversationSummary>({
+    db: () => {
+      const db = rawSqlDb();
+      if (!db) throw new Error("conversation summary index requires raw SQL support");
+      return db;
+    },
+    async buildSummaries(threadIds) {
+      const threads = (await new ThreadRepository(getDb() as unknown as ThreadRepositoryDb).listByIds(threadIds))
+        .filter((thread) => !thread.securityDomainId);
+      const summarize = await loadSummaryLookups(threads.map((thread) => thread.id));
+      return threads.map((thread) => {
+        const summary = summarize(thread);
+        return {
+          threadId: thread.id,
+          summary,
+          fields: {
+            status: summary.status,
+            audience: summary.audience,
+            hasChannel: Boolean(summary.channel),
+            channelType: summary.channel?.type ?? null,
+            userId: summary.user?.id ?? null,
+            feedbackTotal: summary.feedbackSummary.total,
+            feedbackPositive: summary.feedbackSummary.positive,
+            feedbackNegative: summary.feedbackSummary.negative,
+            searchText: buildConversationSearchText(summary)
+          }
+        };
+      });
+    }
+  });
+  let summaryIndexTimer: NodeJS.Timeout | null = null;
+
+  function startSummaryIndexBackgroundRefresh() {
+    if (summaryIndexTimer) return;
+    // Keeps rows fresh between admin visits so the next request rarely has stale work.
+    summaryIndexTimer = setInterval(() => {
+      summaryIndex.refresh().catch((error) => {
+        console.warn("[conversation-audit] summary index refresh failed", error);
+      });
+    }, 5 * 60_000);
+    summaryIndexTimer.unref?.();
+  }
+
+  /** Active-session state lives in runtime_sessions (no trigger), so overlay it live for the page. */
+  async function overlayActiveSessions(items: ConversationSummary[]): Promise<ConversationSummary[]> {
+    const findSessions = (getDb() as unknown as ThreadRepositoryDb).runtimeSession?.findMany;
+    if (items.length === 0 || typeof findSessions !== "function") return items;
+    const sessions = await findSessions.call((getDb() as unknown as ThreadRepositoryDb).runtimeSession, {
+      where: { threadId: { in: items.map((item) => item.id) }, status: "active" }
+    });
+    const active = new Set(sessions.map((session) => session.threadId).filter(Boolean));
+    return items.map((item) => ({ ...item, activeSession: active.has(item.id) }));
   }
 
   async function listApiAuditRecords(): Promise<ApiAuditRecord[]> {
@@ -2279,6 +2349,30 @@ export function createConversationAuditRouter(options: {
       const sort = parseSort(req.query.sort);
       const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
       const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
+
+      if (options.summaryIndex && rawSqlDb()) {
+        await summaryIndex.refresh();
+        startSummaryIndexBackgroundRefresh();
+        const result = await summaryIndex.query({ status, feedback, source, query, sort, page: requestedPage, pageSize });
+        res.json({
+          filters: {
+            query: query ?? "",
+            status,
+            feedback,
+            source,
+            sort
+          },
+          summary: result.aggregate,
+          page: {
+            page: result.page,
+            pageSize,
+            totalItems: result.totalItems,
+            totalPages: result.totalPages
+          },
+          conversations: await overlayActiveSessions(result.items)
+        });
+        return;
+      }
 
       const filtered = (await listConversationSummaries())
         .filter((item) => matchesStatusFilter(item, status))

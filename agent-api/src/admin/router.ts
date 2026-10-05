@@ -861,7 +861,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
     createConversationAuditRouter({
       getDb: () => getDbInstance() as never,
       isThreadActive: options.isThreadActive,
-      productFeedbackReply: options.productFeedbackReply
+      productFeedbackReply: options.productFeedbackReply,
+      summaryIndex: true
     })
   );
 

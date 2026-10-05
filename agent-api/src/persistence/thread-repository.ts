@@ -153,6 +153,7 @@ type ThreadTable = {
   findUnique(args: { where: { id: string } } | { where: { externalId: string } }): Promise<ThreadRow | null>;
   findMany(args?: {
     where?: {
+      id?: { in: string[] };
       status?: "active" | "archived";
       userId?: string | null;
       organizationId?: string | null;
@@ -1168,6 +1169,13 @@ export class ThreadRepository {
       records: rows.map((row) => this.buildThreadRecord(row, [], sessionByThread.get(row.id) ?? null)),
       messageVersions
     };
+  }
+
+  /** Full thread records (with messages) for the given ids, in no particular order. */
+  async listByIds(threadIds: string[]): Promise<ThreadRecord[]> {
+    if (threadIds.length === 0) return [];
+    const rows = await this.db.thread.findMany({ where: { id: { in: threadIds } } });
+    return this.loadThreadRecords(this.db, rows);
   }
 
   /** Loads ordered messages for many threads with chunked IN queries. */
