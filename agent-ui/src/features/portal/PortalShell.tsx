@@ -11356,7 +11356,7 @@ export function PortalShell(props: {
           <HomeProfileProvider enabled={!isExternalPortalUser && !trainingReadOnly} userId={portalPreferenceUser?.id}>
           <PortalRoadmapProvider
             personalFeaturesEnabled={!isExternalPortalUser && !trainingReadOnly}
-            usageEnabled={!trainingReadOnly && Boolean(portalPreferenceUser?.id)}
+            usageEnabled={!isExternalPortalUser && !trainingReadOnly && Boolean(portalPreferenceUser?.id)}
             tourEnabled={!isExternalPortalUser && !trainingReadOnly}
             onboardingCompletedAt={portalPreferenceUser?.portalPreferences?.onboardingCompletedAt}
             userLoaded={Boolean(portalPreferenceUser?.id)}

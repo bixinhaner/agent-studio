@@ -11867,7 +11867,7 @@ app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/portal/me/usage", async (req: Request, res: Response) => {
+app.get("/api/portal/me/usage", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
   try {
     const actor = currentActorFromRequest(req);
     const summary = await personalUsage.summarize({
