@@ -8,12 +8,19 @@ import { browserTimezone } from "./schedule-format";
 
 const PERIODS: PersonalUsagePeriod[] = ["month", "last_month", "7d", "30d"];
 
+export function useTurnCount() {
+  const { t, intlLocale } = usePortalI18n();
+  return (count: number) =>
+    count === 1 ? t("usage.turnCountOne") : t("usage.turnCount", { count: new Intl.NumberFormat(intlLocale).format(count) });
+}
+
 export function formatTokens(value: number, locale: string): string {
   return new Intl.NumberFormat(locale, { notation: value >= 10_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value);
 }
 
 function DailyBars(props: { daily: PersonalUsageSummary["daily"]; locale: string }) {
   const { t } = usePortalI18n();
+  const turnCount = useTurnCount();
   const max = Math.max(1, ...props.daily.map((day) => day.total_tokens));
   const dateFormat = useMemo(() => new Intl.DateTimeFormat(props.locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [props.locale]);
   const label = (date: string) => dateFormat.format(new Date(`${date}T00:00:00Z`));
@@ -25,7 +32,7 @@ function DailyBars(props: { daily: PersonalUsageSummary["daily"]; locale: string
         {props.daily.map((day) => (
           <Tooltip
             key={day.date}
-            title={t("usage.dayTooltip", { date: label(day.date), tokens: formatTokens(day.total_tokens, props.locale), turns: day.turns })}
+            title={t("usage.dayTooltip", { date: label(day.date), tokens: formatTokens(day.total_tokens, props.locale), turns: turnCount(day.turns) })}
             mouseEnterDelay={0}
           >
             <span className="usage-daily-slot">
@@ -85,6 +92,7 @@ function BreakdownList(props: { title: string; rows: Array<{ key: string; label:
 
 export function UsageDrawer(props: { open: boolean; onClose(): void }) {
   const { t, intlLocale } = usePortalI18n();
+  const turnCount = useTurnCount();
   const [period, setPeriod] = useState<PersonalUsagePeriod>("month");
   const [data, setData] = useState<PersonalUsageSummary | null>(null);
   const [error, setError] = useState(false);
@@ -192,7 +200,7 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
                 key: row.key,
                 label: t(`usage.channel.${row.key}` as PortalMessageKey),
                 value: row.total_tokens,
-                detail: `${number(row.turns)} ${t("usage.turns")}`
+                detail: turnCount(row.turns)
               }))}
             />
             <BreakdownList
@@ -202,7 +210,7 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
                 key: row.model,
                 label: row.model,
                 value: row.total_tokens,
-                detail: `${number(row.turns)} ${t("usage.turns")}`
+                detail: turnCount(row.turns)
               }))}
             />
             {data.outputs_by_type.length ? (

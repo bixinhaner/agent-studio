@@ -336,7 +336,7 @@
 .account-card-chevron { color: var(--roadmap-muted); }
 
 .account-menu-popover .ant-popover-inner { padding: 6px; border-radius: 12px; }
-.account-menu { width: 288px; max-height: min(640px, calc(100vh - 80px)); overflow-y: auto; display: grid; gap: 2px; }
+.account-menu { width: 288px; overflow-x: hidden; max-height: min(640px, calc(100vh - 80px)); overflow-y: auto; display: grid; gap: 2px; }
 .account-menu-head { display: grid; gap: 2px; padding: 8px 10px 10px; }
 .account-menu-head strong { color: var(--roadmap-text); font-size: 14px; font-weight: 650; }
 .account-menu-head span { color: var(--roadmap-muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -353,7 +353,8 @@
 .account-menu-item.is-danger, .account-menu-item.is-danger .account-menu-item-icon { color: #b42318; }
 .account-menu-chevron { color: var(--roadmap-muted); transition: transform var(--motion-fast) var(--ease-standard); }
 .account-menu-chevron.is-open { transform: rotate(90deg); }
-.account-menu-access { padding: 2px 10px 8px 40px; }
+.account-menu-access { padding: 2px 6px 8px; }
+.account-menu-access .user-identity-access-panel { width: auto; padding: 12px; border: 1px solid var(--roadmap-line); border-radius: 10px; }
 .account-menu-setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; padding: 4px 10px 4px 40px; color: var(--roadmap-text); font-size: 13px; }
 
 /* ---- usage drawer ---- */
@@ -385,9 +386,9 @@
 .usage-breakdown-value small { color: var(--roadmap-muted); font-size: 11px; font-weight: 400; }
 .usage-daily { margin: 0; }
 .usage-daily-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 4px; border-bottom: 1px solid var(--roadmap-line); }
-.usage-daily-slot { flex: 1 1 0; display: flex; align-items: flex-end; height: 100%; min-width: 3px; cursor: default; }
+.usage-daily-slot { flex: 1 1 0; display: flex; align-items: flex-end; justify-content: center; height: 100%; min-width: 3px; cursor: default; }
 .usage-daily-slot:hover .usage-daily-bar { background: rgb(var(--brand-primary-rgb, 255 70 20)); }
-.usage-daily-bar { width: 100%; border-radius: 4px 4px 0 0; background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.72); transition: background var(--motion-fast) var(--ease-standard); }
+.usage-daily-bar { width: 100%; max-width: 28px; border-radius: 4px 4px 0 0; background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.72); transition: background var(--motion-fast) var(--ease-standard); }
 .usage-daily-bar.is-empty { height: 2px; border-radius: 1px; background: var(--roadmap-line); }
 .usage-daily-axis { display: flex; justify-content: space-between; margin-top: 4px; color: var(--roadmap-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .usage-output-chips { display: flex; flex-wrap: wrap; gap: 8px; }

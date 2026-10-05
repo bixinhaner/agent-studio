@@ -5,7 +5,7 @@ import { usePortalI18n } from "../i18n";
 import { listScheduledTasks } from "./api";
 import { usePortalRoadmap } from "./PortalRoadmapContext";
 
-type Summary = { active: number; failing: number };
+type Summary = { total: number; active: number; failing: number };
 
 /**
  * Scheduled tasks are work the user hands to Bailey and comes back to check,
@@ -25,6 +25,7 @@ export function AutomationRailSection() {
       .then((result) => {
         if (cancelled) return;
         setSummary({
+          total: result.tasks.length,
           active: result.tasks.filter((task) => task.enabled).length,
           failing: result.tasks.filter((task) => task.enabled && task.last_run_status === "failed").length
         });
@@ -40,8 +41,10 @@ export function AutomationRailSection() {
     ? t("rail.scheduledFailed")
     : summary?.active
       ? t("rail.scheduledActive", { count: summary.active })
-      : summary
-        ? t("rail.scheduledNone")
+      : summary?.total
+        ? t("rail.scheduledPaused", { count: summary.total })
+        : summary
+          ? t("rail.scheduledNone")
         : "";
 
   return (
