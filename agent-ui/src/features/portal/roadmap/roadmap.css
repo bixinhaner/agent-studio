@@ -298,6 +298,111 @@
 
 .roadmap-notify-actions { display: inline-flex; gap: 8px; }
 
+/* ---- workspace rail: automation, more menu, trash indicator ---- */
+.workspace-rail-more.ant-btn { width: 28px; height: 28px; color: #71717a; border-radius: 7px; }
+.workspace-rail-more.ant-btn:hover, .workspace-rail-more.is-active.ant-btn { color: var(--workbench-accent, var(--roadmap-accent)); background: var(--workbench-sidebar-active-bg, var(--roadmap-accent-soft)); }
+.workspace-automation-nav { flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px; padding: 6px 12px 10px; border-top: 1px solid var(--workbench-border, #f0f0f0); }
+.workspace-automation-item.workspace-nav-item { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.workspace-automation-status { display: inline-flex; align-items: center; gap: 5px; color: var(--roadmap-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.workspace-automation-status.is-failing { color: #b42318; }
+.workspace-automation-status i { width: 6px; height: 6px; border-radius: 999px; background: #d92d20; }
+.workspace-rail-trash-indicator { flex: 0 0 auto; padding: 0 12px 8px; }
+.workspace-rail-trash-indicator .workspace-nav-item { grid-template-columns: 20px minmax(0, 1fr); background: var(--workbench-sidebar-active-bg, var(--roadmap-accent-soft)); }
+
+/* ---- account card + menu ---- */
+.account-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--roadmap-line);
+  border-radius: 10px;
+  background: var(--roadmap-surface);
+  color: var(--roadmap-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.account-card:hover, .account-card[aria-expanded="true"] { border-color: rgb(var(--brand-primary-rgb, 255 70 20) / 0.3); background: var(--roadmap-surface-soft); }
+.account-card:focus-visible { outline: 2px solid var(--roadmap-accent); outline-offset: 2px; }
+.account-card-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 999px; background: var(--roadmap-accent-soft); color: var(--roadmap-accent); font-size: 14px; font-weight: 650; }
+.account-card-alert { position: absolute; top: -1px; right: -1px; width: 9px; height: 9px; border: 2px solid var(--roadmap-surface); border-radius: 999px; background: #d92d20; }
+.account-card-copy { display: grid; min-width: 0; gap: 1px; }
+.account-card-copy strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.account-card-copy small { overflow: hidden; color: var(--roadmap-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.account-card-chevron { color: var(--roadmap-muted); }
+
+.account-menu-popover .ant-popover-inner { padding: 6px; border-radius: 12px; }
+.account-menu { width: 288px; max-height: min(640px, calc(100vh - 80px)); overflow-y: auto; display: grid; gap: 2px; }
+.account-menu-head { display: grid; gap: 2px; padding: 8px 10px 10px; }
+.account-menu-head strong { color: var(--roadmap-text); font-size: 14px; font-weight: 650; }
+.account-menu-head span { color: var(--roadmap-muted); font-size: 12px; overflow-wrap: anywhere; }
+.account-menu-org { margin-top: 6px; width: 100%; }
+.account-menu-group { display: grid; gap: 1px; padding: 4px 0; border-top: 1px solid var(--roadmap-line); }
+.account-menu-group-label { padding: 6px 10px 2px; color: var(--roadmap-muted); font-size: 11px; font-weight: 600; }
+.account-menu-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--roadmap-text); font: inherit; text-align: left; cursor: pointer; }
+.account-menu-item:hover, .account-menu-item:focus-visible { background: var(--roadmap-surface-soft); outline: none; }
+.account-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--roadmap-accent); }
+.account-menu-item-icon { display: inline-flex; color: var(--roadmap-muted); }
+.account-menu-item-copy { display: grid; min-width: 0; }
+.account-menu-item-copy strong { font-size: 13px; font-weight: 500; }
+.account-menu-item-copy small { overflow: hidden; color: var(--roadmap-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu-item.is-danger, .account-menu-item.is-danger .account-menu-item-icon { color: #b42318; }
+.account-menu-chevron { color: var(--roadmap-muted); transition: transform var(--motion-fast) var(--ease-standard); }
+.account-menu-chevron.is-open { transform: rotate(90deg); }
+.account-menu-access { padding: 2px 10px 8px 40px; }
+.account-menu-setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; padding: 4px 10px 4px 40px; color: var(--roadmap-text); font-size: 13px; }
+
+/* ---- usage drawer ---- */
+.usage-drawer { display: grid; gap: 18px; }
+.usage-hero { display: grid; gap: 4px; padding: 16px; border: 1px solid var(--roadmap-line); border-radius: 12px; background: var(--roadmap-surface-soft); }
+.usage-hero-label { color: var(--roadmap-muted); font-size: 12px; }
+.usage-hero-value { color: var(--roadmap-text); font-size: 30px; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.usage-hero-change { color: var(--roadmap-muted); font-size: 12px; }
+.usage-token-split { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; color: var(--roadmap-muted); font-size: 12px; }
+.usage-token-split span { display: inline-flex; align-items: center; gap: 6px; }
+.usage-token-split b { color: var(--roadmap-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-token-split i { width: 8px; height: 8px; border-radius: 2px; }
+.usage-token-split i.is-input { background: rgb(var(--brand-primary-rgb, 255 70 20)); }
+.usage-token-split i.is-cached { background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.4); }
+.usage-token-split i.is-output { background: #64748b; }
+.usage-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.usage-stats > div { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--roadmap-line); border-radius: 10px; }
+.usage-stats span { color: var(--roadmap-muted); font-size: 12px; }
+.usage-stats strong { color: var(--roadmap-text); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.usage-stats small { color: #b42318; font-size: 11px; }
+.usage-breakdown { display: grid; gap: 8px; }
+.usage-breakdown h3 { margin: 0; color: var(--roadmap-text); font-size: 13px; font-weight: 600; }
+.usage-breakdown ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.usage-breakdown li { display: grid; grid-template-columns: minmax(72px, 120px) minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 12.5px; }
+.usage-breakdown-label { overflow: hidden; color: var(--roadmap-text); text-overflow: ellipsis; white-space: nowrap; }
+.usage-breakdown-track { height: 8px; border-radius: 4px; background: var(--roadmap-surface-soft); overflow: hidden; }
+.usage-breakdown-track span { display: block; height: 100%; border-radius: 4px; background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.75); }
+.usage-breakdown-value { display: grid; justify-items: end; color: var(--roadmap-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-breakdown-value small { color: var(--roadmap-muted); font-size: 11px; font-weight: 400; }
+.usage-daily { margin: 0; }
+.usage-daily-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 4px; border-bottom: 1px solid var(--roadmap-line); }
+.usage-daily-slot { flex: 1 1 0; display: flex; align-items: flex-end; height: 100%; min-width: 3px; cursor: default; }
+.usage-daily-slot:hover .usage-daily-bar { background: rgb(var(--brand-primary-rgb, 255 70 20)); }
+.usage-daily-bar { width: 100%; border-radius: 4px 4px 0 0; background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.72); transition: background var(--motion-fast) var(--ease-standard); }
+.usage-daily-bar.is-empty { height: 2px; border-radius: 1px; background: var(--roadmap-line); }
+.usage-daily-axis { display: flex; justify-content: space-between; margin-top: 4px; color: var(--roadmap-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.usage-output-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.usage-output-chips span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--roadmap-line); border-radius: 999px; color: var(--roadmap-text); font-size: 12px; }
+.usage-output-chips b { font-variant-numeric: tabular-nums; }
+.usage-note { margin: 0; color: var(--roadmap-muted); font-size: 12px; line-height: 1.6; }
+.usage-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---- notification settings ---- */
+.notify-settings { display: grid; gap: 12px; }
+.notify-settings-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--roadmap-line); border-radius: 12px; color: var(--roadmap-text); }
+.notify-settings-row > svg { margin-top: 2px; color: var(--roadmap-muted); }
+.notify-settings-row strong { font-size: 13.5px; font-weight: 600; }
+.notify-settings-row p { margin: 4px 0 8px; color: var(--roadmap-muted); font-size: 12.5px; line-height: 1.55; }
+
 @media (prefers-reduced-motion: reduce) {
   .roadmap-card, .roadmap-memory-item, .portal-role-home .portal-welcome-suggestion-card, .assistant-memory-chip,
   .assistant-skill-tag, .assistant-skill-tag-icon, .assistant-process-working .assistant-process-step,
@@ -307,7 +412,8 @@
   .local-connection-dot.is-online, .local-workspace-trigger-label, .outputs-card, .roadmap-tour-card {
     animation: none !important;
   }
-  .roadmap-card, .portal-role-home-skill, .assistant-skill-tag, .outputs-card, .outputs-type-tabs button, .local-workspace-trigger, .roadmap-tour-hole {
+  .roadmap-card, .portal-role-home-skill, .assistant-skill-tag, .outputs-card, .outputs-type-tabs button, .local-workspace-trigger, .roadmap-tour-hole,
+  .account-card, .account-menu-chevron, .usage-daily-bar {
     transition: none !important;
   }
   ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }

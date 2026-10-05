@@ -2,19 +2,24 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { updatePortalPreferences } from "./api";
 import { MemoryDrawer } from "./MemoryDrawer";
+import { NotificationSettingsDrawer } from "./NotificationSettingsDrawer";
 import { OnboardingTour } from "./OnboardingTour";
 import { ScheduledTasksDrawer, type ScheduledTaskContext, type ScheduledTaskPrefill } from "./ScheduledTasksDrawer";
-import { SubscriptionsDrawer } from "./SubscriptionsDrawer";
+import { UsageDrawer } from "./UsageDrawer";
 import type { PortalResolvedTheme, PortalThemePreference } from "./use-portal-theme";
 
 export type PortalRoadmapApi = {
-  /** Personal features (tasks, subscriptions, memory) are internal-employee only. */
+  /** Personal features (scheduled tasks, memory, notifications) are internal-employee only. */
   personalFeaturesEnabled: boolean;
+  usageEnabled: boolean;
   tourEnabled: boolean;
   theme: { preference: PortalThemePreference; resolved: PortalResolvedTheme; setPreference(next: PortalThemePreference): void };
+  /** Bumps whenever the scheduled tasks drawer closes so summaries can refresh. */
+  scheduledTasksVersion: number;
   openScheduledTasks(prefill?: ScheduledTaskPrefill | null): void;
-  openSubscriptions(): void;
   openMemory(): void;
+  openUsage(): void;
+  openNotificationSettings(): void;
   startTour(): void;
 };
 
@@ -27,6 +32,8 @@ export function usePortalRoadmap(): PortalRoadmapApi | null {
 export function PortalRoadmapProvider(props: {
   children: ReactNode;
   personalFeaturesEnabled: boolean;
+  /** "My usage" is available to every signed-in portal user, including external ones. */
+  usageEnabled: boolean;
   tourEnabled: boolean;
   /** Undefined while the user is still loading; tour auto-shows once when empty. */
   onboardingCompletedAt: string | null | undefined;
@@ -41,8 +48,10 @@ export function PortalRoadmapProvider(props: {
 }) {
   const [tasksOpen, setTasksOpen] = useState(false);
   const [prefill, setPrefill] = useState<ScheduledTaskPrefill | null>(null);
-  const [subsOpen, setSubsOpen] = useState(false);
+  const [tasksVersion, setTasksVersion] = useState(0);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const autoTourDecided = useRef(false);
   const initialViewHandled = useRef(false);
@@ -71,21 +80,25 @@ export function PortalRoadmapProvider(props: {
     setPrefill(next ?? null);
     setTasksOpen(true);
   }, []);
-  const openSubscriptions = useCallback(() => setSubsOpen(true), []);
   const openMemory = useCallback(() => setMemoryOpen(true), []);
+  const openUsage = useCallback(() => setUsageOpen(true), []);
+  const openNotificationSettings = useCallback(() => setNotifyOpen(true), []);
   const startTour = useCallback(() => setTourOpen(true), []);
 
   const value = useMemo<PortalRoadmapApi>(
     () => ({
       personalFeaturesEnabled: props.personalFeaturesEnabled,
+      usageEnabled: props.usageEnabled,
       tourEnabled: props.tourEnabled,
       theme: props.theme,
+      scheduledTasksVersion: tasksVersion,
       openScheduledTasks,
-      openSubscriptions,
       openMemory,
+      openUsage,
+      openNotificationSettings,
       startTour
     }),
-    [openMemory, openScheduledTasks, openSubscriptions, props.personalFeaturesEnabled, props.theme, props.tourEnabled, startTour]
+    [openMemory, openNotificationSettings, openScheduledTasks, openUsage, props.personalFeaturesEnabled, props.theme, props.tourEnabled, props.usageEnabled, startTour, tasksVersion]
   );
 
   const onOpenThread = props.onOpenThread;
@@ -101,16 +114,26 @@ export function PortalRoadmapProvider(props: {
             onClose={() => {
               setTasksOpen(false);
               setPrefill(null);
+              setTasksVersion((current) => current + 1);
             }}
             onOpenThread={(threadId) => {
               setTasksOpen(false);
+              setTasksVersion((current) => current + 1);
               onOpenThread(threadId);
             }}
           />
-          <SubscriptionsDrawer open={subsOpen} onClose={() => setSubsOpen(false)} />
           <MemoryDrawer open={memoryOpen} onClose={() => setMemoryOpen(false)} modeLabel={props.modeLabel} />
+          <NotificationSettingsDrawer
+            open={notifyOpen}
+            onClose={() => setNotifyOpen(false)}
+            onOpenScheduledTasks={() => {
+              setNotifyOpen(false);
+              openScheduledTasks();
+            }}
+          />
         </>
       ) : null}
+      {props.usageEnabled ? <UsageDrawer open={usageOpen} onClose={() => setUsageOpen(false)} /> : null}
       {props.tourEnabled ? (
         <OnboardingTour
           open={tourOpen}

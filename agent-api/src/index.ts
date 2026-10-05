@@ -29,6 +29,7 @@ import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
 import { classifyPortalRole } from "./portal/role-profile.js";
+import { createPersonalUsageService } from "./portal/personal-usage-service.js";
 import { createPortalMemoryRouter } from "./codex-memory/portal-memory-router.js";
 import { PortalMemoryService } from "./codex-memory/portal-memory-service.js";
 import { DingTalkPushService } from "./notifications/dingtalk-push-service.js";
@@ -11840,6 +11841,8 @@ async function resolvePortalMemoryContextPart(
   }
 }
 
+const personalUsage = createPersonalUsageService({ db, ledger: usageLedger });
+
 app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
   try {
     const actor = currentActorFromRequest(req);
@@ -11861,6 +11864,21 @@ app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
     });
   } catch (error) {
     res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load home profile" });
+  }
+});
+
+app.get("/api/portal/me/usage", async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    const summary = await personalUsage.summarize({
+      userId: actor.id,
+      period: typeof req.query.period === "string" ? req.query.period : undefined,
+      timezone: typeof req.query.tz === "string" ? req.query.tz : undefined
+    });
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(summary);
+  } catch (error) {
+    res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load usage" });
   }
 });
 

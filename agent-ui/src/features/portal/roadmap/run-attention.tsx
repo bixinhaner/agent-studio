@@ -6,6 +6,25 @@ import { usePortalI18n } from "../i18n";
 
 const RUN_FINISHED_EVENT = "agent-studio:portal-run-finished";
 const PERMISSION_PROMPT_KEY = "agent-studio.portal.notify-prompt.v1";
+const DESKTOP_MUTED_KEY = "agent-studio.portal.notify-desktop-muted.v1";
+
+/** Desktop notifications can be muted per browser without revoking permission. */
+export function readDesktopNotifyMuted(): boolean {
+  try {
+    return window.localStorage.getItem(DESKTOP_MUTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeDesktopNotifyMuted(muted: boolean) {
+  try {
+    if (muted) window.localStorage.setItem(DESKTOP_MUTED_KEY, "1");
+    else window.localStorage.removeItem(DESKTOP_MUTED_KEY);
+  } catch {
+    // Ignore blocked storage.
+  }
+}
 
 export type PortalRunFinishedDetail = { threadId: string; status: "completed" | "failed" };
 
@@ -65,7 +84,7 @@ export function useRunCompletionAttention(options: {
     };
 
     const maybePromptPermission = () => {
-      if (!notificationsSupported() || Notification.permission !== "default" || promptAlreadyHandled()) return;
+      if (!notificationsSupported() || Notification.permission !== "default" || promptAlreadyHandled() || readDesktopNotifyMuted()) return;
       markPromptHandled();
       const key = "portal-notify-permission";
       notifyApi.open({
@@ -111,7 +130,7 @@ export function useRunCompletionAttention(options: {
           ? translate("notify.completedTitle", { title: base })
           : translate("notify.unreadTitle", { count: unreadRef.current, title: base });
 
-      if (notificationsSupported() && Notification.permission === "granted") {
+      if (notificationsSupported() && Notification.permission === "granted" && !readDesktopNotifyMuted()) {
         try {
           const desktop = new Notification(translate("notify.desktopTitle"), {
             body:

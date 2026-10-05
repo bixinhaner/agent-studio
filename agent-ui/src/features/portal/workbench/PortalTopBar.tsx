@@ -3,6 +3,7 @@ import { Button, Drawer, Dropdown, Space, Tooltip, type MenuProps } from "antd";
 import {
   Check,
   ArrowLeft,
+  BarChart3,
   BellRing,
   BookOpen,
   Brain,
@@ -10,7 +11,6 @@ import {
   Compass,
   Monitor,
   Moon,
-  Sparkles,
   Sun,
   CircleHelp,
   Ellipsis,
@@ -72,19 +72,9 @@ export function PortalTopBar(props: {
   const roadmap = usePortalRoadmap();
   const personalEnabled = Boolean(roadmap?.personalFeaturesEnabled);
   const tourEnabled = Boolean(roadmap?.tourEnabled);
-  const showHelpMenu = Boolean(props.onOpenTraining) || tourEnabled;
-  const personalMenu: MenuProps = {
-    items: [
-      { key: "tasks", icon: <CalendarClock size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.scheduledTasks")}</strong><small>{t("menu.scheduledTasksDetail")}</small></span> },
-      { key: "subs", icon: <BellRing size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.subscriptions")}</strong><small>{t("menu.subscriptionsDetail")}</small></span> },
-      { key: "memory", icon: <Brain size={17} />, label: <span className="portal-training-help-item"><strong>{t("menu.memory")}</strong><small>{t("menu.memoryDetail")}</small></span> }
-    ],
-    onClick: ({ key }) => {
-      if (key === "tasks") roadmap?.openScheduledTasks();
-      else if (key === "subs") roadmap?.openSubscriptions();
-      else if (key === "memory") roadmap?.openMemory();
-    }
-  };
+  const showHelpMenu = Boolean(props.onOpenTraining) || tourEnabled || Boolean(props.onOpenFeedback);
+  // Preferences live in the account menu; training mode has no account card, so keep them here.
+  const showPreferenceButtons = Boolean(props.trainingMode);
   const themeMenu: MenuProps | null = roadmap
     ? {
         items: THEME_OPTIONS.map((option) => ({
@@ -115,14 +105,14 @@ export function PortalTopBar(props: {
             }
           }
         : null,
-      personalEnabled
+      roadmap?.usageEnabled
         ? {
-            key: "subs",
-            label: t("menu.subscriptions"),
-            icon: <BellRing size={18} />,
+            key: "usage",
+            label: t("account.usage"),
+            icon: <BarChart3 size={18} />,
             onClick: () => {
               setMobileActionsOpen(false);
-              roadmap?.openSubscriptions();
+              roadmap?.openUsage();
             }
           }
         : null,
@@ -134,6 +124,17 @@ export function PortalTopBar(props: {
             onClick: () => {
               setMobileActionsOpen(false);
               roadmap?.openMemory();
+            }
+          }
+        : null,
+      personalEnabled
+        ? {
+            key: "notifications",
+            label: t("account.notifications"),
+            icon: <BellRing size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              roadmap?.openNotificationSettings();
             }
           }
         : null,
@@ -280,13 +281,6 @@ export function PortalTopBar(props: {
           ) : null}
 
           <Space size={8} className="portal-topbar-action-group">
-            {!isMobile && personalEnabled ? (
-              <Dropdown trigger={["click"]} placement="bottomRight" menu={personalMenu}>
-                <Button type="text" className="portal-topbar-ghost-btn portal-topbar-personal-btn" icon={<Sparkles size={17} />} aria-haspopup="menu">
-                  {t("menu.personal")}
-                </Button>
-              </Dropdown>
-            ) : null}
             {!isMobile && showHelpMenu ? (
               <Dropdown
                 trigger={["click"]}
@@ -318,11 +312,24 @@ export function PortalTopBar(props: {
                             </span>
                           )
                         }
+                      : null,
+                    props.onOpenFeedback
+                      ? {
+                          key: "feedback",
+                          icon: <MessageSquareText size={17} />,
+                          label: (
+                            <span className="portal-training-help-item">
+                              <strong>{t("topbar.feedback")}</strong>
+                              <small>{t("menu.feedbackDetail")}</small>
+                            </span>
+                          )
+                        }
                       : null
                   ].filter(Boolean) as NonNullable<MenuProps["items"]>,
                   onClick: ({ key }) => {
                     setHelpMenuOpen(false);
                     if (key === "tour") roadmap?.startTour();
+                    else if (key === "feedback") props.onOpenFeedback?.();
                     else props.onOpenTraining?.();
                   }
                 }}
@@ -346,30 +353,6 @@ export function PortalTopBar(props: {
                 {t("training.backToWorkspace")}
               </Button>
             ) : null}
-            {!isMobile && props.onOpenFeedback ? (
-              <Tooltip title={t("topbar.feedback")} placement="bottom">
-                <Button
-                  type="text"
-                  className="portal-topbar-ghost-btn"
-                  icon={<MessageSquareText size={18} />}
-                  onClick={props.onOpenFeedback}
-                  style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label={t("topbar.feedback")}
-                />
-              </Tooltip>
-            ) : null}
-            {!isMobile && props.onOpenBilling ? (
-              <Tooltip title={t("topbar.billing")} placement="bottom">
-                <Button
-                  type="text"
-                  className="portal-topbar-ghost-btn"
-                  icon={<CreditCard size={18} />}
-                  onClick={props.onOpenBilling}
-                  style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label={t("topbar.billingAria")}
-                />
-              </Tooltip>
-            ) : null}
             {!isMobile && props.onOpenAdmin ? (
               <Tooltip title={t("topbar.admin")} placement="bottom">
                 <Button
@@ -382,19 +365,7 @@ export function PortalTopBar(props: {
                 />
               </Tooltip>
             ) : null}
-            {!isMobile && showAdvancedSettings ? (
-              <Tooltip title={t("topbar.settings")} placement="bottom">
-                <Button
-                  type="text"
-                  className="portal-topbar-ghost-btn"
-                  icon={<Settings size={18} />}
-                  onClick={props.onOpenAdvancedSettings}
-                  style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label={t("topbar.advancedSettings")}
-                />
-              </Tooltip>
-            ) : null}
-            {!isMobile && themeMenu && roadmap ? (
+            {!isMobile && showPreferenceButtons && themeMenu && roadmap ? (
               <Dropdown menu={themeMenu} trigger={["click"]} placement="bottomRight" overlayClassName="portal-language-dropdown">
                 <Button
                   type="text"
@@ -405,7 +376,7 @@ export function PortalTopBar(props: {
                 />
               </Dropdown>
             ) : null}
-            {!isMobile && languageSwitcherEnabled ? (
+            {!isMobile && showPreferenceButtons && languageSwitcherEnabled ? (
               <Dropdown
                 menu={languageMenu}
                 trigger={["hover", "click"]}

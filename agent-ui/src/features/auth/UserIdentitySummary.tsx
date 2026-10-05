@@ -5,9 +5,9 @@ import { useState } from "react";
 import { useAuth } from "./AuthProvider";
 import type { AuthUser, AuthUserType } from "./api";
 
-type UserIdentityLocale = "zh" | "en";
+export type UserIdentityLocale = "zh" | "en";
 
-function roleLabel(role: string | undefined, userType: AuthUserType | undefined, locale: UserIdentityLocale): string {
+export function roleLabel(role: string | undefined, userType: AuthUserType | undefined, locale: UserIdentityLocale): string {
   switch ((role || "").trim()) {
     case "super_admin":
       return locale === "en" ? "Super admin" : "超级管理员";
@@ -43,12 +43,7 @@ function providerLabel(provider: string, locale: UserIdentityLocale): string {
   }
 }
 
-export function UserIdentitySummary(props: {
-  user: AuthUser;
-  compact?: boolean;
-  onSignOut?: () => void;
-  locale?: UserIdentityLocale;
-  accessStatus?: {
+export type UserAccessStatus = {
     accessState: "available" | "blocked";
     tone: "positive" | "caution" | "critical" | "neutral";
     sourceLabel: string;
@@ -62,7 +57,14 @@ export function UserIdentitySummary(props: {
     cycleEndsAt?: string;
     remainingCompletedTurns: number | null;
     completedTurnLimit: number | null;
-  } | null;
+};
+
+export function UserIdentitySummary(props: {
+  user: AuthUser;
+  compact?: boolean;
+  onSignOut?: () => void;
+  locale?: UserIdentityLocale;
+  accessStatus?: UserAccessStatus | null;
   accessStatusLoading?: boolean;
   accessStatusError?: string;
   onOpenAccessStatus?: () => void;
@@ -93,89 +95,14 @@ export function UserIdentitySummary(props: {
     }
   };
 
-  const formatAccessTime = (value: string | undefined) => {
-    if (!value) return "";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    }).format(parsed);
-  };
-
-  const accessTone = props.accessStatus?.tone || "neutral";
-  const accessBadgeLabel = props.accessStatus?.accessState === "blocked"
-    ? "Action needed"
-    : accessTone === "caution"
-      ? "Ends soon"
-      : "Active";
   const accessButtonLabel = locale === "en" ? "View access details" : "查看权益信息";
-  const showAiRequestBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
-  const hasAccessDetailRows = Boolean(
-    props.accessStatus && (
-      props.accessStatus.planName ||
-      showAiRequestBalance ||
-      props.accessStatus.cycleEndsAt ||
-      props.accessStatus.expiresAt
-    )
-  );
   const accessPopoverContent = (
-    <div className="user-identity-access-panel">
-      {props.accessStatusLoading ? (
-        <div className="user-identity-access-loading">
-          <Spin size="small" />
-          <span>{locale === "en" ? "Loading your access details..." : "正在加载权益信息..."}</span>
-        </div>
-      ) : props.accessStatusError ? (
-        <div className="user-identity-access-error">
-          <p>{locale === "en" ? "We could not load your access details right now." : "暂时无法加载权益信息。"}</p>
-          <span>{props.accessStatusError}</span>
-        </div>
-      ) : props.accessStatus ? (
-        <>
-          <div className="user-identity-access-hero">
-            <span className={`user-identity-access-badge tone-${accessTone}`}>
-              <span className="user-identity-access-badge-dot" aria-hidden="true" />
-              {accessBadgeLabel}
-            </span>
-            <h4 className="user-identity-access-title">{props.accessStatus.title}</h4>
-            <p className="user-identity-access-summary">{props.accessStatus.summary}</p>
-          </div>
-          {props.accessStatus.detail ? <p className="user-identity-access-detail">{props.accessStatus.detail}</p> : null}
-          {hasAccessDetailRows ? (
-            <div className="user-identity-access-list">
-              {props.accessStatus.planName ? (
-                <div className="user-identity-access-row">
-                  <span>{locale === "en" ? "Plan" : "套餐"}</span>
-                  <strong>{props.accessStatus.planName}</strong>
-                </div>
-              ) : null}
-              {showAiRequestBalance ? (
-                <div className="user-identity-access-row">
-                  <span>{locale === "en" ? "AI requests left" : "剩余 AI Request"}</span>
-                  <strong>{props.accessStatus.remainingCompletedTurns}</strong>
-                </div>
-              ) : null}
-              {props.accessStatus.cycleEndsAt ? (
-                <div className="user-identity-access-row">
-                  <span>{locale === "en" ? "Next reset" : "下次重置"}</span>
-                  <strong>{formatAccessTime(props.accessStatus.cycleEndsAt)}</strong>
-                </div>
-              ) : null}
-              {props.accessStatus.expiresAt ? (
-                <div className="user-identity-access-row">
-                  <span>{locale === "en" ? "Available until" : "可用到"}</span>
-                  <strong>{formatAccessTime(props.accessStatus.expiresAt)}</strong>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {props.accessStatus.actionLabel ? <p className="user-identity-access-footnote">{props.accessStatus.actionLabel}</p> : null}
-        </>
-      ) : (
-        <p className="user-identity-access-empty">{locale === "en" ? "Open this panel to view your current access details." : "打开后可查看当前权益信息。"}</p>
-      )}
-    </div>
+    <UserAccessStatusPanel
+      locale={locale}
+      accessStatus={props.accessStatus}
+      loading={props.accessStatusLoading}
+      error={props.accessStatusError}
+    />
   );
 
   return (
@@ -255,4 +182,98 @@ export function UserIdentitySummary(props: {
       ) : null}
     </section>
   );
+}
+
+/** Plan, balance and reset times; shared by the admin identity card and the portal account menu. */
+export function UserAccessStatusPanel(props: {
+  locale: UserIdentityLocale;
+  accessStatus?: UserAccessStatus | null;
+  loading?: boolean;
+  error?: string;
+}) {
+  const locale = props.locale;
+  const formatAccessTime = (value: string | undefined) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(parsed);
+  };
+
+  const accessTone = props.accessStatus?.tone || "neutral";
+  const accessBadgeLabel = props.accessStatus?.accessState === "blocked"
+    ? "Action needed"
+    : accessTone === "caution"
+      ? "Ends soon"
+      : "Active";
+  const showAiRequestBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
+  const hasAccessDetailRows = Boolean(
+    props.accessStatus && (
+      props.accessStatus.planName ||
+      showAiRequestBalance ||
+      props.accessStatus.cycleEndsAt ||
+      props.accessStatus.expiresAt
+    )
+  );
+  return (
+    <div className="user-identity-access-panel">
+      {props.loading ? (
+        <div className="user-identity-access-loading">
+          <Spin size="small" />
+          <span>{locale === "en" ? "Loading your access details..." : "正在加载权益信息..."}</span>
+        </div>
+      ) : props.error ? (
+        <div className="user-identity-access-error">
+          <p>{locale === "en" ? "We could not load your access details right now." : "暂时无法加载权益信息。"}</p>
+          <span>{props.error}</span>
+        </div>
+      ) : props.accessStatus ? (
+        <>
+          <div className="user-identity-access-hero">
+            <span className={`user-identity-access-badge tone-${accessTone}`}>
+              <span className="user-identity-access-badge-dot" aria-hidden="true" />
+              {accessBadgeLabel}
+            </span>
+            <h4 className="user-identity-access-title">{props.accessStatus.title}</h4>
+            <p className="user-identity-access-summary">{props.accessStatus.summary}</p>
+          </div>
+          {props.accessStatus.detail ? <p className="user-identity-access-detail">{props.accessStatus.detail}</p> : null}
+          {hasAccessDetailRows ? (
+            <div className="user-identity-access-list">
+              {props.accessStatus.planName ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Plan" : "套餐"}</span>
+                  <strong>{props.accessStatus.planName}</strong>
+                </div>
+              ) : null}
+              {showAiRequestBalance ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "AI requests left" : "剩余 AI Request"}</span>
+                  <strong>{props.accessStatus.remainingCompletedTurns}</strong>
+                </div>
+              ) : null}
+              {props.accessStatus.cycleEndsAt ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Next reset" : "下次重置"}</span>
+                  <strong>{formatAccessTime(props.accessStatus.cycleEndsAt)}</strong>
+                </div>
+              ) : null}
+              {props.accessStatus.expiresAt ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Available until" : "可用到"}</span>
+                  <strong>{formatAccessTime(props.accessStatus.expiresAt)}</strong>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {props.accessStatus.actionLabel ? <p className="user-identity-access-footnote">{props.accessStatus.actionLabel}</p> : null}
+        </>
+      ) : (
+        <p className="user-identity-access-empty">{locale === "en" ? "Open this panel to view your current access details." : "打开后可查看当前权益信息。"}</p>
+      )}
+    </div>
+  );
+
 }

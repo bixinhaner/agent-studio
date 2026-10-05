@@ -224,3 +224,34 @@ export type PortalPreferencePatch = {
 export function updatePortalPreferences(patch: PortalPreferencePatch) {
   return api<unknown>("/api/auth/portal-preferences", { method: "PATCH", json: { portal_preferences: patch } });
 }
+
+export type PersonalUsagePeriod = "7d" | "30d" | "month" | "last_month";
+export type PersonalUsageChannel = "portal" | "dingtalk" | "scheduled" | "api" | "other";
+export type PersonalUsageOutputType = "document" | "spreadsheet" | "presentation" | "image" | "other";
+
+export type PersonalUsageSummary = {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  range: { from: string; to: string; days: number };
+  totals: {
+    input_tokens: number;
+    cached_input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    turns: number;
+    failed_turns: number;
+    tasks: number;
+    output_files: number;
+  };
+  previous: { total_tokens: number; turns: number } | null;
+  daily: Array<{ date: string; input_tokens: number; cached_input_tokens: number; output_tokens: number; total_tokens: number; turns: number }>;
+  by_channel: Array<{ key: PersonalUsageChannel; total_tokens: number; turns: number }>;
+  by_model: Array<{ model: string; total_tokens: number; turns: number }>;
+  outputs_by_type: Array<{ type: PersonalUsageOutputType; count: number }>;
+  truncated: boolean;
+};
+
+export function fetchPersonalUsage(period: PersonalUsagePeriod, timezone: string) {
+  const params = new URLSearchParams({ period, tz: timezone });
+  return api<PersonalUsageSummary>(`/api/portal/me/usage?${params.toString()}`);
+}

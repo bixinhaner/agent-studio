@@ -7,13 +7,15 @@ import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { ActionConnectorConfigDraft, IntegrationDetail } from "./types";
+import { ProactivePushSubscriptionsPanel } from "./ProactivePushSubscriptionsPanel";
 
-type ActionConnectorTab = "basic" | "bindings" | "policies" | "history";
+type ActionConnectorTab = "basic" | "bindings" | "policies" | "push" | "history";
 
 const TABS: Array<{ id: ActionConnectorTab; label: string }> = [
   { id: "basic", label: "连接配置" },
   { id: "bindings", label: "绑定" },
   { id: "policies", label: "授权" },
+  { id: "push", label: "主动发现推送" },
   { id: "history", label: "验证历史" }
 ];
 
@@ -236,6 +238,7 @@ export function ActionConnectorIntegrationView(props: {
 
         {activeTab === "bindings" ? <IntegrationBindingsEditor instanceId={props.detail.instance.id} /> : null}
         {activeTab === "policies" ? <IntegrationPolicyEditor instanceId={props.detail.instance.id} /> : null}
+        {activeTab === "push" ? <ProactivePushSubscriptionsPanel /> : null}
         {activeTab === "history" ? (
           <IntegrationValidationHistory items={props.detail.validationHistory.items} />
         ) : null}

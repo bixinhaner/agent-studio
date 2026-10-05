@@ -6,12 +6,14 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
-import { Input } from "antd";
+import { Button, Dropdown, Input } from "antd";
 import {
   ChevronDown,
   ChevronRight,
+  Ellipsis,
   Folder,
   FolderOpen,
+  FolderPlus,
   Plus,
   Search,
   Trash2
@@ -44,6 +46,8 @@ export function WorkspaceRail(props: {
   taskList?: ReactNode;
   taskCount?: number;
   footer?: ReactNode;
+  /** Extra navigation (e.g. automation) rendered below the folder tree. */
+  sections?: ReactNode;
   refreshKey?: number;
   onSearchChange(value: string): void;
   onSelectFolder(folderId: string): void;
@@ -242,6 +246,33 @@ export function WorkspaceRail(props: {
       <div className="workspace-rail-head">
         <div className="workspace-rail-heading-row">
           <h2>{props.title || t("workspace.mine")}</h2>
+          {!props.readOnly ? (
+            <Dropdown
+              trigger={["click"]}
+              placement="bottomRight"
+              menu={{
+                items: [
+                  { key: "folder", icon: <FolderPlus size={15} />, label: t("workspace.newFolder") },
+                  { type: "divider" },
+                  { key: "trash", icon: <Trash2 size={15} />, label: t("workspace.trash") }
+                ],
+                selectable: false,
+                onClick: ({ key }) => {
+                  if (key === "folder") props.onCreateFolder();
+                  else props.onSelectFolder(TRASH_WORKSPACE_VIEW);
+                }
+              }}
+            >
+              <Button
+                type="text"
+                size="small"
+                className={props.selectedFolderId === TRASH_WORKSPACE_VIEW ? "workspace-rail-more is-active" : "workspace-rail-more"}
+                icon={<Ellipsis size={16} />}
+                aria-label={t("workspace.more")}
+                aria-haspopup="menu"
+              />
+            </Dropdown>
+          ) : null}
         </div>
         <Input
           className="workspace-search"
@@ -277,18 +308,18 @@ export function WorkspaceRail(props: {
         {props.errorText ? <p className="workspace-rail-error">{props.errorText}</p> : null}
       </nav>
 
-      {!props.readOnly ? <div className="workspace-rail-footer">
-        <button
-          type="button"
-          className={props.selectedFolderId === TRASH_WORKSPACE_VIEW ? "workspace-nav-item is-active" : "workspace-nav-item"}
-          onClick={() => props.onSelectFolder(TRASH_WORKSPACE_VIEW)}
-        >
-          <Trash2 size={17} />
-          <span>{t("workspace.trash")}</span>
-          <ChevronRight size={14} className="workspace-nav-chevron" />
-        </button>
-        {props.footer}
-      </div> : props.footer ? <div className="workspace-rail-footer">{props.footer}</div> : null}
+      {props.sections}
+
+      {props.selectedFolderId === TRASH_WORKSPACE_VIEW ? (
+        <div className="workspace-rail-trash-indicator">
+          <button type="button" className="workspace-nav-item is-active" onClick={() => props.onSelectFolder(TRASH_WORKSPACE_VIEW)}>
+            <Trash2 size={17} />
+            <span>{t("workspace.trash")}</span>
+          </button>
+        </div>
+      ) : null}
+
+      {props.footer ? <div className="workspace-rail-footer">{props.footer}</div> : null}
     </aside>
   );
 }

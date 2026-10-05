@@ -5660,3 +5660,184 @@
 :root[data-portal-theme="dark"] .outputs-card-copy small {
   color: var(--roadmap-muted);
 }
+:root[data-portal-theme="dark"] .workspace-rail-more.ant-btn {
+  color: #a8a8ae;
+}
+:root[data-portal-theme="dark"] .workspace-rail-more.ant-btn:hover,
+:root[data-portal-theme="dark"] .workspace-rail-more.is-active.ant-btn {
+  color: var(--workbench-accent, var(--roadmap-accent));
+  background: var(--workbench-sidebar-active-bg, var(--roadmap-accent-soft));
+}
+:root[data-portal-theme="dark"] .workspace-automation-nav {
+  border-top: 1px solid var(--workbench-border, #373737);
+}
+:root[data-portal-theme="dark"] .workspace-automation-status {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .workspace-automation-status.is-failing {
+  color: #e85e54;
+}
+:root[data-portal-theme="dark"] .workspace-automation-status i {
+  background: #d92d20;
+}
+:root[data-portal-theme="dark"] .workspace-rail-trash-indicator .workspace-nav-item {
+  background: var(--workbench-sidebar-active-bg, var(--roadmap-accent-soft));
+}
+:root[data-portal-theme="dark"] .account-card {
+  border: 1px solid var(--roadmap-line);
+  background: var(--roadmap-surface);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .account-card:hover,
+:root[data-portal-theme="dark"] .account-card[aria-expanded="true"] {
+  border-color: rgb(var(--brand-primary-rgb, 255 70 20) / 0.3);
+  background: var(--roadmap-surface-soft);
+}
+:root[data-portal-theme="dark"] .account-card:focus-visible {
+  outline: 2px solid var(--roadmap-accent);
+}
+:root[data-portal-theme="dark"] .account-card-avatar {
+  background: var(--roadmap-accent-soft);
+  color: var(--roadmap-accent);
+}
+:root[data-portal-theme="dark"] .account-card-alert {
+  border: 2px solid var(--roadmap-surface);
+  background: #d92d20;
+}
+:root[data-portal-theme="dark"] .account-card-copy small {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-card-chevron {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-head strong {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .account-menu-head span {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-group {
+  border-top: 1px solid var(--roadmap-line);
+}
+:root[data-portal-theme="dark"] .account-menu-group-label {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-item {
+  border: 0;
+  background: none;
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .account-menu-item:hover,
+:root[data-portal-theme="dark"] .account-menu-item:focus-visible {
+  background: var(--roadmap-surface-soft);
+  outline: none;
+}
+:root[data-portal-theme="dark"] .account-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--roadmap-accent);
+}
+:root[data-portal-theme="dark"] .account-menu-item-icon {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-item-copy small {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-item.is-danger,
+:root[data-portal-theme="dark"] .account-menu-item.is-danger .account-menu-item-icon {
+  color: #e85e54;
+}
+:root[data-portal-theme="dark"] .account-menu-chevron {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .account-menu-setting {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-hero {
+  border: 1px solid var(--roadmap-line);
+  background: var(--roadmap-surface-soft);
+}
+:root[data-portal-theme="dark"] .usage-hero-label {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-hero-value {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-hero-change {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-token-split {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-token-split b {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-token-split i.is-input {
+  background: rgb(var(--brand-primary-rgb, 255 70 20));
+}
+:root[data-portal-theme="dark"] .usage-token-split i.is-cached {
+  background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.4);
+}
+:root[data-portal-theme="dark"] .usage-token-split i.is-output {
+  background: #64748b;
+}
+:root[data-portal-theme="dark"] .usage-stats > div {
+  border: 1px solid var(--roadmap-line);
+}
+:root[data-portal-theme="dark"] .usage-stats span {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-stats strong {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-stats small {
+  color: #e85e54;
+}
+:root[data-portal-theme="dark"] .usage-breakdown h3 {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-breakdown-label {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-breakdown-track {
+  background: var(--roadmap-surface-soft);
+}
+:root[data-portal-theme="dark"] .usage-breakdown-track span {
+  background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.75);
+}
+:root[data-portal-theme="dark"] .usage-breakdown-value {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-breakdown-value small {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-daily-bars {
+  border-bottom: 1px solid var(--roadmap-line);
+}
+:root[data-portal-theme="dark"] .usage-daily-slot:hover .usage-daily-bar {
+  background: rgb(var(--brand-primary-rgb, 255 70 20));
+}
+:root[data-portal-theme="dark"] .usage-daily-bar {
+  background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.72);
+}
+:root[data-portal-theme="dark"] .usage-daily-bar.is-empty {
+  background: var(--roadmap-line);
+}
+:root[data-portal-theme="dark"] .usage-daily-axis {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-output-chips span {
+  border: 1px solid var(--roadmap-line);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-note {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .notify-settings-row {
+  border: 1px solid var(--roadmap-line);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .notify-settings-row > svg {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .notify-settings-row p {
+  color: var(--roadmap-muted);
+}

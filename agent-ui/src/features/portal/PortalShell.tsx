@@ -119,7 +119,6 @@ import { pendingPortalUserMessageAppend } from "./pending-user-message";
 import { resolveThreadReadOnlyPresentation } from "./training-readonly-policy";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
-import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { isInternalOrganization, isInternalPortalExperience } from "../auth/portal-experience";
 import {
   createThreadPublicShare,
@@ -220,6 +219,8 @@ import { useWorkbenchLayout } from "./workbench/use-workbench-layout";
 import { createPortalAntdTheme } from "./workbench/theme";
 import { HomeProfileProvider, useHomeProfile } from "./roadmap/home-profile";
 import { recommendSkills, roleSuggestions } from "./roadmap/role-home";
+import { AccountMenu } from "./roadmap/AccountMenu";
+import { AutomationRailSection } from "./roadmap/AutomationRailSection";
 import { tourTarget } from "./roadmap/OnboardingTour";
 import { PortalRoadmapProvider, usePortalRoadmap } from "./roadmap/PortalRoadmapContext";
 import { usePortalTheme } from "./roadmap/use-portal-theme";
@@ -11155,17 +11156,22 @@ export function PortalShell(props: {
   );
 
   const workspaceRailFooter = props.currentUser ? (
-    <UserIdentitySummary
+    <AccountMenu
       user={props.currentUser}
-      compact
       onSignOut={props.onSignOut}
-      locale={locale === "zh-CN" ? "zh" : "en"}
       accessStatus={subscriptionStatus}
       accessStatusLoading={subscriptionStatusLoading}
       accessStatusError={subscriptionStatusError}
       onOpenAccessStatus={() => {
         void refreshPortalSubscriptionStatus();
       }}
+      onOpenBilling={canUseCustomerBilling && !trainingReadOnly ? openCustomerBillingPanel : undefined}
+      onOpenFeedback={trainingReadOnly ? undefined : openProductFeedbackModal}
+      onOpenAdvancedSettings={
+        isExternalPortalUser || trainingReadOnly
+          ? undefined
+          : () => setLayoutState((prev) => ({ ...prev, isAdvancedSettingsOpen: true }))
+      }
     />
   ) : (
     <p className="session-rail-user-fallback">{currentUserName}</p>
@@ -11212,6 +11218,7 @@ export function PortalShell(props: {
       taskList={workspaceTaskList}
       taskCount={selectedWorkspaceThreads.length}
       footer={workspaceRailFooter}
+      sections={<AutomationRailSection />}
       refreshKey={workspaceRefreshToken}
       onSearchChange={(value) => {
         setSessionSearchValue(value);
@@ -11349,6 +11356,7 @@ export function PortalShell(props: {
           <HomeProfileProvider enabled={!isExternalPortalUser && !trainingReadOnly} userId={portalPreferenceUser?.id}>
           <PortalRoadmapProvider
             personalFeaturesEnabled={!isExternalPortalUser && !trainingReadOnly}
+            usageEnabled={!trainingReadOnly && Boolean(portalPreferenceUser?.id)}
             tourEnabled={!isExternalPortalUser && !trainingReadOnly}
             onboardingCompletedAt={portalPreferenceUser?.portalPreferences?.onboardingCompletedAt}
             userLoaded={Boolean(portalPreferenceUser?.id)}

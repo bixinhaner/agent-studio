@@ -40,6 +40,7 @@ describe("PortalTopBar language menu", () => {
           showRuntimeSummary={false}
           showAdvancedSettings={false}
           showRightPanelToggle={false}
+          trainingMode
         />
       </PortalI18nProvider>
     );
@@ -58,6 +59,7 @@ describe("PortalTopBar language menu", () => {
           showRuntimeSummary={false}
           showAdvancedSettings={false}
           showRightPanelToggle={false}
+          trainingMode
         />
       </PortalI18nProvider>
     );
@@ -86,6 +88,7 @@ describe("PortalTopBar language menu", () => {
           showRuntimeSummary={false}
           showAdvancedSettings={false}
           showRightPanelToggle={false}
+          trainingMode
         />
       </PortalI18nProvider>
     );
