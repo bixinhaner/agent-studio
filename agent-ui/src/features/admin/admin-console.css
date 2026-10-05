@@ -7839,3 +7839,23 @@
 .admin-split-detail .admin-card {
   width: auto;
 }
+
+.resource-center-type-tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.resource-center-type-tabs .ant-segmented-block {
+  min-width: max-content;
+}
+
+.resource-center-type-tabs .ant-segmented-block .ant-segmented-item {
+  flex: 1 0 auto;
+  min-width: auto;
+}
+
+.resource-center-type-tabs .ant-segmented-item-label {
+  overflow: visible;
+  text-overflow: clip;
+  padding-inline: 12px;
+}

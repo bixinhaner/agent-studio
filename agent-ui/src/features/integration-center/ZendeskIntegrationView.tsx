@@ -39,9 +39,9 @@ const TABS: Array<{ id: ZendeskTab; label: string }> = [
 ];
 
 const STATUS_OPTIONS = [
-  { label: "active", value: "active" },
-  { label: "disabled", value: "disabled" },
-  { label: "draft", value: "draft" }
+  { label: "已启用", value: "active" },
+  { label: "已停用", value: "disabled" },
+  { label: "草稿", value: "draft" }
 ];
 
 const RESPONSE_MODE_OPTIONS = [

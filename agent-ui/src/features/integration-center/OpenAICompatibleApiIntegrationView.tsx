@@ -18,9 +18,9 @@ const TABS: Array<{ id: ExternalTab; label: string }> = [
 ];
 
 const STATUS_OPTIONS = [
-  { label: "active", value: "active" },
-  { label: "disabled", value: "disabled" },
-  { label: "draft", value: "draft" }
+  { label: "已启用", value: "active" },
+  { label: "已停用", value: "disabled" },
+  { label: "草稿", value: "draft" }
 ];
 
 function asString(value: unknown) {

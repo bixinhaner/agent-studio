@@ -37,10 +37,10 @@ const TABS: Array<{ id: IntegrationSectionTab; label: string }> = [
 ];
 
 const STATUS_OPTIONS = [
-  { label: "draft", value: "draft" },
-  { label: "active", value: "active" },
-  { label: "disabled", value: "disabled" },
-  { label: "error", value: "error" }
+  { label: "草稿", value: "draft" },
+  { label: "已启用", value: "active" },
+  { label: "已停用", value: "disabled" },
+  { label: "异常", value: "error" }
 ];
 
 const DEFAULT_BOT_CONFIG: Required<DingTalkBotConfigInput> = {
