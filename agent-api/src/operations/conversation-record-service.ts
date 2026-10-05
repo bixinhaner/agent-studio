@@ -59,6 +59,19 @@ export class ConversationRecordService {
     return this.deps.threads.list(input.organizationId, input.includeArchived ?? false);
   }
 
+  /** Thread list without message bodies; null when the store cannot provide message versions. */
+  async listThreadsWithMessageVersions(input: { includeArchived?: boolean } = {}): ReturnType<ThreadRepository["listWithMessageVersions"]> {
+    const threads = this.deps.threads as Partial<ThreadRepository>;
+    if (!threads.listWithMessageVersions) return null;
+    return threads.listWithMessageVersions.call(this.deps.threads, input.includeArchived ?? false);
+  }
+
+  async loadThreadMessages(threadIds: string[]): Promise<Map<string, StoredMessageItem[]>> {
+    const threads = this.deps.threads as Partial<ThreadRepository>;
+    if (!threads.loadMessagesByThreadIds) return new Map();
+    return threads.loadMessagesByThreadIds.call(this.deps.threads, threadIds);
+  }
+
   async listThreadsForUser(input: {
     userId: string;
     organizationId?: string;

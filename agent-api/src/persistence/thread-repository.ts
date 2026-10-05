@@ -1127,6 +1127,67 @@ export class ThreadRepository {
    * Loads messages and active sessions for many threads with chunked IN queries
    * instead of two queries per thread (admin audit lists thousands of threads).
    */
+  /**
+   * Lists threads without loading message bodies, plus a per-thread message
+   * version (count + latest update) so callers can cache message-derived data
+   * and fetch messages only for threads that changed. Returns null when the
+   * backing store cannot answer the aggregate query (test fakes).
+   */
+  async listWithMessageVersions(includeArchived = false): Promise<{
+    records: ThreadRecord[];
+    messageVersions: Map<string, string>;
+  } | null> {
+    const findSessions = this.db.runtimeSession.findMany?.bind(this.db.runtimeSession);
+    if (!this.db.$queryRawUnsafe || !findSessions) return null;
+    const [rows, versionRows] = await Promise.all([
+      this.db.thread.findMany({
+        where: {
+          workspaceTrashBatchId: null,
+          ...(includeArchived ? {} : { status: "active" })
+        },
+        orderBy: { updatedAt: "desc" }
+      }),
+      this.db.$queryRawUnsafe<Array<{ threadId: string; count: number; maxUpdatedAt: Date | string | null }>>(
+        'SELECT thread_id AS "threadId", COUNT(*)::int AS "count", MAX(updated_at) AS "maxUpdatedAt" FROM messages GROUP BY thread_id'
+      )
+    ]);
+    const messageVersions = new Map<string, string>();
+    for (const row of versionRows) {
+      messageVersions.set(row.threadId, `${row.count}:${row.maxUpdatedAt ? toIsoString(row.maxUpdatedAt) : ""}`);
+    }
+    const sessionByThread = new Map<string, RuntimeSessionRow>();
+    for (let index = 0; index < rows.length; index += THREAD_BATCH_SIZE) {
+      const ids = rows.slice(index, index + THREAD_BATCH_SIZE).map((row) => row.id);
+      const sessionRows = await findSessions({ where: { threadId: { in: ids }, status: "active" }, orderBy: { updatedAt: "desc" } });
+      for (const session of sessionRows) {
+        const threadId = session.threadId ?? "";
+        if (threadId && !sessionByThread.has(threadId)) sessionByThread.set(threadId, session);
+      }
+    }
+    return {
+      records: rows.map((row) => this.buildThreadRecord(row, [], sessionByThread.get(row.id) ?? null)),
+      messageVersions
+    };
+  }
+
+  /** Loads ordered messages for many threads with chunked IN queries. */
+  async loadMessagesByThreadIds(threadIds: string[]): Promise<Map<string, StoredMessageItem[]>> {
+    const messagesByThread = new Map<string, StoredMessageItem[]>();
+    for (let index = 0; index < threadIds.length; index += THREAD_BATCH_SIZE) {
+      const ids = threadIds.slice(index, index + THREAD_BATCH_SIZE);
+      const messageRows = await this.db.message.findMany({
+        where: { threadId: { in: ids } },
+        orderBy: [{ threadId: "asc" }, { position: "asc" }]
+      });
+      for (const messageRow of messageRows) {
+        const list = messagesByThread.get(messageRow.threadId) ?? [];
+        list.push(mapMessageRow(messageRow));
+        messagesByThread.set(messageRow.threadId, list);
+      }
+    }
+    return messagesByThread;
+  }
+
   private async loadThreadRecords(db: ThreadRepositoryDb, rows: ThreadRow[]): Promise<ThreadRecord[]> {
     const findSessions = db.runtimeSession.findMany?.bind(db.runtimeSession);
     if (!findSessions || rows.length <= 1) {

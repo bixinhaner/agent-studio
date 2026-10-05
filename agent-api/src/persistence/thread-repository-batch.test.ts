@@ -76,3 +76,56 @@ describe("ThreadRepository.list batching", () => {
     expect(records[0].sessionId).toBeUndefined();
   });
 });
+
+describe("ThreadRepository.listWithMessageVersions", () => {
+  it("lists threads without message bodies and reports per-thread message versions", async () => {
+    const db = {
+      thread: { findMany: async () => [threadRow("t1"), threadRow("t2")] },
+      message: {
+        findMany: async () => {
+          throw new Error("message bodies should not load");
+        }
+      },
+      runtimeSession: {
+        findFirst: async () => null,
+        findMany: async () => [{ threadId: "t1", externalId: "s1" }]
+      },
+      $queryRawUnsafe: async () => [{ threadId: "t1", count: 3, maxUpdatedAt: new Date("2026-10-02T00:00:00Z") }],
+      $transaction: async () => {
+        throw new Error("unused");
+      }
+    };
+
+    const listing = await new ThreadRepository(db as never).listWithMessageVersions(true);
+
+    expect(listing?.records.map((record) => [record.id, record.messages.length, record.sessionId])).toEqual([
+      ["t1", 0, "s1"],
+      ["t2", 0, undefined]
+    ]);
+    expect(listing?.messageVersions.get("t1")).toBe("3:2026-10-02T00:00:00.000Z");
+    expect(listing?.messageVersions.has("t2")).toBe(false);
+  });
+
+  it("returns null when the store cannot run the aggregate query", async () => {
+    const db = { thread: { findMany: async () => [] }, message: {}, runtimeSession: { findFirst: async () => null }, $transaction: async () => undefined };
+    expect(await new ThreadRepository(db as never).listWithMessageVersions()).toBeNull();
+  });
+
+  it("loads ordered messages only for requested threads", async () => {
+    const calls: unknown[] = [];
+    const db = {
+      thread: {},
+      message: {
+        findMany: async (args: { where: { threadId: { in: string[] } } }) => {
+          calls.push(args.where.threadId);
+          return [messageRow("t2", 0, "b1"), messageRow("t2", 1, "b2")];
+        }
+      },
+      runtimeSession: {},
+      $transaction: async () => undefined
+    };
+    const messages = await new ThreadRepository(db as never).loadMessagesByThreadIds(["t2"]);
+    expect(calls).toEqual([{ in: ["t2"] }]);
+    expect(messages.get("t2")?.map((item) => (item.message as { id: string }).id)).toEqual(["t2-0", "t2-1"]);
+  });
+});

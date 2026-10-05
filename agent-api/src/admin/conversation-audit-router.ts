@@ -1582,25 +1582,44 @@ function buildConversationAgentModeSummary(
   };
 }
 
+/** Message-derived parts of a conversation summary; cacheable per thread message version. */
+export type ConversationTranscriptDigest = {
+  firstUserText: string | null;
+  latestText: string | null;
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  userAttachmentCount: number;
+};
+
+export function buildConversationTranscriptDigest(threadId: string, messages: StoredMessageItem[]): ConversationTranscriptDigest {
+  const transcript = buildTranscriptMessages(threadId, messages);
+  const userMessages = transcript.filter((item) => item.role === "user");
+  return {
+    firstUserText: summarizeText(userMessages.map((item) => transcriptPreviewText(item)).find(Boolean), 180),
+    latestText: summarizeText(
+      [...transcript]
+        .reverse()
+        .map((item) => transcriptPreviewText(item))
+        .find(Boolean),
+      240
+    ),
+    messageCount: transcript.length,
+    userMessageCount: userMessages.length,
+    assistantMessageCount: transcript.filter((item) => item.role === "assistant").length,
+    userAttachmentCount: userMessages.reduce((sum, item) => sum + item.attachments.length, 0)
+  };
+}
+
 function buildConversationSummary(
   thread: ThreadRecord,
   user: ConversationAuditUser | null,
   channel: ConversationChannelSummary | null = null,
-  agentModeMap: Map<string, AgentModeAuditRow> = new Map()
+  agentModeMap: Map<string, AgentModeAuditRow> = new Map(),
+  digest: ConversationTranscriptDigest = buildConversationTranscriptDigest(thread.id, thread.messages)
 ): ConversationSummary {
-  const transcript = buildTranscriptMessages(thread.id, thread.messages);
-  const userMessages = transcript.filter((item) => item.role === "user");
-  const assistantMessages = transcript.filter((item) => item.role === "assistant");
-  const firstUserText = summarizeText(userMessages.map((item) => transcriptPreviewText(item)).find(Boolean), 180);
-  const latestText = summarizeText(
-    [...transcript]
-      .reverse()
-      .map((item) => transcriptPreviewText(item))
-      .find(Boolean),
-    240
-  );
+  const { firstUserText, latestText, userAttachmentCount } = digest;
   const feedback = normalizeFeedback(thread.feedback);
-  const userAttachmentCount = userMessages.reduce((sum, item) => sum + item.attachments.length, 0);
   const agentModeId = agentModeIdFromRunConfig(thread.codexRunConfig) ?? (channel?.agentModeId ?? undefined);
 
   return {
@@ -1620,9 +1639,9 @@ function buildConversationSummary(
     channel,
     agentMode: buildConversationAgentModeSummary(agentModeId, agentModeMap),
     metrics: {
-      messageCount: transcript.length,
-      userMessageCount: userMessages.length,
-      assistantMessageCount: assistantMessages.length,
+      messageCount: digest.messageCount,
+      userMessageCount: digest.userMessageCount,
+      assistantMessageCount: digest.assistantMessageCount,
       feedbackCount: feedback.length,
       userAttachmentCount
     },
@@ -1957,11 +1976,50 @@ export function createConversationAuditRouter(options: {
     });
   }
 
+  // Message-derived digests keyed by thread id and message version, so the list
+  // endpoint only reloads message bodies for threads that changed since last time.
+  const transcriptDigestCache = new Map<string, { version: string; digest: ConversationTranscriptDigest }>();
+
+  async function listThreadsWithDigests(records: ConversationRecordService): Promise<{
+    threads: ThreadRecord[];
+    digests: Map<string, ConversationTranscriptDigest>;
+  }> {
+    const listing = await records.listThreadsWithMessageVersions({ includeArchived: true });
+    if (!listing) {
+      const threads = await records.listThreads({ includeArchived: true });
+      return { threads, digests: new Map() };
+    }
+    const visible = listing.records.filter((thread) => !thread.securityDomainId);
+    const digests = new Map<string, ConversationTranscriptDigest>();
+    const stale: string[] = [];
+    for (const thread of visible) {
+      const version = listing.messageVersions.get(thread.id) ?? "0:";
+      const cached = transcriptDigestCache.get(thread.id);
+      if (cached && cached.version === version) digests.set(thread.id, cached.digest);
+      else stale.push(thread.id);
+    }
+    if (stale.length > 0) {
+      const messagesByThread = await records.loadThreadMessages(stale);
+      for (const threadId of stale) {
+        const digest = buildConversationTranscriptDigest(threadId, messagesByThread.get(threadId) ?? []);
+        transcriptDigestCache.set(threadId, { version: listing.messageVersions.get(threadId) ?? "0:", digest });
+        digests.set(threadId, digest);
+      }
+    }
+    if (transcriptDigestCache.size > visible.length * 2) {
+      const live = new Set(visible.map((thread) => thread.id));
+      for (const threadId of transcriptDigestCache.keys()) {
+        if (!live.has(threadId)) transcriptDigestCache.delete(threadId);
+      }
+    }
+    return { threads: visible, digests };
+  }
+
   async function listConversationSummaries(): Promise<ConversationSummary[]> {
     const db = getDb();
     const records = conversationRecords();
-    const [threads, users, integrations, agentModes] = await Promise.all([
-      records.listThreads({ includeArchived: true }),
+    const [{ threads, digests }, users, integrations, agentModes] = await Promise.all([
+      listThreadsWithDigests(records),
       db.user.findMany({
         orderBy: { createdAt: "asc" },
         include: {
@@ -1990,7 +2048,8 @@ export function createConversationAuditRouter(options: {
         thread,
         userMap.get(thread.userId ?? "") ?? null,
         buildConversationChannelSummary(bindingByThreadId.get(thread.id), integrationMap),
-        agentModeMap
+        agentModeMap,
+        digests.get(thread.id)
       )
     );
   }
