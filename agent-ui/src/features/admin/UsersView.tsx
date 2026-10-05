@@ -1,5 +1,5 @@
 import { Edit, Search, Shield } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Drawer, Empty, Input, Segmented, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
@@ -426,7 +426,20 @@ export function UsersView() {
   const [editingOrganizationStatus, setEditingOrganizationStatus] = useState("active");
   const [savingOrganization, setSavingOrganization] = useState(false);
   const isNarrowScreen = useIsNarrowScreen(980);
-  const tableScrollY = typeof window === "undefined" ? 520 : Math.max(360, window.innerHeight - 380);
+  // Size the virtual table body to the space left below it so the list uses the viewport
+  // instead of a short fixed box (header row + bottom gap ≈ 72px).
+  const tableHostRef = useRef<HTMLDivElement | null>(null);
+  const [tableScrollY, setTableScrollY] = useState(520);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const top = tableHostRef.current?.getBoundingClientRect().top;
+      if (top === undefined) return;
+      setTableScrollY(Math.max(320, Math.round(window.innerHeight - top - 72)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [isNarrowScreen, loading]);
 
   useEffect(() => {
     let active = true;
@@ -1187,6 +1200,7 @@ export function UsersView() {
               </div>
             )
           ) : (
+            <div ref={tableHostRef}>
             <Table
               columns={columns}
               dataSource={filteredUsers}
@@ -1198,6 +1212,7 @@ export function UsersView() {
               size="middle"
               rowClassName={() => "admin-table-row-hover"}
             />
+            </div>
           )}
         </div>
       </div>

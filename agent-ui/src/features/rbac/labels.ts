@@ -64,6 +64,12 @@ const SYSTEM_ROLE_DESCRIPTIONS: Record<string, string> = {
   admin: "受保护的系统管理员角色"
 };
 
+// Seeded English descriptions, also inherited by roles cloned from the system roles.
+const SEEDED_DESCRIPTIONS: Record<string, string> = {
+  "protected system super administrator role": "受保护的系统超级管理员角色",
+  "protected system administrator role": "受保护的系统管理员角色"
+};
+
 export function permissionCategoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
 }
@@ -74,7 +80,8 @@ export function permissionLabel(permission: { key: string; name: string }): stri
 }
 
 export function roleDescriptionLabel(role: { slug: string; description?: string | null; isSystem?: boolean }): string | null {
-  const builtin = SYSTEM_ROLE_DESCRIPTIONS[role.slug];
-  if (builtin && (!role.description || /^Protected system/i.test(role.description))) return builtin;
-  return role.description ?? null;
+  const seeded = role.description ? SEEDED_DESCRIPTIONS[role.description.trim().toLowerCase()] : undefined;
+  if (seeded) return seeded;
+  if (!role.description) return SYSTEM_ROLE_DESCRIPTIONS[role.slug] ?? null;
+  return role.description;
 }

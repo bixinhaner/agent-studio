@@ -7834,3 +7834,8 @@
   text-overflow: clip;
   padding-inline: 12px;
 }
+
+/* The auth shell caps .admin-card at 720px for sign-in forms; detail panes should fill their column. */
+.admin-split-detail .admin-card {
+  width: auto;
+}
