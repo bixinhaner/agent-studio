@@ -66,6 +66,60 @@ describe("createDingTalkClient", () => {
     ]);
   });
 
+  it("retries org API calls that DingTalk rate-limits and then succeeds", async () => {
+    let listCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({ accessToken: "app-token", expireIn: 7200 });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/topapi/v2/department/listsub")) {
+        listCalls += 1;
+        if (listCalls < 3) {
+          return jsonResponse({
+            errcode: 88,
+            errmsg: "ding talk error[subcode=90002,submsg=当前所有钉钉应用调用该接口次数过多，超出了该接口承受的最大qps]"
+          });
+        }
+        return jsonResponse({ errcode: 0, result: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock, { rateLimitRetryDelaysMs: [0, 0, 0] });
+    await expect(client.listDepartments({})).resolves.toEqual([]);
+    expect(listCalls).toBe(3);
+  });
+
+  it("gives up after the rate-limit retry budget and does not retry other errors", async () => {
+    let listCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({ accessToken: "app-token", expireIn: 7200 });
+      }
+      listCalls += 1;
+      return jsonResponse({ errcode: 88, errmsg: "ding talk error[subcode=90002,submsg=qps]" });
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock, { rateLimitRetryDelaysMs: [0, 0] });
+    await expect(client.listDepartments({})).rejects.toThrow(/90002/);
+    expect(listCalls).toBe(3);
+
+    let otherCalls = 0;
+    const otherFetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({ accessToken: "app-token", expireIn: 7200 });
+      }
+      otherCalls += 1;
+      return jsonResponse({ errcode: 60011, errmsg: "no permission" });
+    }) as typeof fetch;
+    const otherClient = createDingTalkClient(TEST_CONFIG, otherFetch, { rateLimitRetryDelaysMs: [0, 0] });
+    await expect(otherClient.listDepartments({})).rejects.toThrow(/no permission/);
+    expect(otherCalls).toBe(1);
+  });
+
   it("paginates department user list requests with cursor and size", async () => {
     const requestedBodies: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

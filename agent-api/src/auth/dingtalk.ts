@@ -557,6 +557,22 @@ function isInvalidAccessTokenError(error: unknown): boolean {
   return /40014|invalid|illegal|not legal|不合法/i.test(error.message);
 }
 
+/**
+ * DingTalk throttles per-API QPS across every app in the tenant (subcode 90002/90018,
+ * HTTP 429), typically for about a second around the top of the hour. Such errors are
+ * worth a short backoff and retry instead of failing the whole org sync.
+ */
+export function isDingTalkRateLimitError(error: unknown): boolean {
+  if (error instanceof DingTalkRequestError) {
+    if (error.status === 429) return true;
+    if (error.subcode === "90002" || error.subcode === "90018" || error.code === "90002" || error.code === "90018") return true;
+  }
+  if (!(error instanceof Error)) return false;
+  return /subcode=900(02|18)|超出了该接口承受的最大qps|调用该接口次数过多/i.test(error.message);
+}
+
+const DINGTALK_RATE_LIMIT_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+
 function isDingTalkUserNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -608,8 +624,22 @@ export function resolveDingTalkConfig(config: DingTalkConfig):
 
 export function createDingTalkClient(
   config: DingTalkConfig,
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  options: { rateLimitRetryDelaysMs?: number[] } = {}
 ): DingTalkClient {
+  const rateLimitRetryDelaysMs = options.rateLimitRetryDelaysMs ?? DINGTALK_RATE_LIMIT_RETRY_DELAYS_MS;
+  const withRateLimitRetry = async <T>(run: () => Promise<T>): Promise<T> => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await run();
+      } catch (error) {
+        const delay = rateLimitRetryDelaysMs[attempt];
+        if (delay === undefined || !isDingTalkRateLimitError(error)) throw error;
+        const jitter = delay > 0 ? Math.floor(Math.random() * 300) : 0;
+        await new Promise((resolve) => setTimeout(resolve, delay + jitter));
+      }
+    }
+  };
   let appAccessTokenCache: AppAccessTokenCache | undefined;
   let appAccessTokenPromise: Promise<AppAccessTokenCache> | undefined;
   let appAccessTokenGeneration = 0;
@@ -688,7 +718,10 @@ export function createDingTalkClient(
     return (await appAccessTokenPromise).token;
   };
 
-  const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
+  const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> =>
+    withRateLimitRetry(() => requestOrgApiOnce(path, body));
+
+  const requestOrgApiOnce = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
     const requestWithAppAccessToken = async (forceRefresh = false): Promise<unknown> => {
       const accessToken = await getAppAccessToken({ forceRefresh });
       const input = new URL(`${orgApiBaseUrl}${path}`);
