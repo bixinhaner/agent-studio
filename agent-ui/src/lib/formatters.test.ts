@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatListTimestamp, formatUsdAmount, plainTextPreview } from "./formatters";
+import { formatAdminDate, formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPreview } from "./formatters";
 
 describe("formatUsdAmount", () => {
   it("groups thousands and keeps precision proportional to the amount", () => {
@@ -31,8 +31,24 @@ describe("plainTextPreview", () => {
 describe("formatListTimestamp", () => {
   it("shows time for today and a date otherwise", () => {
     const now = new Date(2026, 9, 6, 15, 0);
-    expect(formatListTimestamp(new Date(2026, 9, 6, 9, 5).toISOString(), now)).toMatch(/09:05|9:05/);
-    expect(formatListTimestamp(new Date(2026, 8, 4, 9, 5).toISOString(), now)).toMatch(/9/);
-    expect(formatListTimestamp(new Date(2025, 8, 4).toISOString(), now)).toMatch(/2025/);
+    expect(formatListTimestamp(new Date(2026, 9, 6, 9, 5).toISOString(), now)).toBe("09:05");
+    expect(formatListTimestamp(new Date(2026, 8, 4, 9, 5).toISOString(), now)).toBe("09-04");
+    expect(formatListTimestamp(new Date(2025, 8, 4).toISOString(), now)).toBe("2025-09-04");
+  });
+});
+
+describe("formatAdminDateTime", () => {
+  it("formats local time in a fixed sortable shape", () => {
+    const date = new Date(2026, 8, 4, 16, 35, 7);
+    expect(formatAdminDateTime(date)).toBe("2026-09-04 16:35");
+    expect(formatAdminDateTime(date.toISOString(), { seconds: true })).toBe("2026-09-04 16:35:07");
+    expect(formatAdminDate(date)).toBe("2026-09-04");
+  });
+
+  it("falls back for empty or invalid input", () => {
+    expect(formatAdminDateTime(null)).toBe("—");
+    expect(formatAdminDateTime("", { fallback: "未记录" })).toBe("未记录");
+    expect(formatAdminDateTime("not-a-date")).toBe("not-a-date");
+    expect(formatAdminDate(undefined, "未设置")).toBe("未设置");
   });
 });

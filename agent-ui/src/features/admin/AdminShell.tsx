@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Breadcrumb, Button, Col, ConfigProvider, Drawer, Input, List, Modal, Row, Spin } from "antd";
 import zhCN from "antd/locale/zh_CN";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
@@ -33,7 +33,9 @@ import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { BrandMark } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
 import { ADMIN_PREMIUM_THEME } from "./admin-theme";
-import { lockAdminSecurityDomains } from "./api";
+import { fetchOrgSyncJobs, lockAdminSecurityDomains } from "./api";
+import { jobFailureExplanation, latestFinishedJob } from "./org-sync-errors";
+import { openWarningConfirm } from "../../lib/warning-modal";
 import type { AdminSection } from "./types";
 import "./admin-console.css";
 
@@ -351,14 +353,62 @@ function AdminSectionLazyFallback() {
   );
 }
 
+/** Light-weight attention signals for the sidebar; refreshed when the admin switches pages. */
+function useAdminNavAlerts(orgSyncVisible: boolean, section: AdminConsoleSection): Partial<Record<AdminConsoleSection, string>> {
+  const [alerts, setAlerts] = useState<Partial<Record<AdminConsoleSection, string>>>({});
+  useEffect(() => {
+    if (!orgSyncVisible) return;
+    let cancelled = false;
+    void fetchOrgSyncJobs()
+      .then((response) => {
+        if (cancelled) return;
+        const failure = jobFailureExplanation(latestFinishedJob(response.jobs));
+        setAlerts(failure ? { organization: `最近一次组织同步失败：${failure.reason}` } : {});
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSyncVisible, section]);
+  return alerts;
+}
+
 function AdminNavigation(props: {
   activeSection: AdminConsoleSection;
   visibleSections: Set<AdminConsoleSection>;
   collapsed: boolean;
   onNavigate: (section: AdminConsoleSection) => void;
+  alerts?: Partial<Record<AdminConsoleSection, string>>;
 }) {
+  const scrollRef = useRef<HTMLElement | null>(null);
+  const [edges, setEdges] = useState({ top: false, bottom: false });
+
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setEdges({ top: el.scrollTop > 2, bottom: el.scrollTop + el.clientHeight < el.scrollHeight - 2 });
+  }, []);
+
+  useEffect(() => {
+    updateEdges();
+    window.addEventListener("resize", updateEdges);
+    return () => window.removeEventListener("resize", updateEdges);
+  }, [updateEdges, props.visibleSections, props.collapsed]);
+
+  // Keep the current page visible when the list is taller than the sidebar.
+  useEffect(() => {
+    scrollRef.current?.querySelector<HTMLElement>(".admin-menu-item.active")?.scrollIntoView({ block: "nearest" });
+    updateEdges();
+  }, [props.activeSection, updateEdges]);
+
+  const className = [
+    "admin-sidebar-content",
+    edges.top ? "has-more-above" : "",
+    edges.bottom ? "has-more-below" : ""
+  ].filter(Boolean).join(" ");
+
   return (
-    <div className="admin-sidebar-content">
+    <nav ref={scrollRef} className={className} aria-label="管理后台导航" onScroll={updateEdges}>
       {NAVIGATION_GROUPS.map((group) => ({
         ...group,
         items: group.items.filter((item) => props.visibleSections.has(item.id))
@@ -379,20 +429,26 @@ function AdminNavigation(props: {
               {group.label}
             </div>
           ) : null}
-          {group.items.map((item) => (
-            <div
-              key={item.id}
-              className={`admin-menu-item ${props.activeSection === item.id ? "active" : ""}`}
-              onClick={() => props.onNavigate(item.id)}
-              title={props.collapsed ? item.title : undefined}
-            >
-              {item.icon}
-              {!props.collapsed ? <span>{item.title}</span> : null}
-            </div>
-          ))}
+          {group.items.map((item) => {
+            const alert = props.alerts?.[item.id];
+            return (
+              <button
+                type="button"
+                key={item.id}
+                className={`admin-menu-item ${props.activeSection === item.id ? "active" : ""}`}
+                aria-current={props.activeSection === item.id ? "page" : undefined}
+                onClick={() => props.onNavigate(item.id)}
+                title={props.collapsed ? (alert ? `${item.title}：${alert}` : item.title) : alert}
+              >
+                {item.icon}
+                {!props.collapsed ? <span>{item.title}</span> : null}
+                {alert ? <i className="admin-menu-alert" role="img" aria-label={alert} /> : null}
+              </button>
+            );
+          })}
         </div>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -497,6 +553,12 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
     case "organization":
       return (
         <div className="admin-page-container admin-organization-sync-page">
+          <div className="admin-page-header">
+            <div>
+              <h1 className="admin-page-title">组织同步</h1>
+              <p className="admin-page-desc">从钉钉通讯录同步部门与员工，查看每次同步的变化和失败原因。</p>
+            </div>
+          </div>
           <Row gutter={[16, 16]} className="admin-organization-sync-layout">
               <Col xs={24} xl={10}>
                 <Suspense fallback={<AdminSectionLazyFallback />}>
@@ -532,6 +594,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
     [adminConsole.showOperationsAndConversationMenus]
   );
   const visibleSections = useMemo(() => new Set(visibleSectionIds), [visibleSectionIds]);
+  const navAlerts = useAdminNavAlerts(visibleSections.has("organization"), section);
 
   useEffect(() => {
     document.body.classList.add("admin-console-mode");
@@ -649,7 +712,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           <span>{branding.platformName}</span>
         </div>
       </div>
-      <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={false} onNavigate={handleNavClick} />
+      <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={false} onNavigate={handleNavClick} alerts={navAlerts} />
       <div className="admin-sidebar-footer" style={{ padding: 16, borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
         {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
       </div>
@@ -676,7 +739,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
                   />
                 ) : null}
             </div>
-            <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
+            <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={sidebarCollapsed} onNavigate={handleNavClick} alerts={navAlerts} />
             <div className={`admin-sidebar-footer ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
               {!sidebarCollapsed && props.currentUser ? (
                 <div style={{ padding: 16 }}>
@@ -685,8 +748,15 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
               ) : null}
               {sidebarCollapsed && props.currentUser && props.onSignOut ? (
                 <div style={{ padding: '16px 0', display: 'flex', justifyContent: 'center' }}>
-                  <Button type="text" icon={<LogOutIcon size={18} />} onClick={() => {
-                    if (window.confirm("确认退出当前登录状态？")) props.onSignOut!();
+                  <Button type="text" icon={<LogOutIcon size={18} />} aria-label="退出登录" onClick={() => {
+                    void openWarningConfirm({
+                      title: "退出登录",
+                      content: "确认退出当前登录状态？未保存的配置草稿会丢失。",
+                      dangerLevel: "warning",
+                      okText: "退出登录"
+                    }).then((confirmed) => {
+                      if (confirmed) props.onSignOut!();
+                    });
                   }} title="退出登录" />
                 </div>
               ) : null}

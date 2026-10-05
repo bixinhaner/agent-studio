@@ -12,6 +12,7 @@ import type {
   SkillPackageRecord,
   UpdateAgentModeInput
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type AgentModeDetailViewProps = {
   agentMode: AgentModeRecord;
@@ -42,7 +43,7 @@ function formatLocalDateTime(value?: string) {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function toSkillPackageIds(agentMode: AgentModeRecord) {

@@ -46,6 +46,7 @@ import {
   type SkillCatalogLocalizedContent
 } from "./skill-catalog-api";
 import "./skill-catalog-management.css";
+import { formatAdminDate, formatAdminDateTime } from "../../lib/formatters";
 
 const ICON_BY_KEY: Record<string, LucideIcon> = {
   image: ImageIcon,
@@ -208,23 +209,11 @@ function draftFromEntry(entry: SkillCatalogEntry): SkillCatalogDraft {
 }
 
 function localDate(value?: string): string {
-  if (!value) return "尚未发布";
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatAdminDateTime(value, { fallback: "尚未发布" });
 }
 
 function localDateShort(value?: string): string {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat(undefined, {
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date(value));
+  return formatAdminDate(value);
 }
 
 type ScopeFilter = "all" | "private" | "shared" | "platform" | "plugin" | "archived";

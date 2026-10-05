@@ -1,9 +1,10 @@
 import type { AuditLogSummary } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 function formatLocalTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 export function RoleAuditView(props: { auditLogs: AuditLogSummary[] }) {

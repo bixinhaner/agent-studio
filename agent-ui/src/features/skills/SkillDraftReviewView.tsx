@@ -15,6 +15,8 @@ import {
   updateAdminSkillDraftMarkdown
 } from "./api";
 import type { CodexManagedSkill, CodexSkillDraft } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
+import { openWarningConfirm } from "../../lib/warning-modal";
 
 const REVIEW_STATUS_OPTIONS = [
   { label: "全部状态", value: "all" },
@@ -43,7 +45,7 @@ function formatLocalDateTime(value?: string) {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function statusTagColor(status: string) {
@@ -224,11 +226,15 @@ function ManagedSkillRegistryPanel() {
 
   const handleRemoveSkill = async () => {
     if (!selectedSkill) return;
-    const confirmed = window.confirm(
-      selectedSkill.scope === "private"
-        ? "Remove this installed skill? The author will no longer see it in new chats."
-        : "Remove this shared skill? It will be unbound from Skill Packages and unavailable in new chats."
-    );
+    const confirmed = await openWarningConfirm({
+      title: "移除 Skill",
+      content:
+        selectedSkill.scope === "private"
+          ? "移除后，作者在新对话中将不再看到这个已安装的 Skill。"
+          : "移除后，这个共享 Skill 会从所有技能包解绑，新对话中不可再使用。",
+      description: "已有对话不受影响。",
+      okText: "移除 Skill"
+    });
     if (!confirmed) return;
     setRemoving(true);
     setErrorText("");

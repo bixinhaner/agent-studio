@@ -1,4 +1,5 @@
 import type { SystemSettingsVersionMeta } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type PublishHistoryViewProps = {
   draftMeta: SystemSettingsVersionMeta;
@@ -9,7 +10,7 @@ function formatLocalDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function describeVersion(meta: SystemSettingsVersionMeta | null) {

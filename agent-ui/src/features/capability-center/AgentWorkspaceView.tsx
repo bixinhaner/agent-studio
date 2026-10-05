@@ -54,6 +54,7 @@ import type {
   SkillPackageRecord,
   WebSearchMode
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type TabId = "overview" | "instructions" | "skills" | "runtime" | "access" | "validate";
 type InstructionSection = { title: string; body: string; rules: string[] };
@@ -84,7 +85,7 @@ const PRESETS = [
 
 function formatLocalDateTime(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? "—" : formatAdminDateTime(date);
 }
 
 function agentInstructionInputs(agent: AgentModeRecord): AgentModeInstructionSourceInput[] {

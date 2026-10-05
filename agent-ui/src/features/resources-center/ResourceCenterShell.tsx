@@ -24,6 +24,7 @@ import { openWarningConfirm } from "../../lib/warning-modal";
 import { createKnowledgeSet, fetchKnowledgeSets } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import type { KnowledgeSetRecord, ResourceStatusFilter } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type CreatePanelState = {
   name: string;
@@ -43,13 +44,7 @@ function matchesSearch(input: string, values: Array<string | undefined>) {
 }
 
 function formatLocalDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
+  return formatAdminDateTime(value, { fallback: "—" });
 }
 
 function createInitialPanelState(): CreatePanelState {

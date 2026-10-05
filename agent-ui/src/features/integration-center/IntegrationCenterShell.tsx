@@ -8,6 +8,7 @@ import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { createIntegrationInstance, fetchIntegrationDetail, fetchIntegrationInstances } from "./api";
 import type { CreateIntegrationInstanceInput, IntegrationCenterTab, IntegrationDetail, IntegrationListItem } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const DingTalkIntegrationViewLazy = lazy(() =>
   import("./DingTalkIntegrationView").then((module) => ({ default: module.DingTalkIntegrationView }))
@@ -93,7 +94,7 @@ function formatLocalDateTime(value: string | undefined): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function statusTagColor(status: string): string {

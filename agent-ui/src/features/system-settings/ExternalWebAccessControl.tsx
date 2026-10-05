@@ -6,11 +6,12 @@ import {
   updateExternalWebAccessState,
   type ExternalWebAccessState
 } from "./api";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 function formatLocalDateTime(value: string | null) {
   if (!value) return "尚未操作";
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "尚未操作" : parsed.toLocaleString();
+  return Number.isNaN(parsed.getTime()) ? "尚未操作" : formatAdminDateTime(parsed);
 }
 
 export function ExternalWebAccessControl() {

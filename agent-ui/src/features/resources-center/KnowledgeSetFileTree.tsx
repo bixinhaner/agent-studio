@@ -5,6 +5,7 @@ import { Button, Empty, Input, Modal, Switch, Tag, Typography } from "antd";
 import { fetchKnowledgeSetTree } from "./api";
 import type { KnowledgeSetTreeDirectoryEntry, KnowledgeSetTreeEntry, KnowledgeSetTreeResponse } from "./types";
 import { openWarningConfirm } from "../../lib/warning-modal";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type KnowledgeSetFileTreeProps = {
   knowledgeSetId: string;
@@ -18,7 +19,7 @@ function formatLocalDateTime(value?: string) {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatSize(sizeBytes?: string) {

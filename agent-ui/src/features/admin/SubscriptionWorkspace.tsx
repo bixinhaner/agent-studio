@@ -40,6 +40,8 @@ import type {
   AdminSubscriptionPlan,
   AdminSubscriptionUserRecord
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
+import { openWarningConfirm } from "../../lib/warning-modal";
 
 type WorkspaceTab = "plans" | "users" | "organizations" | "denials";
 
@@ -67,7 +69,7 @@ function formatLocalTime(value: string | null | undefined): string {
   if (!value) return "未设置";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatAdminDateTime(date);
 }
 
 function formatCount(value: number | null | undefined): string {
@@ -593,7 +595,15 @@ export function SubscriptionWorkspace() {
 
   async function handleRemoveUserGrant() {
     if (!selectedUser?.userGrant) return;
-    if (!window.confirm("移除后将回到组织或默认规则，确认继续吗？")) return;
+    const confirmed = await openWarningConfirm({
+      title: "移除用户单独配置",
+      content: `移除后「${selectedUser.displayName || selectedUser.email || "该用户"}」将改用所在组织或默认规则的套餐与额度。`,
+      description: "如果组织未开通，外部用户可能会立即无法继续提问。",
+      dangerLevel: "warning",
+      okText: "移除配置",
+      okButtonDanger: true
+    });
+    if (!confirmed) return;
     setSavingUserGrant(true);
     setErrorText("");
     setSuccessText("");
@@ -628,7 +638,15 @@ export function SubscriptionWorkspace() {
 
   async function handleRemoveOrganizationGrant() {
     if (!selectedOrganization?.grant) return;
-    if (!window.confirm("移除后会回到默认规则，确认继续吗？")) return;
+    const confirmed = await openWarningConfirm({
+      title: "移除组织订阅配置",
+      content: `移除后「${selectedOrganization.name}」的成员将改用默认规则。`,
+      description: "外部组织未开通时默认不能继续提问，请确认已和客户沟通。",
+      dangerLevel: "warning",
+      okText: "移除配置",
+      okButtonDanger: true
+    });
+    if (!confirmed) return;
     setSavingOrganizationGrant(true);
     setErrorText("");
     setSuccessText("");
@@ -660,34 +678,32 @@ export function SubscriptionWorkspace() {
   return (
     <>
       <div className="admin-page-container subscription-page">
-        <section className="subscription-hero subscription-page-block">
-          <div className="subscription-hero-copy">
-            <div className="subscription-hero-eyebrow">Subscription Studio</div>
-            <div>
-              <h1 className="admin-page-title">订阅权益</h1>
-              <p className="admin-page-desc">把套餐、可用期和 AI Request 额度放到同一个工作区里管理，用户触发到期或额度上限时会被直接拦截。</p>
-            </div>
+        <div className="admin-page-header">
+          <div>
+            <h1 className="admin-page-title">订阅权益</h1>
+            <p className="admin-page-desc">把套餐、可用期和 AI Request 额度放到同一个工作区里管理，用户触发到期或额度上限时会被直接拦截。</p>
             <div className="subscription-defaults">
               <div className="subscription-default-chip">
-                <Building2 size={16} />
+                <Building2 size={16} aria-hidden="true" />
                 <span>内部组织未单独配置时默认可继续使用</span>
               </div>
               <div className="subscription-default-chip subscription-default-chip-alert">
-                <ShieldAlert size={16} />
+                <ShieldAlert size={16} aria-hidden="true" />
                 <span>外部组织未开通时默认不能继续提问</span>
               </div>
             </div>
           </div>
-          <div className="subscription-summary-grid">
-            {summaryCards.map((card) => (
-              <section key={card.label} className="subscription-summary-card">
-                <div className="subscription-summary-label">{card.label}</div>
-                <div className="subscription-summary-value">{card.value}</div>
-                <div className="subscription-summary-meta">{card.meta}</div>
-              </section>
-            ))}
-          </div>
-        </section>
+        </div>
+
+        <div className="admin-page-summary-grid">
+          {summaryCards.map((card) => (
+            <section key={card.label} className="admin-page-summary-card">
+              <div className="admin-page-summary-label">{card.label}</div>
+              <div className="admin-page-summary-value">{card.value}</div>
+              <div className="admin-page-summary-meta">{card.meta}</div>
+            </section>
+          ))}
+        </div>
 
         {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
         {successText ? <Alert type="success" showIcon message={successText} /> : null}

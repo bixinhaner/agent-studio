@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { fetchExternalApiUsage } from "./api";
 import type { ExternalApiUsageBreakdownRow, ExternalApiUsageResponse, ExternalApiUsageRecord } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const WINDOW_OPTIONS = [
   { label: "7 天", value: 7 },
@@ -43,7 +44,7 @@ function formatLocalDateTime(value: string | undefined): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatDuration(value: number | undefined): string {

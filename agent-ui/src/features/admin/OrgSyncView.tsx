@@ -17,6 +17,8 @@ import type {
   OrgSyncJob,
   OrgSyncUserLookupEntry
 } from "./types";
+import { explainSyncFailure, jobFailureExplanation, latestFinishedJob } from "./org-sync-errors";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type JobDiffState = {
   expanded: boolean;
@@ -122,7 +124,7 @@ function formatLocalTime(value: string | null | undefined): string {
   if (!value) return "未执行";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatCadence(intervalMinutes: number): string {
@@ -205,7 +207,7 @@ function formatChangeBreakdown(summary: Record<string, unknown> | undefined): st
 
 function formatJobSummaryLine(job: OrgSyncJob): string {
   const failureDetail = getFailureDetail(job);
-  if (failureDetail) return `失败原因：${failureDetail}`;
+  if (failureDetail) return `失败原因：${explainSyncFailure(failureDetail).reason}`;
   if (job.status === "running") return "正在拉取钉钉通讯录并计算变化。";
   if (job.status === "pending") return "任务已创建，等待执行。";
 
@@ -691,6 +693,8 @@ export function OrgSyncView() {
 
   const latestJob = jobs[0];
   const isRunning = latestJob?.status === "running";
+  const lastFinished = latestFinishedJob(jobs);
+  const lastFailure = jobFailureExplanation(lastFinished);
 
   return (
     <>
@@ -708,6 +712,26 @@ export function OrgSyncView() {
         </div>
 
         {errorText ? <Alert type="error" showIcon message={errorText} className="admin-sync-alert" /> : null}
+        {!loading && lastFailure && lastFinished ? (
+          <Alert
+            type="warning"
+            showIcon
+            className="admin-sync-alert"
+            message={`最近一次同步失败（${formatLocalTime(lastFinished.startedAt || lastFinished.createdAt)}）`}
+            description={
+              <span title={lastFailure.raw}>
+                {lastFailure.reason}
+                <br />
+                {lastFailure.action}
+              </span>
+            }
+            action={
+              <Button size="small" loading={submitting || isRunning} onClick={() => void handleTrigger(triggerFullOrgSync)}>
+                重新同步
+              </Button>
+            }
+          />
+        ) : null}
         {loading ? <div className="admin-sync-panel-loading"><Spin size="large" /></div> : null}
 
         {!loading ? (
@@ -755,7 +779,7 @@ export function OrgSyncView() {
                         </span>
                         <span>{formatTriggerType(job.triggerType)}</span>
                         <span>{formatDuration(job)}</span>
-                        <span className="admin-sync-job-row-summary">{formatJobSummaryLine(job)}</span>
+                        <span className="admin-sync-job-row-summary" title={getFailureDetail(job)}>{formatJobSummaryLine(job)}</span>
                       </button>
 
                       {diffState?.expanded ? (

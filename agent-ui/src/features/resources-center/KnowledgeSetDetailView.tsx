@@ -23,6 +23,7 @@ import type {
   KnowledgeSetLibraryResponse,
   KnowledgeSetRecord
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type KnowledgeSetDetailViewProps = {
   knowledgeSet: KnowledgeSetRecord;
@@ -80,7 +81,7 @@ function formatLocalDateTime(value?: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatSize(sizeBytes?: number | string) {
@@ -421,7 +422,8 @@ export function KnowledgeSetDetailView({
       dangerLevel: "danger",
       okText: "删除资料集",
       cancelText: "取消",
-      okButtonDanger: true
+      okButtonDanger: true,
+      requireTypedText: knowledgeSet.name
     });
     if (!confirmed) return;
 
@@ -629,9 +631,6 @@ export function KnowledgeSetDetailView({
         <div className="resource-center-actions">
           <Button type="primary" disabled={busy} onClick={() => void handleSave()}>
             {saving ? "保存中..." : "保存资料集配置"}
-          </Button>
-          <Button danger icon={<DeleteOutlined />} disabled={busy} onClick={() => void handleDeleteKnowledgeSet()}>
-            {deleting ? "删除中..." : "删除资料集"}
           </Button>
         </div>
       </Card>
@@ -917,6 +916,18 @@ export function KnowledgeSetDetailView({
       </Card>
 
       <ResourcePolicyEditor resourceType="knowledge_set" resourceId={knowledgeSet.id} title="资料集资源策略编辑器" />
+
+      <Card className="resource-center-section antd-admin-card admin-danger-zone" size="small">
+        <div className="resource-center-section-header">
+          <div>
+            <h3>危险操作</h3>
+            <p>删除资料集会同时删除文件目录和关联授权策略，智能体将无法再检索这些资料，操作不可恢复。</p>
+          </div>
+          <Button danger icon={<DeleteOutlined />} disabled={busy} onClick={() => void handleDeleteKnowledgeSet()}>
+            {deleting ? "删除中..." : "删除资料集"}
+          </Button>
+        </div>
+      </Card>
 
       <Drawer
         title="原始文件"

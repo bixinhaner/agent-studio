@@ -1,3 +1,4 @@
+import { formatAdminDateTime } from "../../lib/formatters";
 export type OperationsInsightsFilters = {
   days: number;
   timeZone: string;
@@ -321,11 +322,5 @@ export type UpdateCostProfileInput = {
 };
 
 export function formatLocalDateTime(value: string | Date | null | undefined): string {
-  if (!value) return "—";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
+  return formatAdminDateTime(value, { fallback: "—" });
 }

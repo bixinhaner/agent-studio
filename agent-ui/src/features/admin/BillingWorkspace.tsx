@@ -63,6 +63,7 @@ import type {
   AdminBillingPlan,
   AdminPromotionCode
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type BillingTab = "overview" | "products" | "promotions" | "orders" | "auto-renewals" | "customers" | "email" | "stripe";
 type BillingEmailTestScenario = "trial" | "manual" | "automatic";
@@ -121,7 +122,7 @@ function formatLocalTime(value?: string | null): string {
   if (!value) return "未设置";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatAdminDateTime(date);
 }
 
 function formatLocalDateInput(value?: string | null): string {
@@ -477,9 +478,9 @@ function OrderDetailPanel(props: { order: AdminBillingOrder; organizationName: s
       </section>
       <section className="admin-billing-detail-section">
         <h3>Stripe</h3>
-        <p>Checkout session：{props.order.stripeCheckoutSessionId ?? "无"}</p>
-        <p>Invoice：{props.order.stripeInvoiceId ?? "无"}</p>
-        <p>Subscription：{props.order.stripeSubscriptionId ?? "无"}</p>
+        <p>支付会话：{props.order.stripeCheckoutSessionId ?? "无"}</p>
+        <p>发票：{props.order.stripeInvoiceId ?? "无"}</p>
+        <p>订阅 ID：{props.order.stripeSubscriptionId ?? "无"}</p>
       </section>
     </div>
   );
@@ -1157,7 +1158,7 @@ export function BillingWorkspace() {
         <p>联系人：{selectedAccount.billingCustomer?.contactName ?? "未记录"}</p>
         <p>国家/地区：{selectedAccount.billingCustomer?.countryRegion ?? "未记录"}</p>
         <p>SN：{selectedAccount.billingCustomer?.sn ?? "未记录"}</p>
-        <p>Sales：{selectedAccount.billingCustomer?.salesContact ?? "未记录"}</p>
+        <p>销售：{selectedAccount.billingCustomer?.salesContact ?? "未记录"}</p>
       </div>
       <div className="admin-billing-detail-section">
         <h3>Stripe</h3>
@@ -1210,13 +1211,13 @@ export function BillingWorkspace() {
           size="small"
           value={manualStripeCustomerId}
           placeholder="cus_..."
-          enterButton="Bind"
+          enterButton="绑定"
           disabled={saving || !selectedAccount.billingCustomer}
           onChange={(event) => setManualStripeCustomerId(event.target.value)}
           onSearch={(value) => void handleBindStripeCustomer(selectedAccount, value)}
         />
-        <p>Subscription：{selectedAccount.autoRenewal?.stripeSubscriptionId ?? "未创建"}</p>
-        <p>Next renewal：{formatLocalTime(selectedAccount.autoRenewal?.nextRenewalAt)}</p>
+        <p>订阅 ID：{selectedAccount.autoRenewal?.stripeSubscriptionId ?? "未创建"}</p>
+        <p>下次续费：{formatLocalTime(selectedAccount.autoRenewal?.nextRenewalAt)}</p>
       </div>
       <Space wrap>
         <Button
@@ -1455,9 +1456,9 @@ export function BillingWorkspace() {
                 expandable={{
                   expandedRowRender: (record) => (
                     <div className="admin-billing-expanded">
-                      <span>Billing email: {record.billingCustomer?.billingEmail ?? "未设置"}</span>
-                      <span>Company: {record.billingCustomer?.companyName ?? record.organization.name}</span>
-                      <span>Stripe customer: {record.billingCustomer?.stripeCustomerId ?? "未绑定"}</span>
+                      <span>账单邮箱：{record.billingCustomer?.billingEmail ?? "未设置"}</span>
+                      <span>公司：{record.billingCustomer?.companyName ?? record.organization.name}</span>
+                      <span>Stripe 客户：{record.billingCustomer?.stripeCustomerId ?? "未绑定"}</span>
                     </div>
                   )
                 }}
@@ -1496,10 +1497,10 @@ export function BillingWorkspace() {
                     prefix={<Mail size={14} />}
                     value={emailTestAddress}
                     onChange={(event) => setEmailTestAddress(event.target.value)}
-                    placeholder="Test recipient email"
+                    placeholder="测试收件邮箱"
                   />
                   <Select
-                    aria-label="Email test scenario"
+                    aria-label="测试邮件场景"
                     value={emailTestScenario}
                     onChange={(scenario) => setEmailTestScenario(scenario)}
                     options={[
@@ -1632,7 +1633,7 @@ export function BillingWorkspace() {
                     </Button>
                   </div>
                   <Form layout="vertical" className="admin-billing-config-form">
-                    <Form.Item label="Mode">
+                    <Form.Item label="模式">
                       <Select
                         value={stripeForm.mode}
                         onChange={(mode) => setStripeForm((current) => ({ ...current, mode }))}
@@ -1660,28 +1661,28 @@ export function BillingWorkspace() {
                         onChange={(event) => setStripeForm((current) => ({ ...current, webhookSigningSecret: event.target.value }))}
                       />
                     </Form.Item>
-                    <Form.Item label="Success URL">
+                    <Form.Item label="支付成功跳转 URL">
                       <Input value={stripeForm.successUrl} onChange={(event) => setStripeForm((current) => ({ ...current, successUrl: event.target.value }))} />
                     </Form.Item>
-                    <Form.Item label="Cancel URL">
+                    <Form.Item label="支付取消跳转 URL">
                       <Input value={stripeForm.cancelUrl} onChange={(event) => setStripeForm((current) => ({ ...current, cancelUrl: event.target.value }))} />
                     </Form.Item>
-                    <Form.Item label="Customer renewal URL">
+                    <Form.Item label="客户续费页 URL">
                       <Input
                         value={stripeForm.portalBillingUrl}
                         onChange={(event) => setStripeForm((current) => ({ ...current, portalBillingUrl: event.target.value }))}
                       />
                     </Form.Item>
-                    <Form.Item label="Default currency">
+                    <Form.Item label="默认币种">
                       <Input value={stripeForm.defaultCurrency} onChange={(event) => setStripeForm((current) => ({ ...current, defaultCurrency: event.target.value.toLowerCase() }))} maxLength={3} />
                     </Form.Item>
-                    <Form.Item label="Default auto renew">
+                    <Form.Item label="默认自动续费">
                       <Switch checked={stripeForm.defaultAutoRenew} onChange={(defaultAutoRenew) => setStripeForm((current) => ({ ...current, defaultAutoRenew }))} />
                     </Form.Item>
-                    <Form.Item label="Clear stored secret key">
+                    <Form.Item label="清除已保存的 Secret Key">
                       <Switch checked={stripeForm.clearStripeSecretKey} onChange={(clearStripeSecretKey) => setStripeForm((current) => ({ ...current, clearStripeSecretKey }))} />
                     </Form.Item>
-                    <Form.Item label="Clear webhook secret">
+                    <Form.Item label="清除 Webhook 密钥">
                       <Switch checked={stripeForm.clearWebhookSigningSecret} onChange={(clearWebhookSigningSecret) => setStripeForm((current) => ({ ...current, clearWebhookSigningSecret }))} />
                     </Form.Item>
                   </Form>
@@ -1756,13 +1757,13 @@ export function BillingWorkspace() {
         destroyOnHidden
       >
         <Form layout="vertical">
-          <Form.Item label="Code">
+          <Form.Item label="优惠码">
             <Input value={promotionForm.code} onChange={(event) => setPromotionForm((current) => ({ ...current, code: event.target.value }))} placeholder="SPRING25" />
           </Form.Item>
-          <Form.Item label="Name">
-            <Input value={promotionForm.name} onChange={(event) => setPromotionForm((current) => ({ ...current, name: event.target.value }))} placeholder="Spring campaign" />
+          <Form.Item label="名称">
+            <Input value={promotionForm.name} onChange={(event) => setPromotionForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：春季活动" />
           </Form.Item>
-          <Form.Item label="Type">
+          <Form.Item label="类型">
             <Select
               value={promotionForm.type}
               onChange={(type) => setPromotionForm((current) => ({ ...current, type }))}
@@ -1774,19 +1775,19 @@ export function BillingWorkspace() {
               ]}
             />
           </Form.Item>
-          <Form.Item label="Value">
+          <Form.Item label="优惠值">
             <InputNumber min={0} value={promotionForm.value} onChange={(value) => setPromotionForm((current) => ({ ...current, value: Number(value ?? 0) }))} style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item label="Eligible plans">
+          <Form.Item label="适用套餐">
             <Select mode="multiple" allowClear value={promotionForm.eligiblePlanIds} onChange={(eligiblePlanIds) => setPromotionForm((current) => ({ ...current, eligiblePlanIds }))} options={planOptions} />
           </Form.Item>
-          <Form.Item label="Eligible email domains">
+          <Form.Item label="适用邮箱域名">
             <Input value={promotionForm.eligibleEmailDomains} onChange={(event) => setPromotionForm((current) => ({ ...current, eligibleEmailDomains: event.target.value }))} placeholder="example.com, customer.com" />
           </Form.Item>
-          <Form.Item label="Expires at">
+          <Form.Item label="到期时间">
             <Input type="datetime-local" value={promotionForm.expiresAt} onChange={(event) => setPromotionForm((current) => ({ ...current, expiresAt: event.target.value }))} />
           </Form.Item>
-          <Form.Item label="Note">
+          <Form.Item label="备注">
             <Input.TextArea value={promotionForm.note} onChange={(event) => setPromotionForm((current) => ({ ...current, note: event.target.value }))} rows={3} />
           </Form.Item>
         </Form>
@@ -1802,16 +1803,16 @@ export function BillingWorkspace() {
         destroyOnHidden
       >
         <Form layout="vertical">
-          <Form.Item label="Organization">
+          <Form.Item label="组织">
             <Select showSearch value={giftForm.organizationId} onChange={(organizationId) => setGiftForm((current) => ({ ...current, organizationId }))} options={organizationOptions} />
           </Form.Item>
-          <Form.Item label="Plan">
+          <Form.Item label="套餐">
             <Select value={giftForm.planId} onChange={(planId) => setGiftForm((current) => ({ ...current, planId }))} options={planOptions} />
           </Form.Item>
-          <Form.Item label="Days">
+          <Form.Item label="天数">
             <InputNumber min={1} value={giftForm.days} onChange={(days) => setGiftForm((current) => ({ ...current, days: Number(days ?? 1) }))} style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item label="Reason">
+          <Form.Item label="原因">
             <Input.TextArea value={giftForm.reason} onChange={(event) => setGiftForm((current) => ({ ...current, reason: event.target.value }))} rows={3} />
           </Form.Item>
         </Form>
@@ -1830,16 +1831,16 @@ export function BillingWorkspace() {
         destroyOnHidden
       >
         <Form layout="vertical">
-          <Form.Item label="Organization">
+          <Form.Item label="组织">
             <Select showSearch value={paymentLinkForm.organizationId} onChange={(organizationId) => setPaymentLinkForm((current) => ({ ...current, organizationId }))} options={organizationOptions} />
           </Form.Item>
-          <Form.Item label="Plan">
+          <Form.Item label="套餐">
             <Select value={paymentLinkForm.planId} onChange={(planId) => setPaymentLinkForm((current) => ({ ...current, planId }))} options={planOptions} />
           </Form.Item>
-          <Form.Item label="Promotion code">
+          <Form.Item label="推广码">
             <Input value={paymentLinkForm.promotionCode} onChange={(event) => setPaymentLinkForm((current) => ({ ...current, promotionCode: event.target.value }))} />
           </Form.Item>
-          <Form.Item label="Auto renew">
+          <Form.Item label="自动续费">
             <Switch checked={paymentLinkForm.autoRenew} onChange={(autoRenew) => setPaymentLinkForm((current) => ({ ...current, autoRenew }))} />
           </Form.Item>
           {createdPaymentLink ? (
@@ -1895,18 +1896,18 @@ export function BillingWorkspace() {
         destroyOnHidden
       >
         <Form layout="vertical">
-          <Form.Item label="Billing status">
+          <Form.Item label="售卖状态">
             <Select
               value={planBillingForm.billingStatus}
               onChange={(billingStatus) => setPlanBillingForm((current) => ({ ...current, billingStatus }))}
               options={[
-                { value: "active", label: "active · Portal 可购买" },
-                { value: "not_configured", label: "not_configured · 暂不售卖" },
-                { value: "disabled", label: "disabled · 停止售卖" }
+                { value: "active", label: "Portal 可购买" },
+                { value: "not_configured", label: "暂不售卖" },
+                { value: "disabled", label: "停止售卖" }
               ]}
             />
           </Form.Item>
-          <Form.Item label="Price cents">
+          <Form.Item label="价格（分）">
             <InputNumber
               min={0}
               value={planBillingForm.billingPriceCents}
@@ -1915,26 +1916,26 @@ export function BillingWorkspace() {
               style={{ width: "100%" }}
             />
           </Form.Item>
-          <Form.Item label="Currency">
+          <Form.Item label="币种">
             <Input
               value={planBillingForm.billingCurrency}
               maxLength={3}
               onChange={(event) => setPlanBillingForm((current) => ({ ...current, billingCurrency: event.target.value.toLowerCase() }))}
             />
           </Form.Item>
-          <Form.Item label="Billing interval">
+          <Form.Item label="计费周期">
             <Select
               value={planBillingForm.billingInterval}
               onChange={(billingInterval) => setPlanBillingForm((current) => ({ ...current, billingInterval }))}
               options={[
-                { value: "month", label: "month" },
-                { value: "year", label: "year" },
-                { value: "week", label: "week" },
-                { value: "day", label: "day" }
+                { value: "month", label: "月" },
+                { value: "year", label: "年" },
+                { value: "week", label: "周" },
+                { value: "day", label: "天" }
               ]}
             />
           </Form.Item>
-          <Form.Item label="Interval count">
+          <Form.Item label="计费周期数">
             <InputNumber
               min={1}
               value={planBillingForm.billingIntervalCount}
@@ -1968,19 +1969,19 @@ export function BillingWorkspace() {
       >
         {editingEmailRule ? (
           <Form layout="vertical">
-            <Form.Item label="Status">
+            <Form.Item label="状态">
               <Select value={editingEmailRule.status} onChange={(status) => setEditingEmailRule((current) => current ? { ...current, status } : current)} options={[
-                { value: "enabled", label: "enabled" },
-                { value: "disabled", label: "disabled" }
+                { value: "enabled", label: "启用" },
+                { value: "disabled", label: "停用" }
               ]} />
             </Form.Item>
-            <Form.Item label="Subject">
+            <Form.Item label="邮件主题">
               <Input value={editingEmailRule.subject} onChange={(event) => setEditingEmailRule((current) => current ? { ...current, subject: event.target.value } : current)} />
             </Form.Item>
-            <Form.Item label="Text template">
+            <Form.Item label="纯文本模板">
               <Input.TextArea rows={5} value={editingEmailRule.bodyText} onChange={(event) => setEditingEmailRule((current) => current ? { ...current, bodyText: event.target.value } : current)} />
             </Form.Item>
-            <Form.Item label="HTML template">
+            <Form.Item label="HTML 模板">
               <Input.TextArea
                 rows={8}
                 value={editingEmailRule.bodyHtml ?? ""}

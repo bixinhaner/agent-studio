@@ -26,6 +26,7 @@ import type {
   IntegrationListItem,
   IntegrationSectionTab
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const TABS: Array<{ id: IntegrationSectionTab; label: string }> = [
   { id: "basic", label: "基本信息" },
@@ -73,7 +74,7 @@ function formatLocalDateTime(value?: string | null) {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

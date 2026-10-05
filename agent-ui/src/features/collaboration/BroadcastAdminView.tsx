@@ -37,6 +37,7 @@ import {
   MousePointerClick,
   Radio,
   RefreshCcw,
+  Search,
   Save,
   Send,
   ShieldCheck,
@@ -65,6 +66,7 @@ import type {
   BroadcastStatus
 } from "./types";
 import { TrainingCatalogSettings } from "./TrainingCatalogSettings";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type CampaignDraft = {
   title: string;
@@ -100,7 +102,7 @@ function formatLocalDateTime(value?: string): string {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function buildEmptyDraft(): CampaignDraft {
@@ -412,6 +414,18 @@ const DELIVERY_EVENT_LABELS: Record<string, string> = {
   "broadcast.published": "站内发布"
 };
 
+/** Human-readable recipient for a delivery row; the internal targetRef stays in the tooltip. */
+export function deliveryRecipientLabel(delivery: Pick<BroadcastDeliveryRecord, "payload" | "channelType" | "eventType">): string {
+  const payload = delivery.payload && typeof delivery.payload === "object" ? (delivery.payload as Record<string, unknown>) : {};
+  const email = [payload.email, payload.testEmail].find((value): value is string => typeof value === "string" && value.trim() !== "");
+  if (email) return email;
+  const count = [payload.recipientCount, payload.count].find((value): value is number => typeof value === "number");
+  if (delivery.eventType === "broadcast.published") return count !== undefined ? `${count.toLocaleString("zh-CN")} 位用户` : "目标用户";
+  if (delivery.channelType === "dingtalk") return "钉钉";
+  if (delivery.channelType === "in_app") return "站内";
+  return "未知收件人";
+}
+
 export function BroadcastAdminView() {
   const [broadcasts, setBroadcasts] = useState<BroadcastRecord[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -480,7 +494,17 @@ export function BroadcastAdminView() {
     () => [...broadcasts].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
     [broadcasts]
   );
-  const selectedBroadcast = orderedBroadcasts.find((item) => item.id === selectedId) ?? orderedBroadcasts[0] ?? null;
+  const [listQuery, setListQuery] = useState("");
+  const [listStatus, setListStatus] = useState<"all" | "draft" | "published">("all");
+  const visibleBroadcasts = useMemo(() => {
+    const needle = listQuery.trim().toLowerCase();
+    return orderedBroadcasts.filter((item) => {
+      if (listStatus !== "all" && item.status !== listStatus) return false;
+      if (!needle) return true;
+      return [item.title, item.content?.subject, item.bodyMarkdown].some((value) => value?.toLowerCase().includes(needle));
+    });
+  }, [listQuery, listStatus, orderedBroadcasts]);
+  const selectedBroadcast = orderedBroadcasts.find((item) => item.id === selectedId) ?? visibleBroadcasts[0] ?? orderedBroadcasts[0] ?? null;
   const currentBroadcast = editingId ? orderedBroadcasts.find((item) => item.id === editingId) ?? null : null;
 
   useEffect(() => {
@@ -819,10 +843,26 @@ export function BroadcastAdminView() {
       <div className={`engagement-overview-grid${isNarrowScreen ? " narrow" : ""}`}>
         <div className="engagement-campaign-list">
           <div className="engagement-list-head">
-            <Input.Search placeholder="搜索触达活动" allowClear />
-            <Segmented options={["全部", "草稿", "已发送"]} />
+            <Input
+              allowClear
+              prefix={<Search size={16} aria-hidden="true" style={{ color: "var(--admin-color-subtle)" }} />}
+              placeholder="搜索标题或邮件主题"
+              aria-label="搜索触达活动"
+              value={listQuery}
+              onChange={(event) => setListQuery(event.target.value)}
+            />
+            <Segmented
+              aria-label="按状态筛选"
+              value={listStatus}
+              onChange={(value) => setListStatus(value as typeof listStatus)}
+              options={[
+                { label: "全部", value: "all" },
+                { label: "草稿", value: "draft" },
+                { label: "已发送", value: "published" }
+              ]}
+            />
           </div>
-          {orderedBroadcasts.length ? orderedBroadcasts.map((broadcast) => (
+          {visibleBroadcasts.length ? visibleBroadcasts.map((broadcast) => (
             <button
               key={broadcast.id}
               type="button"
@@ -843,7 +883,7 @@ export function BroadcastAdminView() {
               </div>
             </button>
           )) : (
-            <Empty description="还没有触达活动" style={{ padding: 40 }} />
+            <Empty description={orderedBroadcasts.length ? "没有符合筛选的触达活动" : "还没有触达活动"} style={{ padding: 40 }} />
           )}
         </div>
 
@@ -877,9 +917,10 @@ export function BroadcastAdminView() {
                     <Tag color={delivery.status === "sent" ? "success" : delivery.status === "failed" ? "error" : "processing"}>
                       {DELIVERY_STATUS_LABELS[delivery.status] ?? delivery.status}
                     </Tag>
-                    <span title={delivery.errorMessage || delivery.eventType}>
+                    <span title={[delivery.errorMessage, delivery.targetRef].filter(Boolean).join("\n")}>
                       {DELIVERY_EVENT_LABELS[delivery.eventType] ?? delivery.eventType}
-                      {delivery.targetRef ? ` · ${delivery.targetRef}` : ""}
+                      {` · ${deliveryRecipientLabel(delivery)}`}
+                      {delivery.status === "failed" && delivery.errorMessage ? <em className="engagement-delivery-error">{delivery.errorMessage}</em> : null}
                     </span>
                     <small>{formatLocalDateTime(delivery.createdAt)}</small>
                   </div>

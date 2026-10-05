@@ -23,7 +23,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { UrlTransform } from "react-markdown";
 
-import { formatListTimestamp, formatUsdAmount, plainTextPreview } from "../../lib/formatters";
+import { formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPreview } from "../../lib/formatters";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { useAuth } from "../auth/AuthProvider";
 import {
@@ -153,7 +153,7 @@ function formatLocalDateTime(value: string | null | undefined): string {
   if (!value) return "未知时间";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -1006,7 +1006,7 @@ function ConversationAuditMarkdownImage(props: {
               <button
                 type="button"
                 className="admin-conversation-image-lightbox-close"
-                aria-label="Close image detail"
+                aria-label="关闭图片详情"
                 onClick={() => setLightboxOpen(false)}
               >
                 ×

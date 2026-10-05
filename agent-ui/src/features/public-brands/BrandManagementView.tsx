@@ -56,6 +56,7 @@ import type {
   PublicBrandLookups,
   PublicBrandRecord
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const { TextArea } = Input;
 type DetailTab = "entry" | "experience" | "email" | "payment" | "knowledge" | "customers";
@@ -235,7 +236,7 @@ function normalizeInput(value: PublicBrandInput): PublicBrandInput {
 function localTime(value?: string): string {
   if (!value) return "尚未生成";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "尚未生成" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "尚未生成" : formatAdminDateTime(date);
 }
 
 function readinessLabel(brand: PublicBrandRecord): string {

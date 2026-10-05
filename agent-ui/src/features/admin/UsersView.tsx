@@ -14,6 +14,7 @@ import {
   patchAdminUserLocalSettings
 } from "./api";
 import type { AdminCustomerOrganization, AdminDepartmentNode, AdminUser } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type UserScope = "active" | "internal" | "brandEmployee" | "external" | "dingtalkOnly" | "disabled" | "all";
 type LoginFilter = "all" | "loggedIn" | "neverLoggedIn";
@@ -62,7 +63,7 @@ function formatLocalTime(value: string | null): string {
   if (!value) return "未同步";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function formatUserStatus(status: string): string {

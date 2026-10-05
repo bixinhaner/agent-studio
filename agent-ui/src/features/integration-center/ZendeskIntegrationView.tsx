@@ -26,6 +26,8 @@ import type { ZendeskDingTalkGroupFallbackRule, ZendeskGroupOption } from "./typ
 import type { ZendeskRunRecord } from "../zendesk/types";
 import "../zendesk/zendesk.css";
 import { resourceStatusLabel } from "../../lib/status-labels";
+import { formatAdminDateTime } from "../../lib/formatters";
+import { openWarningConfirm } from "../../lib/warning-modal";
 
 type ZendeskTab = "basic" | "operations" | "cache" | "bindings" | "policies" | "history";
 
@@ -434,12 +436,7 @@ function adminUserDingTalkLabel(user: AdminUser) {
 
 function formatLocalDateTime(value?: string) {
   if (!value) return "-";
-  const at = new Date(value);
-  if (Number.isNaN(at.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(at);
+  return formatAdminDateTime(value);
 }
 
 function formatBytes(bytes: number) {
@@ -789,9 +786,12 @@ export function ZendeskIntegrationView(props: {
       setSuccessText("");
       return;
     }
-    const confirmed = window.confirm(
-      `确认删除 ${cleanupPreview.eligibleCount} 个 closed ticket 运行缓存，预计释放 ${formatBytes(cleanupPreview.reclaimableBytes)}？`
-    );
+    const confirmed = await openWarningConfirm({
+      title: "清理已关闭工单的运行缓存",
+      content: `将删除 ${cleanupPreview.eligibleCount} 个已关闭工单的运行缓存，预计释放 ${formatBytes(cleanupPreview.reclaimableBytes)}。`,
+      description: "只影响缓存文件，工单记录和对话记录不受影响；删除后不可恢复。",
+      okText: "开始清理"
+    });
     if (!confirmed) return;
 
     setRunningCleanup(true);

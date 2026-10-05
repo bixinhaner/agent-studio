@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Input, Segmented, Select, Tag } from "antd";
+import { SearchOutlined } from "@ant-design/icons";
 
 import { fetchNativeCodexSkills, putSkillPackageItems, putSkillPackageRuntimeBindings, updateSkillPackage } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -353,9 +354,11 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
               {bindingView === "native" ? (
                 <div className="capability-native-skill-panel">
                   <div className="capability-native-skill-toolbar">
-                    <Input.Search
+                    <Input
                       allowClear
-                      placeholder="搜索 skill 名称、描述或路径"
+                      prefix={<SearchOutlined aria-hidden="true" style={{ color: "var(--admin-color-subtle)" }} />}
+                      aria-label="搜索 Skill"
+                      placeholder="搜索 Skill 名称、描述或路径"
                       value={nativeSkillSearch}
                       onChange={(event) => setNativeSkillSearch(event.target.value)}
                     />

@@ -15,8 +15,8 @@ import {
   Tag
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Plus, RefreshCw, Send } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw, Search, Send } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import {
@@ -224,7 +224,7 @@ export function AccessRequestsWorkspace() {
       setPolicy(data.policy);
       setPolicyDraft(createPolicyDraft(data.policy));
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to load access requests");
+      setErrorText(error instanceof Error ? error.message : "加载访问申请失败");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -258,9 +258,16 @@ export function AccessRequestsWorkspace() {
     }
   }
 
+  // Filters apply as the admin types or picks a status; typing is debounced.
+  const loadedOnceRef = useRef(false);
   useEffect(() => {
-    void loadWorkspace();
-  }, []);
+    const silent = loadedOnceRef.current;
+    const timer = window.setTimeout(() => {
+      loadedOnceRef.current = true;
+      void loadWorkspace(silent);
+    }, silent && query ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [statusFilter, query]);
 
   async function openRequest(requestId: string) {
     setDrawerOpen(true);
@@ -492,12 +499,13 @@ export function AccessRequestsWorkspace() {
             ]}
             style={{ minWidth: 160 }}
           />
-          <Input.Search
+          <Input
             allowClear
-            placeholder="公司 / 邮箱 / PO"
+            prefix={<Search size={16} aria-hidden="true" style={{ color: "var(--admin-color-subtle)" }} />}
+            placeholder="搜索公司、邮箱或 PO"
+            aria-label="搜索访问申请"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            onSearch={() => void loadWorkspace()}
             style={{ width: 280 }}
           />
           <Button icon={<RefreshCw size={16} />} onClick={() => void loadWorkspace(true)} loading={refreshing}>

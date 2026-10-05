@@ -23,6 +23,7 @@ import type {
   SystemSettingsVersionRecord
 } from "./types";
 import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from "./validation";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; group: string }> = [
   { id: "branding", label: "基本设置", icon: Settings2, group: '常规' },
@@ -114,7 +115,7 @@ function formatLocalDateTime(value?: string | null) {
   if (!value) return "未记录";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "未记录";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function isPayloadSectionChanged(left: unknown, right: unknown) {

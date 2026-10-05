@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchAiResponseReview, submitAiResponseReview } from "./api";
 import type { AiResponseReviewRecord } from "./types";
 import "./ai-response-review.css";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type AiResponseReviewPageProps = {
   reviewId: string;
@@ -15,7 +16,7 @@ function formatLocalDateTime(value: string | null | undefined): string {
   if (!value) return "Not set";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function statusColor(status: AiResponseReviewRecord["effectiveStatus"]) {

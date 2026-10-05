@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useAuth } from "./AuthProvider";
 import type { AuthUser, AuthUserType } from "./api";
+import { openWarningConfirm } from "../../lib/warning-modal";
 
 export type UserIdentityLocale = "zh" | "en";
 
@@ -79,10 +80,16 @@ export function UserIdentitySummary(props: {
   const providerLabels = [...new Set(auth.identities.map((identity) => providerLabel(identity.provider, locale)).filter(Boolean))];
   const organizationOptions = auth.memberships.filter((membership) => membership.organization);
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     if (!props.onSignOut) return;
-    if (!window.confirm(locale === "en" ? "Sign out of the current session?" : "确认退出当前登录状态？")) return;
-    props.onSignOut();
+    const confirmed = await openWarningConfirm({
+      title: locale === "en" ? "Sign out" : "退出登录",
+      content: locale === "en" ? "Sign out of the current session?" : "确认退出当前登录状态？",
+      dangerLevel: "warning",
+      okText: locale === "en" ? "Sign out" : "退出登录",
+      cancelText: locale === "en" ? "Cancel" : "取消"
+    });
+    if (confirmed) props.onSignOut();
   };
 
   const handleOrganizationChange = async (nextOrganizationId: string) => {

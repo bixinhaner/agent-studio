@@ -1,10 +1,11 @@
 import type { IntegrationValidationItem } from './types';
 import { resourceStatusLabel } from "../../lib/status-labels";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 function formatTimestamp(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function stringifyUnknown(value: unknown) {

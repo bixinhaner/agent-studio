@@ -100,6 +100,7 @@ import type {
   PythonRuntimeSettings,
   PythonRuntimeStatus
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
   enabled: true,
@@ -245,7 +246,7 @@ const RUN_REASON_LABELS: Record<string, string> = {
   missing_answer: "缺少助手回复",
   missing_codex_home: "缺少 Codex home",
   assistant_incomplete: "助手回复未完成",
-  memory_disabled: "Memory 未启用",
+  memory_disabled: "长期记忆未启用",
   generation_disabled: "自动生成未启用",
   codex_native_generation: "当前使用 Codex 原生生成",
   external_context_disabled: "外部上下文暂停生成",
@@ -285,7 +286,7 @@ function formatLocalTime(value?: string | null): string {
   if (!value) return "未记录";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "未记录";
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 function normalizeDatetimeInput(value: string): string | undefined {
@@ -1472,13 +1473,13 @@ export function CodexMemoryManagementView() {
               </Button>
             ) : null}
             <Tag color={publishedEnterpriseSettings?.enabled ? "green" : "orange"}>
-              {publishedEnterpriseSettings?.enabled ? "Enterprise Context 已启用" : "Enterprise Context 未启用"}
+              {publishedEnterpriseSettings?.enabled ? "企业上下文已启用" : "企业上下文未启用"}
             </Tag>
             <Tag color={publishedSettings?.enabled ? "green" : "orange"}>
-              {publishedSettings?.enabled ? "Memory 已启用" : "Memory 未启用"}
+              {publishedSettings?.enabled ? "长期记忆已启用" : "长期记忆未启用"}
             </Tag>
             <Tag color={publishedPythonRuntimeSettings?.enabled ? "green" : "orange"}>
-              {publishedPythonRuntimeSettings?.enabled ? "Python Runtime 已启用" : "Python Runtime 未启用"}
+              {publishedPythonRuntimeSettings?.enabled ? "Python 运行时已启用" : "Python 运行时未启用"}
             </Tag>
             <Tag>{publishedVersion}</Tag>
             {isSettingsDirty ? <Tag color="orange">有未发布草稿</Tag> : <Tag color="green">与发布态一致</Tag>}
@@ -1488,10 +1489,10 @@ export function CodexMemoryManagementView() {
           </h1>
           <p className="admin-page-desc">
             {view === "file" && selectedScope
-              ? `${scopeTitle(selectedScope)} 的 memory 文件`
+              ? `${scopeTitle(selectedScope)} 的 记忆文件`
               : view === "scope" && selectedScope
                 ? scopeSubtitle(selectedScope)
-                : "统一管理模型运行时上下文、企业资料注入和 Codex memory。"}
+                : "统一管理模型运行时上下文、企业资料注入和 Codex 长期记忆。"}
           </p>
         </div>
         <Space>
@@ -1555,7 +1556,7 @@ export function CodexMemoryManagementView() {
           <Space direction="vertical" size={18} style={{ width: "100%" }}>
             <div>
               <SettingSwitch
-                title="启用 Codex Memory"
+                title="启用 Codex 长期记忆"
                 description="关闭后不会向 Codex 注入 memory 配置。"
                 checked={settings.enabled}
                 onChange={(enabled) => updateSetting("enabled", enabled)}
@@ -1568,7 +1569,7 @@ export function CodexMemoryManagementView() {
               />
               <SettingSwitch
                 title="自动生成记忆"
-                description="由统一生成引擎把稳定偏好写入 Codex-compatible memory 文件。"
+                description="由统一生成引擎把稳定偏好写入 Codex 兼容的记忆文件。"
                 checked={settings.generateMemories}
                 onChange={(generateMemories) => updateSetting("generateMemories", generateMemories)}
               />
@@ -1757,7 +1758,7 @@ export function CodexMemoryManagementView() {
               message={settings.enabled ? "发布后所有 Codex 渠道统一启用 memory" : "发布后所有 Codex 渠道统一关闭 memory"}
               description={
                 settings.generationEngine === "agent_studio"
-                  ? "读取仍走 Codex 原生 memory 文件，生成由 Agent Studio 统一异步完成。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
+                  ? "读取仍走 Codex 原生记忆文件，生成由 Agent Studio 统一异步完成。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
                   : "读取和生成都交给 Codex 原生机制。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
               }
             />
@@ -2589,7 +2590,7 @@ export function CodexMemoryManagementView() {
                 </Tag>
               </Space>
               <Typography.Text type="secondary">
-                Codex-compatible memory 继续用于稳定偏好和长期流程；不会自动沉淀企业目录里的动态岗位资料。
+                Codex 兼容的长期记忆继续用于稳定偏好和长期流程；不会自动沉淀企业目录里的动态岗位资料。
               </Typography.Text>
               <Space wrap>
                 <Tag>{settings.generationEngine === "agent_studio" ? "Agent Studio 生成" : "Codex 原生生成"}</Tag>
@@ -2646,7 +2647,7 @@ export function CodexMemoryManagementView() {
             hint={`${enabledChannels.length} 个渠道草稿启用`}
           />
           <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
-          <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
+          <MemoryMetric label="记忆文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
           <MemoryMetric
             label="Python Runtime"
             value={publishedPythonRuntimeSettings?.enabled ? "已启用" : "未启用"}
@@ -2733,7 +2734,7 @@ export function CodexMemoryManagementView() {
               <Space direction="vertical" size={10}>
                 <Space>
                   <CheckCircle2 size={16} color={settings.enabled ? "#16a34a" : "#f59e0b"} />
-                  <Typography.Text>{settings.enabled ? "全局 Memory 已启用" : "全局 Memory 未启用"}</Typography.Text>
+                  <Typography.Text>{settings.enabled ? "全局长期记忆已启用" : "全局长期记忆未启用"}</Typography.Text>
                 </Space>
                 <Space>
                   <CheckCircle2 size={16} color={settings.useMemories ? "#16a34a" : "#f59e0b"} />
@@ -2755,7 +2756,7 @@ export function CodexMemoryManagementView() {
               </Typography.Text>
               <Popconfirm
                 title="清空当前记忆空间？"
-                description="该操作会删除这个空间下的所有 memory 文件。"
+                description="该操作会删除这个空间下的所有 记忆文件。"
                 okText="清空"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
@@ -2775,7 +2776,7 @@ export function CodexMemoryManagementView() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
                 <div>
                   <Typography.Title level={4} style={{ margin: 0 }}>
-                    memory 文件
+                    记忆文件
                   </Typography.Title>
                   <Typography.Text type="secondary">点击文件可预览，进入编辑页可修改 Markdown 内容。</Typography.Text>
                 </div>
@@ -2789,7 +2790,7 @@ export function CodexMemoryManagementView() {
                 dataSource={files}
                 columns={fileColumns}
                 pagination={{ pageSize: 6, showSizeChanger: false }}
-                locale={{ emptyText: <Empty description="这个空间暂无 memory 文件" /> }}
+                locale={{ emptyText: <Empty description="这个空间暂无 记忆文件" /> }}
                 onRow={(file) => ({
                   onClick: () => setSelectedFilePath(file.path),
                   style: {
@@ -2844,7 +2845,7 @@ export function CodexMemoryManagementView() {
                 </div>
               ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Empty description="选择一个 memory 文件查看内容" />
+                  <Empty description="选择一个 记忆文件查看内容" />
                 </div>
               )}
             </div>
@@ -2858,7 +2859,7 @@ export function CodexMemoryManagementView() {
     if (!selectedScope || !selectedFile) {
       return (
         <div className="admin-card" style={{ padding: 48, marginTop: 16 }}>
-          <Empty description="请选择一个 memory 文件" />
+          <Empty description="请选择一个 记忆文件" />
         </div>
       );
     }

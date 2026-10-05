@@ -24,6 +24,7 @@ import type {
   AdminEmailNotificationEventKey,
   SystemSettingsAdminEmailNotifications
 } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type Props = {
   value: SystemSettingsAdminEmailNotifications;
@@ -46,7 +47,7 @@ const EVENT_LABEL = new Map(EVENT_META.map((item) => [item.key, item.label]));
 
 function localDateTime(value: string) {
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "未记录" : parsed.toLocaleString();
+  return Number.isNaN(parsed.getTime()) ? "未记录" : formatAdminDateTime(parsed);
 }
 
 export function AdminEmailNotificationSettingsView({ value, disabled, onChange }: Props) {

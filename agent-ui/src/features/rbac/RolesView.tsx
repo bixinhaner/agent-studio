@@ -21,11 +21,12 @@ import { cloneRole, createRole, disableRole, fetchRoles } from "./api";
 import { RoleDetailView } from "./RoleDetailView";
 import type { RoleSummary } from "./types";
 import { roleDescriptionLabel } from "./labels";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 function formatLocalTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatAdminDateTime(parsed);
 }
 
 export function RolesView() {

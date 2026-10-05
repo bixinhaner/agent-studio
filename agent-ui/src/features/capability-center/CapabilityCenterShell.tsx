@@ -39,6 +39,7 @@ import { defaultWorkspaceAgentsMdSourceRef } from "./workspace-agents-md-source-
 import { modelOptionsFromCatalog, type ModelOption } from "../../lib/model-config";
 import type { AgentModeRecord, RunProfileRecord, SkillPackageRecord, WorkspaceAgentsTemplateRecord } from "./types";
 import "./agent-workspace.css";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 const AgentWorkspaceView = lazy(() =>
   import("./AgentWorkspaceView").then((module) => ({ default: module.AgentWorkspaceView }))
@@ -85,7 +86,7 @@ function slugify(value: string) {
 
 function formatLocalDateTime(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? "—" : formatAdminDateTime(date);
 }
 
 function initials(name: string) {

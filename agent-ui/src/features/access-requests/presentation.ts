@@ -1,15 +1,16 @@
+import { formatAdminDate, formatAdminDateTime } from "../../lib/formatters";
 export function formatLocalTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatAdminDateTime(date);
 }
 
 export function formatLocalDate(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString();
+  return formatAdminDate(date);
 }
 
 export function formatFileSize(bytes: number | null | undefined): string {

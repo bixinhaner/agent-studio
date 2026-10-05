@@ -15,6 +15,7 @@ import {
   updateAdminSecurityDomain
 } from "./api";
 import type { AdminDepartmentNode, AdminSecurityDomain, AdminSecurityDomainAccessStatus, AdminUser } from "./types";
+import { formatAdminDateTime } from "../../lib/formatters";
 
 type EditorState = {
   id?: string;
@@ -56,13 +57,7 @@ function editorFromDomain(domain: AdminSecurityDomain): EditorState {
   };
 }
 
-const localDateTime = new Intl.DateTimeFormat(undefined, {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit"
-});
+const localDateTime = { format: (value: Date) => formatAdminDateTime(value) };
 
 export function SecurityDomainsView() {
   const [access, setAccess] = useState<AdminSecurityDomainAccessStatus | null>(null);
