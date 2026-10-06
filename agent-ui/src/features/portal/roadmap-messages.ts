@@ -264,7 +264,7 @@ export const ROADMAP_EN_MESSAGES = {
   "usage.rank.company": "Company-wide",
   "usage.rank.position": "#{rank}",
   "usage.rank.none": "Not ranked",
-  "usage.rank.active": "{count} people used Bailey",
+  "usage.rank.active": "{count} used Bailey",
   "usage.rank.note": "Ranked by total tokens in this period, among active internal employees. Only your own position is shown.",
   "usage.team.members": "People",
   "usage.team.active": "Used Bailey",
