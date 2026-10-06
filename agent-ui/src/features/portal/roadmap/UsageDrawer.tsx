@@ -279,7 +279,7 @@ function UsageSummaryBody(props: {
   );
 }
 
-function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpenMember(userId: string): void }) {
+function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpenMember(userId: string): void; onOpenSelf(): void }) {
   const { t, intlLocale } = usePortalI18n();
   const turnCount = useTurnCount();
   const [query, setQuery] = useState("");
@@ -297,15 +297,22 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
     return result;
   }, [departmentById, focus]);
   const childDepartments = departments.filter((item) => item.parent_id === (focus?.id ?? null));
+  // People counted in the focused department, then those who only also belong there ("兼").
+  const secondaryIds = useMemo(
+    () => new Set(focus ? focus.secondary_ids : (data?.members ?? []).filter((member) => member.secondary).map((member) => member.user_id)),
+    [data, focus]
+  );
   const members = useMemo(() => {
     if (!data) return [];
-    const allowed = focus ? new Set(focus.member_ids) : null;
+    const allowed = focus ? new Set([...focus.member_ids, ...focus.secondary_ids]) : null;
     const needle = query.trim().toLowerCase();
-    return data.members.filter(
-      (member) =>
-        (!allowed || allowed.has(member.user_id)) &&
-        (!needle || [member.name, member.title, member.department].some((value) => value?.toLowerCase().includes(needle)))
-    );
+    return data.members
+      .filter(
+        (member) =>
+          (!allowed || allowed.has(member.user_id)) &&
+          (!needle || [member.name, member.title, member.department].some((value) => value?.toLowerCase().includes(needle)))
+      )
+      .sort((left, right) => Number(right.relation === "self") - Number(left.relation === "self"));
   }, [data, focus, query]);
 
   if (error) {
@@ -392,7 +399,11 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
       ) : null}
 
       <section className="usage-breakdown">
-        <h3>{t("usage.team.people", { count: number(focus ? focus.members : data.totals.members) })}</h3>
+        <h3>
+          {secondaryIds.size
+            ? t("usage.team.peopleWithSecondary", { count: number(stats.members), secondary: number(secondaryIds.size) })
+            : t("usage.team.people", { count: number(stats.members) })}
+        </h3>
         <Input
           allowClear
           prefix={<Search size={14} aria-hidden="true" />}
@@ -407,11 +418,20 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
           <ul className="usage-team-list">
             {members.map((member) => (
               <li key={member.user_id}>
-                <button type="button" className="usage-team-row" onClick={() => props.onOpenMember(member.user_id)}>
+                <button
+                  type="button"
+                  className="usage-team-row"
+                  onClick={() => (member.relation === "self" ? props.onOpenSelf() : props.onOpenMember(member.user_id))}
+                >
                   <span className="usage-team-person">
                     <span className="usage-team-name">
                       <span className="usage-team-label">{member.name}</span>
                       <span className={`usage-team-relation is-${member.relation}`}>{t(`usage.team.relation.${member.relation}` as PortalMessageKey)}</span>
+                      {secondaryIds.has(member.user_id) ? (
+                        <span className="usage-team-relation is-secondary" title={t("usage.team.secondaryHint")}>
+                          {t("usage.team.secondary")}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="usage-team-meta">{[member.department, member.title].filter(Boolean).join(" · ") || "—"}</span>
                   </span>
@@ -532,7 +552,7 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
           <>
             {/* Stays mounted under the member view so search and scroll survive "Back". */}
             <div className="usage-drawer" hidden={Boolean(memberId)}>
-              <TeamView period={period} timezone={timezone} onOpenMember={setMemberId} />
+              <TeamView period={period} timezone={timezone} onOpenMember={setMemberId} onOpenSelf={() => setView("me")} />
             </div>
             {memberId ? <MemberView userId={memberId} period={period} timezone={timezone} onBack={() => setMemberId(null)} /> : null}
           </>

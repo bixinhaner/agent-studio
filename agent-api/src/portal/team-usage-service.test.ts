@@ -110,14 +110,20 @@ describe("createTeamUsageService", () => {
     expect(result.team).toEqual({ available: true, size: 3 });
   });
 
-  it("returns only in-scope members, sorted by tokens, with team totals", async () => {
+  it("returns in-scope members plus the leader's own row, sorted by tokens, with team totals", async () => {
     const { svc, ledger } = service();
     const result = await svc.team({ viewerId: "lead", period: "7d" });
-    expect(ledger.sumByUserInRange).toHaveBeenCalledWith(expect.objectContaining({ userIds: ["a", "b", "c"] }));
-    expect(result.members.map((item) => item.user_id)).toEqual(["a", "b", "c"]);
-    expect(result.members[0]).toMatchObject({ name: "Alice", title: "Engineer", department: "Engineering", relation: "direct", total_tokens: 500, tasks: 2 });
-    expect(result.members[1]).toMatchObject({ name: "b@x.com", total_tokens: 0 });
-    expect(result.totals).toEqual({ members: 3, active_members: 1, total_tokens: 500, turns: 5, tasks: 2 });
+    expect(ledger.sumByUserInRange).toHaveBeenCalledWith(expect.objectContaining({ userIds: ["a", "b", "c", "lead"] }));
+    expect(result.members.map((item) => [item.user_id, item.relation])).toEqual([["a", "direct"], ["lead", "self"], ["b", "direct"], ["c", "department"]]);
+    expect(result.members[0]).toMatchObject({ name: "Alice", title: "Engineer", department: "Engineering", total_tokens: 500, tasks: 2 });
+    expect(result.members[2]).toMatchObject({ name: "b@x.com", total_tokens: 0 });
+    expect(result.totals).toEqual({ members: 4, active_members: 2, total_tokens: 700, turns: 7, tasks: 3 });
+  });
+
+  it("leaves the viewer out when they are not inside the departments they see", async () => {
+    const { svc } = service();
+    const result = await svc.team({ viewerId: "boss", period: "month" });
+    expect(result.members.some((item) => item.relation === "self")).toBe(false);
   });
 
   it("rejects team and member views outside the viewer's scope", async () => {
@@ -142,8 +148,9 @@ describe("preview grants", () => {
   it("parses grants and drops expired or malformed entries", async () => {
     const { parsePreviewGrants } = await import("./team-usage-service.js");
     const now = new Date("2026-10-06T08:00:00Z");
-    const grants = parsePreviewGrants("u1:d1|d2:2026-10-06; u2:d3:2026-10-05;bad;u3::2026-12-01;u4:d4:soon", now);
-    expect(Object.fromEntries(grants)).toEqual({ u1: ["d1", "d2"] });
+    const grants = parsePreviewGrants("u1:d1|d2:2026-10-06; u2:d3:2026-10-05;bad;u3::2026-12-01;u4:d4:soon;u5:*", now);
+    // A grant without a date never expires.
+    expect(Object.fromEntries(grants)).toEqual({ u1: ["d1", "d2"], u5: ["*"] });
   });
 
   it("treats a granted viewer as leader of the department until it expires", async () => {
@@ -172,10 +179,10 @@ describe("department breakdown", () => {
     const result = await svc.team({ viewerId: "lead", period: "month" });
     const byId = Object.fromEntries(result.departments.map((item) => [item.id, item]));
     expect(Object.keys(byId).sort()).toEqual(["eng", "eng-fe"]);
-    // eng includes its own members (a, b) and the sub-department (c); the viewer is never counted.
-    expect(byId.eng).toMatchObject({ name: "Engineering", parent_id: null, members: 3, active_members: 1, total_tokens: 500, turns: 5, tasks: 2 });
-    expect(byId.eng.member_ids.sort()).toEqual(["a", "b", "c"]);
-    expect(byId["eng-fe"]).toMatchObject({ parent_id: "eng", members: 1, member_ids: ["c"], total_tokens: 0 });
+    // eng includes its own members (a, b, the leader) and the sub-department (c).
+    expect(byId.eng).toMatchObject({ name: "Engineering", parent_id: null, members: 4, active_members: 2, total_tokens: 700, turns: 7, tasks: 3 });
+    expect(byId.eng.member_ids.sort()).toEqual(["a", "b", "c", "lead"]);
+    expect(byId["eng-fe"]).toMatchObject({ parent_id: "eng", members: 1, member_ids: ["c"], secondary_ids: [], total_tokens: 0 });
   });
 
   it("is empty for viewers who only have reports through the manager chain", async () => {
@@ -196,5 +203,79 @@ describe("department breakdown", () => {
   it("expands a \"*\" grant to every active top-level department", async () => {
     const { ledDepartmentTree } = await import("./team-usage-service.js");
     expect([...ledDepartmentTree(directory, "z", ["*"]).led].sort()).toEqual(["eng", "eng-fe", "sales"]);
+  });
+
+  it("counts each person once so sibling departments add up to their parent, listing extra memberships as secondary", async () => {
+    const { buildDepartmentBreakdown, ledDepartmentTree, resolveTeamScope } = await import("./team-usage-service.js");
+    // rd ─┬─ qa ── wl
+    //     └─ pm
+    const org: OrgDirectory = {
+      users: ["head", "qaHead", "p", "q", "r"].map((id) => ({ id, displayName: id, email: null, dingtalkUserId: null })),
+      profiles: [],
+      memberships: [
+        { userId: "head", departmentId: "rd", isPrimary: false, isLeader: true, sortOrder: 0 },
+        // The R&D head is also listed in a sub-department: counted once, in the highest department they lead.
+        { userId: "head", departmentId: "qa", isPrimary: true, isLeader: false, sortOrder: 0 },
+        { userId: "qaHead", departmentId: "qa", isPrimary: true, isLeader: true, sortOrder: 0 },
+        // p sits in two sibling departments: counted in the primary one, secondary in the other.
+        { userId: "p", departmentId: "wl", isPrimary: true, isLeader: false, sortOrder: 0 },
+        { userId: "p", departmentId: "pm", isPrimary: false, isLeader: false, sortOrder: 0 },
+        // q has no primary flag: falls back to the highest department (pm is above wl).
+        { userId: "q", departmentId: "wl", isPrimary: false, isLeader: false, sortOrder: 0 },
+        { userId: "q", departmentId: "pm", isPrimary: false, isLeader: false, sortOrder: 1 },
+        { userId: "r", departmentId: "pm", isPrimary: true, isLeader: false, sortOrder: 0 }
+      ],
+      departments: [
+        { id: "rd", name: "R&D", parentDepartmentId: null, status: "active" },
+        { id: "qa", name: "QA", parentDepartmentId: "rd", status: "active" },
+        { id: "wl", name: "Wireless", parentDepartmentId: "qa", status: "active" },
+        { id: "pm", name: "PM", parentDepartmentId: "rd", status: "active" }
+      ]
+    };
+    const usage = new Map(["head", "qaHead", "p", "q", "r"].map((id, index) => [id, { totalTokens: 10 ** index, turns: 1, tasks: 1 }]));
+    const viewer = "head";
+    const nodes = buildDepartmentBreakdown(org, ledDepartmentTree(org, viewer), resolveTeamScope(org, viewer), usage, viewer);
+    const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
+    expect(byId.rd.member_ids.sort()).toEqual(["head", "p", "q", "qaHead", "r"]);
+    expect(byId.qa.member_ids.sort()).toEqual(["p", "qaHead"]);
+    expect(byId.qa.secondary_ids.sort()).toEqual(["head", "q"]);
+    expect(byId.wl).toMatchObject({ member_ids: ["p"], secondary_ids: ["q"] });
+    expect(byId.pm.member_ids.sort()).toEqual(["q", "r"]);
+    expect(byId.pm.secondary_ids).toEqual(["p"]);
+    // Siblings add up exactly: rd = own (head) + qa + pm.
+    expect(byId.rd.total_tokens).toBe(usage.get("head")!.totalTokens + byId.qa.total_tokens + byId.pm.total_tokens);
+    expect(byId.qa.total_tokens).toBe(usage.get("qaHead")!.totalTokens + byId.wl.total_tokens);
+
+    // The QA head sees QA including themselves, with exactly the numbers the R&D head sees;
+    // head and q are attributed outside QA, so they are listed as secondary only.
+    const qaNodes = buildDepartmentBreakdown(org, ledDepartmentTree(org, "qaHead"), resolveTeamScope(org, "qaHead"), usage, "qaHead");
+    const qa = qaNodes.find((node) => node.id === "qa")!;
+    expect(qa.member_ids.sort()).toEqual(["p", "qaHead"]);
+    expect(qa.secondary_ids.sort()).toEqual(["head", "q"]);
+    expect(qa.total_tokens).toBe(byId.qa.total_tokens);
+
+    const svc = createTeamUsageService({
+      db: {
+        user: { findMany: vi.fn(async () => org.users) },
+        enterpriseUserProfile: { findMany: vi.fn(async () => org.profiles) },
+        departmentMembership: { findMany: vi.fn(async () => org.memberships) },
+        department: { findMany: vi.fn(async () => org.departments) }
+      },
+      ledger: {
+        sumByUserInRange: vi.fn(async () =>
+          [...usage].map(([userId, item]) => ({ userId, ...item, lastActiveAt: null }))
+        )
+      },
+      personalUsage: { summarize: vi.fn() }
+    });
+    const team = await svc.team({ viewerId: "qaHead" });
+    expect(Object.fromEntries(team.members.map((item) => [item.user_id, [item.relation, item.secondary]]))).toEqual({
+      qaHead: ["self", false],
+      p: ["department", false],
+      head: ["department", true],
+      q: ["department", true]
+    });
+    // Totals match the QA node: secondary people are listed but not counted.
+    expect(team.totals).toMatchObject({ members: 2, total_tokens: qa.total_tokens });
   });
 });

@@ -267,7 +267,7 @@ export type UsageRanking = {
   team: { available: boolean; size: number };
 };
 
-export type TeamRelation = "direct" | "indirect" | "department";
+export type TeamRelation = "direct" | "indirect" | "department" | "self";
 
 export type TeamUsageMember = {
   user_id: string;
@@ -275,6 +275,8 @@ export type TeamUsageMember = {
   title: string | null;
   department: string | null;
   relation: TeamRelation;
+  /** Listed via a secondary department membership only; not counted in totals. */
+  secondary: boolean;
   total_tokens: number;
   turns: number;
   tasks: number;
@@ -285,7 +287,10 @@ export type TeamDepartmentNode = {
   id: string;
   name: string;
   parent_id: string | null;
+  /** People counted here (each person counts in exactly one department). */
   member_ids: string[];
+  /** People who also belong here but count elsewhere ("兼"). */
+  secondary_ids: string[];
   members: number;
   active_members: number;
   total_tokens: number;

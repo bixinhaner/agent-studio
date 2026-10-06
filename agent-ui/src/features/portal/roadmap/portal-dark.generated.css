@@ -5896,6 +5896,10 @@
   border-color: rgb(var(--brand-primary-rgb, 255 70 20) / 0.35);
   color: var(--roadmap-text);
 }
+:root[data-portal-theme="dark"] .usage-team-relation.is-self {
+  border-color: var(--roadmap-text);
+  color: var(--roadmap-text);
+}
 :root[data-portal-theme="dark"] .usage-team-chevron {
   color: var(--roadmap-muted);
 }
