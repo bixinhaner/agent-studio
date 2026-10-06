@@ -5902,3 +5902,24 @@
 :root[data-portal-theme="dark"] .usage-member-title strong {
   color: var(--roadmap-text);
 }
+:root[data-portal-theme="dark"] .usage-team-trail {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-team-trail button {
+  border: 0;
+  background: transparent;
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-team-trail button:hover {
+  background: var(--roadmap-surface-soft);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-team-trail button[aria-current="page"] {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-team-trail button:focus-visible {
+  outline: 2px solid rgb(var(--brand-primary-rgb, 255 70 20));
+}
+:root[data-portal-theme="dark"] .usage-team-dept-icon {
+  color: var(--roadmap-muted);
+}

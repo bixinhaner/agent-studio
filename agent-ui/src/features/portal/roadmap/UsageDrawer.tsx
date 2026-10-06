@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, Empty, Input, Segmented, Skeleton, Tooltip } from "antd";
-import { ArrowLeft, BarChart3, ChevronRight, Search, Trophy } from "lucide-react";
+import { ArrowLeft, BarChart3, Building2, ChevronRight, Search, Trophy } from "lucide-react";
 
 import { formatListTimestamp } from "../../../lib/formatters";
 import { usePortalI18n, type PortalMessageKey } from "../i18n";
@@ -11,6 +11,7 @@ import {
   fetchUsageRanking,
   type PersonalUsagePeriod,
   type PersonalUsageSummary,
+  type TeamDepartmentNode,
   type TeamMemberUsage,
   type TeamUsageSummary,
   type UsageRankEntry,
@@ -282,17 +283,30 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
   const { t, intlLocale } = usePortalI18n();
   const turnCount = useTurnCount();
   const [query, setQuery] = useState("");
+  const [focusId, setFocusId] = useState<string | null>(null);
   const fetcher = useCallback(() => fetchTeamUsage(props.period, props.timezone), [props.period, props.timezone]);
   const { data, error, loading, reload } = useLoader<TeamUsageSummary>(true, fetcher);
   const number = (value: number) => new Intl.NumberFormat(intlLocale).format(value);
+  const departments = data?.departments ?? [];
+  const departmentById = useMemo(() => new Map(departments.map((item) => [item.id, item])), [departments]);
+  const focus = focusId ? departmentById.get(focusId) ?? null : null;
+  // Breadcrumb from the top led department down to the focused one.
+  const trail = useMemo(() => {
+    const result: TeamDepartmentNode[] = [];
+    for (let node = focus; node; node = node.parent_id ? departmentById.get(node.parent_id) ?? null : null) result.unshift(node);
+    return result;
+  }, [departmentById, focus]);
+  const childDepartments = departments.filter((item) => item.parent_id === (focus?.id ?? null));
   const members = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     if (!data) return [];
-    if (!needle) return data.members;
-    return data.members.filter((member) =>
-      [member.name, member.title, member.department].some((value) => value?.toLowerCase().includes(needle))
+    const allowed = focus ? new Set(focus.member_ids) : null;
+    const needle = query.trim().toLowerCase();
+    return data.members.filter(
+      (member) =>
+        (!allowed || allowed.has(member.user_id)) &&
+        (!needle || [member.name, member.title, member.department].some((value) => value?.toLowerCase().includes(needle)))
     );
-  }, [data, query]);
+  }, [data, focus, query]);
 
   if (error) {
     return (
@@ -305,69 +319,120 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
     );
   }
   if (!data || (loading && data.period !== props.period)) return <Skeleton active paragraph={{ rows: 8 }} />;
-  const maxTokens = Math.max(1, ...data.members.map((member) => member.total_tokens));
+  const stats = focus ?? data.totals;
+  const maxTokens = Math.max(1, ...members.map((member) => member.total_tokens));
+  const maxDepartmentTokens = Math.max(1, ...childDepartments.map((item) => item.total_tokens));
   return (
     <>
+      {departments.length ? (
+        <nav className="usage-team-trail" aria-label={t("usage.team.trail")}>
+          <button type="button" onClick={() => setFocusId(null)} aria-current={focus ? undefined : "page"}>
+            {t("usage.team.all")}
+          </button>
+          {trail.map((node) => (
+            <span key={node.id}>
+              <ChevronRight size={12} aria-hidden="true" />
+              <button type="button" onClick={() => setFocusId(node.id)} aria-current={node.id === focus?.id ? "page" : undefined} title={node.name}>
+                {node.name}
+              </button>
+            </span>
+          ))}
+        </nav>
+      ) : null}
+
       <div className="usage-stats">
         <div>
           <span>{t("usage.team.members")}</span>
-          <strong>{number(data.totals.members)}</strong>
+          <strong>{number(stats.members)}</strong>
         </div>
         <div>
           <span>{t("usage.team.active")}</span>
-          <strong>{number(data.totals.active_members)}</strong>
+          <strong>{number(stats.active_members)}</strong>
           <small className="is-neutral">
             {new Intl.NumberFormat(intlLocale, { style: "percent", maximumFractionDigits: 0 }).format(
-              data.totals.members ? data.totals.active_members / data.totals.members : 0
+              stats.members ? stats.active_members / stats.members : 0
             )}
           </small>
         </div>
         <div>
           <span>{t("usage.totalTokens")}</span>
-          <strong>{formatTokens(data.totals.total_tokens, intlLocale)}</strong>
+          <strong>{formatTokens(stats.total_tokens, intlLocale)}</strong>
         </div>
       </div>
 
-      <Input
-        allowClear
-        prefix={<Search size={14} aria-hidden="true" />}
-        placeholder={t("usage.team.search")}
-        aria-label={t("usage.team.search")}
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
+      {childDepartments.length ? (
+        <section className="usage-breakdown">
+          <h3>{focus ? t("usage.team.subDepartments") : t("usage.team.ledDepartments")}</h3>
+          <ul className="usage-team-list">
+            {childDepartments.map((node) => (
+              <li key={node.id}>
+                <button type="button" className="usage-team-row" onClick={() => setFocusId(node.id)}>
+                  <span className="usage-team-person">
+                    <span className="usage-team-name">
+                      <Building2 size={14} aria-hidden="true" className="usage-team-dept-icon" />
+                      <span className="usage-team-label">{node.name}</span>
+                    </span>
+                    <span className="usage-team-meta">
+                      {t("usage.team.deptMeta", { active: number(node.active_members), members: number(node.members) })}
+                    </span>
+                  </span>
+                  <span className="usage-team-usage">
+                    <span className="usage-team-tokens">{node.total_tokens > 0 ? formatTokens(node.total_tokens, intlLocale) : "—"}</span>
+                    <span className="usage-breakdown-track" aria-hidden="true">
+                      <span style={{ width: node.total_tokens > 0 ? `${Math.max(2, (node.total_tokens / maxDepartmentTokens) * 100)}%` : 0 }} />
+                    </span>
+                    <span className="usage-team-meta">{node.turns > 0 ? turnCount(node.turns) : t("usage.team.noUsage")}</span>
+                  </span>
+                  <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-      {members.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("usage.team.noMatch")} />
-      ) : (
-        <ul className="usage-team-list">
-          {members.map((member) => (
-            <li key={member.user_id}>
-              <button type="button" className="usage-team-row" onClick={() => props.onOpenMember(member.user_id)}>
-                <span className="usage-team-person">
-                  <span className="usage-team-name">
-                    {member.name}
-                    <span className={`usage-team-relation is-${member.relation}`}>{t(`usage.team.relation.${member.relation}` as PortalMessageKey)}</span>
+      <section className="usage-breakdown">
+        <h3>{t("usage.team.people", { count: number(focus ? focus.members : data.totals.members) })}</h3>
+        <Input
+          allowClear
+          prefix={<Search size={14} aria-hidden="true" />}
+          placeholder={t("usage.team.search")}
+          aria-label={t("usage.team.search")}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {members.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("usage.team.noMatch")} />
+        ) : (
+          <ul className="usage-team-list">
+            {members.map((member) => (
+              <li key={member.user_id}>
+                <button type="button" className="usage-team-row" onClick={() => props.onOpenMember(member.user_id)}>
+                  <span className="usage-team-person">
+                    <span className="usage-team-name">
+                      <span className="usage-team-label">{member.name}</span>
+                      <span className={`usage-team-relation is-${member.relation}`}>{t(`usage.team.relation.${member.relation}` as PortalMessageKey)}</span>
+                    </span>
+                    <span className="usage-team-meta">{[member.department, member.title].filter(Boolean).join(" · ") || "—"}</span>
                   </span>
-                  <span className="usage-team-meta">{[member.department, member.title].filter(Boolean).join(" · ") || "—"}</span>
-                </span>
-                <span className="usage-team-usage">
-                  <span className="usage-team-tokens">{member.total_tokens > 0 ? formatTokens(member.total_tokens, intlLocale) : "—"}</span>
-                  <span className="usage-breakdown-track" aria-hidden="true">
-                    <span style={{ width: member.total_tokens > 0 ? `${Math.max(2, (member.total_tokens / maxTokens) * 100)}%` : 0 }} />
+                  <span className="usage-team-usage">
+                    <span className="usage-team-tokens">{member.total_tokens > 0 ? formatTokens(member.total_tokens, intlLocale) : "—"}</span>
+                    <span className="usage-breakdown-track" aria-hidden="true">
+                      <span style={{ width: member.total_tokens > 0 ? `${Math.max(2, (member.total_tokens / maxTokens) * 100)}%` : 0 }} />
+                    </span>
+                    <span className="usage-team-meta">
+                      {member.turns > 0
+                        ? `${turnCount(member.turns)} · ${t("usage.team.lastActive", { time: formatListTimestamp(member.last_active_at) })}`
+                        : t("usage.team.noUsage")}
+                    </span>
                   </span>
-                  <span className="usage-team-meta">
-                    {member.turns > 0
-                      ? `${turnCount(member.turns)} · ${t("usage.team.lastActive", { time: formatListTimestamp(member.last_active_at) })}`
-                      : t("usage.team.noUsage")}
-                  </span>
-                </span>
-                <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                  <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <p className="usage-note">{t("usage.team.note")}</p>
     </>
   );

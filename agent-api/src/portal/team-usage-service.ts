@@ -63,6 +63,8 @@ export type TeamUsageResponse = {
   timezone: string;
   totals: { members: number; active_members: number; total_tokens: number; turns: number; tasks: number };
   members: TeamUsageMember[];
+  /** Empty unless the viewer leads departments in DingTalk. */
+  departments: TeamDepartmentNode[];
 };
 
 export class TeamUsageAccessError extends Error {}
@@ -75,7 +77,6 @@ export function normalizeTimezone(timezone: string | undefined): string {
   return timezone && isValidTimezone(timezone) ? timezone : "Asia/Shanghai";
 }
 
-/** People the viewer may see, keyed by user id, with the closest relation. Never includes the viewer. */
 /**
  * Temporary preview grants from TEAM_USAGE_PREVIEW_GRANTS, e.g.
  * "userId:departmentId|departmentId:2026-10-07;otherUser:dept:2026-10-08".
@@ -95,6 +96,7 @@ export function parsePreviewGrants(raw: string | undefined, now: Date): Map<stri
   return grants;
 }
 
+/** People the viewer may see, keyed by user id, with the closest relation. Never includes the viewer. */
 export function resolveTeamScope(directory: OrgDirectory, viewerId: string, extraLedDepartmentIds: string[] = []): Map<string, TeamRelation> {
   const activeIds = new Set(directory.users.map((user) => user.id));
   const userIdByDingTalkId = new Map<string, string>();
@@ -125,28 +127,107 @@ export function resolveTeamScope(directory: OrgDirectory, viewerId: string, extr
     depth += 1;
   }
 
-  // Department leadership covers the led department and all its sub-departments.
-  const children = new Map<string, string[]>();
-  for (const department of directory.departments) {
-    if (department.status !== "active" || !department.parentDepartmentId) continue;
-    children.set(department.parentDepartmentId, [...(children.get(department.parentDepartmentId) ?? []), department.id]);
-  }
-  const ledDepartments = new Set<string>();
-  const stack = [
-    ...directory.memberships.filter((item) => item.userId === viewerId && item.isLeader).map((item) => item.departmentId),
-    ...extraLedDepartmentIds
-  ];
-  while (stack.length > 0) {
-    const departmentId = stack.pop()!;
-    if (ledDepartments.has(departmentId)) continue;
-    ledDepartments.add(departmentId);
-    stack.push(...(children.get(departmentId) ?? []));
-  }
+  const { led } = ledDepartmentTree(directory, viewerId, extraLedDepartmentIds);
   for (const membership of directory.memberships) {
-    if (membership.userId === viewerId || !ledDepartments.has(membership.departmentId)) continue;
+    if (membership.userId === viewerId || !led.has(membership.departmentId)) continue;
     if (activeIds.has(membership.userId) && !scope.has(membership.userId)) scope.set(membership.userId, "department");
   }
   return scope;
+}
+
+/** Departments the viewer leads (DingTalk leader flag or preview grant) plus all active sub-departments. */
+export function ledDepartmentTree(directory: OrgDirectory, viewerId: string, extraLedDepartmentIds: string[] = []) {
+  const active = new Set(directory.departments.filter((item) => item.status === "active").map((item) => item.id));
+  const children = new Map<string, string[]>();
+  for (const department of directory.departments) {
+    if (!active.has(department.id) || !department.parentDepartmentId) continue;
+    children.set(department.parentDepartmentId, [...(children.get(department.parentDepartmentId) ?? []), department.id]);
+  }
+  const led = new Set<string>();
+  const stack = [
+    ...directory.memberships.filter((item) => item.userId === viewerId && item.isLeader).map((item) => item.departmentId),
+    ...extraLedDepartmentIds
+  ].filter((id) => active.has(id));
+  while (stack.length > 0) {
+    const departmentId = stack.pop()!;
+    if (led.has(departmentId)) continue;
+    led.add(departmentId);
+    stack.push(...(children.get(departmentId) ?? []));
+  }
+  return { led, children };
+}
+
+export type TeamDepartmentNode = {
+  id: string;
+  name: string;
+  /** Parent within the viewer's led tree; null for the departments the viewer leads at the top. */
+  parent_id: string | null;
+  /** Distinct in-scope people in this department and all its sub-departments. */
+  member_ids: string[];
+  members: number;
+  active_members: number;
+  total_tokens: number;
+  turns: number;
+  tasks: number;
+};
+
+/** Per-department aggregates over the led tree; people in several departments count once per department. */
+export function buildDepartmentBreakdown(
+  directory: OrgDirectory,
+  tree: { led: Set<string>; children: Map<string, string[]> },
+  scope: Map<string, TeamRelation>,
+  totalsByUser: Map<string, Pick<UsageUserTotals, "totalTokens" | "turns" | "tasks">>
+): TeamDepartmentNode[] {
+  const direct = new Map<string, Set<string>>();
+  for (const membership of directory.memberships) {
+    if (!tree.led.has(membership.departmentId) || !scope.has(membership.userId)) continue;
+    const set = direct.get(membership.departmentId) ?? new Set<string>();
+    set.add(membership.userId);
+    direct.set(membership.departmentId, set);
+  }
+  const subtree = new Map<string, Set<string>>();
+  const collect = (departmentId: string): Set<string> => {
+    const cached = subtree.get(departmentId);
+    if (cached) return cached;
+    const result = new Set(direct.get(departmentId) ?? []);
+    subtree.set(departmentId, result);
+    for (const child of tree.children.get(departmentId) ?? []) {
+      if (tree.led.has(child)) for (const userId of collect(child)) result.add(userId);
+    }
+    return result;
+  };
+  const byId = new Map(directory.departments.map((item) => [item.id, item]));
+  const nodes: TeamDepartmentNode[] = [];
+  for (const departmentId of tree.led) {
+    const department = byId.get(departmentId);
+    if (!department) continue;
+    const memberIds = [...collect(departmentId)];
+    let totalTokens = 0;
+    let turns = 0;
+    let tasks = 0;
+    let activeMembers = 0;
+    for (const userId of memberIds) {
+      const usage = totalsByUser.get(userId);
+      if (!usage) continue;
+      totalTokens += usage.totalTokens;
+      turns += usage.turns;
+      tasks += usage.tasks;
+      if (usage.turns > 0) activeMembers += 1;
+    }
+    const parentId = department.parentDepartmentId && tree.led.has(department.parentDepartmentId) ? department.parentDepartmentId : null;
+    nodes.push({
+      id: departmentId,
+      name: department.name,
+      parent_id: parentId,
+      member_ids: memberIds,
+      members: memberIds.length,
+      active_members: activeMembers,
+      total_tokens: totalTokens,
+      turns,
+      tasks
+    });
+  }
+  return nodes.sort((left, right) => right.total_tokens - left.total_tokens || right.members - left.members || left.name.localeCompare(right.name, "zh"));
 }
 
 export function primaryDepartmentId(directory: OrgDirectory, userId: string): string | null {
@@ -180,9 +261,12 @@ export function createTeamUsageService(deps: {
 }) {
   const now = deps.now ?? (() => new Date());
 
+  function previewDepartments(viewerId: string) {
+    return parsePreviewGrants(deps.previewGrants?.(), now()).get(viewerId) ?? [];
+  }
+
   function scopeFor(directory: OrgDirectory, viewerId: string) {
-    const extra = parsePreviewGrants(deps.previewGrants?.(), now()).get(viewerId) ?? [];
-    return resolveTeamScope(directory, viewerId, extra);
+    return resolveTeamScope(directory, viewerId, previewDepartments(viewerId));
   }
 
   async function loadDirectory(): Promise<OrgDirectory> {
@@ -277,7 +361,8 @@ export function createTeamUsageService(deps: {
           turns: members.reduce((sum, item) => sum + item.turns, 0),
           tasks: members.reduce((sum, item) => sum + item.tasks, 0)
         },
-        members
+        members,
+        departments: buildDepartmentBreakdown(directory, ledDepartmentTree(directory, input.viewerId, previewDepartments(input.viewerId)), scope, totalsByUser)
       };
     },
 

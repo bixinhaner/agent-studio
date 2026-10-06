@@ -165,3 +165,31 @@ describe("preview grants", () => {
     await expect(make("2026-10-07T00:00:01Z").team({ viewerId: "c" })).rejects.toBeInstanceOf(TeamUsageAccessError);
   });
 });
+
+describe("department breakdown", () => {
+  it("aggregates the led tree per department with subtree members and a parent link", async () => {
+    const { svc } = service();
+    const result = await svc.team({ viewerId: "lead", period: "month" });
+    const byId = Object.fromEntries(result.departments.map((item) => [item.id, item]));
+    expect(Object.keys(byId).sort()).toEqual(["eng", "eng-fe"]);
+    // eng includes its own members (a, b) and the sub-department (c); the viewer is never counted.
+    expect(byId.eng).toMatchObject({ name: "Engineering", parent_id: null, members: 3, active_members: 1, total_tokens: 500, turns: 5, tasks: 2 });
+    expect(byId.eng.member_ids.sort()).toEqual(["a", "b", "c"]);
+    expect(byId["eng-fe"]).toMatchObject({ parent_id: "eng", members: 1, member_ids: ["c"], total_tokens: 0 });
+  });
+
+  it("is empty for viewers who only have reports through the manager chain", async () => {
+    const { svc } = service();
+    const result = await svc.team({ viewerId: "boss", period: "month" });
+    expect(result.members.length).toBeGreaterThan(0);
+    expect(result.departments).toEqual([]);
+  });
+
+  it("starts a granted subtree at the granted department", async () => {
+    const { buildDepartmentBreakdown, ledDepartmentTree, resolveTeamScope } = await import("./team-usage-service.js");
+    const tree = ledDepartmentTree(directory, "z", ["eng-fe", "old"]);
+    expect([...tree.led]).toEqual(["eng-fe"]);
+    const nodes = buildDepartmentBreakdown(directory, tree, resolveTeamScope(directory, "z", ["eng-fe"]), new Map());
+    expect(nodes).toEqual([expect.objectContaining({ id: "eng-fe", parent_id: null, member_ids: ["c"] })]);
+  });
+});

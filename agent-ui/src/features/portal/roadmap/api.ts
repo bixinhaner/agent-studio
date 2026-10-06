@@ -281,11 +281,24 @@ export type TeamUsageMember = {
   last_active_at: string | null;
 };
 
+export type TeamDepartmentNode = {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  member_ids: string[];
+  members: number;
+  active_members: number;
+  total_tokens: number;
+  turns: number;
+  tasks: number;
+};
+
 export type TeamUsageSummary = {
   period: PersonalUsagePeriod;
   timezone: string;
   totals: { members: number; active_members: number; total_tokens: number; turns: number; tasks: number };
   members: TeamUsageMember[];
+  departments: TeamDepartmentNode[];
 };
 
 export type TeamMemberUsage = {
