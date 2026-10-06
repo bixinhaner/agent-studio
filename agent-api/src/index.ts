@@ -11843,7 +11843,12 @@ async function resolvePortalMemoryContextPart(
 }
 
 const personalUsage = createPersonalUsageService({ db, ledger: usageLedger });
-const teamUsage = createTeamUsageService({ db, ledger: usageLedger, personalUsage });
+const teamUsage = createTeamUsageService({
+  db,
+  ledger: usageLedger,
+  personalUsage,
+  previewGrants: () => process.env.TEAM_USAGE_PREVIEW_GRANTS
+});
 
 app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
   try {

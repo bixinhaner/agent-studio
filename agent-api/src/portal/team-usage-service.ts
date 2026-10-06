@@ -76,7 +76,26 @@ export function normalizeTimezone(timezone: string | undefined): string {
 }
 
 /** People the viewer may see, keyed by user id, with the closest relation. Never includes the viewer. */
-export function resolveTeamScope(directory: OrgDirectory, viewerId: string): Map<string, TeamRelation> {
+/**
+ * Temporary preview grants from TEAM_USAGE_PREVIEW_GRANTS, e.g.
+ * "userId:departmentId|departmentId:2026-10-07;otherUser:dept:2026-10-08".
+ * Each grant treats the viewer as leader of those departments until the end of the
+ * given UTC date, then stops applying on its own; malformed or expired entries are ignored.
+ */
+export function parsePreviewGrants(raw: string | undefined, now: Date): Map<string, string[]> {
+  const grants = new Map<string, string[]>();
+  for (const entry of (raw ?? "").split(";")) {
+    const [userId, departments, until] = entry.split(":").map((part) => part?.trim() ?? "");
+    if (!userId || !departments || !/^\d{4}-\d{2}-\d{2}$/.test(until ?? "")) continue;
+    const expiresAt = Date.parse(`${until}T23:59:59.999Z`);
+    if (!Number.isFinite(expiresAt) || expiresAt < now.getTime()) continue;
+    const ids = departments.split("|").map((id) => id.trim()).filter(Boolean);
+    grants.set(userId, [...(grants.get(userId) ?? []), ...ids]);
+  }
+  return grants;
+}
+
+export function resolveTeamScope(directory: OrgDirectory, viewerId: string, extraLedDepartmentIds: string[] = []): Map<string, TeamRelation> {
   const activeIds = new Set(directory.users.map((user) => user.id));
   const userIdByDingTalkId = new Map<string, string>();
   for (const user of directory.users) {
@@ -113,7 +132,10 @@ export function resolveTeamScope(directory: OrgDirectory, viewerId: string): Map
     children.set(department.parentDepartmentId, [...(children.get(department.parentDepartmentId) ?? []), department.id]);
   }
   const ledDepartments = new Set<string>();
-  const stack = directory.memberships.filter((item) => item.userId === viewerId && item.isLeader).map((item) => item.departmentId);
+  const stack = [
+    ...directory.memberships.filter((item) => item.userId === viewerId && item.isLeader).map((item) => item.departmentId),
+    ...extraLedDepartmentIds
+  ];
   while (stack.length > 0) {
     const departmentId = stack.pop()!;
     if (ledDepartments.has(departmentId)) continue;
@@ -149,8 +171,19 @@ export function rankAmong(memberIds: Iterable<string>, viewerId: string, tokensB
   return { rank: mine > 0 ? ahead + 1 : null, size: ids.length, active };
 }
 
-export function createTeamUsageService(deps: { db: Db; ledger: Ledger; personalUsage: PersonalUsage; now?: () => Date }) {
+export function createTeamUsageService(deps: {
+  db: Db;
+  ledger: Ledger;
+  personalUsage: PersonalUsage;
+  now?: () => Date;
+  previewGrants?: () => string | undefined;
+}) {
   const now = deps.now ?? (() => new Date());
+
+  function scopeFor(directory: OrgDirectory, viewerId: string) {
+    const extra = parsePreviewGrants(deps.previewGrants?.(), now()).get(viewerId) ?? [];
+    return resolveTeamScope(directory, viewerId, extra);
+  }
 
   async function loadDirectory(): Promise<OrgDirectory> {
     const [users, profiles, memberships, departments] = await Promise.all([
@@ -191,7 +224,7 @@ export function createTeamUsageService(deps: { db: Db; ledger: Ledger; personalU
       const departmentMembers = departmentId
         ? directory.memberships.filter((item) => item.departmentId === departmentId && activeIds.has(item.userId)).map((item) => item.userId)
         : [];
-      const scope = resolveTeamScope(directory, input.viewerId);
+      const scope = scopeFor(directory, input.viewerId);
       return {
         period,
         timezone,
@@ -209,7 +242,7 @@ export function createTeamUsageService(deps: { db: Db; ledger: Ledger; personalU
       const period = normalizePeriod(input.period);
       const timezone = normalizeTimezone(input.timezone);
       const directory = await loadDirectory();
-      const scope = resolveTeamScope(directory, input.viewerId);
+      const scope = scopeFor(directory, input.viewerId);
       if (scope.size === 0) throw new TeamUsageAccessError("No team members in your DingTalk directory scope");
       const totals = await deps.ledger.sumByUserInRange({ ...range(period, timezone), userIds: [...scope.keys()] });
       const totalsByUser = new Map(totals.map((row) => [row.userId, row]));
@@ -251,7 +284,7 @@ export function createTeamUsageService(deps: { db: Db; ledger: Ledger; personalU
     async member(input: { viewerId: string; memberId: string; period?: string; timezone?: string }) {
       requireViewer(input.viewerId);
       const directory = await loadDirectory();
-      const relation = resolveTeamScope(directory, input.viewerId).get(input.memberId);
+      const relation = scopeFor(directory, input.viewerId).get(input.memberId);
       if (!relation) throw new TeamUsageAccessError("This person is outside your DingTalk directory scope");
       const user = directory.users.find((item) => item.id === input.memberId);
       const departmentId = primaryDepartmentId(directory, input.memberId);

@@ -137,3 +137,31 @@ describe("createTeamUsageService", () => {
     await expect(svc.ranking({ viewerId: " " })).rejects.toThrow("signed-in");
   });
 });
+
+describe("preview grants", () => {
+  it("parses grants and drops expired or malformed entries", async () => {
+    const { parsePreviewGrants } = await import("./team-usage-service.js");
+    const now = new Date("2026-10-06T08:00:00Z");
+    const grants = parsePreviewGrants("u1:d1|d2:2026-10-06; u2:d3:2026-10-05;bad;u3::2026-12-01;u4:d4:soon", now);
+    expect(Object.fromEntries(grants)).toEqual({ u1: ["d1", "d2"] });
+  });
+
+  it("treats a granted viewer as leader of the department until it expires", async () => {
+    const make = (now: string) =>
+      createTeamUsageService({
+        db: {
+          user: { findMany: vi.fn(async () => directory.users) },
+          enterpriseUserProfile: { findMany: vi.fn(async () => directory.profiles) },
+          departmentMembership: { findMany: vi.fn(async () => directory.memberships) },
+          department: { findMany: vi.fn(async () => directory.departments) }
+        },
+        ledger: { sumByUserInRange: vi.fn(async () => []) },
+        personalUsage: { summarize: vi.fn() },
+        now: () => new Date(now),
+        previewGrants: () => "c:sales:2026-10-06"
+      });
+    const active = await make("2026-10-06T20:00:00Z").team({ viewerId: "c" });
+    expect(active.members.map((item) => [item.user_id, item.relation])).toEqual([["b", "department"], ["z", "department"]]);
+    await expect(make("2026-10-07T00:00:01Z").team({ viewerId: "c" })).rejects.toBeInstanceOf(TeamUsageAccessError);
+  });
+});
