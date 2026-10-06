@@ -108,7 +108,7 @@ export function MemoryDrawer(props: {
   const scopeLabel = useMemo(() => {
     const { modeLabel } = props;
     const base = (item: PortalMemoryScope) =>
-      item.mode_id ? modeLabel(item.mode_id) ?? t("memory.scopeOther") : t("memory.scopeGeneral");
+      item.mode_id ? modeLabel(item.mode_id) ?? item.mode_name ?? t("memory.scopeOther") : t("memory.scopeGeneral");
     const counts = new Map<string, number>();
     for (const item of data?.scopes ?? []) counts.set(base(item), (counts.get(base(item)) ?? 0) + 1);
     return (item: PortalMemoryScope) => {

@@ -45,10 +45,18 @@ export function createPortalMemoryRouter(input: {
   translations?: MemoryTranslationService;
   resolveActor(req: Request): { userId: string; organizationId?: string };
   getSettings(): Promise<SystemSettingsCodexMemory>;
+  /** Display names of assistants by mode id, so the picker never shows a generic label. */
+  resolveModeNames?(modeIds: string[]): Promise<Record<string, string>>;
 }): Router {
   const router = Router();
 
-  async function scopeOut(scope: PortalMemoryScope, language: MemoryLanguage | undefined) {
+  async function modeNamesOf(scopes: PortalMemoryScope[]): Promise<Record<string, string>> {
+    const ids = [...new Set(scopes.map((scope) => scope.modeId).filter((id): id is string => Boolean(id)))];
+    if (!ids.length || !input.resolveModeNames) return {};
+    return input.resolveModeNames(ids).catch(() => ({}));
+  }
+
+  async function scopeOut(scope: PortalMemoryScope, language: MemoryLanguage | undefined, modeNames: Record<string, string> = {}) {
     const learned = scope.learned;
     const translated =
       learned && language && learned.language !== language
@@ -59,6 +67,7 @@ export function createPortalMemoryRouter(input: {
       organization_key: scope.organizationKey,
       agent_segment: scope.agentSegment,
       mode_id: scope.modeId ?? null,
+      mode_name: (scope.modeId && modeNames[scope.modeId]) || null,
       updated_at: scope.updatedAt ?? null,
       user_items: scope.userItems.map(itemOut),
       learned: learned
@@ -78,13 +87,14 @@ export function createPortalMemoryRouter(input: {
       const actor = input.resolveActor(req);
       const language = typeof req.query.locale === "string" && req.query.locale ? localeLanguage(req.query.locale) : undefined;
       const [scopes, settings] = await Promise.all([input.service.list(actor.userId), input.getSettings()]);
+      const modeNames = await modeNamesOf(scopes);
       res.setHeader("Cache-Control", "private, no-store");
       res.json({
         enabled: Boolean(settings.enabled && settings.useMemories),
         learning: Boolean(settings.enabled && settings.generateMemories),
         min_idle_hours: settings.minRolloutIdleHours,
         translation_available: Boolean(input.translations),
-        scopes: await Promise.all(scopes.map((scope) => scopeOut(scope, language)))
+        scopes: await Promise.all(scopes.map((scope) => scopeOut(scope, language, modeNames)))
       });
     } catch (error) {
       sendError(res, error, "Failed to load memories");

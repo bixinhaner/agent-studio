@@ -33,6 +33,8 @@ export type PortalMemoryScope = {
   learned?: PortalLearnedMemory;
   /** Store directory of the assistant (translation cache lives here). */
   storeDir: string;
+  /** When any home of the assistant last changed; orders scopes that have no memory yet. */
+  lastUsedAt?: string;
 };
 
 export function modeIdFromAgentSegment(segment: string): string | undefined {
@@ -74,6 +76,12 @@ async function readText(filePath: string): Promise<string> {
   }
 }
 
+async function latestMtime(paths: string[]): Promise<string | undefined> {
+  const stats = await Promise.all(paths.map((item) => fs.stat(item).catch(() => undefined)));
+  const latest = Math.max(0, ...stats.map((stat) => stat?.mtimeMs ?? 0));
+  return latest ? new Date(latest).toISOString() : undefined;
+}
+
 /** Codex's learned memory of one home, without the user section Agent Studio projects into it. */
 export async function learnedMemoryForHome(codexHome: string): Promise<PortalLearnedMemory | undefined> {
   const summaryPath = path.join(codexMemoryProjectionPath(codexHome), "memory_summary.md");
@@ -90,7 +98,14 @@ export async function learnedMemoryForHome(codexHome: string): Promise<PortalLea
 export class PortalMemoryService {
   private readonly locks = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly options: { sessionHomeRoot: string }) {}
+  constructor(private readonly options: {
+    sessionHomeRoot: string;
+    /**
+     * Older organization directory keys mapped to the current one. Codex homes used to be keyed
+     * by organization id before the slug, so the same assistant can sit under both.
+     */
+    organizationAliases?: Record<string, string>;
+  }) {}
 
   private async withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(key) ?? Promise.resolve();
@@ -110,16 +125,20 @@ export class PortalMemoryService {
   async listUserHomes(userId: string): Promise<PortalMemoryHome[]> {
     if (!/^[A-Za-z0-9_-]+$/.test(userId)) return [];
     const root = path.resolve(this.options.sessionHomeRoot);
-    const result: PortalMemoryHome[] = [];
+    const aliases = this.options.organizationAliases ?? {};
     let orgEntries: string[] = [];
     try {
       orgEntries = await fs.readdir(root);
     } catch {
       return [];
     }
-    for (const orgKey of orgEntries) {
-      if (orgKey === "integrations" || orgKey.startsWith("thread-") || orgKey.startsWith("session-") || orgKey.startsWith(".")) continue;
-      const userDir = path.join(root, orgKey, userId);
+    // Current organization keys first, so their directory owns the store of a merged assistant.
+    orgEntries.sort((left, right) => Number(left in aliases) - Number(right in aliases));
+    const merged = new Map<string, PortalMemoryHome>();
+    for (const dirKey of orgEntries) {
+      if (dirKey === "integrations" || dirKey.startsWith("thread-") || dirKey.startsWith("session-") || dirKey.startsWith(".")) continue;
+      const orgKey = aliases[dirKey] ?? dirKey;
+      const userDir = path.join(root, dirKey, userId);
       let segments: string[] = [];
       try {
         segments = await fs.readdir(userDir);
@@ -140,12 +159,19 @@ export class PortalMemoryService {
         // Homes with memory first (newest first): the newest one is where Codex currently runs.
         const withMemory = await listSiblingCodexHomes(userDir, base);
         const homes = [...withMemory, ...all.filter((home) => !withMemory.includes(home))];
+        const id = `${orgKey}~${base}`;
+        const existing = merged.get(id);
+        if (existing) {
+          // A legacy directory of the same organization: Codex may still hold memory there.
+          existing.homes.push(...homes);
+          continue;
+        }
         // Any `<base>-<hash>` path derives the same store, even one that does not exist on disk.
         const anyHome = homes[0] ?? path.join(userDir, `${base}-000000`);
-        result.push({ id: `${orgKey}~${base}`, organizationKey: orgKey, agentSegment: base, codexHome: anyHome, homes });
+        merged.set(id, { id, organizationKey: orgKey, agentSegment: base, codexHome: anyHome, homes });
       }
     }
-    return result;
+    return [...merged.values()];
   }
 
   async resolveHome(userId: string, scopeId: string): Promise<PortalMemoryHome> {
@@ -165,7 +191,11 @@ export class PortalMemoryService {
   }
 
   async readScope(home: PortalMemoryHome): Promise<PortalMemoryScope> {
-    const [userItems, learned] = await Promise.all([readUserMemories(home.codexHome), this.learnedMemory(home)]);
+    const [userItems, learned, lastUsedAt] = await Promise.all([
+      readUserMemories(home.codexHome),
+      this.learnedMemory(home),
+      latestMtime(home.homes)
+    ]);
     const updatedAt = [learned?.updatedAt, ...userItems.map((item) => item.updatedAt)]
       .filter((value): value is string => Boolean(value))
       .sort()
@@ -178,13 +208,22 @@ export class PortalMemoryService {
       updatedAt,
       userItems,
       learned,
-      storeDir: userMemoryStoreDir(home.codexHome)
+      storeDir: userMemoryStoreDir(home.codexHome),
+      lastUsedAt
     };
   }
 
+  /**
+   * Assistants that hold memory, newest first. Empty assistants are hidden; when nothing has
+   * memory yet, the most recently used assistant is still listed so the user can add the first one.
+   */
   async list(userId: string): Promise<PortalMemoryScope[]> {
     const scopes = await Promise.all((await this.listUserHomes(userId)).map((home) => this.readScope(home)));
-    return scopes.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+    const recency = (scope: PortalMemoryScope) => scope.updatedAt ?? scope.lastUsedAt ?? "";
+    scopes.sort((a, b) => recency(b).localeCompare(recency(a)));
+    const withMemory = scopes.filter((scope) => scope.userItems.length > 0 || scope.learned);
+    if (withMemory.length) return withMemory;
+    return [...scopes].sort((a, b) => (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? "")).slice(0, 1);
   }
 
   /** Memories a run in `codexHome` can draw on: the user's own items plus Codex's preference bullets. */

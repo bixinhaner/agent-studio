@@ -161,6 +161,44 @@ describe("PortalMemoryService", () => {
     expect(await readFile(path.join(userDir, "agent-general-cccccc", "memories", "memory_summary.md"), "utf8")).toContain("- 喜欢表格");
   });
 
+  it("hides assistants without memory and falls back to the most recently used one", async () => {
+    const touch = async (segment: string, at: string) => {
+      const dir = path.join(userDir, segment);
+      await mkdir(dir, { recursive: true });
+      await utimes(dir, new Date(at), new Date(at));
+    };
+    await touch("agent-doc-dddddd", "2026-09-01T00:00:00Z");
+    await touch("agent-hr-eeeeee", "2026-10-01T00:00:00Z");
+    expect((await service.list("user1")).map((scope) => scope.id)).toEqual(["internal~agent-hr"]);
+    // Hidden assistants still accept writes.
+    await service.add(await homeFor("internal~agent-doc"), { text: "文档用中文" });
+    await codexHome("ffffff", { summary: NATIVE_SUMMARY });
+    expect((await service.list("user1")).map((scope) => scope.id).sort()).toEqual(["internal~agent-doc", "internal~agent-general"]);
+  });
+
+  it("merges an assistant's legacy organization-id directory into its current organization", async () => {
+    const aliased = new PortalMemoryService({ sessionHomeRoot: root, organizationAliases: { org_internal: "internal" } });
+    const current = await codexHome("aaaaaa");
+    const legacy = path.join(root, "org_internal", "user1", "agent-general-999999");
+    await mkdir(path.join(legacy, "memories"), { recursive: true });
+    await writeFile(path.join(legacy, "memories", "memory_summary.md"), NATIVE_SUMMARY, "utf8");
+    await mkdir(path.join(root, "org_internal", "user1", "agent-old-111111"), { recursive: true });
+
+    const homes = await aliased.listUserHomes("user1");
+    expect(homes.map((home) => home.id).sort()).toEqual(["internal~agent-general", "internal~agent-old"]);
+    const general = homes.find((home) => home.id === "internal~agent-general")!;
+    expect(general.homes).toEqual([current, legacy]);
+    expect(userMemoryStoreDir(general.codexHome)).toBe(path.join(userDir, ".agent-studio-memory", "agent-general"));
+
+    const [scope] = await aliased.list("user1");
+    expect(scope).toMatchObject({ id: "internal~agent-general", organizationKey: "internal" });
+    expect(scope.learned?.profile).toHaveLength(1);
+    await aliased.add(await aliased.resolveHome("user1", "internal~agent-general"), { text: "喜欢表格" });
+    expect(await readFile(path.join(current, "memories", "memory_summary.md"), "utf8")).toContain("- 喜欢表格");
+    // Runs no longer start under the legacy key, so its Codex memory is shown but never rewritten.
+    expect(await readFile(path.join(legacy, "memories", "memory_summary.md"), "utf8")).toBe(NATIVE_SUMMARY);
+  });
+
   it("migrates hand-written legacy memories and drops auto-extracted ones", async () => {
     const legacyRaw = [
       "# Raw Memories",

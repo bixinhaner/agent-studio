@@ -43,7 +43,9 @@ import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "
 import { createAuthEmailSender, createBrandAwareEmailSender } from "./auth/email.js";
 import {
   ensureInternalOrganization,
-  INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
+  INTERNAL_ORGANIZATION_ID,
+  INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
+  INTERNAL_ORGANIZATION_SLUG
 } from "./auth/internal-organization.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import {
@@ -11754,7 +11756,11 @@ const notificationSubscriptions = new NotificationSubscriptionService({
   push: dingtalkPush,
   logger: console
 });
-const portalMemory = new PortalMemoryService({ sessionHomeRoot: appConfig.codex.sessionHomeRoot });
+const portalMemory = new PortalMemoryService({
+  sessionHomeRoot: appConfig.codex.sessionHomeRoot,
+  // Homes created before organizations were keyed by slug live under the organization id.
+  organizationAliases: { [INTERNAL_ORGANIZATION_ID]: INTERNAL_ORGANIZATION_SLUG }
+});
 const portalMemoryTranslations = new MemoryTranslationService({
   async resolveLlmConfig() {
     const settings =
@@ -11824,7 +11830,11 @@ app.use(
     },
     getSettings: async () =>
       (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
-      createDefaultSystemSettingsPayload().codexMemory
+      createDefaultSystemSettingsPayload().codexMemory,
+    resolveModeNames: async (modeIds) =>
+      Object.fromEntries(
+        (await db.agentMode.findMany({ where: { id: { in: modeIds } }, select: { id: true, name: true } })).map((mode) => [mode.id, mode.name])
+      )
   })
 );
 

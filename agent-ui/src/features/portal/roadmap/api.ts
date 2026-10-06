@@ -197,6 +197,8 @@ export type PortalMemoryScope = {
   organization_key?: string | null;
   agent_segment: string;
   mode_id: string | null;
+  /** Assistant name from the server, for modes the portal does not list (e.g. channel-only robots). */
+  mode_name?: string | null;
   updated_at: string | null;
   user_items: PortalMemoryItem[];
   learned: PortalLearnedMemory | null;
