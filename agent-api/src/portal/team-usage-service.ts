@@ -80,6 +80,7 @@ export function normalizeTimezone(timezone: string | undefined): string {
 /**
  * Temporary preview grants from TEAM_USAGE_PREVIEW_GRANTS, e.g.
  * "userId:departmentId|departmentId:2026-10-07;otherUser:dept:2026-10-08".
+ * "*" as a department id stands for every active top-level department (whole-company preview).
  * Each grant treats the viewer as leader of those departments until the end of the
  * given UTC date, then stops applying on its own; malformed or expired entries are ignored.
  */
@@ -146,7 +147,9 @@ export function ledDepartmentTree(directory: OrgDirectory, viewerId: string, ext
   const led = new Set<string>();
   const stack = [
     ...directory.memberships.filter((item) => item.userId === viewerId && item.isLeader).map((item) => item.departmentId),
-    ...extraLedDepartmentIds
+    ...extraLedDepartmentIds.flatMap((id) =>
+      id === "*" ? directory.departments.filter((item) => !item.parentDepartmentId).map((item) => item.id) : [id]
+    )
   ].filter((id) => active.has(id));
   while (stack.length > 0) {
     const departmentId = stack.pop()!;

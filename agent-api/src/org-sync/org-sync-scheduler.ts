@@ -6,6 +6,10 @@ type SchedulerTimer = ReturnType<typeof setInterval>;
 type OrgSyncSchedulerOptions = {
   enabled: boolean;
   intervalMinutes: number;
+  /** "HH:mm" wall-clock time to run once a day; overrides intervalMinutes when set. */
+  dailyAt?: string | null;
+  /** IANA timezone for dailyAt (default Asia/Shanghai). */
+  timezone?: string | null;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
   setTimeoutFn?: typeof setTimeout;
@@ -70,6 +74,51 @@ function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): bool
   return startedAt !== null && now - startedAt >= STALE_RUNNING_JOB_AGE_MS;
 }
 
+function parseDailyAt(value: string | null | undefined): { hour: number; minute: number } | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value?.trim() ?? "");
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour < 24 && minute < 60 ? { hour, minute } : null;
+}
+
+function zonedParts(timestamp: number, timeZone: string): { year: number; month: number; day: number; hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).formatToParts(new Date(timestamp));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
+}
+
+/** UTC timestamp of a wall-clock time in `timeZone` (two passes settle DST offsets). */
+function zonedTime(year: number, month: number, day: number, hour: number, minute: number, timeZone: string): number {
+  const wall = Date.UTC(year, month - 1, day, hour, minute);
+  let guess = wall;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const seen = zonedParts(guess, timeZone);
+    const seenWall = Date.UTC(seen.year, seen.month - 1, seen.day, seen.hour, seen.minute);
+    guess += wall - seenWall;
+  }
+  return guess;
+}
+
+/** The most recent daily slot at or before `now`, and the next one after it. */
+export function dailySlots(now: number, at: { hour: number; minute: number }, timeZone: string): { previous: number; next: number } {
+  const today = zonedParts(now, timeZone);
+  const slotOn = (offsetDays: number) => {
+    const base = new Date(Date.UTC(today.year, today.month - 1, today.day + offsetDays));
+    return zonedTime(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), at.hour, at.minute, timeZone);
+  };
+  const todaySlot = slotOn(0);
+  return todaySlot <= now ? { previous: todaySlot, next: slotOn(1) } : { previous: slotOn(-1), next: todaySlot };
+}
+
 export class OrgSyncScheduler {
   private initialTimer: SchedulerTimer | null = null;
   private intervalTimer: SchedulerTimer | null = null;
@@ -116,6 +165,14 @@ export class OrgSyncScheduler {
     }
   }
 
+  private get daily(): { hour: number; minute: number } | null {
+    return parseDailyAt(this.options.dailyAt);
+  }
+
+  private get timezone(): string {
+    return this.options.timezone?.trim() || "Asia/Shanghai";
+  }
+
   private get intervalMs(): number {
     return Math.max(1, Math.trunc(this.options.intervalMinutes)) * 60_000;
   }
@@ -139,6 +196,17 @@ export class OrgSyncScheduler {
         toTimestamp(lastSuccessfulJob.updatedAt) ??
         toTimestamp(lastSuccessfulJob.createdAt)
       : null;
+    const daily = this.daily;
+    if (daily) {
+      // Catch up once if the most recent slot was missed (e.g. the process was down or the run failed).
+      const { previous } = dailySlots(this.nowFn(), daily, this.timezone);
+      if (lastSuccessfulAt === null || lastSuccessfulAt < previous) {
+        await this.tick().catch(() => undefined);
+      }
+      this.scheduleNextDaily();
+      return;
+    }
+
     const delayMs = lastSuccessfulAt === null
       ? 0
       : Math.max(0, lastSuccessfulAt + this.intervalMs - this.nowFn());
@@ -156,6 +224,20 @@ export class OrgSyncScheduler {
         .finally(() => {
           if (this.started) this.startInterval();
         });
+    }, delayMs);
+    this.initialTimer?.unref?.();
+  }
+
+  /** Daily mode re-arms a timeout per run so the wall-clock time never drifts. */
+  private scheduleNextDaily(): void {
+    const daily = this.daily;
+    if (!this.started || !daily) return;
+    const delayMs = Math.max(1_000, dailySlots(this.nowFn(), daily, this.timezone).next - this.nowFn());
+    this.initialTimer = this.setTimeoutFn(() => {
+      this.initialTimer = null;
+      void this.tick()
+        .catch(() => undefined)
+        .finally(() => this.scheduleNextDaily());
     }, delayMs);
     this.initialTimer?.unref?.();
   }

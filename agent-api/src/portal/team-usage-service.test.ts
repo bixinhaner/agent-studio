@@ -192,4 +192,9 @@ describe("department breakdown", () => {
     const nodes = buildDepartmentBreakdown(directory, tree, resolveTeamScope(directory, "z", ["eng-fe"]), new Map());
     expect(nodes).toEqual([expect.objectContaining({ id: "eng-fe", parent_id: null, member_ids: ["c"] })]);
   });
+
+  it("expands a \"*\" grant to every active top-level department", async () => {
+    const { ledDepartmentTree } = await import("./team-usage-service.js");
+    expect([...ledDepartmentTree(directory, "z", ["*"]).led].sort()).toEqual(["eng", "eng-fe", "sales"]);
+  });
 });

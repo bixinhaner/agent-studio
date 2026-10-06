@@ -2207,7 +2207,9 @@ const orgSyncService = new OrgSyncService({
 });
 const orgSyncScheduler = new OrgSyncScheduler(orgSyncService, syncJobs, {
   enabled: appConfig.orgSync.enabled,
-  intervalMinutes: appConfig.orgSync.intervalMinutes
+  intervalMinutes: appConfig.orgSync.intervalMinutes,
+  dailyAt: appConfig.orgSync.dailyAt,
+  timezone: appConfig.orgSync.timezone
 });
 const sessionCookies = createSessionCookieManager({
   cookieName: appConfig.sessionCookie.name,

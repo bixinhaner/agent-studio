@@ -61,6 +61,8 @@ const schema = z.object({
   ACCESS_REQUEST_UPLOAD_ROOT: z.string().default("./temp/access-request-proofs"),
   ORG_SYNC_ENABLED: z.string().optional(),
   ORG_SYNC_INTERVAL_MINUTES: z.string().optional(),
+  ORG_SYNC_DAILY_AT: z.string().optional(),
+  ORG_SYNC_TIMEZONE: z.string().optional(),
   WORKSPACE_WHITELIST: z.string().default("."),
   LEGACY_THREAD_OWNER_ID: z.string().optional(),
   THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
@@ -308,7 +310,10 @@ export const appConfig = {
   deployDrainFile,
   orgSync: {
     enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),
-    intervalMinutes: parseInteger(env.ORG_SYNC_INTERVAL_MINUTES, 24 * 60)
+    intervalMinutes: parseInteger(env.ORG_SYNC_INTERVAL_MINUTES, 24 * 60),
+    // Daily wall-clock run (Beijing 08:17 by default); set ORG_SYNC_DAILY_AT="" to fall back to the interval.
+    dailyAt: env.ORG_SYNC_DAILY_AT ?? "08:17",
+    timezone: env.ORG_SYNC_TIMEZONE?.trim() || "Asia/Shanghai"
   }
 };
 
