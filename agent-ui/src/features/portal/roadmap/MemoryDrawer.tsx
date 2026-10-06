@@ -56,7 +56,18 @@ export function MemoryDrawer(props: {
     return result;
   }, [scope?.items]);
 
-  const scopeLabel = (item: PortalMemoryScope) => props.modeLabel(item.mode_id) ?? item.mode_id ?? t("memory.scopeGeneral");
+  // One entry per assistant; the organization is only appended when two entries would read the same.
+  const scopeLabel = useMemo(() => {
+    const { modeLabel } = props;
+    const base = (item: PortalMemoryScope) =>
+      item.mode_id ? modeLabel(item.mode_id) ?? t("memory.scopeOther") : t("memory.scopeGeneral");
+    const counts = new Map<string, number>();
+    for (const item of data?.scopes ?? []) counts.set(base(item), (counts.get(base(item)) ?? 0) + 1);
+    return (item: PortalMemoryScope) => {
+      const label = base(item);
+      return (counts.get(label) ?? 0) > 1 && item.organization_key ? `${label} · ${item.organization_key}` : label;
+    };
+  }, [data?.scopes, props.modeLabel, t]);
 
   const run = async (task: () => Promise<unknown>, success: string) => {
     setBusy(true);

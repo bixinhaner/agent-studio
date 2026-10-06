@@ -797,8 +797,150 @@ async function markPromotedMemoryCandidates(
   if (changed) await writeMemoryCandidates(sourceDir, candidates);
 }
 
+const AGENT_HOME_SEGMENT_PATTERN = /^(agent-.+)-[0-9a-f]{6,}$/;
+/** Sibling directory (next to the per-capability homes) that holds one memory store per assistant. */
+export const AGENT_STUDIO_MEMORY_STORE_DIR_NAME = ".agent-studio-memory";
+
+/**
+ * Stable memory store for a user/integration + assistant. Codex homes are keyed by
+ * `agent-<mode>-<capabilityHash>` and get a new hash whenever the assistant's MCP
+ * servers change; memory must survive that, so it lives beside the homes, keyed by
+ * mode only. Returns undefined for homes that do not follow that layout.
+ */
+export function agentStudioMemoryStore(codexHome: string): { storeDir: string; parentDir: string; segmentBase: string } | undefined {
+  const resolved = path.resolve(codexHome);
+  const segmentBase = path.basename(resolved).match(AGENT_HOME_SEGMENT_PATTERN)?.[1];
+  if (!segmentBase) return undefined;
+  const parentDir = path.dirname(resolved);
+  return { storeDir: path.join(parentDir, AGENT_STUDIO_MEMORY_STORE_DIR_NAME, segmentBase), parentDir, segmentBase };
+}
+
 export function agentStudioMemorySourcePath(codexHome: string): string {
-  return path.join(codexHome, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH);
+  return agentStudioMemoryStore(codexHome)?.storeDir ?? path.join(codexHome, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH);
+}
+
+/** Per-capability homes of the same assistant (`<segmentBase>-<hash>`) under `parentDir`, newest memory first. */
+export async function listSiblingCodexHomes(parentDir: string, segmentBase: string): Promise<string[]> {
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(parentDir);
+  } catch {
+    return [];
+  }
+  const homes = names
+    .filter((name) => name.match(AGENT_HOME_SEGMENT_PATTERN)?.[1] === segmentBase)
+    .map((name) => path.join(parentDir, name));
+  const stamped = await Promise.all(homes.map(async (home) => ({ home, mtime: await latestLegacyMemoryMtime(home) })));
+  return stamped
+    .filter((item) => item.mtime !== undefined)
+    .sort((left, right) => right.mtime! - left.mtime!)
+    .map((item) => item.home);
+}
+
+async function latestLegacyMemoryMtime(codexHome: string): Promise<number | undefined> {
+  let latest: number | undefined;
+  for (const dir of [path.join(codexHome, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH), path.join(codexHome, CODEX_MEMORY_DIR_NAME)]) {
+    for (const name of ["raw_memories.md", "MEMORY.md", "memory_summary.md"]) {
+      const stat = await fs.stat(path.join(dir, name)).catch(() => undefined);
+      if (stat && (latest === undefined || stat.mtimeMs > latest)) latest = stat.mtimeMs;
+    }
+  }
+  return latest;
+}
+
+/**
+ * Discrete Agent Studio memory items in a directory: the generated summary list, else raw
+ * `- memory:` entries. Codex-native handbooks (free-form MEMORY.md documents) are not items
+ * and stay in their home untouched.
+ */
+async function structuredMemoryItems(dir: string): Promise<string[]> {
+  const summaryItems = memorySummaryItemsFromContent(
+    await readTextIfExists(path.join(dir, "MEMORY.md")) || await readTextIfExists(path.join(dir, "memory_summary.md"))
+  );
+  if (summaryItems.length > 0) return uniqueMemoryItems(summaryItems);
+  return uniqueMemoryItems(rawMemoriesFromContent(await readTextIfExists(path.join(dir, "raw_memories.md"))));
+}
+
+type RawMemoryBlock = { memory: string; text: string };
+
+function rawMemoryBlocks(content: string): RawMemoryBlock[] {
+  const blocks: RawMemoryBlock[] = [];
+  for (const chunk of content.split(/\n(?=## )/)) {
+    if (!chunk.startsWith("## ")) continue;
+    const memory = chunk.match(/^- memory:\s*(.+)$/m)?.[1]?.trim();
+    if (memory) blocks.push({ memory, text: chunk.trimEnd() });
+  }
+  return blocks;
+}
+
+export type MergedMemoryStore = { items: string[]; raw: string; candidates: MemoryCandidate[]; homes: string[] };
+
+/**
+ * Merges the memories scattered across an assistant's per-capability homes. Homes are
+ * read newest first so their wording wins on duplicates; items are returned oldest
+ * first because summaries keep the most recent tail when trimmed.
+ */
+export async function mergeLegacyMemoryHomes(homes: string[]): Promise<MergedMemoryStore> {
+  const seen = new Set<string>();
+  const newestFirst: Array<{ memory: string; block?: string }> = [];
+  const candidates = new Map<string, MemoryCandidate>();
+  const used: string[] = [];
+  for (const home of homes) {
+    const legacySource = path.join(home, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH);
+    const dir = (await pathExists(path.join(legacySource, "raw_memories.md"))) || (await pathExists(path.join(legacySource, "MEMORY.md")))
+      ? legacySource
+      : path.join(home, CODEX_MEMORY_DIR_NAME);
+    const items = await structuredMemoryItems(dir);
+    const blocks = rawMemoryBlocks(await readTextIfExists(path.join(dir, "raw_memories.md")));
+    for (const item of [...items].reverse()) {
+      const key = normalizedMemoryKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const block = [...blocks].reverse().find((entry) => normalizedMemoryKey(entry.memory) === key);
+      newestFirst.push({ memory: item, block: block?.text });
+    }
+    for (const candidate of await readMemoryCandidates(dir)) {
+      const existing = candidates.get(candidate.key);
+      if (!existing || existing.lastSeenAt < candidate.lastSeenAt) candidates.set(candidate.key, candidate);
+    }
+    if (items.length > 0) used.push(home);
+  }
+  const ordered = newestFirst.reverse();
+  const migratedAt = new Date().toISOString();
+  const raw = ordered.length
+    ? `# Raw Memories\n\n${ordered
+        .map((item) => item.block ?? [`## ${migratedAt}`, "- source: migrated", `- memory: ${item.memory}`].join("\n"))
+        .join("\n\n")}\n`
+    : "# Raw Memories\n\nNo raw memories yet.\n";
+  return { items: ordered.map((item) => item.memory), raw, candidates: [...candidates.values()], homes: used };
+}
+
+/** Builds the stable store from the assistant's older homes the first time it is needed. */
+async function createMemoryStore(store: { storeDir: string; parentDir: string; segmentBase: string }): Promise<void> {
+  const merged = await mergeLegacyMemoryHomes(await listSiblingCodexHomes(store.parentDir, store.segmentBase));
+  const summary = buildMemorySummary(merged.items);
+  // Write into a temp dir and rename so concurrent readers never see a half-built store.
+  const tempDir = `${store.storeDir}.tmp-${randomUUID().slice(0, 8)}`;
+  await fs.mkdir(tempDir, { recursive: true });
+  await fs.writeFile(path.join(tempDir, "raw_memories.md"), merged.raw, "utf8");
+  await fs.writeFile(path.join(tempDir, "MEMORY.md"), summary, "utf8");
+  await fs.writeFile(path.join(tempDir, "memory_summary.md"), summary, "utf8");
+  if (merged.candidates.length) await writeMemoryCandidates(tempDir, merged.candidates);
+  try {
+    await fs.rename(tempDir, store.storeDir);
+  } catch (error) {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    // Another request created the store first; keep theirs.
+    if (!(await pathExists(path.join(store.storeDir, "raw_memories.md")))) throw error;
+  }
+}
+
+/** True when the store does not exist yet but older homes of the assistant still hold memory items. */
+async function legacyHomesHaveMemories(store: { parentDir: string; segmentBase: string }): Promise<boolean> {
+  for (const home of await listSiblingCodexHomes(store.parentDir, store.segmentBase)) {
+    if ((await mergeLegacyMemoryHomes([home])).items.length > 0) return true;
+  }
+  return false;
 }
 
 export function agentStudioMemoryCandidatesPath(codexHome: string): string {
@@ -841,6 +983,13 @@ export async function ensureAgentStudioMemorySource(codexHome: string): Promise<
     return sourceDir;
   }
 
+  const store = agentStudioMemoryStore(codexHome);
+  if (store) {
+    await fs.mkdir(path.dirname(store.storeDir), { recursive: true });
+    await createMemoryStore(store);
+    return store.storeDir;
+  }
+
   const projectionDir = codexMemoryProjectionPath(codexHome);
   const legacyRaw = await readTextIfExists(path.join(projectionDir, "raw_memories.md"));
   const legacySummary =
@@ -864,7 +1013,12 @@ export async function ensureAgentStudioMemorySource(codexHome: string): Promise<
 
 export async function syncAgentStudioMemoryProjection(codexHome: string): Promise<void> {
   let sourceDir = agentStudioMemorySourcePath(codexHome);
-  if (!(await pathExists(sourceDir))) {
+  const store = agentStudioMemoryStore(codexHome);
+  if (store && !(await pathExists(sourceDir))) {
+    // A fresh capability home still starts with the assistant's memories from older homes.
+    if (!(await legacyHomesHaveMemories(store))) return;
+    sourceDir = await ensureAgentStudioMemorySource(codexHome);
+  } else if (!(await pathExists(sourceDir))) {
     const projectionDir = codexMemoryProjectionPath(codexHome);
     const legacyRaw = await readTextIfExists(path.join(projectionDir, "raw_memories.md"));
     const legacySummary =

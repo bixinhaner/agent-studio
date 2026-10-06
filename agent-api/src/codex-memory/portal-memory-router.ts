@@ -59,6 +59,7 @@ export function createPortalMemoryRouter(input: {
         enabled: Boolean(settings.enabled && settings.useMemories),
         scopes: scopes.map((scope) => ({
           id: scope.id,
+          organization_key: scope.organizationKey,
           agent_segment: scope.agentSegment,
           mode_id: scope.modeId ?? null,
           updated_at: scope.updatedAt ?? null,

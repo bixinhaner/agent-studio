@@ -176,7 +176,9 @@ export type PortalMemoryItem = {
 };
 
 export type PortalMemoryScope = {
+  /** Stable per assistant (`org~agent-<mode>`), regardless of tool configuration changes. */
   id: string;
+  organization_key?: string | null;
   agent_segment: string;
   mode_id: string | null;
   updated_at: string | null;
