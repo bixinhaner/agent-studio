@@ -462,3 +462,6 @@
 .usage-team-trail button:focus-visible { outline: 2px solid rgb(var(--brand-primary-rgb, 255 70 20)); outline-offset: 1px; }
 .usage-team-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-team-dept-icon { flex: none; color: var(--roadmap-muted); }
+/* Team lists sit inside .usage-breakdown sections; opt out of its 3-column bar rows. */
+.usage-breakdown .usage-team-list { gap: 2px; }
+.usage-breakdown .usage-team-list li { display: block; }
