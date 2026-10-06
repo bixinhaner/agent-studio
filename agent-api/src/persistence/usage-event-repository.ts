@@ -84,7 +84,24 @@ type UsageEventRow = {
   createdAt: Date | string;
 };
 
+type UsageEventGroupRow = {
+  userId: string | null;
+  threadId?: string | null;
+  _sum?: { inputTokens?: number | null; outputTokens?: number | null } | null;
+  _count?: { _all?: number } | null;
+  _max?: { createdAt?: Date | string | null } | null;
+};
+
+export type UsageUserTotals = {
+  userId: string;
+  totalTokens: number;
+  turns: number;
+  tasks: number;
+  lastActiveAt: string | null;
+};
+
 type UsageEventTable = {
+  groupBy?(args: Record<string, unknown>): Promise<UsageEventGroupRow[]>;
   update?(args: { where: { id: string }; data: Record<string, unknown> }): Promise<UsageEventRow>;
   create(args: { data: Record<string, unknown> }): Promise<UsageEventRow>;
   findMany(args?: {
@@ -351,6 +368,37 @@ export class UsageEventRepository {
       from: input.from,
       to: input.to
     });
+  }
+
+  /** Per-user token / turn / task totals for an exact range; total tokens = input + output. */
+  async sumByUserInRange(input: { from: string | Date; to: string | Date; userIds?: string[] }): Promise<UsageUserTotals[]> {
+    const groupBy = this.db.usageEvent.groupBy?.bind(this.db.usageEvent);
+    if (!groupBy) throw new Error("usage aggregation requires groupBy support");
+    if (input.userIds && input.userIds.length === 0) return [];
+    const where = {
+      userId: input.userIds ? { in: input.userIds } : { not: null },
+      createdAt: { gte: toExactDate(input.from), lt: toExactDate(input.to) }
+    };
+    const [totals, threads] = await Promise.all([
+      groupBy({ by: ["userId"], where, _sum: { inputTokens: true, outputTokens: true }, _count: { _all: true }, _max: { createdAt: true } }),
+      groupBy({ by: ["userId", "threadId"], where: { ...where, threadId: { not: null } }, _count: { _all: true } })
+    ]);
+    const tasks = new Map<string, number>();
+    for (const row of threads) {
+      if (row.userId) tasks.set(row.userId, (tasks.get(row.userId) ?? 0) + 1);
+    }
+    return totals
+      .filter((row): row is UsageEventGroupRow & { userId: string } => Boolean(row.userId))
+      .map((row) => {
+        const lastActive = row._max?.createdAt ?? null;
+        return {
+          userId: row.userId,
+          totalTokens: Number(row._sum?.inputTokens ?? 0) + Number(row._sum?.outputTokens ?? 0),
+          turns: Number(row._count?._all ?? 0),
+          tasks: tasks.get(row.userId) ?? 0,
+          lastActiveAt: lastActive ? new Date(lastActive).toISOString() : null
+        };
+      });
   }
 
   async listByExactCreatedAtRange(input: ListUsageEventsByExactRangeInput): Promise<UsageEventRecord[]> {

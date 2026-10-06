@@ -253,6 +253,38 @@ describe("createDingTalkClient", () => {
     await expect(client.getUser({ userId: "departed-user" })).resolves.toBeNull();
   });
 
+  it("reads per-department leadership from user detail leader_in_dept", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({ accessToken: "app-token", expireIn: 7200 });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/topapi/v2/user/get")) {
+        return jsonResponse({
+          errcode: 0,
+          result: {
+            userid: "lead-1",
+            name: "Lead",
+            dept_id_list: [11, 22],
+            leader_in_dept: [
+              { dept_id: 11, leader: false },
+              { dept_id: 22, leader: true }
+            ]
+          }
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const user = await createDingTalkClient(TEST_CONFIG, fetchMock).getUser({ userId: "lead-1" });
+
+    expect(user?.isLeader).toBe(true);
+    expect(user?.departmentPositions?.map((item) => [item.departmentExternalId, item.isLeader])).toEqual([
+      ["11", false],
+      ["22", true]
+    ]);
+  });
+
   it("refreshes the cached app access token after it expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T00:00:00.000Z"));

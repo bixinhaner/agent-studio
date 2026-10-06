@@ -110,7 +110,8 @@ function normalizeDepartment(department: DingTalkDepartment): NormalizedOrgDepar
 function mergeDepartmentPositions(
   existing: DingTalkDepartmentPosition[] | undefined,
   incoming: DingTalkDepartmentPosition[] | undefined,
-  sourceDepartmentId?: string
+  sourceDepartmentId?: string,
+  sourceDepartmentLeader?: boolean
 ): DingTalkDepartmentPosition[] | undefined {
   const byDepartment = new Map<string, DingTalkDepartmentPosition>();
   for (const position of [...(existing ?? []), ...(incoming ?? [])]) {
@@ -126,6 +127,12 @@ function mergeDepartmentPositions(
   }
   if (sourceDepartmentId && !byDepartment.has(sourceDepartmentId)) {
     byDepartment.set(sourceDepartmentId, { departmentExternalId: sourceDepartmentId });
+  }
+  // The department member list reports `leader` for the department being listed,
+  // so it is the authoritative per-department leader flag.
+  if (sourceDepartmentId && sourceDepartmentLeader !== undefined) {
+    const current = byDepartment.get(sourceDepartmentId)!;
+    byDepartment.set(sourceDepartmentId, { ...current, isLeader: sourceDepartmentLeader });
   }
   const values = [...byDepartment.values()].sort((left, right) => left.departmentExternalId.localeCompare(right.departmentExternalId));
   return values.length > 0 ? values : undefined;
@@ -214,7 +221,11 @@ function copyEnterpriseFields(
   if (isAdmin !== undefined) target.isAdmin = isAdmin;
   const isBoss = existing?.isBoss ?? incoming.isBoss;
   if (isBoss !== undefined) target.isBoss = isBoss;
-  const isLeader = existing?.isLeader ?? incoming.isLeader;
+  // Leader of any department counts; the first listed department must not mask later ones.
+  const isLeader =
+    existing?.isLeader === undefined && incoming.isLeader === undefined
+      ? undefined
+      : Boolean(existing?.isLeader) || Boolean(incoming.isLeader);
   if (isLeader !== undefined) target.isLeader = isLeader;
   if (existing?.extension ?? incoming.extension) target.extension = existing?.extension ?? incoming.extension;
 }
@@ -241,7 +252,7 @@ function mergeUser(
     if (incoming.corpId) created.corpId = incoming.corpId;
     if (incoming.email) created.email = incoming.email;
     copyEnterpriseFields(created, undefined, incoming);
-    const departmentPositions = mergeDepartmentPositions(undefined, incoming.departmentPositions, sourceDepartmentId);
+    const departmentPositions = mergeDepartmentPositions(undefined, incoming.departmentPositions, sourceDepartmentId, incoming.isLeader);
     if (departmentPositions) created.departmentPositions = departmentPositions;
     if (
       incoming.primaryDepartmentExternalId &&
@@ -270,7 +281,7 @@ function mergeUser(
   if (existing.corpId ?? incoming.corpId) merged.corpId = existing.corpId ?? incoming.corpId;
   if (existing.email ?? incoming.email) merged.email = existing.email ?? incoming.email;
   copyEnterpriseFields(merged, existing, incoming);
-  const departmentPositions = mergeDepartmentPositions(existing.departmentPositions, incoming.departmentPositions, sourceDepartmentId);
+  const departmentPositions = mergeDepartmentPositions(existing.departmentPositions, incoming.departmentPositions, sourceDepartmentId, incoming.isLeader);
   if (departmentPositions) merged.departmentPositions = departmentPositions;
 
   const primaryDepartmentExternalId =

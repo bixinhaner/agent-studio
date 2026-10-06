@@ -29,6 +29,7 @@ import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
 import { classifyPortalRole } from "./portal/role-profile.js";
+import { createTeamUsageService, TeamUsageAccessError } from "./portal/team-usage-service.js";
 import { createPersonalUsageService } from "./portal/personal-usage-service.js";
 import { createPortalMemoryRouter } from "./codex-memory/portal-memory-router.js";
 import { PortalMemoryService } from "./codex-memory/portal-memory-service.js";
@@ -11842,6 +11843,7 @@ async function resolvePortalMemoryContextPart(
 }
 
 const personalUsage = createPersonalUsageService({ db, ledger: usageLedger });
+const teamUsage = createTeamUsageService({ db, ledger: usageLedger, personalUsage });
 
 app.get("/api/portal/home-profile", async (req: Request, res: Response) => {
   try {
@@ -11879,6 +11881,43 @@ app.get("/api/portal/me/usage", requireInternalPortalActorForFeature, async (req
     res.json(summary);
   } catch (error) {
     res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load usage" });
+  }
+});
+
+function usageQuery(req: Request) {
+  return {
+    period: typeof req.query.period === "string" ? req.query.period : undefined,
+    timezone: typeof req.query.tz === "string" ? req.query.tz : undefined
+  };
+}
+
+app.get("/api/portal/me/usage/ranking", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await teamUsage.ranking({ viewerId: actor.id, ...usageQuery(req) }));
+  } catch (error) {
+    res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load usage ranking" });
+  }
+});
+
+app.get("/api/portal/me/team-usage", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await teamUsage.team({ viewerId: actor.id, ...usageQuery(req) }));
+  } catch (error) {
+    res.status(error instanceof TeamUsageAccessError ? 403 : 400).json({ detail: error instanceof Error ? error.message : "Failed to load team usage" });
+  }
+});
+
+app.get("/api/portal/me/team-usage/:userId", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await teamUsage.member({ viewerId: actor.id, memberId: String(req.params.userId), ...usageQuery(req) }));
+  } catch (error) {
+    res.status(error instanceof TeamUsageAccessError ? 403 : 400).json({ detail: error instanceof Error ? error.message : "Failed to load member usage" });
   }
 });
 

@@ -104,3 +104,31 @@ describe("UsageEventRepository", () => {
     });
   });
 });
+
+describe("UsageEventRepository.sumByUserInRange", () => {
+  it("sums input + output tokens per user and counts distinct threads as tasks", async () => {
+    const groupBy = vi.fn(async (args: { by: string[] }) =>
+      args.by.length === 1
+        ? [
+            { userId: "u1", _sum: { inputTokens: 100, outputTokens: 20 }, _count: { _all: 3 }, _max: { createdAt: new Date("2026-10-05T01:00:00Z") } },
+            { userId: null, _sum: { inputTokens: 9, outputTokens: 9 }, _count: { _all: 1 }, _max: { createdAt: null } },
+            { userId: "u2", _sum: { inputTokens: null, outputTokens: null }, _count: { _all: 1 }, _max: { createdAt: null } }
+          ]
+        : [
+            { userId: "u1", threadId: "t1", _count: { _all: 2 } },
+            { userId: "u1", threadId: "t2", _count: { _all: 1 } }
+          ]
+    );
+    const repository = new UsageEventRepository({ usageEvent: { groupBy, create: vi.fn(), findMany: vi.fn() } } as never);
+
+    const rows = await repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", userIds: ["u1", "u2"] });
+
+    expect(rows).toEqual([
+      { userId: "u1", totalTokens: 120, turns: 3, tasks: 2, lastActiveAt: "2026-10-05T01:00:00.000Z" },
+      { userId: "u2", totalTokens: 0, turns: 1, tasks: 0, lastActiveAt: null }
+    ]);
+    expect(groupBy.mock.calls[0][0]).toMatchObject({ where: { userId: { in: ["u1", "u2"] } } });
+    expect(groupBy.mock.calls[1][0]).toMatchObject({ by: ["userId", "threadId"], where: { threadId: { not: null } } });
+    await expect(repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", userIds: [] })).resolves.toEqual([]);
+  });
+});

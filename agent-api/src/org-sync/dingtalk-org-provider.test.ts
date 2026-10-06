@@ -78,6 +78,39 @@ describe("DingTalkOrgProvider", () => {
     ]);
   });
 
+  it("keeps the department list leader flag per department instead of first-seen wins", async () => {
+    const client = buildClient({
+      listDepartments: vi.fn(async ({ parentId }) =>
+        parentId === "1"
+          ? [
+              { externalId: "dept-a", name: "Dept A", parentExternalId: "1", sortOrder: 1 },
+              { externalId: "dept-b", name: "Dept B", parentExternalId: "1", sortOrder: 2 }
+            ]
+          : []
+      ),
+      listDepartmentUsers: vi.fn(async ({ departmentId }) =>
+        departmentId === "1"
+          ? []
+          : [
+              {
+                userId: "user-1",
+                displayName: "Alice",
+                departmentExternalIds: ["dept-a", "dept-b"],
+                lifecycleState: "active" as const,
+                isLeader: departmentId === "dept-b"
+              }
+            ]
+      )
+    });
+    const snapshot = await new DingTalkOrgProvider(client).fetchFullOrganization();
+    const user = snapshot.users.find((item) => item.userId === "user-1");
+    expect(user?.isLeader).toBe(true);
+    expect(user?.departmentPositions?.map((item) => [item.departmentExternalId, item.isLeader])).toEqual([
+      ["dept-a", false],
+      ["dept-b", true]
+    ]);
+  });
+
   it("uses cached user details within refresh interval without calling DingTalk detail API", async () => {
     const getUser = vi.fn(async () => {
       throw new Error("detail API should not be called");

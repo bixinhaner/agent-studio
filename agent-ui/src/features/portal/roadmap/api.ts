@@ -255,3 +255,56 @@ export function fetchPersonalUsage(period: PersonalUsagePeriod, timezone: string
   const params = new URLSearchParams({ period, tz: timezone });
   return api<PersonalUsageSummary>(`/api/portal/me/usage?${params.toString()}`);
 }
+
+export type UsageRankEntry = { rank: number | null; size: number; active: number };
+
+export type UsageRanking = {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  total_tokens: number;
+  department: (UsageRankEntry & { id: string; name: string }) | null;
+  company: UsageRankEntry;
+  team: { available: boolean; size: number };
+};
+
+export type TeamRelation = "direct" | "indirect" | "department";
+
+export type TeamUsageMember = {
+  user_id: string;
+  name: string;
+  title: string | null;
+  department: string | null;
+  relation: TeamRelation;
+  total_tokens: number;
+  turns: number;
+  tasks: number;
+  last_active_at: string | null;
+};
+
+export type TeamUsageSummary = {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  totals: { members: number; active_members: number; total_tokens: number; turns: number; tasks: number };
+  members: TeamUsageMember[];
+};
+
+export type TeamMemberUsage = {
+  member: { user_id: string; name: string; title: string | null; department: string | null; relation: TeamRelation };
+  usage: PersonalUsageSummary;
+};
+
+function usageParams(period: PersonalUsagePeriod, timezone: string) {
+  return new URLSearchParams({ period, tz: timezone }).toString();
+}
+
+export function fetchUsageRanking(period: PersonalUsagePeriod, timezone: string) {
+  return api<UsageRanking>(`/api/portal/me/usage/ranking?${usageParams(period, timezone)}`);
+}
+
+export function fetchTeamUsage(period: PersonalUsagePeriod, timezone: string) {
+  return api<TeamUsageSummary>(`/api/portal/me/team-usage?${usageParams(period, timezone)}`);
+}
+
+export function fetchTeamMemberUsage(userId: string, period: PersonalUsagePeriod, timezone: string) {
+  return api<TeamMemberUsage>(`/api/portal/me/team-usage/${encodeURIComponent(userId)}?${usageParams(period, timezone)}`);
+}

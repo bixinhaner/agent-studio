@@ -35,7 +35,8 @@ export type UsageLedgerRankings = {
   topFeatures: Array<Omit<UsageLedgerRanking, "key"> & { featureType: string }>;
 };
 
-type UsageEventStore = Pick<UsageEventRepository, "list" | "listByExactCreatedAtRange">;
+type UsageEventStore = Pick<UsageEventRepository, "list" | "listByExactCreatedAtRange"> &
+  Partial<Pick<UsageEventRepository, "sumByUserInRange">>;
 
 const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 
@@ -124,6 +125,11 @@ export class UsageLedgerService {
 
   async listEventsByExactCreatedAtRange(input: ListUsageEventsByExactRangeInput): Promise<UsageEventRecord[]> {
     return this.deps.usageEvents.listByExactCreatedAtRange(input);
+  }
+
+  async sumByUserInRange(input: { from: string | Date; to: string | Date; userIds?: string[] }) {
+    if (!this.deps.usageEvents.sumByUserInRange) throw new Error("usage aggregation is not available");
+    return this.deps.usageEvents.sumByUserInRange(input);
   }
 
   async listExternalApiEvents(input: Omit<ListUsageEventsInput, "featureType"> = {}): Promise<UsageEventRecord[]> {

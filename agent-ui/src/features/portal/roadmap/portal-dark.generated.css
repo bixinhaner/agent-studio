@@ -5844,3 +5844,61 @@
 :root[data-portal-theme="dark"] .notify-settings-row p {
   color: var(--roadmap-muted);
 }
+:root[data-portal-theme="dark"] .usage-rank h3 {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-rank-cell {
+  border: 1px solid var(--roadmap-line);
+}
+:root[data-portal-theme="dark"] .usage-rank-label {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-rank-cell strong {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-rank-cell strong small {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-rank-cell strong.is-empty {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-rank-cell > small {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-stats small.is-neutral {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-team-row {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+:root[data-portal-theme="dark"] .usage-team-row:hover {
+  background: var(--roadmap-surface-soft);
+}
+:root[data-portal-theme="dark"] .usage-team-row:focus-visible {
+  outline: 2px solid rgb(var(--brand-primary-rgb, 255 70 20));
+}
+:root[data-portal-theme="dark"] .usage-team-name {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-team-meta {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-team-tokens {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-team-relation {
+  border: 1px solid var(--roadmap-line);
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-team-relation.is-direct {
+  border-color: rgb(var(--brand-primary-rgb, 255 70 20) / 0.35);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .usage-team-chevron {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .usage-member-title strong {
+  color: var(--roadmap-text);
+}

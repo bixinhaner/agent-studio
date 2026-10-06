@@ -424,3 +424,33 @@
   .outputs-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .roadmap-drawer .ant-drawer-content-wrapper { width: 100% !important; }
 }
+
+/* Usage ranking and team view */
+.usage-rank { display: grid; gap: 8px; }
+.usage-rank h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--roadmap-text); font-size: 13px; font-weight: 600; }
+.usage-rank-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.usage-rank-cell { display: grid; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--roadmap-line); border-radius: 10px; }
+.usage-rank-label { overflow: hidden; color: var(--roadmap-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.usage-rank-cell strong { color: var(--roadmap-text); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.usage-rank-cell strong small { color: var(--roadmap-muted); font-size: 12px; font-weight: 400; }
+.usage-rank-cell strong.is-empty { color: var(--roadmap-muted); font-size: 15px; font-weight: 500; }
+.usage-rank-cell > small { color: var(--roadmap-muted); font-size: 11px; }
+.usage-stats small.is-neutral { color: var(--roadmap-muted); }
+.usage-team-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.usage-team-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) 16px; align-items: center; gap: 12px; width: 100%; padding: 10px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background var(--motion-fast) var(--ease-standard); }
+.usage-team-row:hover { background: var(--roadmap-surface-soft); }
+.usage-team-row:focus-visible { outline: 2px solid rgb(var(--brand-primary-rgb, 255 70 20)); outline-offset: 1px; }
+.usage-team-person, .usage-team-usage { display: grid; gap: 3px; min-width: 0; }
+.usage-team-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--roadmap-text); font-size: 13.5px; font-weight: 600; }
+.usage-team-meta { overflow: hidden; color: var(--roadmap-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.usage-team-tokens { color: var(--roadmap-text); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-team-relation { flex: none; padding: 0 6px; border: 1px solid var(--roadmap-line); border-radius: 999px; color: var(--roadmap-muted); font-size: 11px; font-weight: 400; line-height: 18px; }
+.usage-team-relation.is-direct { border-color: rgb(var(--brand-primary-rgb, 255 70 20) / 0.35); color: var(--roadmap-text); }
+.usage-team-chevron { color: var(--roadmap-muted); }
+.usage-member-header { display: grid; gap: 6px; justify-items: start; }
+.usage-member-title { display: grid; gap: 2px; padding: 0 8px; }
+.usage-member-title strong { color: var(--roadmap-text); font-size: 16px; font-weight: 650; }
+.usage-drawer[hidden] { display: none; }
+@media (max-width: 560px) {
+  .usage-team-row { grid-template-columns: minmax(0, 1fr) 96px 16px; gap: 8px; }
+}

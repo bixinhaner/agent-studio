@@ -309,6 +309,17 @@ function getDepartmentPositions(record: Record<string, unknown> | null): DingTal
     });
   }
 
+  // User detail reports per-department leadership as leader_in_dept: [{ dept_id, leader }].
+  for (const item of asArray(record?.leader_in_dept)) {
+    const entry = asRecord(item);
+    const departmentExternalId = getString(entry, ["dept_id", "deptId", "departmentId"]);
+    const leader = getBoolean(entry, ["leader", "isLeader", "is_leader"]);
+    if (!departmentExternalId || leader === undefined) continue;
+    const existing = positions.find((position) => position.departmentExternalId === departmentExternalId);
+    if (existing) existing.isLeader = leader;
+    else positions.push({ departmentExternalId, isPrimary: departmentExternalId === getPrimaryDepartmentExternalId(record), isLeader: leader });
+  }
+
   for (const departmentExternalId of getDepartmentExternalIds(record)) {
     if (positions.some((item) => item.departmentExternalId === departmentExternalId)) continue;
     positions.push({
@@ -343,7 +354,7 @@ function normalizeTimestamp(value: unknown): string | undefined {
 function getLeaderFlag(record: Record<string, unknown> | null): boolean | undefined {
   const direct = getBoolean(record, ["leader", "isLeader", "is_leader"]);
   if (direct !== undefined) return direct;
-  const leaderInDept = asRecord(record?.leader_in_dept);
+  const leaderInDept = Array.isArray(record?.leader_in_dept) ? null : asRecord(record?.leader_in_dept);
   if (leaderInDept) {
     const values = Object.values(leaderInDept);
     if (values.some((value) => value === true || value === "true" || value === 1 || value === "1")) {
