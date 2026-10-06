@@ -37,7 +37,6 @@ describe("CodexMemoryEngine (retired extraction)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const engine = new CodexMemoryEngine({
       getSettings: async () => ({ ...createDefaultSystemSettingsPayload().codexMemory, generationEngine: "agent_studio" as const }),
-      resolveProviderSnapshot: async () => providerSnapshot,
       sessionHomeRoot,
       logger: console
     });

@@ -109,7 +109,6 @@ import {
 } from "./codex-memory/engine.js";
 import { MemoryTranslationService } from "./codex-memory/memory-translation.js";
 import { syncAgentStudioMemoryProjection } from "./codex-memory/user-memory.js";
-import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { orderAssistantContentParts } from "./messages/assistant-content-order.js";
 import { resolveCompletedAssistantText } from "./messages/assistant-completion.js";
@@ -798,21 +797,8 @@ codexMemoryEngine = new CodexMemoryEngine({
   getSettings: async () =>
     (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
     createDefaultSystemSettingsPayload().codexMemory,
-  resolveProviderSnapshot: () => codexProviders.resolveActiveProviderSnapshot(),
-  getLlmSecretState: getCodexMemoryLlmSecretState,
   sessionHomeRoot: appConfig.codex.sessionHomeRoot,
   logger: console
-});
-const codexMemoryBackfill = new CodexMemoryBackfillService({
-  db,
-  memoryEngine: codexMemoryEngine,
-  sessionHomeRoot: appConfig.codex.sessionHomeRoot,
-  logger: console
-});
-void codexMemoryBackfill.resumePendingRuns().catch((error) => {
-  console.warn("codex memory backfill resume failed", {
-    detail: error instanceof Error ? error.message : String(error)
-  });
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const zendeskSettingsStore = new ZendeskSettingsStore();
@@ -11673,7 +11659,6 @@ registerCommonApiRoutes(app, {
           createDefaultSystemSettingsPayload().pythonRuntime,
         sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot
       }),
-    backfill: codexMemoryBackfill,
     users,
     agentModes,
     listIntegrationInstancesByIds: async (ids) => {

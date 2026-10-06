@@ -415,8 +415,6 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
 
   constructor(private readonly dependencies: {
     getSettings(): Promise<SystemSettingsCodexMemory | undefined>;
-    resolveProviderSnapshot(): Promise<ManagedCodexProviderSnapshot>;
-    getLlmSecretState?(): Promise<{ apiKey?: string } | undefined>;
     sessionHomeRoot?: string;
     logger?: Pick<typeof console, "warn" | "info">;
   }) {}
