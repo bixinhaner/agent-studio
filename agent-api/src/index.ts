@@ -105,8 +105,10 @@ import {
   CodexMemoryEngine,
   codexHomeFromRunConfig as codexHomeFromMemoryRunConfig,
   codexRunConfigHasExternalContext,
-  syncAgentStudioMemoryProjection
+  resolveLlmConfig as resolveCodexMemoryLlmConfig
 } from "./codex-memory/engine.js";
+import { MemoryTranslationService } from "./codex-memory/memory-translation.js";
+import { syncAgentStudioMemoryProjection } from "./codex-memory/user-memory.js";
 import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { orderAssistantContentParts } from "./messages/assistant-content-order.js";
@@ -11768,6 +11770,20 @@ const notificationSubscriptions = new NotificationSubscriptionService({
   logger: console
 });
 const portalMemory = new PortalMemoryService({ sessionHomeRoot: appConfig.codex.sessionHomeRoot });
+const portalMemoryTranslations = new MemoryTranslationService({
+  async resolveLlmConfig() {
+    const settings =
+      (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+      createDefaultSystemSettingsPayload().codexMemory;
+    return resolveCodexMemoryLlmConfig(
+      settings,
+      await codexProviders.resolveActiveProviderSnapshot(),
+      await getCodexMemoryLlmSecretState()
+    );
+  },
+  recordDirectUsage: (input) => usageRecorder.recordDirectUsage(input),
+  logger: console
+});
 
 function requireInternalPortalActorForFeature(req: Request, res: Response, next: NextFunction) {
   try {
@@ -11816,9 +11832,10 @@ app.use(
   "/api/portal/memory",
   createPortalMemoryRouter({
     service: portalMemory,
+    translations: portalMemoryTranslations,
     resolveActor(req) {
       const actor = currentActorFromRequest(req);
-      return { userId: actor.id };
+      return { userId: actor.id, organizationId: actor.organizationId };
     },
     getSettings: async () =>
       (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??

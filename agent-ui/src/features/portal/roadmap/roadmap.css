@@ -132,6 +132,31 @@
 .roadmap-memory-item.is-editing { display: grid; gap: 8px; }
 .roadmap-memory-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .roadmap-memory-actions { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
+.roadmap-memory-item.is-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.roadmap-memory-item.is-row p { margin: 0; flex: 1; min-width: 0; }
+.roadmap-memory-section { margin-top: 18px; }
+.roadmap-memory-section h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--roadmap-text); }
+.roadmap-memory-section-hint { margin: 0 0 10px; font-size: 12px; line-height: 1.5; }
+.roadmap-memory-note { margin: 0 0 8px; font-size: 12px; line-height: 1.5; }
+.roadmap-memory-learned {
+  border: 1px solid var(--roadmap-line); border-radius: 10px; padding: 12px 14px; background: var(--roadmap-surface);
+  display: grid; gap: 12px; color: var(--roadmap-text); font-size: 13px; line-height: 1.65;
+}
+.roadmap-memory-learned.is-empty { gap: 4px; }
+.roadmap-memory-learned.is-empty span { color: var(--roadmap-muted); font-size: 12px; }
+.roadmap-memory-learned h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--roadmap-muted); }
+.roadmap-memory-learned p { margin: 0; word-break: break-word; }
+.roadmap-memory-learned-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--roadmap-muted); }
+.roadmap-memory-points { margin: 0; padding-left: 18px; display: grid; gap: 4px; word-break: break-word; }
+.roadmap-memory-points ul { margin: 2px 0 0; padding-left: 16px; color: var(--roadmap-muted); }
+.roadmap-memory-translate-toggle, .roadmap-memory-disclosure {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 2px 0; cursor: pointer;
+  color: var(--roadmap-muted); font: inherit; font-size: 12px;
+}
+.roadmap-memory-disclosure { color: var(--roadmap-text); font-weight: 600; min-height: 28px; }
+.roadmap-memory-translate-toggle:hover, .roadmap-memory-disclosure:hover { color: var(--roadmap-text); }
+.roadmap-memory-translate-toggle:focus-visible, .roadmap-memory-disclosure:focus-visible { outline: 2px solid var(--roadmap-accent); outline-offset: 2px; border-radius: 4px; }
+.roadmap-memory-translating { display: grid; gap: 8px; }
 
 /* ---- onboarding tour ---- */
 /* Fixed layer in body CSS pixels; positions come from OnboardingTour (zoom-aware). */

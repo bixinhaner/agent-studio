@@ -252,13 +252,14 @@ describe("ManagedCodexProviderResolver", () => {
     const snapshot = await resolver.resolveActiveProviderSnapshot();
 
     expect(snapshot.kind).toBe("chatgpt");
+    // Codex native memory is the only generator, so default settings let it generate.
     expect(snapshot.runtimeOptions.config).toMatchObject({
       features: {
         memories: true
       },
       memories: {
         use_memories: true,
-        generate_memories: false
+        generate_memories: true
       }
     });
   });

@@ -5448,6 +5448,43 @@
 :root[data-portal-theme="dark"] .roadmap-memory-item p {
   color: var(--roadmap-text);
 }
+:root[data-portal-theme="dark"] .roadmap-memory-section h3 {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-learned {
+  border: 1px solid var(--roadmap-line);
+  background: var(--roadmap-surface);
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-learned.is-empty span {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-learned h4 {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-learned-meta {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-points ul {
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-translate-toggle,
+:root[data-portal-theme="dark"] .roadmap-memory-disclosure {
+  border: 0;
+  background: none;
+  color: var(--roadmap-muted);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-disclosure {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-translate-toggle:hover,
+:root[data-portal-theme="dark"] .roadmap-memory-disclosure:hover {
+  color: var(--roadmap-text);
+}
+:root[data-portal-theme="dark"] .roadmap-memory-translate-toggle:focus-visible,
+:root[data-portal-theme="dark"] .roadmap-memory-disclosure:focus-visible {
+  outline: 2px solid var(--roadmap-accent);
+}
 :root[data-portal-theme="dark"] .roadmap-tour-backdrop {
   background: rgba(53, 61, 80, 0.5);
 }

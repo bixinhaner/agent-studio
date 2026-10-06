@@ -609,7 +609,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     enabled: true,
     useMemories: true,
     generateMemories: true,
-    generationEngine: "agent_studio",
+    // Agent Studio extraction is retired; the field stays for stored settings compatibility.
+    generationEngine: "codex_native",
     llmProvider: "active_codex_provider",
     llmApiMode: "auto",
     llmModel: "",

@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { existsSync, type Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
@@ -11,12 +11,9 @@ import type { CodexMemoryBackfillService } from "./backfill-service.js";
 import {
   AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
   AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES,
-  agentStudioMemoryCandidatesPath,
-  agentStudioMemorySourcePath,
-  codexMemoryProjectionPath,
-  ensureAgentStudioMemorySource,
-  syncAgentStudioMemoryProjection
+  codexMemoryProjectionPath
 } from "./engine.js";
+import { syncAgentStudioMemoryProjection } from "./user-memory.js";
 
 type CodexMemoryAdminRouterOptions = {
   sessionHomeRoot: string;
@@ -258,9 +255,9 @@ function resolveScopeHome(sessionHomeRoot: string, scopeId: string): { relativeH
   return { relativeHome: toUnixRelative(path.relative(sessionHomeRoot, codexHome)), codexHome };
 }
 
+/** Admins see and edit Codex's own memory files; user-added memories are projected into them as a marked section. */
 function adminMemoryPathForCodexHome(codexHome: string): string {
-  const sourcePath = agentStudioMemorySourcePath(codexHome);
-  return existsSync(sourcePath) ? sourcePath : codexMemoryProjectionPath(codexHome);
+  return codexMemoryProjectionPath(codexHome);
 }
 
 function resolveMemoryFile(input: {
@@ -1019,8 +1016,6 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   router.put("/codex-memory/scopes/:scopeId/files/content", requireWrite, async (req: Request, res: Response) => {
     try {
       const parsed = writeMemoryFileSchema.parse(req.body ?? {});
-      const scope = resolveScopeHome(sessionHomeRoot, req.params.scopeId);
-      await ensureAgentStudioMemorySource(scope.codexHome);
       const resolved = resolveMemoryFile({
         sessionHomeRoot,
         scopeId: req.params.scopeId,
@@ -1063,15 +1058,12 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   router.delete("/codex-memory/scopes/:scopeId", requireWrite, async (req: Request, res: Response) => {
     try {
       const scope = resolveScopeHome(sessionHomeRoot, req.params.scopeId);
-      const sourcePath = agentStudioMemorySourcePath(scope.codexHome);
       const projectionPath = codexMemoryProjectionPath(scope.codexHome);
-      if (await pathExists(sourcePath)) {
-        await clearManagedMemoryFiles(sourcePath);
-        await fs.rm(agentStudioMemoryCandidatesPath(scope.codexHome), { force: true });
-      }
       if (await pathExists(projectionPath)) {
         await clearManagedMemoryFiles(projectionPath);
       }
+      // Clears what Codex learned; memories the user typed in stay and are projected again.
+      await syncAgentStudioMemoryProjection(scope.codexHome);
       res.status(204).end();
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });

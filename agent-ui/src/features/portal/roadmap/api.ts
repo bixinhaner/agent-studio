@@ -165,14 +165,30 @@ export function testSubscription(id: string) {
   });
 }
 
-export type PortalMemoryCategory = "preference" | "background" | "habit";
-
 export type PortalMemoryItem = {
   id: string;
   text: string;
-  category: PortalMemoryCategory;
-  source: "learned" | "user";
+  created_at: string;
+  updated_at: string;
+};
+
+export type MemoryPoint = { text: string; details: string[] };
+
+export type MemoryContent = {
+  profile: string[];
+  preferences: MemoryPoint[];
+  tips: MemoryPoint[];
+};
+
+export type MemoryLanguage = "zh" | "en";
+
+/** What Bailey (Codex) learned from conversations; read-only. */
+export type PortalLearnedMemory = MemoryContent & {
+  language: MemoryLanguage;
+  content_hash: string;
   updated_at: string | null;
+  /** Cached display translation into the requested locale, when one exists. */
+  translated: (MemoryContent & { language: MemoryLanguage }) | null;
 };
 
 export type PortalMemoryScope = {
@@ -182,18 +198,34 @@ export type PortalMemoryScope = {
   agent_segment: string;
   mode_id: string | null;
   updated_at: string | null;
-  items: PortalMemoryItem[];
+  user_items: PortalMemoryItem[];
+  learned: PortalLearnedMemory | null;
 };
 
-export function listMemories() {
-  return api<{ enabled: boolean; scopes: PortalMemoryScope[] }>("/api/portal/memory");
+export type PortalMemoryOverview = {
+  enabled: boolean;
+  learning: boolean;
+  min_idle_hours: number;
+  translation_available: boolean;
+  scopes: PortalMemoryScope[];
+};
+
+export function listMemories(locale: string) {
+  return api<PortalMemoryOverview>(`/api/portal/memory?${new URLSearchParams({ locale }).toString()}`);
 }
 
-export function addMemory(input: { scope_id: string; text: string; category: PortalMemoryCategory }) {
+export function translateMemory(scopeId: string, locale: string) {
+  return api<{ content_hash: string; translated: MemoryContent & { language: MemoryLanguage } }>(
+    `/api/portal/memory/${encodeURIComponent(scopeId)}/translate`,
+    { method: "POST", json: { locale } }
+  );
+}
+
+export function addMemory(input: { scope_id: string; text: string }) {
   return api<{ scope_id: string; item: PortalMemoryItem }>("/api/portal/memory", { method: "POST", json: input });
 }
 
-export function updateMemory(scopeId: string, itemId: string, input: { text?: string; category?: PortalMemoryCategory }) {
+export function updateMemory(scopeId: string, itemId: string, input: { text: string }) {
   return api<{ item: PortalMemoryItem }>(
     `/api/portal/memory/${encodeURIComponent(scopeId)}/${encodeURIComponent(itemId)}`,
     { method: "PATCH", json: input }

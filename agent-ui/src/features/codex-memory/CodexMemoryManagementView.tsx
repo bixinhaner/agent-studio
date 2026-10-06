@@ -1569,25 +1569,10 @@ export function CodexMemoryManagementView() {
               />
               <SettingSwitch
                 title="自动生成记忆"
-                description="由统一生成引擎把稳定偏好写入 Codex 兼容的记忆文件。"
+                description="由 Codex 原生机制在对话空闲后提取并整理长期记忆。Agent Studio 不再自行提取，只保留用户在 portal 手动添加的记忆。"
                 checked={settings.generateMemories}
                 onChange={(generateMemories) => updateSetting("generateMemories", generateMemories)}
               />
-              <div style={{ padding: "14px 0", borderBottom: "1px solid var(--admin-color-border-subtle, rgba(15, 23, 42, 0.08))" }}>
-                <Typography.Text strong>生成方式</Typography.Text>
-                <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
-                  Agent Studio 异步生成不依赖 Codex 原生 rollout eligibility；Codex 原生模式只保留官方后台生成。
-                </Typography.Text>
-                <Select
-                  value={settings.generationEngine}
-                  onChange={(value) => updateSetting("generationEngine", value as CodexMemorySettings["generationEngine"])}
-                  options={[
-                    { label: "Agent Studio 异步生成", value: "agent_studio" },
-                    { label: "Codex 原生生成", value: "codex_native" }
-                  ]}
-                  style={{ width: "100%", marginTop: 10 }}
-                />
-              </div>
               <SettingSwitch
                 title="外部上下文时暂停生成"
                 description="带知识库、工单或文件上下文时避免把临时信息沉淀为长期记忆。"
@@ -1596,114 +1581,112 @@ export function CodexMemoryManagementView() {
               />
             </div>
 
-            {settings.generationEngine === "agent_studio" ? (
-              <div
-                style={{
-                  border: "1px solid var(--admin-color-border)",
-                  borderRadius: 12,
-                  padding: 14,
-                  background: "var(--admin-color-bg-subtle, #f8fafc)"
-                }}
-              >
-                <Typography.Text strong>LLM API 配置</Typography.Text>
-                <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
-                  默认复用当前 Codex Provider；如果当前是本地 ChatGPT 登录，需要配置 API key 环境变量才会生成记忆。
-                </Typography.Text>
-                <Row gutter={[12, 12]} style={{ marginTop: 10 }}>
+            <div
+              style={{
+                border: "1px solid var(--admin-color-border)",
+                borderRadius: 12,
+                padding: 14,
+                background: "var(--admin-color-bg-subtle, #f8fafc)"
+              }}
+            >
+              <Typography.Text strong>记忆翻译 LLM 配置</Typography.Text>
+              <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                用于把 Codex 记忆翻译成用户界面语言后在 portal 展示，Codex 仍读取原文；用量按 memory_translation 计入统计。默认复用当前 Codex Provider。
+              </Typography.Text>
+              <Row gutter={[12, 12]} style={{ marginTop: 10 }}>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>Provider</Typography.Text>
+                  <Select
+                    value={settings.llmProvider}
+                    onChange={(value) => updateSetting("llmProvider", value as CodexMemorySettings["llmProvider"])}
+                    options={[
+                      { label: "复用当前 Codex Provider", value: "active_codex_provider" },
+                      { label: "OpenAI Responses API", value: "openai_responses" },
+                      { label: "OpenAI-compatible API", value: "openai_compatible" },
+                      { label: "Azure OpenAI", value: "azure_openai" }
+                    ]}
+                    style={{ width: "100%", marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>API 模式</Typography.Text>
+                  <Select
+                    value={settings.llmApiMode}
+                    onChange={(value) => updateSetting("llmApiMode", value as CodexMemorySettings["llmApiMode"])}
+                    options={[
+                      { label: "自动选择", value: "auto" },
+                      { label: "Responses API", value: "responses" },
+                      { label: "Chat Completions", value: "chat_completions" }
+                    ]}
+                    style={{ width: "100%", marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>模型 / Azure 部署名</Typography.Text>
+                  <Input
+                    value={settings.llmModel}
+                    placeholder="gpt-5.4"
+                    onChange={(event) => updateSetting("llmModel", event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>Base URL</Typography.Text>
+                  <Input
+                    value={settings.llmBaseUrl}
+                    placeholder="留空则使用当前 Provider 或 OpenAI 默认地址"
+                    onChange={(event) => updateSetting("llmBaseUrl", event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>API key</Typography.Text>
+                  <Input.Password
+                    value={llmApiKeyDraft}
+                    placeholder={llmSecretState.hasApiKey ? "已保存，留空则不修改" : "请输入 API key"}
+                    disabled={clearLlmApiKey}
+                    onChange={(event) => setLlmApiKeyDraft(event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                  <Typography.Text type="secondary" style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+                    {llmSecretState.hasApiKey
+                      ? `已保存 API key${llmSecretState.rotatedAt ? `，更新时间 ${formatLocalTime(llmSecretState.rotatedAt)}` : ""}`
+                      : "尚未保存 API key"}
+                  </Typography.Text>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>API key 环境变量</Typography.Text>
+                  <Input
+                    value={settings.llmApiKeyEnv}
+                    placeholder="CODEX_API_KEY"
+                    onChange={(event) => updateSetting("llmApiKeyEnv", event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24}>
+                  <Checkbox
+                    checked={clearLlmApiKey}
+                    onChange={(event) => {
+                      setClearLlmApiKey(event.target.checked);
+                      if (event.target.checked) setLlmApiKeyDraft("");
+                    }}
+                  >
+                    清空当前保存的 API key
+                  </Checkbox>
+                </Col>
+                {settings.llmProvider === "azure_openai" ? (
                   <Col xs={24} md={12}>
-                    <Typography.Text strong>Provider</Typography.Text>
-                    <Select
-                      value={settings.llmProvider}
-                      onChange={(value) => updateSetting("llmProvider", value as CodexMemorySettings["llmProvider"])}
-                      options={[
-                        { label: "复用当前 Codex Provider", value: "active_codex_provider" },
-                        { label: "OpenAI Responses API", value: "openai_responses" },
-                        { label: "OpenAI-compatible API", value: "openai_compatible" },
-                        { label: "Azure OpenAI", value: "azure_openai" }
-                      ]}
-                      style={{ width: "100%", marginTop: 8 }}
-                    />
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>API 模式</Typography.Text>
-                    <Select
-                      value={settings.llmApiMode}
-                      onChange={(value) => updateSetting("llmApiMode", value as CodexMemorySettings["llmApiMode"])}
-                      options={[
-                        { label: "自动选择", value: "auto" },
-                        { label: "Responses API", value: "responses" },
-                        { label: "Chat Completions", value: "chat_completions" }
-                      ]}
-                      style={{ width: "100%", marginTop: 8 }}
-                    />
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>模型 / Azure 部署名</Typography.Text>
+                    <Typography.Text strong>Azure API Version</Typography.Text>
                     <Input
-                      value={settings.llmModel}
-                      placeholder="gpt-5.4"
-                      onChange={(event) => updateSetting("llmModel", event.target.value)}
+                      value={settings.llmAzureApiVersion}
+                      placeholder="2025-04-01-preview"
+                      onChange={(event) => updateSetting("llmAzureApiVersion", event.target.value)}
                       style={{ marginTop: 8 }}
                     />
                   </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>Base URL</Typography.Text>
-                    <Input
-                      value={settings.llmBaseUrl}
-                      placeholder="留空则使用当前 Provider 或 OpenAI 默认地址"
-                      onChange={(event) => updateSetting("llmBaseUrl", event.target.value)}
-                      style={{ marginTop: 8 }}
-                    />
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>API key</Typography.Text>
-                    <Input.Password
-                      value={llmApiKeyDraft}
-                      placeholder={llmSecretState.hasApiKey ? "已保存，留空则不修改" : "请输入 API key"}
-                      disabled={clearLlmApiKey}
-                      onChange={(event) => setLlmApiKeyDraft(event.target.value)}
-                      style={{ marginTop: 8 }}
-                    />
-                    <Typography.Text type="secondary" style={{ display: "block", marginTop: 4, fontSize: 12 }}>
-                      {llmSecretState.hasApiKey
-                        ? `已保存 API key${llmSecretState.rotatedAt ? `，更新时间 ${formatLocalTime(llmSecretState.rotatedAt)}` : ""}`
-                        : "尚未保存 API key"}
-                    </Typography.Text>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>API key 环境变量</Typography.Text>
-                    <Input
-                      value={settings.llmApiKeyEnv}
-                      placeholder="CODEX_API_KEY"
-                      onChange={(event) => updateSetting("llmApiKeyEnv", event.target.value)}
-                      style={{ marginTop: 8 }}
-                    />
-                  </Col>
-                  <Col xs={24}>
-                    <Checkbox
-                      checked={clearLlmApiKey}
-                      onChange={(event) => {
-                        setClearLlmApiKey(event.target.checked);
-                        if (event.target.checked) setLlmApiKeyDraft("");
-                      }}
-                    >
-                      清空当前保存的 API key
-                    </Checkbox>
-                  </Col>
-                  {settings.llmProvider === "azure_openai" ? (
-                    <Col xs={24} md={12}>
-                      <Typography.Text strong>Azure API Version</Typography.Text>
-                      <Input
-                        value={settings.llmAzureApiVersion}
-                        placeholder="2025-04-01-preview"
-                        onChange={(event) => updateSetting("llmAzureApiVersion", event.target.value)}
-                        style={{ marginTop: 8 }}
-                      />
-                    </Col>
-                  ) : null}
-                </Row>
-              </div>
-            ) : null}
+                ) : null}
+              </Row>
+            </div>
 
             <Row gutter={[12, 12]}>
               <Col xs={24} md={12}>
@@ -1757,9 +1740,7 @@ export function CodexMemoryManagementView() {
               showIcon
               message={settings.enabled ? "发布后所有 Codex 渠道统一启用 memory" : "发布后所有 Codex 渠道统一关闭 memory"}
               description={
-                settings.generationEngine === "agent_studio"
-                  ? "读取仍走 Codex 原生记忆文件，生成由 Agent Studio 统一异步完成。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
-                  : "读取和生成都交给 Codex 原生机制。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
+                "读取和生成都交给 Codex 原生机制；用户手动添加的记忆以独立段落写入 Codex 记忆摘要，不覆盖 Codex 内容。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
               }
             />
 
@@ -2593,7 +2574,7 @@ export function CodexMemoryManagementView() {
                 Codex 兼容的长期记忆继续用于稳定偏好和长期流程；不会自动沉淀企业目录里的动态岗位资料。
               </Typography.Text>
               <Space wrap>
-                <Tag>{settings.generationEngine === "agent_studio" ? "Agent Studio 生成" : "Codex 原生生成"}</Tag>
+                <Tag>Codex 原生生成</Tag>
                 <Tag>{settings.useMemories ? "读取已有记忆" : "不读取记忆"}</Tag>
                 <Tag>{settings.generateMemories ? "允许生成" : "不生成"}</Tag>
               </Space>
@@ -2670,7 +2651,6 @@ export function CodexMemoryManagementView() {
             { key: "memory", label: "长期记忆", children: renderSettingsPanel() },
             { key: "python", label: "Python 运行时", children: renderPythonRuntimePanel() },
             { key: "spaces", label: "记忆空间", children: renderSpacesPanel() },
-            { key: "backfill", label: "历史回填", children: renderBackfillPanel() },
             { key: "runs", label: "统计日志", children: renderRunLogsPanel() }
           ]}
         />

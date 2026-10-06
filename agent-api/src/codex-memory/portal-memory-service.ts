@@ -1,36 +1,26 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
   AGENT_STUDIO_MEMORY_STORE_DIR_NAME,
-  agentStudioMemorySourcePath,
   agentStudioMemoryStore,
-  buildMemorySummary,
   codexMemoryProjectionPath,
-  ensureAgentStudioMemorySource,
-  normalizedMemoryKey,
   listSiblingCodexHomes,
-  mergeLegacyMemoryHomes,
-  pathExists,
-  readCanonicalMemoryItems,
-  readMemoryCandidates,
-  similarityScore,
-  syncAgentStudioMemoryProjection,
-  uniqueMemoryItems,
-  writeMemoryCandidates
+  normalizedMemoryKey,
+  pathExists
 } from "./engine.js";
+import { buildNativeMemoryView, type NativeMemoryView } from "./native-memory-view.js";
+import {
+  readUserMemories,
+  syncAgentStudioMemoryProjection,
+  userMemoryId,
+  userMemoryStoreDir,
+  writeUserMemories,
+  type UserMemoryItem
+} from "./user-memory.js";
 
-export type PortalMemoryCategory = "preference" | "background" | "habit";
-export const PORTAL_MEMORY_CATEGORIES: readonly PortalMemoryCategory[] = ["preference", "background", "habit"];
-
-export type PortalMemoryItem = {
-  id: string;
-  text: string;
-  category: PortalMemoryCategory;
-  source: "learned" | "user";
-  updatedAt?: string;
-};
+/** What Codex learned on its own, as shown to the user (read-only). */
+export type PortalLearnedMemory = NativeMemoryView & { updatedAt?: string };
 
 export type PortalMemoryScope = {
   id: string;
@@ -39,14 +29,17 @@ export type PortalMemoryScope = {
   agentSegment: string;
   modeId?: string;
   updatedAt?: string;
-  items: PortalMemoryItem[];
+  userItems: UserMemoryItem[];
+  learned?: PortalLearnedMemory;
+  /** Store directory of the assistant (translation cache lives here). */
+  storeDir: string;
 };
 
 export function modeIdFromAgentSegment(segment: string): string | undefined {
   return segment.match(/^agent-(.+?)(?:-[0-9a-f]{6,})?$/)?.[1];
 }
 
-/** One assistant's memory for a user: a stable store plus the per-capability homes it projects into. */
+/** One assistant's memory for a user: a stable store plus the per-capability homes Codex runs in. */
 export type PortalMemoryHome = {
   id: string;
   organizationKey: string;
@@ -65,68 +58,11 @@ export class PortalMemoryError extends Error {
   }
 }
 
-export function memoryItemId(text: string): string {
-  return createHash("sha256").update(text.trim()).digest("hex").slice(0, 16);
-}
-
-/** Maps free-form engine categories onto the three portal groups. */
-export function portalMemoryCategory(raw: string | undefined): PortalMemoryCategory {
-  const value = (raw ?? "").toLowerCase();
-  if (!value) return "background";
-  if (value === "preference" || value === "background" || value === "habit") return value;
-  if (/prefer|style|tone|language|format|偏好/.test(value)) return "preference";
-  if (/workflow|procedure|process|convention|habit|routine|习惯|流程/.test(value)) return "habit";
-  return "background";
-}
-
-type RawEntry = { heading: string; lines: string[]; memory?: string; category?: string; source?: string };
-
-function parseRawEntries(content: string): { preamble: string[]; entries: RawEntry[] } {
-  const preamble: string[] = [];
-  const entries: RawEntry[] = [];
-  let current: RawEntry | undefined;
-  for (const line of content.split("\n")) {
-    if (line.startsWith("## ")) {
-      current = { heading: line, lines: [] };
-      entries.push(current);
-      continue;
-    }
-    if (!current) {
-      preamble.push(line);
-      continue;
-    }
-    current.lines.push(line);
-    const memory = line.match(/^- memory:\s*(.+)$/)?.[1]?.trim();
-    if (memory) current.memory = memory;
-    const category = line.match(/^- category:\s*(.+)$/)?.[1]?.trim();
-    if (category) current.category = category;
-    const source = line.match(/^- source:\s*(.+)$/)?.[1]?.trim();
-    if (source) current.source = source;
-  }
-  return { preamble, entries };
-}
-
-function serializeRawEntries(preamble: string[], entries: RawEntry[]): string {
-  const head = preamble.join("\n").trimEnd() || "# Raw Memories";
-  if (!entries.length) return `${head}\n\nNo raw memories yet.\n`;
-  const body = entries.map((entry) => [entry.heading, ...entry.lines].join("\n").trimEnd()).join("\n\n");
-  return `${head.replace(/\n*No raw memories yet\.\s*$/i, "")}\n\n${body}\n`;
-}
-
-function sameMemory(left: string, right: string): boolean {
-  return left.trim() === right.trim() || normalizedMemoryKey(left) === normalizedMemoryKey(right);
-}
-
 function cleanText(value: string): string {
   const text = value.replace(/\s+/g, " ").trim();
   if (!text) throw new PortalMemoryError("Memory text is required", "text_required");
   if (text.length > MAX_ITEM_CHARS) throw new PortalMemoryError(`Memory must be at most ${MAX_ITEM_CHARS} characters`, "text_too_long");
   return text;
-}
-
-/** Canonical items without the engine's empty-summary placeholder document. */
-async function readItems(dir: string): Promise<string[]> {
-  return (await readCanonicalMemoryItems(dir)).filter((item) => !item.startsWith("# Memory Summary"));
 }
 
 async function readText(filePath: string): Promise<string> {
@@ -138,9 +74,18 @@ async function readText(filePath: string): Promise<string> {
   }
 }
 
+/** Codex's learned memory of one home, without the user section Agent Studio projects into it. */
+export async function learnedMemoryForHome(codexHome: string): Promise<PortalLearnedMemory | undefined> {
+  const summaryPath = path.join(codexMemoryProjectionPath(codexHome), "memory_summary.md");
+  const view = buildNativeMemoryView(await readText(summaryPath));
+  if (!view) return undefined;
+  const stat = await fs.stat(summaryPath).catch(() => undefined);
+  return { ...view, updatedAt: stat?.mtime.toISOString() };
+}
+
 /**
- * Portal-facing view over the per-user Agent Studio memory source. Every user
- * agent scope lives at `<sessionHomeRoot>/<org>/<userId>/<agentSegment>`.
+ * Portal view of a user's memories per assistant: what Codex learned (read-only) and what the
+ * user added by hand (editable). User homes live at `<sessionHomeRoot>/<org>/<userId>/<agentSegment>`.
  */
 export class PortalMemoryService {
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -181,15 +126,20 @@ export class PortalMemoryService {
       } catch {
         continue;
       }
-      const bases = new Set<string>();
+      const homesByBase = new Map<string, string[]>();
       for (const segment of segments) {
         const store = agentStudioMemoryStore(path.join(userDir, segment));
-        if (store) bases.add(store.segmentBase);
+        if (store) homesByBase.set(store.segmentBase, [...(homesByBase.get(store.segmentBase) ?? []), path.join(userDir, segment)]);
       }
-      for (const base of bases) {
-        const homes = await listSiblingCodexHomes(userDir, base);
-        const storeDir = path.join(userDir, AGENT_STUDIO_MEMORY_STORE_DIR_NAME, base);
-        if (!homes.length && !(await pathExists(storeDir))) continue;
+      if (await pathExists(path.join(userDir, AGENT_STUDIO_MEMORY_STORE_DIR_NAME))) {
+        for (const base of await fs.readdir(path.join(userDir, AGENT_STUDIO_MEMORY_STORE_DIR_NAME)).catch(() => [] as string[])) {
+          if (base.startsWith("agent-") && !base.includes(".tmp-") && !homesByBase.has(base)) homesByBase.set(base, []);
+        }
+      }
+      for (const [base, all] of homesByBase) {
+        // Homes with memory first (newest first): the newest one is where Codex currently runs.
+        const withMemory = await listSiblingCodexHomes(userDir, base);
+        const homes = [...withMemory, ...all.filter((home) => !withMemory.includes(home))];
         // Any `<base>-<hash>` path derives the same store, even one that does not exist on disk.
         const anyHome = homes[0] ?? path.join(userDir, `${base}-000000`);
         result.push({ id: `${orgKey}~${base}`, organizationKey: orgKey, agentSegment: base, codexHome: anyHome, homes });
@@ -198,152 +148,103 @@ export class PortalMemoryService {
     return result;
   }
 
-  async resolveHome(userId: string, scopeId: string) {
+  async resolveHome(userId: string, scopeId: string): Promise<PortalMemoryHome> {
     const homes = await this.listUserHomes(userId);
     const found = homes.find((home) => home.id === scopeId);
     if (found) return found;
     throw new PortalMemoryError("Memory scope does not exist", "scope_not_found");
   }
 
-  /** Items of the assistant's store, or a read-only preview of the merge before the store exists. */
-  private async readScope(codexHome: string): Promise<PortalMemoryItem[]> {
-    const store = agentStudioMemoryStore(codexHome);
-    const sourceDir = agentStudioMemorySourcePath(codexHome);
-    let items: string[];
-    let rawContent: string;
-    if (store && !(await pathExists(sourceDir))) {
-      const merged = await mergeLegacyMemoryHomes(await listSiblingCodexHomes(store.parentDir, store.segmentBase));
-      items = merged.items;
-      rawContent = merged.raw;
-    } else {
-      const dir = (await pathExists(sourceDir)) ? sourceDir : codexMemoryProjectionPath(codexHome);
-      items = await readItems(dir);
-      rawContent = await readText(path.join(dir, "raw_memories.md"));
+  /** Learned memory of the newest home that has any; the newest home is the one Codex currently runs in. */
+  async learnedMemory(home: PortalMemoryHome): Promise<PortalLearnedMemory | undefined> {
+    for (const codexHome of home.homes) {
+      const learned = await learnedMemoryForHome(codexHome);
+      if (learned) return learned;
     }
-    const { entries } = parseRawEntries(rawContent);
-    return items.map((text) => {
-      const entry = [...entries].reverse().find((item) => item.memory && sameMemory(item.memory, text));
-      const updatedAt = entry?.heading.slice(3).trim();
-      return {
-        id: memoryItemId(text),
-        text,
-        category: portalMemoryCategory(entry?.category),
-        source: entry?.source === "portal_user" ? "user" : "learned",
-        updatedAt: updatedAt && !Number.isNaN(Date.parse(updatedAt)) ? updatedAt : undefined
-      };
-    });
+    return undefined;
+  }
+
+  async readScope(home: PortalMemoryHome): Promise<PortalMemoryScope> {
+    const [userItems, learned] = await Promise.all([readUserMemories(home.codexHome), this.learnedMemory(home)]);
+    const updatedAt = [learned?.updatedAt, ...userItems.map((item) => item.updatedAt)]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return {
+      id: home.id,
+      organizationKey: home.organizationKey,
+      agentSegment: home.agentSegment,
+      modeId: modeIdFromAgentSegment(home.agentSegment),
+      updatedAt,
+      userItems,
+      learned,
+      storeDir: userMemoryStoreDir(home.codexHome)
+    };
   }
 
   async list(userId: string): Promise<PortalMemoryScope[]> {
-    const homes = await this.listUserHomes(userId);
-    const scopes = await Promise.all(
-      homes.map(async (home): Promise<PortalMemoryScope> => {
-        const stat = await fs.stat(agentStudioMemorySourcePath(home.codexHome)).catch(() => undefined) ?? await fs.stat(home.codexHome).catch(() => undefined);
-        return {
-          id: home.id,
-          organizationKey: home.organizationKey,
-          agentSegment: home.agentSegment,
-          modeId: modeIdFromAgentSegment(home.agentSegment),
-          updatedAt: stat?.mtime.toISOString(),
-          items: await this.readScope(home.codexHome)
-        };
-      })
-    );
+    const scopes = await Promise.all((await this.listUserHomes(userId)).map((home) => this.readScope(home)));
     return scopes.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   }
 
+  /** Memories a run in `codexHome` can draw on: the user's own items plus Codex's preference bullets. */
   async countForCodexHome(codexHome: string | undefined): Promise<number> {
     if (!codexHome) return 0;
     try {
-      return (await this.readScope(codexHome)).length;
+      const [items, learned] = await Promise.all([readUserMemories(codexHome), learnedMemoryForHome(codexHome)]);
+      return items.length + (learned?.preferences.length ?? 0);
     } catch {
       return 0;
     }
   }
 
-  private async mutate(
-    codexHome: string,
-    change: (state: { items: string[]; entries: RawEntry[]; preamble: string[] }) => void | Promise<void>
-  ): Promise<void> {
+  private async mutate<T>(home: PortalMemoryHome, change: (items: UserMemoryItem[]) => T): Promise<T> {
     // All homes of one assistant share a store, so serialize on the store, not the home.
-    await this.withLock(agentStudioMemorySourcePath(codexHome), async () => {
-      if (!agentStudioMemoryStore(codexHome)) await fs.mkdir(codexHome, { recursive: true });
-      const sourceDir = await ensureAgentStudioMemorySource(codexHome);
-      const rawPath = path.join(sourceDir, "raw_memories.md");
-      const items = await readItems(sourceDir);
-      const { preamble, entries } = parseRawEntries(await readText(rawPath));
-      const state = { items: [...items], entries, preamble };
-      await change(state);
-      // With an empty summary the engine falls back to raw entries, so drop
-      // them too; otherwise superseded wordings would reappear.
-      if (!uniqueMemoryItems(state.items).length) state.entries = [];
-      // Adds are capped at MAX_ITEMS_PER_SCOPE; merged stores may already hold a few more, so never trim on edit.
-      const summary = buildMemorySummary(uniqueMemoryItems(state.items));
-      await fs.writeFile(rawPath, serializeRawEntries(state.preamble, state.entries), "utf8");
-      await fs.writeFile(path.join(sourceDir, "memory_summary.md"), summary, "utf8");
-      await fs.writeFile(path.join(sourceDir, "MEMORY.md"), summary, "utf8");
-      await syncAgentStudioMemoryProjection(codexHome);
+    return this.withLock(userMemoryStoreDir(home.codexHome), async () => {
+      const items = await readUserMemories(home.codexHome);
+      const result = change(items);
+      await writeUserMemories(home.codexHome, items);
+      // Runs re-sync before starting; doing it now keeps the files consistent for admins too.
+      for (const codexHome of home.homes) await syncAgentStudioMemoryProjection(codexHome);
+      return result;
     });
   }
 
-  private rawEntry(text: string, category: PortalMemoryCategory, action: string): RawEntry {
-    return {
-      heading: `## ${new Date().toISOString()}`,
-      lines: ["- source: portal_user", `- action: ${action}`, `- category: ${category}`, `- memory: ${text}`],
-      memory: text,
-      category,
-      source: "portal_user"
-    };
-  }
-
-  async add(codexHome: string, input: { text: string; category: PortalMemoryCategory }): Promise<PortalMemoryItem> {
+  async add(home: PortalMemoryHome, input: { text: string }): Promise<UserMemoryItem> {
     const text = cleanText(input.text);
-    await this.mutate(codexHome, (state) => {
-      if (state.items.length >= MAX_ITEMS_PER_SCOPE) {
+    return this.mutate(home, (items) => {
+      if (items.some((item) => normalizedMemoryKey(item.text) === normalizedMemoryKey(text))) {
+        throw new PortalMemoryError("This memory already exists", "duplicate_item");
+      }
+      if (items.length >= MAX_ITEMS_PER_SCOPE) {
         throw new PortalMemoryError(`At most ${MAX_ITEMS_PER_SCOPE} memories are kept per assistant`, "too_many_items");
       }
-      state.items.push(text);
-      state.entries.push(this.rawEntry(text, input.category, "create"));
+      const now = new Date().toISOString();
+      const item = { id: userMemoryId(text), text, createdAt: now, updatedAt: now };
+      items.push(item);
+      return item;
     });
-    return { id: memoryItemId(text), text, category: input.category, source: "user" };
   }
 
-  async update(codexHome: string, itemId: string, input: { text?: string; category?: PortalMemoryCategory }): Promise<PortalMemoryItem> {
-    let result: PortalMemoryItem | undefined;
-    await this.mutate(codexHome, (state) => {
-      const index = state.items.findIndex((item) => memoryItemId(item) === itemId);
+  async update(home: PortalMemoryHome, itemId: string, input: { text: string }): Promise<UserMemoryItem> {
+    const text = cleanText(input.text);
+    return this.mutate(home, (items) => {
+      const index = items.findIndex((item) => item.id === itemId);
       if (index < 0) throw new PortalMemoryError("Memory does not exist", "item_not_found");
-      const previous = state.items[index];
-      const text = input.text !== undefined ? cleanText(input.text) : previous;
-      const lastEntry = [...state.entries].reverse().find((entry) => entry.memory && sameMemory(entry.memory, previous));
-      const category = input.category ?? portalMemoryCategory(lastEntry?.category);
-      state.items[index] = text;
-      // Drop raw evidence of the old wording so fallbacks cannot resurrect it.
-      state.entries = state.entries.filter((entry) => !(entry.memory && sameMemory(entry.memory, previous)));
-      state.entries.push(this.rawEntry(text, category, "update"));
-      result = { id: memoryItemId(text), text, category, source: "user" };
-    });
-    return result!;
-  }
-
-  async remove(codexHome: string, itemId: string): Promise<void> {
-    await this.mutate(codexHome, async (state) => {
-      const index = state.items.findIndex((item) => memoryItemId(item) === itemId);
-      if (index < 0) throw new PortalMemoryError("Memory does not exist", "item_not_found");
-      const [removed] = state.items.splice(index, 1);
-      state.entries = state.entries.filter((entry) => !(entry.memory && sameMemory(entry.memory, removed)));
-      const sourceDir = agentStudioMemorySourcePath(codexHome);
-      const candidates = await readMemoryCandidates(sourceDir);
-      let changed = false;
-      for (const candidate of candidates) {
-        if (candidate.status === "pending" && (sameMemory(candidate.memory, removed) || similarityScore(candidate.memory, removed) >= 0.75)) {
-          candidate.status = "rejected";
-          candidate.lastDecision = "user_deleted";
-          candidate.lastReason = "Deleted by the user in the portal";
-          changed = true;
-        }
+      if (items.some((item, other) => other !== index && normalizedMemoryKey(item.text) === normalizedMemoryKey(text))) {
+        throw new PortalMemoryError("This memory already exists", "duplicate_item");
       }
-      if (changed) await writeMemoryCandidates(sourceDir, candidates);
+      const item = { ...items[index], id: userMemoryId(text), text, updatedAt: new Date().toISOString() };
+      items[index] = item;
+      return item;
+    });
+  }
+
+  async remove(home: PortalMemoryHome, itemId: string): Promise<void> {
+    await this.mutate(home, (items) => {
+      const index = items.findIndex((item) => item.id === itemId);
+      if (index < 0) throw new PortalMemoryError("Memory does not exist", "item_not_found");
+      items.splice(index, 1);
     });
   }
 }
