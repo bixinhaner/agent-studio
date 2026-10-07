@@ -4,6 +4,8 @@ module.exports = {
       // Default app name: agent-studio-api
       name: "__PM2_ADMIN_APP_NAME__",
       // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      // merge_logs stops PM2 from suffixing the file names with the process id.
+      merge_logs: true,
       out_file: "__PM2_LOG_DIR__/__PM2_ADMIN_APP_NAME__-out.log",
       error_file: "__PM2_LOG_DIR__/__PM2_ADMIN_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
@@ -31,6 +33,8 @@ module.exports = {
       // switches traffic once it is ready, and the old slot retires after its runs.
       name: "__PM2_CHAT_APP_NAME__",
       // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      // merge_logs stops PM2 from suffixing the file names with the process id.
+      merge_logs: true,
       out_file: "__PM2_LOG_DIR__/__PM2_CHAT_APP_NAME__-out.log",
       error_file: "__PM2_LOG_DIR__/__PM2_CHAT_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
@@ -58,6 +62,8 @@ module.exports = {
       // Blue-green chat slot b.
       name: "__PM2_CHAT_B_APP_NAME__",
       // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      // merge_logs stops PM2 from suffixing the file names with the process id.
+      merge_logs: true,
       out_file: "__PM2_LOG_DIR__/__PM2_CHAT_B_APP_NAME__-out.log",
       error_file: "__PM2_LOG_DIR__/__PM2_CHAT_B_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
