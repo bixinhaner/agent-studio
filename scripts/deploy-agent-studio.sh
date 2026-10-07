@@ -673,7 +673,8 @@ git_update() {
   PREVIOUS_HEAD="${DEPLOY_PREVIOUS_HEAD:-$(git_head)}"
   if [[ "$SKIP_GIT_PULL" == "1" || -n "$ACTIVATE_RELEASE" ]]; then
     log_info "Skipping git fetch/pull"
-    TARGET_COMMIT="$PREVIOUS_HEAD"
+    # After a re-exec PREVIOUS_HEAD is the pre-pull checkout; deploy what is checked out now.
+    TARGET_COMMIT="$(git_head)"
     return 0
   fi
 
