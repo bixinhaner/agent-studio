@@ -98,6 +98,12 @@ function formatQuotaDelta(value: number | null | undefined): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(0)} 个百分点`;
 }
 
+function quotaResetTooltip(resetAt: string, early: boolean): string {
+  const time = formatLocalDateTime(resetAt);
+  const reset = early ? `周额度提前重置，最晚于 ${time} 生效` : `周额度于 ${time} 到期重置`;
+  return `${reset}；当日变化已合并重置前后的消耗`;
+}
+
 function resolveLocalTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -370,7 +376,7 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
               <td>
                 {formatQuotaDelta(row.quotaDeltaPercent)}
                 {row.quotaResetAt ? (
-                  <Tooltip title={`周额度于 ${formatLocalDateTime(row.quotaResetAt)} 重置，当日变化已合并重置前后的消耗`}>
+                  <Tooltip title={quotaResetTooltip(row.quotaResetAt, row.quotaResetEarly)}>
                     <Tag color="blue" bordered={false} style={{ marginInlineStart: 6, marginInlineEnd: 0 }}>
                       重置
                     </Tag>

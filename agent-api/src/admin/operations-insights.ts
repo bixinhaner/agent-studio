@@ -87,6 +87,7 @@ export type OperationsInsightsTrendPoint = {
   quotaUsedPercent: number | null;
   quotaDeltaPercent: number | null;
   quotaResetAt: string | null;
+  quotaResetEarly: boolean;
 };
 
 export type OperationsInsightsBreakdownRow = {
@@ -476,8 +477,12 @@ function quotaSeriesKey(snapshot: CodexQuotaSnapshotRecord): string {
 export type QuotaTrendFields = {
   quotaUsedPercent: number | null;
   quotaDeltaPercent: number | null;
+  // Exact old-window expiry, or for an early reset the latest moment it could have happened.
   quotaResetAt: string | null;
+  quotaResetEarly: boolean;
 };
+
+type QuotaReset = { at: string; early: boolean };
 
 export function buildQuotaTrendFields(
   snapshots: CodexQuotaSnapshotRecord[],
@@ -488,8 +493,7 @@ export function buildQuotaTrendFields(
   type QuotaSeries = {
     items: SnapshotWithDay[];
     predecessor?: QuotaSeries;
-    // Upstream window start (resetsAt - windowDurationMins) when this series is a real reset.
-    resetAt: string | null;
+    reset: QuotaReset | null;
   };
   const byDay = new Map<string, SnapshotWithDay[]>();
   const seriesByKey = new Map<string, QuotaSeries>();
@@ -501,7 +505,7 @@ export function buildQuotaTrendFields(
     dayItems.push(item);
     byDay.set(item.day, dayItems);
     const seriesKey = quotaSeriesKey(snapshot);
-    const series = seriesByKey.get(seriesKey) ?? { items: [], resetAt: null };
+    const series = seriesByKey.get(seriesKey) ?? { items: [], reset: null };
     series.items.push(item);
     seriesByKey.set(seriesKey, series);
   }
@@ -520,7 +524,7 @@ export function buildQuotaTrendFields(
       const predecessor = list[index - 1];
       if (!predecessor) return;
       series.predecessor = predecessor;
-      series.resetAt = detectQuotaReset(predecessor.items.at(-1)!, series.items[0]);
+      series.reset = detectQuotaReset(predecessor.items.at(-1)!, series.items[0]);
     });
   }
   // A reading from the previous day only serves as the baseline when it is the adjacent
@@ -538,21 +542,25 @@ export function buildQuotaTrendFields(
       series.items.some((item) => item.day === day)
     );
     let delta = 0;
-    let quotaResetAt: string | null = null;
+    let quotaReset: QuotaReset | null = null;
     for (const series of daySeries) {
       const sameDay = series.items.filter((item) => item.day === day);
       const firstOfDay = sameDay[0];
       const lastOfDay = sameDay.at(-1)!;
       const startedToday = series.items[0] === firstOfDay;
       let baseline = firstOfDay.snapshot.usedPercent;
-      if (startedToday && series.resetAt) {
-        // A fresh window starts from zero, so the first reading already counts.
-        baseline = 0;
-        quotaResetAt = series.resetAt;
+      const predecessorLast = series.predecessor?.items.at(-1);
+      if (startedToday && series.reset) {
+        quotaReset = series.reset;
+        // A fresh window starts from zero, so the first reading already counts, but only when
+        // sampling was continuous; after a collection gap that usage belongs to earlier days.
+        if (predecessorLast && firstOfDay.observedAtMs - predecessorLast.observedAtMs <= maxBaselineGapMs) {
+          baseline = 0;
+        }
       } else {
         // An upstream resetsAt shift without a reset keeps counting from the previous window.
         const previous = startedToday
-          ? series.predecessor?.items.at(-1)
+          ? predecessorLast
           : series.items.filter((item) => item.observedAtMs < firstOfDay.observedAtMs).at(-1);
         if (previous && firstOfDay.observedAtMs - previous.observedAtMs <= maxBaselineGapMs) {
           baseline = previous.snapshot.usedPercent;
@@ -563,7 +571,8 @@ export function buildQuotaTrendFields(
     result.set(day, {
       quotaUsedPercent: latest.snapshot.usedPercent,
       quotaDeltaPercent: daySeries.length > 0 ? delta : null,
-      quotaResetAt
+      quotaResetAt: quotaReset?.at ?? null,
+      quotaResetEarly: quotaReset?.early ?? false
     });
   }
   return result;
@@ -571,17 +580,27 @@ export function buildQuotaTrendFields(
 
 // Reset facts come from the upstream rate limit (resetsAt / windowDurationMins / usedPercent),
 // so policy changes such as early resets or a different window length need no code change.
+// Upstream starts a window lazily: until the first request after a reset, every read reports
+// resetsAt = now + window, so consecutive untouched windows are one idle window, not resets.
 function detectQuotaReset(
   previous: { snapshot: CodexQuotaSnapshotRecord; observedAtMs: number },
   next: { snapshot: CodexQuotaSnapshotRecord; observedAtMs: number }
-): string | null {
+): QuotaReset | null {
   const windowStartedAt = quotaWindowStartedAt(next.snapshot);
   const windowStartedAtMs = windowStartedAt ? Date.parse(windowStartedAt) : Number.NaN;
   // Allow the same reset-epoch jitter as quotaSeriesKey.
   const startedAfterPreviousReading = windowStartedAtMs >= previous.observedAtMs - 60_000;
   const usageDropped = next.snapshot.usedPercent < previous.snapshot.usedPercent;
-  if (!startedAfterPreviousReading && !usageDropped) return null;
-  return startedAfterPreviousReading ? windowStartedAt : next.snapshot.observedAt;
+  if (!usageDropped && !(startedAfterPreviousReading && previous.snapshot.usedPercent > 0)) return null;
+
+  const previousResetAtMs = Date.parse(previous.snapshot.resetAt);
+  if (Number.isFinite(previousResetAtMs) && previousResetAtMs <= next.observedAtMs) {
+    return { at: new Date(previousResetAtMs).toISOString(), early: false };
+  }
+  const latestPossibleMs = Number.isFinite(windowStartedAtMs)
+    ? Math.min(windowStartedAtMs, next.observedAtMs)
+    : next.observedAtMs;
+  return { at: new Date(Math.max(latestPossibleMs, previous.observedAtMs)).toISOString(), early: true };
 }
 
 function quotaWindowStartedAt(snapshot: CodexQuotaSnapshotRecord): string | null {
@@ -1231,7 +1250,8 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       internalCost: formatDecimal(bucket.internalCost),
       quotaUsedPercent: quotaTrendFields.get(bucket.day)?.quotaUsedPercent ?? null,
       quotaDeltaPercent: quotaTrendFields.get(bucket.day)?.quotaDeltaPercent ?? null,
-      quotaResetAt: quotaTrendFields.get(bucket.day)?.quotaResetAt ?? null
+      quotaResetAt: quotaTrendFields.get(bucket.day)?.quotaResetAt ?? null,
+      quotaResetEarly: quotaTrendFields.get(bucket.day)?.quotaResetEarly ?? false
     }))
     .sort((left, right) => left.day.localeCompare(right.day));
 

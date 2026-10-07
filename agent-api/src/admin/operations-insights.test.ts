@@ -71,9 +71,9 @@ describe("buildOperationsInsights", () => {
 
     expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai")).toEqual(
       new Map([
-        ["2026-04-14", { quotaUsedPercent: 42, quotaDeltaPercent: 0, quotaResetAt: null }],
-        ["2026-04-15", { quotaUsedPercent: 51, quotaDeltaPercent: 3, quotaResetAt: null }],
-        ["2026-04-16", { quotaUsedPercent: 2, quotaDeltaPercent: 2, quotaResetAt: "2026-04-19T01:00:00.000Z" }]
+        ["2026-04-14", { quotaUsedPercent: 42, quotaDeltaPercent: 0, quotaResetAt: null, quotaResetEarly: false }],
+        ["2026-04-15", { quotaUsedPercent: 51, quotaDeltaPercent: 3, quotaResetAt: null, quotaResetEarly: false }],
+        ["2026-04-16", { quotaUsedPercent: 2, quotaDeltaPercent: 2, quotaResetAt: "2026-04-16T01:00:00.000Z", quotaResetEarly: true }]
       ])
     );
   });
@@ -105,7 +105,24 @@ describe("buildOperationsInsights", () => {
     expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai").get("2026-10-07")).toEqual({
       quotaUsedPercent: 24,
       quotaDeltaPercent: 4,
-      quotaResetAt: null
+      quotaResetAt: null,
+      quotaResetEarly: false
+    });
+  });
+
+  it("does not attribute usage accumulated during a snapshot gap to the first day after it", () => {
+    // Mirrors production: no snapshots between 09-24 and 09-30 while the window reset on 09-27.
+    const snapshots = quotaSnapshots([
+      ["2026-09-24T10:00:00.000Z", 74, "2026-09-26T17:00:43.000Z"],
+      ["2026-09-30T02:00:00.000Z", 41, "2026-10-03T17:00:43.000Z"],
+      ["2026-09-30T08:00:00.000Z", 44, "2026-10-03T17:00:43.000Z"]
+    ]);
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai").get("2026-09-30")).toEqual({
+      quotaUsedPercent: 44,
+      quotaDeltaPercent: 3,
+      quotaResetAt: "2026-09-26T17:00:43.000Z",
+      quotaResetEarly: false
     });
   });
 
@@ -122,7 +139,8 @@ describe("buildOperationsInsights", () => {
       quotaUsedPercent: 5,
       // Old window 50% (adjacent 3h sample before midnight) -> 80%, then new window 0% -> 5%.
       quotaDeltaPercent: 35,
-      quotaResetAt: "2026-10-07T06:00:00.000Z"
+      quotaResetAt: "2026-10-07T06:00:00.000Z",
+      quotaResetEarly: false
     });
   });
 
@@ -154,7 +172,29 @@ describe("buildOperationsInsights", () => {
       quotaUsedPercent: 2,
       // Old window 12% -> 14% (adjacent sample across midnight) plus new window 0% -> 2%.
       quotaDeltaPercent: 4,
-      quotaResetAt: "2026-10-07T03:28:42.000Z"
+      quotaResetAt: "2026-10-07T03:28:42.000Z",
+      quotaResetEarly: true
+    });
+  });
+
+  it("treats lazily started windows after an early reset as one reset", () => {
+    // Mirrors production on 2026-10-03: until the first request, upstream reports
+    // resetsAt = read time + 7 days, so every idle read carries a different resetsAt.
+    const snapshots = quotaSnapshots([
+      ["2026-10-02T19:44:00.000Z", 51, "2026-10-03T17:00:42.000Z"],
+      ["2026-10-02T20:44:00.000Z", 51, "2026-10-03T17:00:43.000Z"],
+      ["2026-10-02T21:44:00.000Z", 0, "2026-10-09T21:44:52.000Z"],
+      ["2026-10-02T22:44:00.000Z", 0, "2026-10-09T22:44:52.000Z"],
+      ["2026-10-03T00:44:00.000Z", 0, "2026-10-09T23:53:56.000Z"],
+      ["2026-10-03T04:44:00.000Z", 1, "2026-10-09T23:53:57.000Z"]
+    ]);
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai").get("2026-10-03")).toEqual({
+      quotaUsedPercent: 1,
+      quotaDeltaPercent: 1,
+      // The old window would have expired on 10-04, so this was an early reset no later than 05:44 local.
+      quotaResetAt: "2026-10-02T21:44:00.000Z",
+      quotaResetEarly: true
     });
   });
 
