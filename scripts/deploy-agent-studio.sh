@@ -3,6 +3,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+script_path="$script_dir/$(basename "${BASH_SOURCE[0]}")"
+ORIGINAL_ARGS=("$@")
 
 # shellcheck source=/dev/null
 source "$script_dir/lib/common.sh"
@@ -628,7 +630,7 @@ git_head() {
 }
 
 git_update() {
-  PREVIOUS_HEAD="$(git_head)"
+  PREVIOUS_HEAD="${DEPLOY_PREVIOUS_HEAD:-$(git_head)}"
   if [[ "$SKIP_GIT_PULL" == "1" || -n "$ACTIVATE_RELEASE" ]]; then
     log_info "Skipping git fetch/pull"
     TARGET_COMMIT="$PREVIOUS_HEAD"
@@ -643,8 +645,17 @@ git_update() {
   fi
 
   log_step "Updating repository checkout"
+  local script_before
+  script_before="$(cksum <"$script_path")"
   run_as_app_user_shell "cd '$APP_REPO_DIR' && git fetch '$GIT_REMOTE' && git checkout '$GIT_REF' && git pull --ff-only '$GIT_REMOTE' '$GIT_REF'"
   TARGET_COMMIT="$(git_head)"
+  if [[ "$(cksum <"$script_path")" != "$script_before" ]]; then
+    # Bash has already parsed this run's functions; re-exec so the pulled
+    # deploy logic applies to this deploy rather than the next one.
+    log_info "Deploy script changed in $TARGET_COMMIT; re-running the updated script"
+    exec 9>&-
+    DEPLOY_PREVIOUS_HEAD="$PREVIOUS_HEAD" exec bash "$script_path" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"} --skip-git-pull
+  fi
 }
 
 acquire_deploy_lock() {
@@ -1098,11 +1109,22 @@ current_release_dir() {
 
 # Each backend build gets its own directory (code, node_modules, Prisma client),
 # so building never rewrites files that running processes still load lazily.
+# Releases only contain agent-api, so commits with an identical agent-api tree
+# (for example deploy tooling changes) can share one build.
+same_backend_tree() {
+  local release="$1" target="$2" release_tree target_tree
+  [[ -n "$release" ]] || return 1
+  release_tree="$(run_as_app_user_shell "git -C '$APP_REPO_DIR' rev-parse --verify --quiet '$release:agent-api'" 2>/dev/null)" || return 1
+  target_tree="$(run_as_app_user_shell "git -C '$APP_REPO_DIR' rev-parse --verify --quiet '$target:agent-api'" 2>/dev/null)" || return 1
+  [[ "$release_tree" == "$target_tree" ]]
+}
+
 build_backend_release() {
   local current
   current="$(current_release_dir)"
-  if [[ -n "$current" && "$(release_commit "$current")" == "$TARGET_COMMIT" && -f "$current/agent-api/dist/index.js" ]]; then
-    log_info "Reusing release $(basename "$current") already built for $TARGET_COMMIT"
+  if [[ -n "$current" && -f "$current/agent-api/dist/index.js" ]] &&
+    same_backend_tree "$(release_commit "$current")" "$TARGET_COMMIT"; then
+    log_info "Reusing release $(basename "$current"); agent-api is unchanged at $TARGET_COMMIT"
     RELEASE_DIR="$current"
     return 0
   fi
