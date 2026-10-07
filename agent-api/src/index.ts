@@ -11629,7 +11629,8 @@ registerCommonApiRoutes(app, {
     alertRules,
     alertEvents,
     notificationRecords,
-    quotaSnapshots: codexQuotaSnapshotRepository
+    quotaSnapshots: codexQuotaSnapshotRepository,
+    quotaSnapshotIntervalMs: codexQuotaSnapshotService.intervalMs
   }),
   resourcesAdminRouter: createResourcesAdminRouter({
     knowledgeSets,

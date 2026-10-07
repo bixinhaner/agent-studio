@@ -1,4 +1,4 @@
-import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs } from "antd";
+import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs, Tag, Tooltip } from "antd";
 import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
@@ -367,7 +367,16 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
               <td>{formatUsdAmount(row.estimatedCost)}</td>
               <td>{formatUsdAmount(row.internalCost)}</td>
               <td>{formatQuotaPercent(row.quotaUsedPercent)}</td>
-              <td>{formatQuotaDelta(row.quotaDeltaPercent)}</td>
+              <td>
+                {formatQuotaDelta(row.quotaDeltaPercent)}
+                {row.quotaResetAt ? (
+                  <Tooltip title={`周额度于 ${formatLocalDateTime(row.quotaResetAt)} 重置，当日变化已合并重置前后的消耗`}>
+                    <Tag color="blue" bordered={false} style={{ marginInlineStart: 6, marginInlineEnd: 0 }}>
+                      重置
+                    </Tag>
+                  </Tooltip>
+                ) : null}
+              </td>
             </tr>
           ))}
         </tbody>

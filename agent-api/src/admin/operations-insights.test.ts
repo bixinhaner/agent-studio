@@ -71,11 +71,91 @@ describe("buildOperationsInsights", () => {
 
     expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai")).toEqual(
       new Map([
-        ["2026-04-14", { quotaUsedPercent: 42, quotaDeltaPercent: 0 }],
-        ["2026-04-15", { quotaUsedPercent: 51, quotaDeltaPercent: 3 }],
-        ["2026-04-16", { quotaUsedPercent: 2, quotaDeltaPercent: 2 }]
+        ["2026-04-14", { quotaUsedPercent: 42, quotaDeltaPercent: 0, quotaResetAt: null }],
+        ["2026-04-15", { quotaUsedPercent: 51, quotaDeltaPercent: 3, quotaResetAt: null }],
+        ["2026-04-16", { quotaUsedPercent: 2, quotaDeltaPercent: 2, quotaResetAt: "2026-04-19T01:00:00.000Z" }]
       ])
     );
+  });
+
+  function quotaSnapshots(rows: ReadonlyArray<readonly [string, number, string, number?]>) {
+    return rows.map(([observedAt, usedPercent, resetAt, windowDurationMins], index) => ({
+      id: `quota-${index}`,
+      credentialHash: "credential-a",
+      limitId: "codex",
+      resetAt,
+      windowDurationMins: windowDurationMins ?? 10080,
+      usedPercent,
+      remainingPercent: 100 - usedPercent,
+      ordinaryUsageAllowed: true,
+      observedAt,
+      sampleBucket: observedAt
+    }));
+  }
+
+  it("keeps counting when upstream moves resetsAt without resetting usage", () => {
+    const snapshots = quotaSnapshots([
+      ["2026-10-07T01:00:00.000Z", 20, "2026-10-09T23:53:56.000Z"],
+      ["2026-10-07T02:00:00.000Z", 21, "2026-10-09T23:53:56.000Z"],
+      // Window start (10-03) is before the previous reading, and usage did not drop.
+      ["2026-10-07T03:00:00.000Z", 22, "2026-10-10T05:00:00.000Z"],
+      ["2026-10-07T04:00:00.000Z", 24, "2026-10-10T05:00:00.000Z"]
+    ]);
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai").get("2026-10-07")).toEqual({
+      quotaUsedPercent: 24,
+      quotaDeltaPercent: 4,
+      quotaResetAt: null
+    });
+  });
+
+  it("derives the reset time from the upstream window length and sampling interval", () => {
+    const snapshots = quotaSnapshots([
+      // Daily window sampled every 3 hours.
+      ["2026-10-06T14:00:00.000Z", 50, "2026-10-07T06:00:00.000Z", 1440],
+      ["2026-10-06T17:00:00.000Z", 60, "2026-10-07T06:00:00.000Z", 1440],
+      ["2026-10-07T05:00:00.000Z", 80, "2026-10-07T06:00:00.000Z", 1440],
+      ["2026-10-07T08:00:00.000Z", 5, "2026-10-08T06:00:00.000Z", 1440]
+    ]);
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai", 3 * 60 * 60_000).get("2026-10-07")).toEqual({
+      quotaUsedPercent: 5,
+      // Old window 50% (adjacent 3h sample before midnight) -> 80%, then new window 0% -> 5%.
+      quotaDeltaPercent: 35,
+      quotaResetAt: "2026-10-07T06:00:00.000Z"
+    });
+  });
+
+  it("sums consumption before and after a mid-day quota reset", () => {
+    // Mirrors production on 2026-10-07 (Asia/Shanghai): the weekly window reset early
+    // at 11:28 local time while the previous window was at 14%.
+    const snapshots = ([
+      ["2026-10-06T15:45:00.000Z", 12, "2026-10-09T23:53:56.000Z"],
+      ["2026-10-06T16:45:00.000Z", 13, "2026-10-09T23:53:56.000Z"],
+      ["2026-10-07T02:25:00.000Z", 14, "2026-10-09T23:53:57.000Z"],
+      ["2026-10-07T03:25:00.000Z", 14, "2026-10-09T23:53:56.000Z"],
+      ["2026-10-07T04:25:00.000Z", 0, "2026-10-14T03:28:42.000Z"],
+      ["2026-10-07T08:48:00.000Z", 1, "2026-10-14T03:28:42.000Z"],
+      ["2026-10-07T11:48:00.000Z", 2, "2026-10-14T03:28:43.000Z"]
+    ] as const).map(([observedAt, usedPercent, resetAt], index) => ({
+      id: `quota-${index}`,
+      credentialHash: "credential-a",
+      limitId: "codex",
+      resetAt,
+      windowDurationMins: 10080,
+      usedPercent,
+      remainingPercent: 100 - usedPercent,
+      ordinaryUsageAllowed: true,
+      observedAt,
+      sampleBucket: observedAt
+    }));
+
+    expect(buildQuotaTrendFields(snapshots, "Asia/Shanghai").get("2026-10-07")).toEqual({
+      quotaUsedPercent: 2,
+      // Old window 12% -> 14% (adjacent sample across midnight) plus new window 0% -> 2%.
+      quotaDeltaPercent: 4,
+      quotaResetAt: "2026-10-07T03:28:42.000Z"
+    });
   });
 
   it("aggregates chat and external API usage into user, organization, path, and session views", () => {

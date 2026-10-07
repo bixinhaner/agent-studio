@@ -30,6 +30,7 @@ type MonitoringRouterOptions = {
   alertEvents: Pick<AlertEventRepository, "list" | "getById" | "update">;
   notificationRecords: Pick<NotificationRecordRepository, "list">;
   quotaSnapshots: Pick<CodexQuotaSnapshotRepository, "list">;
+  quotaSnapshotIntervalMs?: number;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -234,7 +235,8 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
           usersById: new Map(users.flatMap(([key, value]) => (value ? [[key, value] as const] : []))),
           departmentsById: new Map(departments),
           filters,
-          quotaSnapshots
+          quotaSnapshots,
+          quotaSnapshotIntervalMs: options.quotaSnapshotIntervalMs
         })
       );
     } catch (error) {

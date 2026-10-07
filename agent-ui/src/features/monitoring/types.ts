@@ -61,6 +61,7 @@ export type OperationsInsightsTrendPoint = {
   internalCost: string;
   quotaUsedPercent: number | null;
   quotaDeltaPercent: number | null;
+  quotaResetAt: string | null;
 };
 
 export type OperationsInsightsBreakdownRow = {

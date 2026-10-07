@@ -19,6 +19,8 @@ export type CodexQuotaSnapshotServiceOptions = {
   now?: () => Date;
 };
 
+export const DEFAULT_CODEX_QUOTA_SNAPSHOT_INTERVAL_MS = 60 * 60_000;
+
 type RateLimit = {
   usedPercent: number;
   windowDurationMins: number;
@@ -181,12 +183,16 @@ export class CodexQuotaSnapshotService {
     }
   }
 
+  get intervalMs(): number {
+    return this.options.intervalMs ?? DEFAULT_CODEX_QUOTA_SNAPSHOT_INTERVAL_MS;
+  }
+
   start(): void {
     if (this.timer) return;
     void this.collectOnce().catch((error) => this.options.logger?.warn("codex quota snapshot failed", error));
     this.timer = setInterval(() => {
       void this.collectOnce().catch((error) => this.options.logger?.warn("codex quota snapshot failed", error));
-    }, this.options.intervalMs ?? 60 * 60_000);
+    }, this.intervalMs);
     this.timer.unref();
   }
 
