@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Import-check the shared Python runtime; exit 1 when a required package is missing."""
 from __future__ import annotations
 
 import importlib
@@ -9,6 +10,7 @@ import sys
 REQUIRED_CHECKS = {
     "pandas": "pandas",
     "openpyxl": "openpyxl",
+    "xlrd": "xlrd",
     "docx": "python-docx",
     "pptx": "python-pptx",
     "pypdf": "pypdf",
@@ -16,7 +18,21 @@ REQUIRED_CHECKS = {
     "pdf2image": "pdf2image",
     "reportlab": "reportlab",
     "fitz": "pymupdf",
+    "olefile": "olefile",
+    "extract_msg": "extract-msg",
     "PIL": "pillow",
+    "cv2": "opencv-python-headless",
+    "cairosvg": "cairosvg",
+    "matplotlib": "matplotlib",
+    "plotly": "plotly",
+    "bs4": "beautifulsoup4",
+    "lxml": "lxml",
+    "playwright": "playwright",
+    "imageio": "imageio",
+    "imageio_ffmpeg": "imageio-ffmpeg",
+    "py7zr": "py7zr",
+    "rarfile": "rarfile",
+    "scipy": "scipy",
 }
 
 OPTIONAL_CHECKS = {

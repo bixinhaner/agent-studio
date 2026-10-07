@@ -50,12 +50,29 @@ test("runtime prerequisites restart chat only and Caddy template refreshes Caddy
     chat: true,
     caddy: false
   });
+  assert.deepEqual(classifyChanges(["scripts/shared-runtime/python-requirements.txt"]).targets, {
+    frontend: false,
+    admin: false,
+    chat: true,
+    caddy: false
+  });
   assert.deepEqual(classifyChanges(["templates/Caddyfile.template", "scripts/deploy-agent-studio.sh"]).targets, {
     frontend: false,
     admin: false,
     chat: false,
     caddy: true
   });
+});
+
+test("shared runtime maintenance jobs reinstall with an admin restart only", () => {
+  assert.deepEqual(
+    classifyChanges([
+      "scripts/shared-runtime/thread-cleanup.sh",
+      "scripts/shared-runtime/gap-scan.py",
+      "templates/shared-runtime/agent-studio-runtime-gap-scan.timer.template"
+    ]).targets,
+    { frontend: false, admin: true, chat: false, caddy: false }
+  );
 });
 
 test("each target diffs from its own deployed commit so deferred restarts catch up", () => {

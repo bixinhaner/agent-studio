@@ -11,7 +11,7 @@ import type {
   EnterpriseContextChannel,
   EnterpriseContextPreviewResponse,
   EnterpriseContextSettings,
-  PythonRuntimeStatus
+  SharedRuntimeStatus
 } from "./types";
 
 export async function fetchCodexMemoryScopes(input: {
@@ -115,6 +115,6 @@ export async function previewEnterpriseContext(input: {
   });
 }
 
-export async function fetchPythonRuntimeStatus(): Promise<PythonRuntimeStatus> {
-  return api<PythonRuntimeStatus>("/api/admin/codex-memory/python-runtime/status");
+export async function fetchSharedRuntimeStatus(): Promise<SharedRuntimeStatus> {
+  return api<SharedRuntimeStatus>("/api/admin/codex-memory/shared-runtime/status");
 }

@@ -1243,19 +1243,31 @@ if changed:
 PY
 }
 
+# Shared runtime ("共享运行环境"): Python packages, command-line tools, Playwright
+# browsers and download caches every conversation reuses. Lists live in scripts/shared-runtime/.
+shared_runtime_dir="$script_dir/shared-runtime"
+SHARED_BROWSERS_ROOT="$SHARED_RUNTIME_CACHE_ROOT/ms-playwright"
+
 ensure_shared_python_runtime_dirs() {
-  log_step "Preparing shared Python runtime directories"
+  log_step "Preparing shared runtime directories"
   run_as_root mkdir -p \
     "$SHARED_RUNTIME_ROOT" \
     "$SHARED_PYTHON_RUNTIME_ROOT" \
     "$SHARED_PYTHON_PIP_CACHE_ROOT" \
     "$SHARED_ARGOS_PACKAGE_ROOT" \
-    "$SHARED_ARGOS_DOWNLOAD_ROOT"
-  run_as_root chown "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+    "$SHARED_ARGOS_DOWNLOAD_ROOT" \
+    "$SHARED_RUNTIME_STATE_ROOT" \
+    "$SHARED_BROWSERS_ROOT" \
+    "$SHARED_RUNTIME_CACHE_ROOT/npm" \
+    "$SHARED_RUNTIME_CACHE_ROOT/uv" \
+    "$SHARED_RUNTIME_CACHE_ROOT/uv-python" \
+    "$SHARED_RUNTIME_CACHE_ROOT/huggingface"
+  run_as_root chown "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT" "$SHARED_RUNTIME_STATE_ROOT"
   run_as_root chown -R "$APP_USER:$APP_GROUP" \
     "$(dirname "$SHARED_PYTHON_RUNTIME_ROOT")" \
     "$SHARED_ARGOS_PACKAGE_ROOT" \
-    "$SHARED_ARGOS_DOWNLOAD_ROOT"
+    "$SHARED_ARGOS_DOWNLOAD_ROOT" \
+    "$SHARED_RUNTIME_CACHE_ROOT"
 }
 
 migrate_legacy_translate_packages() {
@@ -1285,21 +1297,22 @@ ensure_legacy_translate_symlink() {
 }
 
 shared_python_env_prefix() {
-  printf 'PYTHONPATH=%s PIP_CACHE_DIR=%s ARGOS_PACKAGE_DIR=%s ARGOS_DOWNLOAD_DIR=%s' \
+  printf 'PYTHONPATH=%s PIP_CACHE_DIR=%s ARGOS_PACKAGE_DIR=%s ARGOS_DOWNLOAD_DIR=%s PLAYWRIGHT_BROWSERS_PATH=%s' \
     "$(shell_quote "$SHARED_PYTHON_RUNTIME_ROOT")" \
     "$(shell_quote "$SHARED_PYTHON_PIP_CACHE_ROOT")" \
     "$(shell_quote "$SHARED_ARGOS_PACKAGE_ROOT")" \
-    "$(shell_quote "$SHARED_ARGOS_DOWNLOAD_ROOT")"
+    "$(shell_quote "$SHARED_ARGOS_DOWNLOAD_ROOT")" \
+    "$(shell_quote "$SHARED_BROWSERS_ROOT")"
 }
 
 check_shared_python_runtime_imports() {
   local env_prefix
   env_prefix="$(shared_python_env_prefix)"
-  run_as_app_user_shell "$env_prefix python3 '$script_dir/check-shared-python-runtime.py'"
+  run_as_app_user_shell "$env_prefix python3 '$shared_runtime_dir/check-python.py'"
 }
 
 install_shared_python_runtime_packages() {
-  local requirements="$script_dir/shared-python-runtime-requirements.txt"
+  local requirements="$shared_runtime_dir/python-requirements.txt"
   [[ -f "$requirements" ]] || die "missing shared Python runtime requirements: $requirements"
   run_as_app_user_shell "python3 -m pip --version >/dev/null 2>&1" || die "python3 pip is required for shared Python runtime"
 
@@ -1309,10 +1322,66 @@ install_shared_python_runtime_packages() {
   run_as_app_user_shell "$env_prefix python3 -m pip install --upgrade --target '$SHARED_PYTHON_RUNTIME_ROOT' -r '$requirements'"
 }
 
+# Command-line tools agents call directly (ImageMagick, ffmpeg, zip, 7z, ...). A failed
+# apt run only warns: the admin console shows the missing tools and chat still deploys.
+ensure_shared_runtime_system_packages() {
+  local list="$shared_runtime_dir/system-packages.txt"
+  [[ -f "$list" ]] || die "missing shared runtime system package list: $list"
+  command -v dpkg-query >/dev/null 2>&1 || {
+    log_warn "dpkg-query not found; skipping shared runtime system packages"
+    return 0
+  }
+  local missing=() package
+  while IFS= read -r package; do
+    package="${package%%#*}"
+    package="${package//[[:space:]]/}"
+    [[ -n "$package" ]] || continue
+    dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q "install ok installed" || missing+=("$package")
+  done < "$list"
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    log_info "Shared runtime system packages are installed"
+    return 0
+  fi
+  log_step "Installing shared runtime system packages: ${missing[*]}"
+  if run_as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq &&
+    run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"; then
+    log_info "Installed shared runtime system packages"
+  else
+    log_warn "Shared runtime system packages failed to install: ${missing[*]}"
+  fi
+}
+
+smoke_shared_browser() {
+  local env_prefix
+  env_prefix="$(shared_python_env_prefix)"
+  run_as_app_user_shell "cd /tmp && $env_prefix timeout 90 python3 '$shared_runtime_dir/smoke-browser.py'"
+}
+
+# Chromium for Playwright lives once in the shared cache; agents installing another
+# Playwright version add their own revision next to it.
+ensure_shared_browsers() {
+  log_step "Checking shared Playwright Chromium"
+  local env_prefix
+  env_prefix="$(shared_python_env_prefix)"
+  if ! run_as_app_user_shell "$env_prefix python3 -m playwright install chromium"; then
+    log_warn "Playwright Chromium download failed; browser tasks fall back to per-thread installs"
+    return 0
+  fi
+  if smoke_shared_browser; then
+    return 0
+  fi
+  log_info "Installing Chromium system libraries"
+  run_as_root env DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH="$SHARED_PYTHON_RUNTIME_ROOT" PLAYWRIGHT_BROWSERS_PATH="$SHARED_BROWSERS_ROOT" \
+    python3 -m playwright install-deps chromium || true
+  smoke_shared_browser || log_warn "Shared Chromium still fails to launch; check the admin console shared runtime page"
+}
+
 ensure_shared_python_runtime() {
   ensure_shared_python_runtime_dirs
   migrate_legacy_translate_packages
   ensure_shared_python_runtime_dirs
+  ensure_shared_runtime_system_packages
 
   if check_shared_python_runtime_imports; then
     log_info "Shared Python runtime imports are ready"
@@ -1321,7 +1390,60 @@ ensure_shared_python_runtime() {
     check_shared_python_runtime_imports || die "shared Python runtime import check failed after installation"
   fi
 
+  ensure_shared_browsers
   ensure_legacy_translate_symlink
+}
+
+# Root-owned copies of the cleanup and gap-scan jobs plus their systemd timers. The jobs
+# read and write only files under SHARED_RUNTIME_STATE_ROOT for the admin console.
+install_shared_runtime_maintenance() {
+  command -v systemctl >/dev/null 2>&1 || {
+    log_warn "systemctl not found; shared runtime cleanup and gap scan are not scheduled"
+    return 0
+  }
+  local data_root template_dir="$script_dir/../templates/shared-runtime" changed=0
+  data_root="$(dirname "$SHARED_RUNTIME_ROOT")"
+  run_as_root mkdir -p /usr/local/lib/agent-studio "$SHARED_RUNTIME_STATE_ROOT"
+  run_as_root chown "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_STATE_ROOT"
+
+  install_if_changed() {
+    local source="$1" destination="$2" mode="$3"
+    if run_as_root cmp -s "$source" "$destination" 2>/dev/null; then
+      return 0
+    fi
+    run_as_root install -o root -g root -m "$mode" "$source" "$destination"
+    changed=1
+  }
+
+  install_if_changed "$shared_runtime_dir/thread-cleanup.sh" /usr/local/sbin/agent-studio-thread-tmp-cleanup 755
+  install_if_changed "$shared_runtime_dir/gap-scan.py" /usr/local/lib/agent-studio/runtime-gap-scan.py 755
+
+  local unit rendered
+  for unit in agent-studio-thread-tmp-cleanup.service agent-studio-thread-tmp-cleanup.timer \
+    agent-studio-runtime-gap-scan.service agent-studio-runtime-gap-scan.timer; do
+    rendered="$(mktemp)"
+    sed \
+      -e "s#__DATA_ROOT__#$data_root#g" \
+      -e "s#__STATE_ROOT__#$SHARED_RUNTIME_STATE_ROOT#g" \
+      -e "s#__SESSIONS_ROOT__#$data_root/sessions#g" \
+      -e "s#__CODEX_HOMES_ROOT__#$APP_API_DIR/temp/codex-homes#g" \
+      -e "s#__APP_USER__#$APP_USER#g" \
+      -e "s#__APP_GROUP__#$APP_GROUP#g" \
+      "$template_dir/$unit.template" > "$rendered"
+    install_if_changed "$rendered" "/etc/systemd/system/$unit" 644
+    rm -f "$rendered"
+  done
+  unset -f install_if_changed
+
+  if [[ "$changed" == "1" ]]; then
+    run_as_root systemctl daemon-reload
+    log_info "Installed shared runtime cleanup and gap scan jobs"
+  fi
+  run_as_root systemctl enable --now agent-studio-thread-tmp-cleanup.timer agent-studio-runtime-gap-scan.timer >/dev/null 2>&1 ||
+    log_warn "failed to enable shared runtime maintenance timers"
+  if ! run_as_root test -f "$SHARED_RUNTIME_STATE_ROOT/runtime-gaps.json"; then
+    run_as_root systemctl start --no-block agent-studio-runtime-gap-scan.service || true
+  fi
 }
 
 check_plugin_runtime() {
@@ -1646,6 +1768,7 @@ restart_targets() {
   log_step "Rendering PM2 ecosystem file"
   render_pm2_ecosystem
   install_pm2_logrotate
+  install_shared_runtime_maintenance
 
   if deploy_restarts_admin; then
     restart_role_with_drain admin

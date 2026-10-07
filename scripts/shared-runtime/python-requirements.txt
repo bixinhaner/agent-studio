@@ -1,0 +1,39 @@
+# Shared Python runtime packages, installed with `pip install --target` into
+# SHARED_PYTHON_RUNTIME_ROOT and importable from every conversation via PYTHONPATH.
+# Additions should follow the "缺口监测" (runtime-gaps.json) report in the admin console.
+
+# Spreadsheets and documents
+pandas
+openpyxl
+xlrd
+python-docx
+python-pptx
+pypdf
+pdfplumber
+pdf2image
+reportlab
+pymupdf
+olefile
+extract-msg
+
+# Images and charts
+pillow
+opencv-python-headless
+cairosvg
+matplotlib
+plotly
+
+# Web pages
+beautifulsoup4
+lxml
+playwright
+
+# Media, archives and data
+imageio
+imageio-ffmpeg
+py7zr
+rarfile
+scipy
+
+# Installer used by skills that need an isolated tool environment
+uv

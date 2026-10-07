@@ -214,6 +214,12 @@ Migrations must stay compatible with the release that is still running: `scripts
 
 PM2 logs: every app writes to fixed files `~agentstudio/.pm2/logs/<app>-out.log` / `<app>-error.log` (so slot switches keep one file per app), rotated by `/etc/logrotate.d/<admin app>-pm2` (daily or at 100M, 14 compressed copies), which the deploy script renders from `templates/logrotate-pm2.conf.template`.
 
+Shared runtime (admin console "上下文与记忆 → 共享运行环境"): every conversation reuses the Python packages in `scripts/shared-runtime/python-requirements.txt`, the Ubuntu tools in `scripts/shared-runtime/system-packages.txt` (ImageMagick, ffmpeg, zip/7z, ...), Playwright Chromium and the download caches under `/var/lib/agent-studio/shared/cache` (`PLAYWRIGHT_BROWSERS_PATH`, `npm_config_cache`, `UV_CACHE_DIR`, ...). Chat deploys install what is missing. Every deploy that restarts admin or chat also installs two root-owned timers:
+- `agent-studio-thread-tmp-cleanup` (daily) removes thread workspace copies idle 3 days and thread temp dirs idle for the retention published in the console (`shared/state/cleanup-policy.json`, default 14 days).
+- `agent-studio-runtime-gap-scan` (daily, runs as the app user) writes `shared/state/runtime-gaps.json`: packages and commands agents were missing in the last 30 days. Use it to decide what to add to the lists.
+
+Shared caches are not cleaned automatically.
+
 Hot-loaded data: the proactive scenario catalog lives in `agent-api/templates/runtime-content/proactive-scenarios.json` and is reloaded every 30s, so catalog edits only need `git pull` (no restart). Deploys hold `/tmp/agent-studio-deploy.lock`, so two deploys cannot run at once; `--skip-agent-drain` remains the explicit emergency override.
 
 Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.

@@ -33,13 +33,16 @@ const RULES = [
   { pattern: /^agent-api\//, targets: BACKEND, reason: "backend" },
 
   { pattern: /^templates\/Caddyfile\.template$/, targets: ["caddy"], reason: "Caddy template" },
+  // Server maintenance jobs are installed whenever admin restarts; no chat restart needed.
+  { pattern: /^templates\/shared-runtime\//, targets: ["admin"], reason: "shared runtime maintenance jobs" },
   { pattern: /^templates\/pm2-ecosystem\.config\.cjs\.template$/, targets: BACKEND, reason: "PM2 template" },
   { pattern: /^templates\//, targets: NONE, reason: "install templates" },
 
+  { pattern: /^scripts\/shared-runtime\/(thread-cleanup\.sh|gap-scan\.py)$/, targets: ["admin"], reason: "shared runtime maintenance jobs" },
   // Conversation runtime prerequisites are only installed when chat restarts.
   {
     pattern:
-      /^scripts\/(runtime-wrappers\/|runtime-fontconfig\/|plugin-runtime-requirements\.json$|shared-python-runtime-requirements\.txt$|ensure-dws-runtime\.sh$|check-plugin-runtime\.mjs$|smoke-shared-plugin-runtime\.mjs$|check-shared-python-runtime\.py$|build-shared-codex-runtime-archive\.sh$)/,
+      /^scripts\/(runtime-wrappers\/|runtime-fontconfig\/|shared-runtime\/|plugin-runtime-requirements\.json$|ensure-dws-runtime\.sh$|check-plugin-runtime\.mjs$|smoke-shared-plugin-runtime\.mjs$|build-shared-codex-runtime-archive\.sh$)/,
     targets: ["chat"],
     reason: "conversation runtime prerequisites"
   },

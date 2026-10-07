@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily shared runtime gap scan for agent-studio
+
+[Timer]
+OnCalendar=*-*-* 18:30:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

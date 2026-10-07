@@ -1,0 +1,10 @@
+[Unit]
+Description=Report tools agent-studio conversations were missing (shared runtime gap scan)
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_GROUP__
+ExecStart=/usr/bin/python3 /usr/local/lib/agent-studio/runtime-gap-scan.py --codex-homes __CODEX_HOMES_ROOT__ --sessions __SESSIONS_ROOT__ --output __STATE_ROOT__/runtime-gaps.json --days 30
+Nice=19
+IOSchedulingClass=idle

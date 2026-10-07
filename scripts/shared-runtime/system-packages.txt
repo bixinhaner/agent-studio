@@ -1,0 +1,11 @@
+# Ubuntu packages for command-line tools agents call directly. Installed with
+# apt-get --no-install-recommends when missing; one package per line.
+imagemagick
+zip
+7zip
+p7zip-full
+libarchive-tools
+ffmpeg
+libxml2-utils
+sqlite3
+libcairo2

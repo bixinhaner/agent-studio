@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily cleanup of regenerable data in idle agent-studio threads
+
+[Timer]
+OnCalendar=*-*-* 19:30:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

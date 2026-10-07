@@ -131,11 +131,12 @@ import {
   type StructuredPreviewMode
 } from "./files/structured-preview-service.js";
 import {
-  buildSharedPythonRuntimeEnv,
+  buildSharedRuntimeEnv,
   ensureRuntimeWorkspaceTmp,
-  inspectSharedPythonRuntime,
-  sharedPythonRuntimeHint
-} from "./shared-python-runtime.js";
+  inspectSharedRuntime,
+  sharedRuntimeHint,
+  syncSharedRuntimeCleanupPolicy
+} from "./shared-runtime.js";
 import {
   buildToolRuntimeEnv,
   ensureToolRuntimeEnvDirs,
@@ -3618,11 +3619,12 @@ async function resolveRuntimeLaunchConfig(input: {
   const toolEnv = buildToolRuntimeEnv({
     workspace: input.workspace
   });
-  const pythonEnv = buildSharedPythonRuntimeEnv({
+  const sharedEnv = buildSharedRuntimeEnv({
     settings: pythonRuntimeSettings,
-    workspace: input.workspace
+    workspace: input.workspace,
+    baseEnv: { ...process.env, ...toolEnv }
   });
-  const runtimeHint = sharedPythonRuntimeHint(pythonRuntimeSettings);
+  const runtimeHint = sharedRuntimeHint(pythonRuntimeSettings);
   const runtimeHints = [
     ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
@@ -3641,11 +3643,11 @@ async function resolveRuntimeLaunchConfig(input: {
   );
   const envOverrides = {
     ...toolEnv,
-    ...pythonEnv,
+    ...sharedEnv,
     ...(dwsRuntime?.envOverrides ?? {}),
     ...(dwsRuntime
       ? {
-          PATH: [dwsRuntime.proxyBinDir, toolEnv.PATH || process.env.PATH].filter(Boolean).join(path.delimiter)
+          PATH: [dwsRuntime.proxyBinDir, sharedEnv.PATH || toolEnv.PATH || process.env.PATH].filter(Boolean).join(path.delimiter)
         }
       : {})
   };
@@ -3654,6 +3656,25 @@ async function resolveRuntimeLaunchConfig(input: {
     envOverrides: Object.keys(envOverrides).length > 0 ? envOverrides : undefined,
     codexRunConfig
   };
+}
+
+const SHARED_RUNTIME_POLICY_SYNC_MS = 10 * 60 * 1000;
+
+// The root cleanup timer reads the published temp retention from a state file, so the
+// admin service keeps that file in step with system settings.
+function startSharedRuntimeCleanupPolicySync(): void {
+  const sync = async () => {
+    try {
+      const settings =
+        (await codexProviders.getPublishedSystemSettings())?.payload.pythonRuntime ??
+        createDefaultSystemSettingsPayload().pythonRuntime;
+      await syncSharedRuntimeCleanupPolicy(settings);
+    } catch (error) {
+      console.warn("shared runtime cleanup policy sync failed", error instanceof Error ? error.message : String(error));
+    }
+  };
+  void sync();
+  setInterval(() => void sync(), SHARED_RUNTIME_POLICY_SYNC_MS).unref();
 }
 
 async function sessionRuntimeCapabilitiesAreCurrent(session: SessionRecord, userId?: string): Promise<boolean> {
@@ -11811,13 +11832,15 @@ registerCommonApiRoutes(app, {
       update: updateCodexMemoryLlmSecret
     },
     enterpriseContext,
-    getPythonRuntimeStatus: async () =>
-      inspectSharedPythonRuntime({
-        settings:
-          (await codexProviders.getPublishedSystemSettings())?.payload.pythonRuntime ??
-          createDefaultSystemSettingsPayload().pythonRuntime,
-        sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot
-      }),
+    getSharedRuntimeStatus: async () => {
+      const settings =
+        (await codexProviders.getPublishedSystemSettings())?.payload.pythonRuntime ??
+        createDefaultSystemSettingsPayload().pythonRuntime;
+      await syncSharedRuntimeCleanupPolicy(settings).catch((error) => {
+        console.warn("shared runtime cleanup policy sync failed", error instanceof Error ? error.message : String(error));
+      });
+      return inspectSharedRuntime({ settings });
+    },
     users,
     agentModes,
     listIntegrationInstancesByIds: async (ids) => {
@@ -14913,6 +14936,7 @@ async function bootstrap() {
         `imported ${imported.importedCount} legacy thread(s) from ${appConfig.threadStoreFile}${imported.archivedPath ? ` -> ${imported.archivedPath}` : ""}`
       );
     }
+    startSharedRuntimeCleanupPolicySync();
     orgSyncScheduler.start();
     zendeskAiReviewEmailReminderScheduler.start();
     conversationSecurityReviewScheduler.start();

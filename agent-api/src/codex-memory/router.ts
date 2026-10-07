@@ -5,7 +5,7 @@ import { Router, type Request, type RequestHandler, type Response } from "expres
 import { z } from "zod";
 
 import type { EnterpriseContextService } from "../enterprise-context-service.js";
-import type { SharedPythonRuntimeStatus } from "../shared-python-runtime.js";
+import type { SharedRuntimeStatus } from "../shared-runtime.js";
 import { systemSettingsEnterpriseContextSchema } from "../system-settings/types.js";
 import {
   AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
@@ -28,7 +28,7 @@ type CodexMemoryAdminRouterOptions = {
     get(id: string): Promise<{ name: string; slug: string } | undefined>;
   };
   enterpriseContext?: Pick<EnterpriseContextService, "resolveForRun">;
-  getPythonRuntimeStatus?: () => Promise<SharedPythonRuntimeStatus>;
+  getSharedRuntimeStatus?: () => Promise<SharedRuntimeStatus>;
   listIntegrationInstancesByIds?: (ids: string[]) => Promise<Array<{
     id: string;
     type: string;
@@ -751,17 +751,22 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
     }
   });
 
-  router.get("/codex-memory/python-runtime/status", requireRead, async (_req: Request, res: Response) => {
-    if (!options.getPythonRuntimeStatus) {
-      res.status(501).json({ detail: "python runtime status is not configured" });
-      return;
+  // `/python-runtime/status` is kept as an alias for clients from before the rename.
+  router.get(
+    ["/codex-memory/shared-runtime/status", "/codex-memory/python-runtime/status"],
+    requireRead,
+    async (_req: Request, res: Response) => {
+      if (!options.getSharedRuntimeStatus) {
+        res.status(501).json({ detail: "shared runtime status is not configured" });
+        return;
+      }
+      try {
+        res.json(await options.getSharedRuntimeStatus());
+      } catch (error) {
+        res.status(500).json({ detail: detailFromError(error) });
+      }
     }
-    try {
-      res.json(await options.getPythonRuntimeStatus());
-    } catch (error) {
-      res.status(500).json({ detail: detailFromError(error) });
-    }
-  });
+  );
 
   router.get("/codex-memory/runs", requireRead, async (req: Request, res: Response) => {
     try {

@@ -66,27 +66,69 @@ export type EnterpriseContextSettings = SystemSettingsEnterpriseContext;
 export type PythonRuntimeSettings = SystemSettingsPythonRuntime;
 export type EnterpriseContextChannel = "portal" | "dingtalk" | "crest" | "zendesk" | "openai_compatible_api";
 
-export type PythonRuntimeCapabilityStatus = {
-  key: "spreadsheets" | "documents" | "images" | "translation";
+export type SharedRuntimeCapabilityStatus = {
+  key: string;
   label: string;
+  description: string;
   status: "ready" | "partial" | "missing";
   available: string[];
   missing: string[];
 };
 
-export type PythonRuntimeStatus = {
+export type SharedRuntimeCacheStatus = {
+  key: string;
+  label: string;
+  description: string;
+  envKey: string;
+  path: string;
+  exists: boolean;
+  bytes: number;
+};
+
+export type SharedRuntimeCleanupRun = {
+  finishedAt: string;
+  dryRun: boolean;
+  tmpRetentionDays: number;
+  workspaceCopyRetentionDays: number;
+  removedThreadTmp: number;
+  removedWorkspaceCopies: number;
+  skippedInUse: number;
+  freedBytes: number;
+};
+
+export type SharedRuntimeGapItem = {
+  kind: "python" | "command";
+  name: string;
+  threads: number;
+  occurrences: number;
+  covered: boolean;
+};
+
+export type SharedRuntimeGapReport = {
+  generatedAt: string;
+  windowDays: number;
+  rolloutsScanned: number;
+  rolloutsWithGaps: number;
+  items: SharedRuntimeGapItem[];
+  installs: Array<{ tool: string; calls: number; threads: number }>;
+  duplicateCaches: Array<{ name: string; threads: number; bytes: number }>;
+};
+
+export type SharedRuntimeStatus = {
   enabled: boolean;
   runtimeExists: boolean;
   runtimeBytes: number;
+  cacheBytes: number;
   pythonVersion?: string;
   envKeys: string[];
-  capabilities: PythonRuntimeCapabilityStatus[];
-  duplicateArtifacts: {
-    sessionVirtualenvCount: number;
-    argosCacheCount: number;
-    argosDataCount: number;
-    scanned: boolean;
+  capabilities: SharedRuntimeCapabilityStatus[];
+  caches: SharedRuntimeCacheStatus[];
+  cleanup: {
+    tmpRetentionDays: number;
+    workspaceCopyRetentionDays: number;
+    lastRun: SharedRuntimeCleanupRun | null;
   };
+  gaps: SharedRuntimeGapReport | null;
   checkedAt: string;
 };
 
