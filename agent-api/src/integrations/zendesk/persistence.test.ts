@@ -24,6 +24,7 @@ describe("Zendesk persistence stores", () => {
     const findMany = vi.fn(async () => []);
     const store = new ZendeskRunStore({
       zendeskRun: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
         create,
         findMany,
         update: vi.fn(async () => {
@@ -125,6 +126,7 @@ describe("Zendesk persistence stores", () => {
     }));
     const store = new ZendeskRunStore({
       zendeskRun: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
         create: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -144,6 +146,50 @@ describe("Zendesk persistence stores", () => {
     expect(update.mock.calls[0]?.[0].data.requesterCommentId).toBe(BigInt(zendeskCommentId));
     expect(record?.commentId).toBe(zendeskCommentId);
     expect(record?.requesterCommentId).toBe(zendeskCommentId);
+  });
+
+  it("reclaims a run only when its status and owner still match", async () => {
+    const row = {
+      id: "run-1",
+      integrationInstanceId: "inst-1",
+      scopeKey: "inst-1",
+      ticketId: "45268",
+      source: "webhook",
+      status: "failed",
+      detail: "服务重启中断，已自动收尾",
+      decision: null,
+      commentId: null,
+      requesterCommentId: null,
+      ticketSubject: null,
+      error: null,
+      ownerInstanceId: "chat-a:1",
+      createdAt: "2026-05-21T12:00:00.000Z",
+      updatedAt: "2026-05-21T12:01:00.000Z"
+    };
+    const updateMany = vi
+      .fn<(args: { where: Record<string, unknown>; data: Record<string, unknown> }) => Promise<{ count: number }>>()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const store = new ZendeskRunStore({
+      zendeskRun: {
+        updateMany,
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        findMany: vi.fn(async () => [row]),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+
+    const won = await store.update("run-1", { status: "failed" }, { status: "processing", ownerInstanceId: "chat-a:1" });
+    const lost = await store.update("run-1", { status: "failed" }, { status: "processing", ownerInstanceId: undefined });
+
+    expect(updateMany.mock.calls[0]?.[0].where).toEqual({ id: "run-1", status: "processing", ownerInstanceId: "chat-a:1" });
+    expect(updateMany.mock.calls[1]?.[0].where).toEqual({ id: "run-1", status: "processing", ownerInstanceId: null });
+    expect(won?.ownerInstanceId).toBe("chat-a:1");
+    expect(lost).toBeUndefined();
   });
 
   it("lists stale processing Zendesk runs for restart recovery", async () => {
@@ -167,6 +213,7 @@ describe("Zendesk persistence stores", () => {
     ]);
     const store = new ZendeskRunStore({
       zendeskRun: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
         create: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -219,6 +266,7 @@ describe("Zendesk persistence stores", () => {
     ]);
     const store = new ZendeskRunStore({
       zendeskRun: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
         create: vi.fn(async () => {
           throw new Error("not used");
         }),

@@ -7,11 +7,14 @@ const DEFAULT_DRAIN_REASON = "System is updating. Please retry in a few minutes.
 
 // The legacy shared file drains every role. Role files let a deploy that only
 // restarts admin keep accepting new conversations on the chat service.
-export function deployDrainFilesForRole(baseFile: string, role: ServiceRole): string[] {
+// Blue-green chat slots only read their own slot file: draining the retiring
+// slot must not drain the slot that is taking over its traffic.
+export function deployDrainFilesForRole(baseFile: string, role: ServiceRole, chatSlot?: string): string[] {
   const parsed = path.parse(baseFile);
-  const roleFile = (name: "admin" | "chat") => path.join(parsed.dir, `${parsed.name}-${name}${parsed.ext}`);
+  const scopedFile = (name: string) => path.join(parsed.dir, `${parsed.name}-${name}${parsed.ext}`);
+  if (role === "chat" && chatSlot) return [baseFile, scopedFile(`chat-${chatSlot}`)];
   const roles: Array<"admin" | "chat"> = role === "all" ? ["admin", "chat"] : [role];
-  return [baseFile, ...roles.map(roleFile)];
+  return [baseFile, ...roles.map(scopedFile)];
 }
 
 export async function readDeploymentDrainReason(

@@ -15,6 +15,7 @@ API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
 ADMIN_API_PORT="${ADMIN_API_PORT:-}"
 CHAT_API_PORT="${CHAT_API_PORT:-}"
+CHAT_B_API_PORT="${CHAT_B_API_PORT:-}"
 DEPLOY_SCOPE="${AGENT_STUDIO_DEPLOY_SCOPE:-auto}"
 DOMAIN="${DOMAIN:-}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
@@ -42,8 +43,11 @@ AGENT_DRAIN_STATUS_URL="${AGENT_DRAIN_STATUS_URL:-}"
 AGENT_ADMIN_DRAIN_STATUS_URL="${AGENT_ADMIN_DRAIN_STATUS_URL:-}"
 AGENT_CHAT_DRAIN_STATUS_URL="${AGENT_CHAT_DRAIN_STATUS_URL:-}"
 DEPLOY_DRAIN_FILE="${AGENT_STUDIO_DEPLOY_DRAIN_FILE:-}"
-CHAT_RESTART_MODE="${AGENT_STUDIO_CHAT_RESTART_MODE:-idle}"
+CHAT_RESTART_MODE="${AGENT_STUDIO_CHAT_RESTART_MODE:-bluegreen}"
 CHAT_IDLE_TIMEOUT_SECONDS="${AGENT_CHAT_IDLE_TIMEOUT_SECONDS:-1800}"
+CHAT_RETIRE_MAX_SECONDS="${AGENT_STUDIO_CHAT_RETIRE_MAX_SECONDS:-1800}"
+CHAT_READY_TIMEOUT_SECONDS="${AGENT_CHAT_READY_TIMEOUT_SECONDS:-180}"
+ALLOW_BREAKING_MIGRATION="${AGENT_STUDIO_ALLOW_BREAKING_MIGRATION:-0}"
 RELEASE_RETENTION="${AGENT_STUDIO_RELEASE_RETENTION:-3}"
 DEPLOY_LOCK_FILE="${AGENT_STUDIO_DEPLOY_LOCK_FILE:-/tmp/agent-studio-deploy.lock}"
 PLAN_ONLY=0
@@ -56,6 +60,7 @@ PREVIOUS_HEAD=""
 TARGET_COMMIT=""
 RELEASE_DIR=""
 CHAT_RESTART_PENDING=0
+CADDY_REFRESHED=0
 ACTIVE_DRAIN_FILES=()
 
 usage() {
@@ -79,8 +84,10 @@ Options:
   --activate-release <id>
                          Switch the backend to an existing release (rollback) and restart
                          admin and chat
-  --chat-restart <mode>  idle: wait until no conversation is running, then restart with only a
-                         brief drain; on timeout leave the chat restart pending [default]
+  --chat-restart <mode>  bluegreen: start the idle chat slot on the new release, switch new
+                         traffic to it once ready and let the old slot finish its runs [default]
+                         idle: wait until no conversation is running, then restart in place with
+                         only a brief drain; on timeout leave the chat restart pending
                          drain: block new conversations until active runs finish (legacy)
                          skip: do not restart chat; it stays pending for a later deploy
   --chat-idle-timeout <sec>
@@ -89,7 +96,8 @@ Options:
   --api-port <port>      Backward-compatible admin API port [default: $API_PORT]
   --admin-api-port <port>
                          Admin API port [default: --api-port value]
-  --chat-api-port <port> Chat/runtime API port [default: 8791]
+  --chat-api-port <port> Chat/runtime API port of blue-green slot a [default: 8791]
+                         (slot b listens on the next port)
   --caddy-upstream-host <host>
                          Backward-compatible upstream host applied to both admin and chat [default: 127.0.0.1]
   --caddy-upstream-port <port>
@@ -115,6 +123,9 @@ Options:
   --skip-agent-drain     Restart immediately without deployment drain/wait
   --drain-timeout <sec>  Seconds a drained service waits for active runs before restart
                          [default: $AGENT_DRAIN_TIMEOUT_SECONDS]
+  --allow-breaking-migration
+                         Apply migrations that drop, rename or tighten schema the running
+                         release may still use (blue-green runs old and new code together)
   -h, --help             Show this help text
 USAGE
 }
@@ -251,6 +262,10 @@ while [[ $# -gt 0 ]]; do
       AGENT_DRAIN_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
+    --allow-breaking-migration)
+      ALLOW_BREAKING_MIGRATION=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -284,8 +299,8 @@ case "$DEPLOY_SCOPE" in
 esac
 
 case "$CHAT_RESTART_MODE" in
-  idle|drain|skip) ;;
-  *) die "--chat-restart must be idle, drain or skip" ;;
+  bluegreen|idle|drain|skip) ;;
+  *) die "--chat-restart must be bluegreen, idle, drain or skip" ;;
 esac
 
 if [[ -n "$ACTIVATE_RELEASE" && ! "$ACTIVATE_RELEASE" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -299,6 +314,11 @@ fi
 if [[ -z "$CHAT_API_PORT" ]]; then
   CHAT_API_PORT="8791"
 fi
+
+if [[ -z "$CHAT_B_API_PORT" && "$CHAT_API_PORT" =~ ^[0-9]+$ ]]; then
+  CHAT_B_API_PORT="$((CHAT_API_PORT + 1))"
+fi
+PM2_CHAT_B_APP_NAME="${PM2_CHAT_B_APP_NAME:-$PM2_CHAT_APP_NAME-b}"
 
 if [[ -z "$CADDY_UPSTREAM_HOST" ]]; then
   CADDY_UPSTREAM_HOST="127.0.0.1"
@@ -334,6 +354,10 @@ fi
 
 if [[ ! "$CHAT_API_PORT" =~ ^[0-9]+$ || "$CHAT_API_PORT" == "0" ]]; then
   die "--chat-api-port must be a positive integer"
+fi
+
+if [[ ! "$CHAT_RETIRE_MAX_SECONDS" =~ ^[0-9]+$ || ! "$CHAT_READY_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  die "chat retire and ready timeouts must be non-negative integers"
 fi
 
 if [[ ! "$AGENT_DRAIN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -424,6 +448,15 @@ resolve_deploy_plan() {
     PLAN_FRONTEND=0; PLAN_ADMIN=1; PLAN_CHAT=1; PLAN_CADDY=0
   fi
   log_info "Deploy plan: frontend=$PLAN_FRONTEND admin=$PLAN_ADMIN chat=$PLAN_CHAT caddy=$PLAN_CADDY (scope=$DEPLOY_SCOPE, chat restart=$CHAT_RESTART_MODE)"
+  if [[ "$PLAN_CHAT" == "1" && "$CHAT_RESTART_MODE" == "bluegreen" ]]; then
+    local active
+    active="$(active_chat_slot)"
+    if [[ -z "$(read_deploy_state chat.slot)" ]]; then
+      log_info "Chat: first blue-green switch; slot $(other_chat_slot "$active") starts on the new release and takes new conversations, the current chat instance finishes its runs (up to ${CHAT_RETIRE_MAX_SECONDS}s) and is then removed; Caddy is refreshed"
+    else
+      log_info "Chat: blue-green switch from slot $active to slot $(other_chat_slot "$active"); running conversations finish on slot $active, no conversation is blocked"
+    fi
+  fi
 }
 
 require_repo_checkout() {
@@ -447,7 +480,9 @@ render_pm2_ecosystem() {
 
   local rendered_ecosystem
   rendered_ecosystem="$(mktemp)"
-  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" "$APP_REPO_DIR" <<'PY'
+  local peer_urls
+  peer_urls="$(chat_slot_base_url a),$(chat_slot_base_url b)"
+  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" "$APP_REPO_DIR" "$PM2_CHAT_B_APP_NAME" "$CHAT_B_API_PORT" "$peer_urls" <<'PY'
 from pathlib import Path
 import sys
 
@@ -456,6 +491,9 @@ destination = Path(sys.argv[2])
 rendered = (
     template
     .replace("__PM2_ADMIN_APP_NAME__", sys.argv[3])
+    .replace("__PM2_CHAT_B_APP_NAME__", sys.argv[10])
+    .replace("__CHAT_B_API_PORT__", sys.argv[11])
+    .replace("__CHAT_PEER_URLS__", sys.argv[12])
     .replace("__PM2_CHAT_APP_NAME__", sys.argv[4])
     .replace("__APP_API_DIR__", sys.argv[5])
     .replace("__API_HOST__", sys.argv[6])
@@ -504,6 +542,8 @@ rendered = (
     .replace("{$CADDY_ADMIN_UPSTREAM_PORT}", admin_upstream_port)
     .replace("{$CADDY_CHAT_UPSTREAM_HOST}", chat_upstream_host)
     .replace("{$CADDY_CHAT_UPSTREAM_PORT}", chat_upstream_port)
+    # Blue-green chat slot b listens on the next port.
+    .replace("{$CADDY_CHAT_B_UPSTREAM_PORT}", str(int(chat_upstream_port) + 1))
 )
 destination.write_text(rendered)
 PY
@@ -683,6 +723,13 @@ enable_deploy_drain() {
 
   local drain_target
   drain_target="$(deploy_drain_file_for_role "$role")"
+  if [[ "$role" == "chat" ]]; then
+    # Slot-aware chat instances only read their own slot file.
+    local slot_target
+    slot_target="$(deploy_drain_file_for_role "chat-$(active_chat_slot)")"
+    write_drain_file "$slot_target"
+    ACTIVE_DRAIN_FILES+=("$slot_target")
+  fi
   log_step "Enabling deployment drain for $role"
   local drain_dir
   drain_dir="$(dirname "$drain_target")"
@@ -693,6 +740,13 @@ enable_deploy_drain() {
     run_as_root chown "$APP_USER:$APP_GROUP" "$drain_dir"
   fi
 
+  write_drain_file "$drain_target"
+  ACTIVE_DRAIN_FILES+=("$drain_target")
+  log_info "Deployment drain file: $drain_target"
+}
+
+write_drain_file() {
+  local drain_target="$1"
   local drain_file
   drain_file="$(mktemp)"
   python3 - "$drain_file" <<'PY'
@@ -709,18 +763,25 @@ Path(sys.argv[1]).write_text(json.dumps({
 PY
 
   if is_app_user; then
+    mkdir -p "$(dirname "$drain_target")"
     install -m 644 "$drain_file" "$drain_target"
   else
+    run_as_root mkdir -p "$(dirname "$drain_target")"
     run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$drain_file" "$drain_target"
   fi
   rm -f "$drain_file"
-  ACTIVE_DRAIN_FILES+=("$drain_target")
-  log_info "Deployment drain file: $drain_target"
+}
+
+remove_drain_file() {
+  local drain_target="$1"
+  [[ -e "$drain_target" ]] || return 0
+  if is_app_user; then rm -f "$drain_target"; else run_as_root rm -f "$drain_target"; fi
 }
 
 disable_deploy_drain() {
   local role="$1"
   local drain_target
+  [[ "$role" != "chat" ]] || remove_drain_file "$(deploy_drain_file_for_role "chat-$(active_chat_slot)")"
   drain_target="$(deploy_drain_file_for_role "$role")"
   [[ -e "$drain_target" ]] || return 0
   log_step "Disabling deployment drain for $role"
@@ -754,6 +815,217 @@ pm2_app_pid() {
   run_as_app_user_shell "pm2 pid '$app_name' 2>/dev/null | tail -n 1" | tr -dc '0-9'
 }
 
+# Blue-green chat: slot a is the original chat app, slot b runs beside it on
+# the next port. releases/state/chat.slot names the slot serving new traffic.
+chat_slot_app() {
+  [[ "$1" == "b" ]] && printf '%s\n' "$PM2_CHAT_B_APP_NAME" || printf '%s\n' "$PM2_CHAT_APP_NAME"
+}
+
+chat_slot_port() {
+  [[ "$1" == "b" ]] && printf '%s\n' "$CHAT_B_API_PORT" || printf '%s\n' "$CHAT_API_PORT"
+}
+
+other_chat_slot() {
+  [[ "$1" == "b" ]] && printf 'a\n' || printf 'b\n'
+}
+
+local_api_host() {
+  case "$API_HOST" in
+    0.0.0.0|"") printf '127.0.0.1\n' ;;
+    ::) printf '[::1]\n' ;;
+    *) printf '%s\n' "$API_HOST" ;;
+  esac
+}
+
+chat_slot_base_url() {
+  printf 'http://%s:%s\n' "$(local_api_host)" "$(chat_slot_port "$1")"
+}
+
+pm2_app_status() {
+  run_as_app_user_shell "pm2 jlist" 2>/dev/null | python3 -c '
+import json, sys
+name = sys.argv[1]
+for app in json.load(sys.stdin):
+    if app.get("name") == name:
+        print(app.get("pm2_env", {}).get("status", ""))
+        break
+' "$1" || true
+}
+
+pm2_app_online() {
+  [[ "$(pm2_app_status "$1")" == "online" ]]
+}
+
+active_chat_slot() {
+  local slot
+  slot="$(read_deploy_state chat.slot)"
+  [[ "$slot" == "a" || "$slot" == "b" ]] || slot="a"
+  printf '%s\n' "$slot"
+}
+
+# Prints a field of the slot's local status endpoint, or nothing when it is down.
+chat_slot_status_field() {
+  local slot="$1" field="$2" status_json
+  status_json="$(curl -fsS --max-time 3 "$(chat_slot_base_url "$slot")/internal/deploy/drain-status" 2>/dev/null || true)"
+  [[ -n "$status_json" ]] || return 0
+  STATUS_JSON="$status_json" python3 - "$field" <<'PY' 2>/dev/null || true
+import json, os, sys
+payload = json.loads(os.environ.get("STATUS_JSON", "{}"))
+field = sys.argv[1]
+if field == "busy":
+    value = payload.get("busy_count")
+    if value is None:
+        value = int(payload.get("active_runtime_turns", 0)) + len(payload.get("active_threads") or [])
+elif field == "phase":
+    value = (payload.get("retirement") or {}).get("phase", "")
+else:
+    value = payload.get(field, "")
+print(str(value).lower() if isinstance(value, bool) else value)
+PY
+}
+
+wait_for_chat_slot_ready() {
+  local slot="$1" started elapsed
+  started="$(date +%s)"
+  log_step "Waiting for chat slot $slot to accept traffic"
+  while true; do
+    if curl -fsS --max-time 3 "$(chat_slot_base_url "$slot")/internal/ready" >/dev/null 2>&1; then
+      log_info "Chat slot $slot is ready"
+      return 0
+    fi
+    elapsed=$(( $(date +%s) - started ))
+    (( elapsed < CHAT_READY_TIMEOUT_SECONDS )) || return 1
+    sleep 2
+  done
+}
+
+# A slot left online by an earlier switch (still retiring, or both started by a
+# reboot) must hand over before it can be replaced. It exits by itself once its
+# runs finish; past the retire limit it is stopped, which marks remaining runs
+# as interrupted by a system update.
+wait_for_chat_slot_exit() {
+  local slot="$1" app started elapsed last_log=-60 busy
+  app="$(chat_slot_app "$slot")"
+  pm2_app_online "$app" || return 0
+  log_step "Chat slot $slot is still running; letting it finish before reusing it"
+  write_drain_file "$(deploy_drain_file_for_role "chat-$slot")"
+  started="$(date +%s)"
+  while pm2_app_online "$app"; do
+    elapsed=$(( $(date +%s) - started ))
+    if (( elapsed >= CHAT_RETIRE_MAX_SECONDS + 120 )); then
+      log_warn "Chat slot $slot did not exit within ${elapsed}s; stopping it"
+      run_as_app_user_shell "pm2 stop '$app'"
+      break
+    fi
+    if (( elapsed - last_log >= 60 )); then
+      busy="$(chat_slot_status_field "$slot" busy)"
+      log_info "Chat slot $slot is finishing ${busy:-?} item(s) of work (${elapsed}s elapsed)"
+      last_log="$elapsed"
+    fi
+    sleep "$AGENT_DRAIN_POLL_SECONDS"
+  done
+}
+
+# The chat instance from before blue-green cannot retire by itself: Caddy's
+# readiness check already sends it no new traffic, so wait for its runs to end.
+retire_legacy_chat_instance() {
+  local slot="$1" app started elapsed idle=0 last_log=-60 busy
+  app="$(chat_slot_app "$slot")"
+  log_step "Waiting for the pre-blue-green chat instance to finish its runs (new conversations already use the new slot)"
+  started="$(date +%s)"
+  while pm2_app_online "$app"; do
+    busy="$(chat_slot_status_field "$slot" busy)"
+    if [[ "${busy:-0}" == "0" ]]; then
+      idle=$((idle + 1))
+      (( idle >= 2 )) && break
+    else
+      idle=0
+    fi
+    elapsed=$(( $(date +%s) - started ))
+    if (( elapsed >= CHAT_RETIRE_MAX_SECONDS )); then
+      log_warn "Pre-blue-green chat instance still has ${busy:-?} active item(s) after ${elapsed}s; stopping it"
+      break
+    fi
+    if (( elapsed - last_log >= 60 )); then
+      log_info "Pre-blue-green chat instance has ${busy:-?} active item(s) (${elapsed}s elapsed)"
+      last_log="$elapsed"
+    fi
+    sleep "$AGENT_DRAIN_POLL_SECONDS"
+  done
+  # Removed rather than stopped so a reboot cannot resurrect its old definition;
+  # the next switch starts this slot from the ecosystem file.
+  run_as_app_user_shell "pm2 delete '$app'" || true
+  remove_drain_file "$(deploy_drain_file_for_role chat)"
+}
+
+switch_chat_slot() {
+  local active target active_app target_app legacy=0
+  active="$(active_chat_slot)"
+  [[ -n "$(read_deploy_state chat.slot)" ]] || legacy=1
+  # Serve from whichever slot is actually up if the recorded one is not.
+  if ! pm2_app_online "$(chat_slot_app "$active")" && pm2_app_online "$(chat_slot_app "$(other_chat_slot "$active")")"; then
+    active="$(other_chat_slot "$active")"
+    legacy=0
+  fi
+  target="$(other_chat_slot "$active")"
+  active_app="$(chat_slot_app "$active")"
+  target_app="$(chat_slot_app "$target")"
+  log_step "Blue-green chat switch: slot $active -> slot $target"
+
+  wait_for_chat_slot_exit "$target"
+  remove_drain_file "$(deploy_drain_file_for_role "chat-$target")"
+  if pm2_app_exists "$target_app"; then
+    run_as_app_user_shell "pm2 delete '$target_app'"
+  fi
+  run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$target_app' --update-env"
+  if ! wait_for_chat_slot_ready "$target"; then
+    run_as_app_user_shell "pm2 stop '$target_app'" || true
+    die "chat slot $target did not become ready within ${CHAT_READY_TIMEOUT_SECONDS}s; slot $active keeps serving"
+  fi
+
+  # Caddy must health-check both slots before the old one stops being ready.
+  if [[ "$legacy" == "1" ]] || deploy_refreshes_caddy; then
+    refresh_caddy_config
+    CADDY_REFRESHED=1
+  fi
+
+  write_deploy_state chat-retiring.release "$(read_deploy_state chat.release)"
+  write_deploy_state chat.slot "$target"
+  run_as_app_user_shell "pm2 save" || true
+  if ! pm2_app_online "$active_app"; then
+    log_info "Chat slot $active was not running; nothing to retire"
+  elif [[ "$legacy" == "1" ]]; then
+    retire_legacy_chat_instance "$active"
+  else
+    # The old slot sees the ready peer, stops being ready (Caddy moves new
+    # requests within a second), finishes its runs and exits by itself.
+    write_drain_file "$(deploy_drain_file_for_role "chat-$active")"
+    local started phase
+    started="$(date +%s)"
+    while true; do
+      phase="$(chat_slot_status_field "$active" phase)"
+      if [[ -z "$phase" || "$phase" != "active" ]]; then
+        log_info "Chat slot $active is retiring; it exits after its in-flight runs (limit ${CHAT_RETIRE_MAX_SECONDS}s)"
+        break
+      fi
+      if (( $(date +%s) - started >= 30 )); then
+        log_warn "Chat slot $active has not started retiring yet; it keeps its drain file and retires once it sees slot $target"
+        break
+      fi
+      sleep 1
+    done
+  fi
+}
+
+check_migration_compat() {
+  local base="${1:-$PREVIOUS_HEAD}"
+  log_step "Checking new migrations stay compatible with the running release"
+  local args=(--repo "$APP_REPO_DIR" --base "$base" --head "$TARGET_COMMIT")
+  [[ "$ALLOW_BREAKING_MIGRATION" == "1" ]] && args+=(--allow-breaking)
+  run_as_app_user node "$script_dir/check-migration-compat.mjs" "${args[@]}" ||
+    die "migration compatibility check failed; see the BREAKING lines above"
+}
+
 drain_status_url_for_port() {
   local status_port="$1"
   local status_host="$API_HOST"
@@ -784,7 +1056,8 @@ try:
 except Exception:
     sys.exit(1)
 
-value = payload.get("active_runtime_turns", 0)
+# Slot-aware releases report everything that keeps them busy; older ones only runtime turns.
+value = payload.get("busy_count", payload.get("active_runtime_turns", 0))
 try:
     value = int(value)
 except Exception:
@@ -806,7 +1079,7 @@ PY
 }
 
 pm2_app_name_for_role() {
-  [[ "$1" == "chat" ]] && printf '%s\n' "$PM2_CHAT_APP_NAME" || printf '%s\n' "$PM2_ADMIN_APP_NAME"
+  [[ "$1" == "chat" ]] && chat_slot_app "$(active_chat_slot)" || printf '%s\n' "$PM2_ADMIN_APP_NAME"
 }
 
 active_runs_for_role() {
@@ -816,7 +1089,7 @@ active_runs_for_role() {
   pm2_app_exists "$app_name" || { printf '0\n'; return 0; }
   pid="$(pm2_app_pid "$app_name" || true)"
   if [[ "$role" == "chat" ]]; then
-    status_url="${AGENT_CHAT_DRAIN_STATUS_URL:-${AGENT_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$CHAT_API_PORT")}}"
+    status_url="${AGENT_CHAT_DRAIN_STATUS_URL:-${AGENT_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$(chat_slot_port "$(active_chat_slot)")")}}"
   else
     status_url="${AGENT_ADMIN_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$ADMIN_API_PORT")}"
   fi
@@ -870,7 +1143,7 @@ restart_chat_when_idle() {
       # A run may have started between the check and the drain signal.
       active_count="$(active_runs_for_role chat)"
       if [[ "$active_count" == "0" ]]; then
-        restart_pm2_app "$PM2_CHAT_APP_NAME"
+        restart_pm2_app "$(pm2_app_name_for_role chat)"
         disable_deploy_drain chat
         return 0
       fi
@@ -1129,6 +1402,8 @@ build_backend_release() {
     return 0
   fi
 
+  check_migration_compat "$(release_commit "$current")"
+
   local release_id
   release_id="$(date -u +%Y%m%dT%H%M%SZ)-${TARGET_COMMIT:0:12}"
   RELEASE_DIR="$RELEASES_DIR/$release_id"
@@ -1179,7 +1454,7 @@ prune_releases() {
   local keep=() current role release
   current="$(current_release_dir)"
   [[ -n "$current" ]] && keep+=("$(basename "$current")")
-  for role in admin chat; do
+  for role in admin chat chat-retiring; do
     release="$(read_deploy_state "$role.release")"
     [[ -n "$release" ]] && keep+=("$release")
   done
@@ -1322,6 +1597,10 @@ restart_targets() {
 
   if deploy_restarts_chat; then
     case "$CHAT_RESTART_MODE" in
+      bluegreen)
+        switch_chat_slot
+        record_app_release chat
+        ;;
       idle)
         if restart_chat_when_idle; then
           record_app_release chat
@@ -1379,7 +1658,7 @@ verify_api_health() {
   for attempt in {1..12}; do
     if node "$script_dir/check-api-health.mjs" \
       --admin-url "http://$health_host:$ADMIN_API_PORT/healthz" \
-      --chat-url "http://$health_host:$CHAT_API_PORT/healthz"; then
+      --chat-url "http://$health_host:$(chat_slot_port "$(active_chat_slot)")/healthz"; then
       return 0
     fi
     sleep 2
@@ -1440,7 +1719,9 @@ main() {
   if deploy_restarts_admin || deploy_restarts_chat; then
     restart_targets
   fi
-  if deploy_refreshes_caddy; then
+  if [[ "$CADDY_REFRESHED" == "1" ]]; then
+    log_info "Caddy config was refreshed during the chat switch"
+  elif deploy_refreshes_caddy; then
     refresh_caddy_config
   else
     log_info "Skipping Caddy config refresh"
@@ -1462,7 +1743,7 @@ main() {
     log_info "Backend release: $(basename "$RELEASE_DIR")"
   fi
   log_info "PM2 admin app: $PM2_ADMIN_APP_NAME on $API_HOST:$ADMIN_API_PORT"
-  log_info "PM2 chat app: $PM2_CHAT_APP_NAME on $API_HOST:$CHAT_API_PORT"
+  log_info "PM2 chat slots: a=$PM2_CHAT_APP_NAME on $API_HOST:$CHAT_API_PORT, b=$PM2_CHAT_B_APP_NAME on $API_HOST:$CHAT_B_API_PORT (active: $(active_chat_slot))"
   log_info "PM2 ecosystem: $PM2_ECOSYSTEM_FILE"
   log_info "Caddy config: $CADDY_CONFIG_FILE"
   log_info "Public domain: ${DOMAIN:-<unset>}"

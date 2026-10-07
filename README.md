@@ -192,7 +192,7 @@ The production layout expected by the scripts is configurable through environmen
 
 - repository root: `/usr/local/agent-studio`
 - app user: `agentstudio`
-- backend: PM2 apps `agent-studio-api` (admin/API management) and `agent-studio-chat-api` (chat/runtime/SSE)
+- backend: PM2 apps `agent-studio-api` (admin/API management) and two chat slots `agent-studio-chat-api` (slot a, port 8791) / `agent-studio-chat-api-b` (slot b, port 8792) for chat/runtime/SSE; only the slot in `releases/state/chat.slot` normally runs
 - frontend: static Vite build served by Caddy
 - API health endpoint: `/healthz`
 
@@ -202,13 +202,17 @@ Deployment scopes:
 - `scripts/deploy-agent-studio.sh --plan`: fetches the remote branch and prints the auto plan without changing anything.
 - `scripts/deploy-agent-studio.sh --frontend-only`: rebuilds static frontend assets only; it does not drain or restart PM2.
 - `scripts/deploy-agent-studio.sh --admin-only`: builds a backend release and restarts only `agent-studio-api`; chat keeps accepting conversations.
-- `scripts/deploy-agent-studio.sh --chat-only`: builds (or reuses) a backend release and restarts only `agent-studio-chat-api`.
+- `scripts/deploy-agent-studio.sh --chat-only`: builds (or reuses) a backend release and switches only the chat slot.
 - `scripts/deploy-agent-studio.sh --all`: rebuilds everything, restarts both APIs and refreshes Caddy.
 - `scripts/deploy-agent-studio.sh --activate-release <id>`: rolls back to an existing release under `releases/` and restarts both APIs.
 
 Backend releases: every backend build goes into `releases/<UTC time>-<commit>/agent-api` with its own `node_modules`, Prisma client and `dist`. `agent-api/dist` and `agent-api/node_modules` are symlinks to the active release. PM2 starts `agent-api/scripts/run-active-release.mjs`, which imports `dist/index.js` by its real path, so a running process (including lazily loaded modules and the Codex binary it spawns) keeps the release it started with while a new build is activated. The active release, releases still used by a running app (`releases/state/<role>.release`) and the newest `AGENT_STUDIO_RELEASE_RETENTION` (default 3) releases are kept. PM2 pins `SESSION_WORKSPACE_ROOT` to `<repo>/sessions` because the code no longer lives inside the checkout.
 
-Restart behavior: drain files are per role (`temp/deploy-drain-admin.json`, `temp/deploy-drain-chat.json`), so restarting admin never blocks new conversations. With `--chat-restart idle` (default) the deploy waits up to `--chat-idle-timeout` (default 1800s) for chat to have no active runs while conversations keep starting normally, then drains only for the seconds the restart takes; if chat never becomes idle the restart is left pending and the next deploy (or `--chat-only --skip-git-pull`) retries it. `--chat-restart drain` restores the old blocking wait bounded by `--drain-timeout`, and `--chat-restart skip` defers chat explicitly. Caddy retries upstream dials for up to 30s, so requests arriving during the restart wait instead of failing. Deploys hold `/tmp/agent-studio-deploy.lock`, so two deploys cannot run at once; `--skip-agent-drain` remains the explicit emergency override.
+Restart behavior (blue-green chat, `--chat-restart bluegreen`, default): the deploy starts the new release in the inactive chat slot, waits for its `/internal/ready`, then writes the old slot's drain file (`temp/deploy-drain-chat-<slot>.json`). Caddy load-balances chat with `lb_policy first` and health-checks `/internal/ready` every second, so new conversations move to the new slot within ~1s while the old slot keeps its in-flight runs on the old release. Cancel/steer/tool-result/running-status requests are routed to the instance that owns the run, and a retiring slot forwards everything else to the ready peer. The old slot exits on its own once idle (limit `AGENT_STUDIO_CHAT_RETIRE_MAX_SECONDS`, default 1800s; remaining runs end as "interrupted by a system update" with partial output kept, and the user can resend). DingTalk stream clients reconnect on the new slot; Zendesk only recovers runs whose owner instance is gone. The first switch from the legacy single chat instance waits for it to become idle (same limit) and then deletes it. `--chat-restart idle|drain|skip` keep the previous single-instance behaviors. Admin restarts never block conversations; personal/team usage routes are served by admin.
+
+Migrations must stay compatible with the release that is still running: `scripts/check-migration-compat.mjs` runs before every backend build and rejects DROP/RENAME/type changes/SET NOT NULL/required columns without default added since the running release. Split such changes into expand-then-contract deploys, or pass `--allow-breaking-migration` after confirming the old code does not use the affected schema.
+
+Hot-loaded data: the proactive scenario catalog lives in `agent-api/templates/runtime-content/proactive-scenarios.json` and is reloaded every 30s, so catalog edits only need `git pull` (no restart). Deploys hold `/tmp/agent-studio-deploy.lock`, so two deploys cannot run at once; `--skip-agent-drain` remains the explicit emergency override.
 
 Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.
 

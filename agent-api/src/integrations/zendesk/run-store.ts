@@ -16,6 +16,7 @@ type ZendeskRunRow = {
   requesterCommentId: number | bigint | string | null;
   ticketSubject: string | null;
   error: string | null;
+  ownerInstanceId?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -28,6 +29,7 @@ type ZendeskRunTable = {
   }): Promise<ZendeskRunRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<ZendeskRunRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<ZendeskRunRow>;
+  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
 };
 
 export type ZendeskRunStoreDb = {
@@ -87,7 +89,8 @@ function mapRun(row: ZendeskRunRow): ZendeskRunRecord {
     commentId: toSafeNumber(row.commentId),
     requesterCommentId: toSafeNumber(row.requesterCommentId),
     ticketSubject: trimOrUndefined(row.ticketSubject ?? undefined),
-    error: trimOrUndefined(row.error ?? undefined)
+    error: trimOrUndefined(row.error ?? undefined),
+    ownerInstanceId: trimOrUndefined(row.ownerInstanceId ?? undefined)
   };
 }
 
@@ -204,29 +207,39 @@ export class ZendeskRunStore {
 
   async update(
     runId: string,
-    patch: Partial<Omit<ZendeskRunRecord, "id" | "ticketId" | "source" | "createdAt">>
+    patch: Partial<Omit<ZendeskRunRecord, "id" | "ticketId" | "source" | "createdAt">>,
+    expected?: { status: ZendeskRunStatus; ownerInstanceId: string | undefined }
   ): Promise<ZendeskRunRecord | undefined> {
     const id = trimOrUndefined(runId);
     if (!id) return undefined;
+    const data = {
+      ...(patch.instanceId !== undefined
+        ? {
+            integrationInstanceId: trimOrUndefined(patch.instanceId) ?? null,
+            scopeKey: zendeskScopeKey(patch.instanceId)
+          }
+        : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
+      ...(patch.decision !== undefined ? { decision: patch.decision ?? null } : {}),
+      ...(patch.commentId !== undefined ? { commentId: toBigIntOrNull(patch.commentId) } : {}),
+      ...(patch.requesterCommentId !== undefined ? { requesterCommentId: toBigIntOrNull(patch.requesterCommentId) } : {}),
+      ...(patch.ticketSubject !== undefined ? { ticketSubject: trimOrUndefined(patch.ticketSubject) ?? null } : {}),
+      ...(patch.error !== undefined ? { error: trimOrUndefined(patch.error) ?? null } : {}),
+      ...(patch.ownerInstanceId !== undefined ? { ownerInstanceId: trimOrUndefined(patch.ownerInstanceId) ?? null } : {})
+    };
     try {
-      const row = await this.db.zendeskRun.update({
-        where: { id },
-        data: {
-          ...(patch.instanceId !== undefined
-            ? {
-                integrationInstanceId: trimOrUndefined(patch.instanceId) ?? null,
-                scopeKey: zendeskScopeKey(patch.instanceId)
-              }
-            : {}),
-          ...(patch.status !== undefined ? { status: patch.status } : {}),
-          ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
-          ...(patch.decision !== undefined ? { decision: patch.decision ?? null } : {}),
-          ...(patch.commentId !== undefined ? { commentId: toBigIntOrNull(patch.commentId) } : {}),
-          ...(patch.requesterCommentId !== undefined ? { requesterCommentId: toBigIntOrNull(patch.requesterCommentId) } : {}),
-          ...(patch.ticketSubject !== undefined ? { ticketSubject: trimOrUndefined(patch.ticketSubject) ?? null } : {}),
-          ...(patch.error !== undefined ? { error: trimOrUndefined(patch.error) ?? null } : {})
-        }
-      });
+      if (expected) {
+        // Compare-and-set so two chat instances cannot both reclaim the same run.
+        const result = await this.db.zendeskRun.updateMany({
+          where: { id, status: expected.status, ownerInstanceId: expected.ownerInstanceId ?? null },
+          data
+        });
+        if (result.count !== 1) return undefined;
+        const [row] = await this.db.zendeskRun.findMany({ where: { id }, take: 1 });
+        return row ? mapRun(row) : undefined;
+      }
+      const row = await this.db.zendeskRun.update({ where: { id }, data });
       return mapRun(row);
     } catch {
       return undefined;

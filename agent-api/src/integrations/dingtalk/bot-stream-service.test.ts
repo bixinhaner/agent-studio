@@ -190,6 +190,38 @@ describe("DingTalkBotStreamService", () => {
     service.stop();
   });
 
+  it("stops receiving during a blue-green handover but keeps proactive sending and reconnects on resume", async () => {
+    let releaseHandler: () => void = () => undefined;
+    const handleMessage = vi.fn(
+      () =>
+        new Promise<{ status: "replied"; replyText: string }>((resolve) => {
+          releaseHandler = () => resolve({ status: "replied", replyText: "done" });
+        })
+    );
+    const service = new DingTalkBotStreamService({
+      listInstances: async () => [TEST_INSTANCE],
+      handleMessage,
+      fetchImpl: vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch
+    });
+    await service.refresh();
+    const first = streamMock.MockDWClient.instances[0];
+    first.emitCallback(streamMock.TOPIC_ROBOT, robotDownstream());
+    await vi.waitFor(() => expect(service.inFlightCount()).toBe(1));
+
+    service.stopReceiving();
+
+    expect(first.connected).toBe(false);
+    expect(service.hasProactiveSender()).toBe(true);
+    expect(service.inFlightCount()).toBe(1);
+    releaseHandler();
+    await vi.waitFor(() => expect(service.inFlightCount()).toBe(0));
+
+    await service.refresh();
+    expect(streamMock.MockDWClient.instances).toHaveLength(2);
+    expect(streamMock.MockDWClient.instances[1]?.connected).toBe(true);
+    service.stop();
+  });
+
   it("falls back to text when markdown replies are rejected", async () => {
     const fetchMock = vi
       .fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response("{}", { status: 200 }))

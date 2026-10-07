@@ -305,6 +305,10 @@ export class ScheduledTaskService {
     this.timer = undefined;
   }
 
+  activeRunCount(): number {
+    return this.running.size;
+  }
+
   async waitForIdle(): Promise<void> {
     await Promise.all([...this.running.values()].map((item) => item.promise));
   }

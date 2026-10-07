@@ -15,6 +15,7 @@ export function portalAssistantErrorMessageKey(detail: string, code?: string): P
   const normalizedDetail = detail.replace(/\s+/g, " ").trim();
 
   if (normalizedCode === "DEPLOYMENT_DRAIN") return "thread.errorDeploymentDrain";
+  if (normalizedCode === "SYSTEM_UPDATE_INTERRUPTED") return "thread.errorSystemUpdateInterrupted";
   if (normalizedCode === "AI_SERVICE_BUSY") return "thread.errorAiServiceBusy";
   if (normalizedCode === "SKILL_LOAD_FAILED") return "thread.errorSkillLoadFailed";
   if (normalizedCode === "DIRECT_CHAT_MESSAGE_TOO_LARGE") return "thread.errorMessageTooLarge";

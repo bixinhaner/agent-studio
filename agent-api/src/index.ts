@@ -15,6 +15,9 @@ import { SecurityDomainAccessControl } from "./security-domains/access-control.j
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
 import { deployDrainFilesForRole, readDeploymentDrainReason } from "./deploy-drain.js";
+import { ChatClusterView, type OwnedRuns, type RunKey } from "./chat-cluster/cluster.js";
+import { createChatClusterRoutingMiddleware, inFlightForwardCount, resolveChatRunKey } from "./chat-cluster/forwarding.js";
+import { ChatRetirementController } from "./chat-cluster/retirement.js";
 import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
@@ -466,6 +469,12 @@ import {
 const app = express();
 const runsAdminService = appConfig.serviceRole !== "chat";
 const runsChatService = appConfig.serviceRole !== "admin";
+// Blue-green chat: each chat slot is one PM2 app; the slot that is not
+// serving traffic is stopped except while a deploy hands over between them.
+const chatSlot = appConfig.serviceRole === "chat" ? appConfig.chatCluster.slot : undefined;
+const chatInstanceId = `${appConfig.serviceRole}${chatSlot ? `-${chatSlot}` : ""}:${process.pid}-${Date.now().toString(36)}`;
+const chatCluster = new ChatClusterView({ peerUrls: appConfig.chatCluster.peerUrls, selfPort: appConfig.port });
+let chatRetirement: ChatRetirementController | undefined;
 const runtime = new CodexRuntime();
 const actionConnectorAttachments = new ActionConnectorAttachmentStore(
   path.join(appConfig.sessionWorkspaceRoot, ".action-connector-attachments")
@@ -546,51 +555,49 @@ function hasActiveRuntimeTurnForThread(threadId: string): boolean {
   return Array.from(activeRuntimeTurns.values()).some((turn) => turn.threadId === normalizedThreadId);
 }
 
-async function isThreadActiveForAdmin(threadId: string): Promise<boolean> {
-  if (runsChatService) return hasActiveRuntimeTurnForThread(threadId);
-  const statusUrl = trimOrUndefined(process.env.AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL);
-  if (!statusUrl) return false;
-  try {
-    const response = await fetch(statusUrl, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(1000)
-    });
-    if (!response.ok) return false;
-    const payload = asRecord(await response.json());
-    const turns = Array.isArray(payload?.turns) ? payload.turns : [];
-    return turns.some((turn) => {
-      const activeThreadId = asRecord(turn)?.thread_id;
-      return trimOrUndefined(typeof activeThreadId === "string" ? activeThreadId : undefined) === threadId;
-    });
-  } catch {
-    return false;
+/** Thread activity reported by the other chat instances; unavailable when one cannot be read. */
+async function chatPeerThreadActivity(): Promise<{ available: boolean; items: Record<string, unknown>[] }> {
+  const items: Record<string, unknown>[] = [];
+  let available = runsChatService;
+  for (const status of await chatCluster.statuses()) {
+    if (status.state === "unknown") return { available: false, items: [] };
+    if (status.state !== "up") continue;
+    available = true;
+    items.push(...status.activeThreads, ...status.turns);
   }
+  return { available, items };
+}
+
+function threadIdOf(item: unknown): string | undefined {
+  const value = asRecord(item)?.thread_id;
+  return trimOrUndefined(typeof value === "string" ? value : undefined);
+}
+
+async function isThreadActiveForAdmin(threadId: string): Promise<boolean> {
+  if (runsChatService && hasActiveRuntimeTurnForThread(threadId)) return true;
+  if (!chatCluster.enabled) return false;
+  const peers = await chatPeerThreadActivity();
+  return peers.items.some((item) => threadIdOf(item) === threadId);
+}
+
+/** Whether a portal task runs on this or another chat instance (blocks binding changes mid-run). */
+async function isPortalThreadRunningInCluster(threadId: string): Promise<boolean> {
+  if ([...portalActiveChatRuns.values()].some((run) => run.threadId === threadId)) return true;
+  if (!chatCluster.enabled) return false;
+  const peers = await chatPeerThreadActivity();
+  return peers.items.some((item) => threadIdOf(item) === threadId);
 }
 
 async function activePortalThreadIdsForActor(
   currentUser: CurrentActor
 ): Promise<{ available: boolean; threadIds: Set<string> }> {
-  let statuses: unknown[];
-  if (runsChatService) {
-    statuses = activeThreadStatus();
-  } else {
-    const statusUrl = trimOrUndefined(process.env.AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL);
-    if (!statusUrl) return { available: false, threadIds: new Set() };
-    try {
-      const response = await fetch(statusUrl, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(1000)
-      });
-      if (!response.ok) return { available: false, threadIds: new Set() };
-      const payload = asRecord(await response.json());
-      statuses = Array.isArray(payload?.active_threads)
-        ? payload.active_threads
-        : Array.isArray(payload?.turns)
-          ? payload.turns
-          : [];
-    } catch {
-      return { available: false, threadIds: new Set() };
-    }
+  const statuses: unknown[] = runsChatService ? [...activeThreadStatus()] : [];
+  if (chatCluster.enabled) {
+    const peers = await chatPeerThreadActivity();
+    if (!peers.available) return { available: false, threadIds: new Set() };
+    statuses.push(...peers.items);
+  } else if (!runsChatService) {
+    return { available: false, threadIds: new Set() };
   }
 
   const threadIds = new Set<string>();
@@ -1706,6 +1713,8 @@ const zendesk = new ZendeskIntegrationService({
   runtimeSession: createZendeskRuntimeSessionBridge(),
   codexExecution,
   getDrainReason: getDeploymentDrainReason,
+  ownerInstanceId: chatInstanceId,
+  isOwnerAlive: isChatInstanceAlive,
   codexSessionHomeRoot: appConfig.codex.sessionHomeRoot,
   registerGeneratedArtifacts: registerGeneratedArtifactsForRuntimeSession,
   async recordUsage(input) {
@@ -2289,13 +2298,39 @@ function runtimeEventHasTurnSideEffect(event: { delta?: string; text?: string; r
   );
 }
 
-async function getDeploymentDrainReason(): Promise<string | undefined> {
-  return readDeploymentDrainReason(deployDrainFilesForRole(appConfig.deployDrainFile, appConfig.serviceRole), (file, error) => {
+async function readDeploymentDrainFiles(): Promise<string | undefined> {
+  return readDeploymentDrainReason(deployDrainFilesForRole(appConfig.deployDrainFile, appConfig.serviceRole, chatSlot), (file, error) => {
     console.warn("failed to read deploy drain file", {
       path: file,
       detail: error instanceof Error ? error.message : String(error)
     });
   });
+}
+
+/** Whether the chat instance that recorded a run may still be working on it. */
+async function isChatInstanceAlive(ownerInstanceId: string | undefined): Promise<boolean> {
+  if (ownerInstanceId && ownerInstanceId === chatInstanceId) return true;
+  if (!chatCluster.enabled) return false;
+  const statuses = await chatCluster.statuses();
+  // Unreadable peer: do not reclaim what it may still be processing.
+  if (statuses.some((status) => status.state === "unknown")) return true;
+  const up = statuses.filter((status) => status.state === "up");
+  // Rows written by a release before ownership tracking: any running peer may own them.
+  if (!ownerInstanceId) return up.length > 0;
+  return up.some((status) => status.instanceId === ownerInstanceId);
+}
+
+/**
+ * Reason to reject new work. A blue-green chat slot being drained while its
+ * peer is ready hands work over instead of rejecting it, so users only see
+ * the drain message when no instance can take the request.
+ */
+async function getDeploymentDrainReason(): Promise<string | undefined> {
+  const reason = await readDeploymentDrainFiles();
+  if (!reason || !chatRetirement) return reason;
+  if (chatRetirement.isRetiring()) return undefined;
+  await chatRetirement.poll();
+  return chatRetirement.isRetiring() ? undefined : chatRetirement.userFacingDrainReason();
 }
 
 async function restoreLiveRuntimeThreadUnlocked(
@@ -2436,7 +2471,7 @@ function runtimePrewarmHours(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 24;
 }
 
-async function prewarmAppServerRuntimeSessions(): Promise<void> {
+async function prewarmAppServerRuntimeSessions(options: { skipThreadIds?: Set<string> } = {}): Promise<void> {
   if (!isAppServerRuntimeEnabled()) return;
   const limit = runtimePrewarmLimit();
   const cutoff = new Date(Date.now() - runtimePrewarmHours() * 60 * 60_000);
@@ -2474,6 +2509,7 @@ async function prewarmAppServerRuntimeSessions(): Promise<void> {
     if (!session || !codexHome || !codexThreadId) continue;
     const leaseThreadId = session.threadId ?? session.sessionId;
     if (seenThreads.has(leaseThreadId)) continue;
+    if (session.threadId && options.skipThreadIds?.has(session.threadId)) continue;
     seenThreads.add(leaseThreadId);
     const scopeKey = `${codexHome}::${stableJson(session.providerSnapshot?.runtimeOptions)}`;
     if (seenScopes.has(scopeKey)) continue;
@@ -4521,6 +4557,8 @@ type PortalActiveChatRun = {
   assistantMessageWritten?: boolean;
   /** Snapshot of what the run has produced so far, kept by a stop so the partial answer survives a refresh. */
   partialSnapshot?: () => PortalPartialAssistantSnapshot;
+  /** Aborted when a retiring chat instance reaches its limit; the turn ends as "interrupted by a system update". */
+  systemInterrupt?: AbortController;
   acceptedAt: string;
 };
 
@@ -4617,6 +4655,7 @@ function registerPortalActiveChatRun(input: {
   userId: string;
   organizationId: string;
   controller: AbortController;
+  systemInterrupt?: AbortController;
   threadId?: string;
   traceId?: string;
   assistantMessageId?: string;
@@ -4633,6 +4672,7 @@ function registerPortalActiveChatRun(input: {
     userId: input.userId,
     organizationId: input.organizationId,
     controller: input.controller,
+    systemInterrupt: input.systemInterrupt,
     createdAt: Date.now(),
     runId: input.runId,
     traceId: trimOrUndefined(input.traceId),
@@ -11365,6 +11405,71 @@ app.post(
 );
 app.use("/api/local-bridge", express.json({ limit: "4mb" }));
 app.use(express.json({ limit: "1mb" }));
+
+// Mutating requests still being handled here; a retiring chat slot exits only
+// after they finish, covering work accepted before its run is registered.
+let inFlightMutatingRequests = 0;
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+    next();
+    return;
+  }
+  inFlightMutatingRequests += 1;
+  res.once("close", () => {
+    inFlightMutatingRequests -= 1;
+  });
+  next();
+});
+
+function ownedChatRuns(): OwnedRuns {
+  const live = <T extends { controller: AbortController }>(runs: Map<string, T>) =>
+    [...runs.entries()].filter(([, run]) => !run.controller.signal.aborted).map(([id]) => id);
+  return {
+    portal_session: live(portalActiveChatRuns),
+    crest_run: live(crestActiveChatRuns),
+    action_connector_run: [
+      ...new Set([
+        ...actionConnectorActiveRuns.keys(),
+        ...(proactiveActionConnectorBridge.activeRunIds?.() ?? []),
+        ...proactiveActionConnectors.activeRunIds()
+      ])
+    ]
+  };
+}
+
+function ownsChatRunLocally(key: RunKey): boolean {
+  return ownedChatRuns()[key.kind].includes(key.id);
+}
+
+/** Work that keeps a retiring chat slot alive. */
+function chatBusyCount(): number {
+  if (!runsChatService) return 0;
+  const owned = ownedChatRuns();
+  return (
+    activeRuntimeTurns.size +
+    owned.portal_session.length +
+    owned.crest_run.length +
+    owned.action_connector_run.length +
+    scheduledTasks.activeRunCount() +
+    zendesk.activeWorkCount() +
+    dingtalkBotStream.inFlightCount() +
+    inFlightMutatingRequests +
+    inFlightForwardCount()
+  );
+}
+
+if (runsChatService && chatCluster.enabled) {
+  app.use(
+    createChatClusterRoutingMiddleware({
+      cluster: chatCluster,
+      instanceId: chatInstanceId,
+      resolveRunKey: resolveChatRunKey,
+      ownsLocally: ownsChatRunLocally,
+      isRetiring: () => Boolean(chatRetirement?.isRetiring()),
+      logger: console
+    })
+  );
+}
 app.use(createPublicBrandContextMiddleware(publicBrands));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
@@ -11413,14 +11518,32 @@ app.get("/internal/deploy/drain-status", async (req: Request, res: Response) => 
     return;
   }
   res.setHeader("Cache-Control", "no-store");
-  const drainReason = await getDeploymentDrainReason();
+  const drainReason = await readDeploymentDrainFiles();
   res.json({
     ok: true,
     now: new Date().toISOString(),
+    instance_id: chatInstanceId,
+    role: appConfig.serviceRole,
+    slot: chatSlot,
     draining: Boolean(drainReason),
+    ready: chatRetirement ? chatRetirement.isReady() : !drainReason,
+    busy_count: chatBusyCount(),
+    retirement: chatRetirement?.snapshot(),
     ...activeRuntimeTurnStatus(),
-    active_threads: activeThreadStatus()
+    active_threads: activeThreadStatus(),
+    owned_runs: runsChatService ? ownedChatRuns() : undefined
   });
+});
+
+// Caddy health check for blue-green chat: only the slot serving new traffic is ready.
+app.get("/internal/ready", (req: Request, res: Response) => {
+  if (!isLocalDeployStatusRequest(req)) {
+    res.status(404).json({ detail: "Not found" });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
+  const ready = chatRetirement ? chatRetirement.isReady() : true;
+  res.status(ready ? 200 : 503).json({ ready, instance_id: chatInstanceId, slot: chatSlot });
 });
 
 app.get("/public-api/branding", async (req: Request, res: Response) => {
@@ -11689,7 +11812,7 @@ registerCommonApiRoutes(app, {
     publicBrands
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
-  localBridgeRouter: createLocalBridgeRouter(db, { isTaskRunning: (threadId) => [...portalActiveChatRuns.values()].some(run => run.threadId === threadId) }),
+  localBridgeRouter: createLocalBridgeRouter(db, { isTaskRunning: isPortalThreadRunningInCluster }),
   externalWebAccessMiddleware: createAuthenticatedExternalWebGate(externalWebAccess),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
@@ -11741,7 +11864,7 @@ const scheduledTasks = new ScheduledTaskService({
   }),
   push: dingtalkPush,
   appBaseUrl: appConfig.appBaseUrl,
-  getDrainReason: getDeploymentDrainReason,
+  getDrainReason: readDeploymentDrainFiles,
   logger: console
 });
 const notificationSubscriptions = new NotificationSubscriptionService({
@@ -13793,9 +13916,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   };
   const heartbeat = setInterval(() => sendTrackedSSE("ping", { now: new Date().toISOString() }), 15000);
   const explicitCancel = new AbortController();
+  const systemInterrupt = new AbortController();
   // A transport disconnect is recoverable: keep the runtime turn alive so the
   // result can be persisted and the explicit cancel endpoint can still find it.
-  const runAbort = mergeAbortSignals([explicitCancel.signal]);
+  const runAbort = mergeAbortSignals([explicitCancel.signal, systemInterrupt.signal]);
   let directInputLength: number | undefined;
   let unregisterPortalRun: (() => void) | undefined;
   let portalRuntimeSession: SessionRecord | undefined;
@@ -13959,6 +14083,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       userId: currentUser.id,
       organizationId: currentUser.organizationId,
       controller: explicitCancel,
+      systemInterrupt,
       threadId: portalThreadId,
       traceId: portalStreamTraceId,
       assistantMessageId: portalAssistantMessageId,
@@ -14355,7 +14480,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         attempted: portalAutoRecoveryAttempted,
         finalAnswerStarted: portalFinalAnswerStarted,
         nonResumableSideEffectStarted: portalNonResumableSideEffectStarted,
-        aborted: explicitCancel.signal.aborted
+        aborted: explicitCancel.signal.aborted || systemInterrupt.signal.aborted
       });
       if (!shouldRecover) throw error;
 
@@ -14383,12 +14508,19 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       });
     }
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    const failurePayload = payloadForSessionAccessError(
-      error,
-      "Chat stream failed",
-      portalLocale
-    );
+    const interruptedBySystemUpdate = systemInterrupt.signal.aborted && !explicitCancel.signal.aborted;
+    const detail = interruptedBySystemUpdate
+      ? "Interrupted by a system update before the answer completed."
+      : error instanceof Error ? error.message : String(error);
+    // A system update interrupt is not a runtime fault: keep the partial
+    // answer, offer retry, and leave the runtime session reusable.
+    const failurePayload = interruptedBySystemUpdate
+      ? { detail, code: "SYSTEM_UPDATE_INTERRUPTED", reason_code: "system_update" }
+      : payloadForSessionAccessError(
+          error,
+          "Chat stream failed",
+          portalLocale
+        );
     portalFailurePresentation = presentPortalFailure({
       payload: failurePayload,
       rawDetail: detail,
@@ -14397,7 +14529,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (portalUserMessageId && !explicitCancel.signal.aborted) {
       portalTurnFailure = detail;
     }
-    if (portalRuntimeSession && portalRuntimeStarted && !explicitCancel.signal.aborted) {
+    if (portalRuntimeSession && portalRuntimeStarted && !explicitCancel.signal.aborted && !interruptedBySystemUpdate) {
       portalRuntimeFailure = detail;
     }
     const errorSent =
@@ -14571,29 +14703,144 @@ if (runsAdminService) {
   }, 60 * 60_000).unref();
 }
 
-if (runsChatService && isAppServerRuntimeEnabled()) {
-  process.once("exit", () => {
-    void shutdownCodexAppServerRuntime("node process exiting");
-    void closeCodexThreadRuntimeLeasePool();
+let chatShutdownStarted = false;
+
+async function clearOwnChatSlotDrainFile(): Promise<void> {
+  if (!chatSlot) return;
+  const slotFile = deployDrainFilesForRole(appConfig.deployDrainFile, "chat", chatSlot)[1];
+  if (slotFile) await fs.rm(slotFile, { force: true }).catch(() => undefined);
+}
+
+/**
+ * Stops this chat instance. With interruptRemaining, in-flight runs end as
+ * "interrupted by a system update" and keep their partial answer, so users can
+ * retry instead of finding a turn that silently disappeared.
+ */
+async function shutdownChatInstance(input: { interruptRemaining: boolean; reason: string; exitCode: number }): Promise<void> {
+  if (chatShutdownStarted) return;
+  chatShutdownStarted = true;
+  chatRetirement?.stop();
+  const owned = ownedChatRuns();
+  console.log("chat instance shutting down", {
+    instance: chatInstanceId,
+    reason: input.reason,
+    interrupt_remaining: input.interruptRemaining,
+    portal_runs: owned.portal_session.length,
+    crest_runs: owned.crest_run.length,
+    action_connector_runs: owned.action_connector_run.length
   });
+  if (input.interruptRemaining) {
+    const interruption = new Error("system_update_interrupted");
+    for (const run of portalActiveChatRuns.values()) {
+      if (!run.controller.signal.aborted) run.systemInterrupt?.abort(interruption);
+    }
+    for (const run of crestActiveChatRuns.values()) {
+      if (!run.controller.signal.aborted) run.controller.abort(interruption);
+    }
+    for (const run of actionConnectorActiveRuns.values()) {
+      if (!run.controller.signal.aborted) run.controller.abort(interruption);
+    }
+    // Proactive runs return to the queue when their lease expires.
+    proactiveActionConnectors.stop();
+    // Give interrupted turns time to persist their partial answer.
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && (portalActiveChatRuns.size > 0 || crestActiveChatRuns.size > 0 || actionConnectorActiveRuns.size > 0)) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  if (isAppServerRuntimeEnabled()) {
+    await shutdownCodexAppServerRuntime(input.reason);
+    await closeCodexThreadRuntimeLeasePool();
+  }
+  process.exit(input.exitCode);
+}
+
+if (runsChatService) {
+  if (isAppServerRuntimeEnabled()) {
+    process.once("exit", () => {
+      void shutdownCodexAppServerRuntime("node process exiting");
+      void closeCodexThreadRuntimeLeasePool();
+    });
+  }
   process.once("SIGTERM", () => {
-    void (async () => {
-      await shutdownCodexAppServerRuntime("received SIGTERM");
-      await closeCodexThreadRuntimeLeasePool();
-      process.exit(0);
-    })();
+    void shutdownChatInstance({ interruptRemaining: true, reason: "received SIGTERM", exitCode: 0 });
   });
   process.once("SIGINT", () => {
-    void (async () => {
-      await shutdownCodexAppServerRuntime("received SIGINT");
-      await closeCodexThreadRuntimeLeasePool();
-      process.exit(130);
-    })();
+    void shutdownChatInstance({ interruptRemaining: true, reason: "received SIGINT", exitCode: 130 });
   });
+}
+
+/** A new slot prewarms only after the old one stopped taking traffic, so it never caches a thread the old slot is still advancing. */
+async function prewarmAfterChatHandover(): Promise<void> {
+  if (chatCluster.enabled) {
+    const deadline = Date.now() + 30 * 60_000;
+    while (Date.now() < deadline && (await chatCluster.readyPeer(0))) {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  }
+  const peerActiveThreads = new Set<string>();
+  if (chatCluster.enabled) {
+    for (const item of (await chatPeerThreadActivity()).items) {
+      const threadId = threadIdOf(item);
+      if (threadId) peerActiveThreads.add(threadId);
+    }
+  }
+  await prewarmAppServerRuntimeSessions({ skipThreadIds: peerActiveThreads });
+}
+
+function startZendeskRecoveryLoop(): void {
+  const recover = (reason: string) =>
+    zendesk
+      .recoverInterruptedProcessingRuns({ reprocess: true, olderThanMs: reason === "startup" ? 0 : 60_000 })
+      .then((result) => {
+        if (result.markedFailed > 0 || result.requeued > 0) {
+          console.log("recovered interrupted Zendesk runs", { reason, ...result });
+        }
+      })
+      .catch((error) => {
+        console.warn("failed to recover interrupted Zendesk runs", error instanceof Error ? error.message : String(error));
+      });
+  void recover("startup");
+  if (!chatCluster.enabled) return;
+  // Runs owned by a slot that exited mid-run are picked up once it is gone.
+  setInterval(() => {
+    if (chatRetirement?.isRetiring()) return;
+    void readDeploymentDrainFiles().then((drain) => (drain ? undefined : recover("periodic")));
+  }, 2 * 60_000).unref();
 }
 
 async function bootstrap() {
   await db.$connect();
+  if (chatSlot && chatCluster.enabled) {
+    chatRetirement = new ChatRetirementController({
+      cluster: chatCluster,
+      readDrainReason: readDeploymentDrainFiles,
+      busyCount: chatBusyCount,
+      retireMaxMs: appConfig.chatCluster.retireMaxMs,
+      onRetireStart: () => {
+        // New conversations, queued work and DingTalk messages go to the new slot.
+        dingtalkBotStream.stopReceiving();
+        proactiveActionConnectors.pauseClaims();
+        scheduledTasks.stop();
+        notificationSubscriptions.stop();
+      },
+      onRetireCancel: async () => {
+        // Serving again (the new slot went away): the handover drain must not
+        // turn into a lone drain that rejects every new conversation.
+        await clearOwnChatSlotDrainFile();
+        dingtalkBotStream.start();
+        proactiveActionConnectors.resumeClaims();
+        scheduledTasks.start();
+        notificationSubscriptions.start();
+      },
+      exit: async (input) => {
+        // A retired slot leaves no drain behind, so a later start (reboot) serves normally.
+        await clearOwnChatSlotDrainFile();
+        await shutdownChatInstance({ ...input, exitCode: 0 });
+      },
+      logger: console
+    });
+  }
   if (runsChatService) {
     await proactiveActionConnectors.start();
   }
@@ -14630,16 +14877,11 @@ async function bootstrap() {
     console.log(`agent-studio-api(${appConfig.serviceRole}) listening on http://${appConfig.host}:${appConfig.port}`);
   });
   if (runsChatService) {
-    void prewarmAppServerRuntimeSessions().catch((error) => {
+    chatRetirement?.start();
+    void prewarmAfterChatHandover().catch((error) => {
       console.warn("failed to prewarm app-server runtime sessions", error instanceof Error ? error.message : String(error));
     });
-    void zendesk.recoverInterruptedProcessingRuns({ reprocess: true }).then((result) => {
-      if (result.markedFailed > 0 || result.requeued > 0) {
-        console.log("recovered interrupted Zendesk runs", result);
-      }
-    }).catch((error) => {
-      console.warn("failed to recover interrupted Zendesk runs", error instanceof Error ? error.message : String(error));
-    });
+    startZendeskRecoveryLoop();
   }
 }
 

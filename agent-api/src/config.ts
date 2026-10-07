@@ -10,6 +10,10 @@ const schema = z.object({
   PORT: z.string().default("8787"),
   HOST: z.string().default("0.0.0.0"),
   AGENT_STUDIO_SERVICE_ROLE: z.enum(["all", "admin", "chat"]).default("all"),
+  AGENT_STUDIO_CHAT_SLOT: z.string().optional(),
+  AGENT_STUDIO_CHAT_PEER_URLS: z.string().optional(),
+  AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL: z.string().optional(),
+  AGENT_STUDIO_CHAT_RETIRE_MAX_SECONDS: z.string().optional(),
   AGENT_API_TOKEN: z.string().optional(),
   ACTION_CONNECTOR_ALLOWED_ORIGINS: z.string().optional(),
   DINGTALK_CLIENT_ID: z.string().optional(),
@@ -195,6 +199,22 @@ function parseInteger(value: string | undefined, defaultValue: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
+function parseChatPeerUrls(list: string | undefined, legacyStatusUrl: string | undefined): string[] {
+  const urls = (list || "")
+    .split(/[\s,]+/)
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  if (urls.length) return [...new Set(urls)];
+  // Before blue-green the admin service only knew the single chat status URL.
+  const legacy = (legacyStatusUrl || "").trim();
+  if (!legacy) return [];
+  try {
+    return [new URL(legacy).origin];
+  } catch {
+    return [];
+  }
+}
+
 function defaultCookieSecure(nodeEnv: string | undefined): boolean {
   const normalized = (nodeEnv || "").trim().toLowerCase();
   return normalized !== "development" && normalized !== "test";
@@ -204,6 +224,14 @@ export const appConfig = {
   port: Number(env.PORT) || 8787,
   host: env.HOST,
   serviceRole: env.AGENT_STUDIO_SERVICE_ROLE,
+  chatCluster: {
+    // Blue-green chat slot ("a"/"b"). Unset keeps the single-instance behavior.
+    slot: (env.AGENT_STUDIO_CHAT_SLOT || "").trim().toLowerCase() || undefined,
+    // Internal base URLs of every chat instance, including this one.
+    peerUrls: parseChatPeerUrls(env.AGENT_STUDIO_CHAT_PEER_URLS, env.AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL),
+    // A retiring slot interrupts runs still active after this long so it can exit.
+    retireMaxMs: parseInteger(env.AGENT_STUDIO_CHAT_RETIRE_MAX_SECONDS, 30 * 60) * 1000
+  },
   token: (env.AGENT_API_TOKEN || "").trim(),
   actionConnectorAllowedOrigins: (env.ACTION_CONNECTOR_ALLOWED_ORIGINS || "")
     .split(",")

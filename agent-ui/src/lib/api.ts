@@ -49,6 +49,54 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// A chat service switch or restart can briefly answer 502/503/504 or drop the
+// connection. Reads are safe to repeat, so retry them a few times before
+// surfacing an error; writes are never repeated automatically.
+export const GATEWAY_RETRY_STATUSES = new Set([502, 503, 504]);
+const READ_RETRY_DELAYS_MS = [400, 1000, 2000];
+
+function isIdempotentMethod(method?: string): boolean {
+  const normalized = (method || "GET").toUpperCase();
+  return normalized === "GET" || normalized === "HEAD";
+}
+
+export function waitForRetry(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export async function fetchWithGatewayRetry(url: string, init: RequestInit, delaysMs = READ_RETRY_DELAYS_MS): Promise<Response> {
+  const retryable = isIdempotentMethod(init.method);
+  for (let attempt = 0; ; attempt += 1) {
+    const canRetry = retryable && attempt < delaysMs.length;
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (error) {
+      if (!canRetry || init.signal?.aborted || !(error instanceof TypeError)) throw error;
+      await waitForRetry(delaysMs[attempt], init.signal);
+      continue;
+    }
+    if (!canRetry || !GATEWAY_RETRY_STATUSES.has(res.status)) return res;
+    // Release the connection before retrying.
+    await res.body?.cancel().catch(() => undefined);
+    await waitForRetry(delaysMs[attempt], init.signal);
+  }
+}
+
 export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   const headers = new Headers(init?.headers || {});
   if (init?.json !== undefined && !headers.has("Content-Type")) {
@@ -58,7 +106,7 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
     headers.set(k, v);
   }
 
-  const res = await fetch(`${apiBase()}${path}`, {
+  const res = await fetchWithGatewayRetry(`${apiBase()}${path}`, {
     ...init,
     credentials: init?.credentials ?? "include",
     headers,

@@ -130,6 +130,7 @@ export type ZendeskRunRecord = {
   requesterCommentId?: number;
   ticketSubject?: string;
   error?: string;
+  ownerInstanceId?: string;
 };
 
 export type ZendeskSetupGuide = {

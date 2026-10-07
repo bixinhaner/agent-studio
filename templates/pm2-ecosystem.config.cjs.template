@@ -19,11 +19,13 @@ module.exports = {
         // Code runs from releases/<id>, so pin the session root to the checkout.
         SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
         AGENT_STUDIO_SERVICE_ROLE: "admin",
-        AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL: "http://127.0.0.1:__CHAT_API_PORT__/internal/deploy/drain-status"
+        // Both blue-green chat slots; admin merges their running-thread status.
+        AGENT_STUDIO_CHAT_PEER_URLS: "__CHAT_PEER_URLS__"
       }
     },
     {
-      // Dedicated chat/runtime app. Restart only this app for conversation changes.
+      // Blue-green chat slot a. A deploy starts the idle slot with the new release,
+      // switches traffic once it is ready, and the old slot retires after its runs.
       name: "__PM2_CHAT_APP_NAME__",
       cwd: "__APP_API_DIR__",
       script: "scripts/run-active-release.mjs",
@@ -32,12 +34,42 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       max_restarts: 10,
+      // A retired slot exits with 0 once its runs finish; PM2 leaves it stopped.
+      stop_exit_codes: [0],
+      // Time to mark interrupted runs as "system update" before SIGKILL.
+      kill_timeout: 30000,
       env: {
         NODE_ENV: "production",
         HOST: "__API_HOST__",
         PORT: "__CHAT_API_PORT__",
         SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
-        AGENT_STUDIO_SERVICE_ROLE: "chat"
+        AGENT_STUDIO_SERVICE_ROLE: "chat",
+        AGENT_STUDIO_CHAT_SLOT: "a",
+        AGENT_STUDIO_CHAT_PEER_URLS: "__CHAT_PEER_URLS__"
+      }
+    },
+    {
+      // Blue-green chat slot b.
+      name: "__PM2_CHAT_B_APP_NAME__",
+      cwd: "__APP_API_DIR__",
+      script: "scripts/run-active-release.mjs",
+      interpreter: "node",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_restarts: 10,
+      // A retired slot exits with 0 once its runs finish; PM2 leaves it stopped.
+      stop_exit_codes: [0],
+      // Time to mark interrupted runs as "system update" before SIGKILL.
+      kill_timeout: 30000,
+      env: {
+        NODE_ENV: "production",
+        HOST: "__API_HOST__",
+        PORT: "__CHAT_B_API_PORT__",
+        SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
+        AGENT_STUDIO_SERVICE_ROLE: "chat",
+        AGENT_STUDIO_CHAT_SLOT: "b",
+        AGENT_STUDIO_CHAT_PEER_URLS: "__CHAT_PEER_URLS__"
       }
     }
   ]

@@ -344,7 +344,7 @@ describe("ZendeskIntegrationService", () => {
 
     const result = await service.recoverInterruptedProcessingRuns({ reprocess: false });
 
-    expect(result).toEqual({ markedFailed: 1, requeued: 0, deferredRequeued: 0, deferredSkipped: 0 });
+    expect(result).toEqual({ markedFailed: 1, requeued: 0, deferredRequeued: 0, deferredSkipped: 0, ownerAlive: 0 });
     expect(runStore.listProcessingOlderThan).toHaveBeenCalledWith(expect.any(Date), 50);
     expect(updates[0]).toMatchObject({
       runId: "run-stale-1",
@@ -354,6 +354,89 @@ describe("ZendeskIntegrationService", () => {
       }
     });
     expect(String(updates[0]?.patch.error)).toContain("Interrupted by Agent Studio service restart");
+  });
+
+  it("only reclaims processing runs whose owning chat instance is gone", async () => {
+    const updates: Array<{ runId: string; patch: Record<string, unknown>; expected?: Record<string, unknown> }> = [];
+    const processing = (id: string, ownerInstanceId?: string) => ({
+      id,
+      instanceId: "zendesk-1",
+      ticketId: id,
+      source: "webhook" as const,
+      status: "processing" as const,
+      detail: "正在调用 agent 生成答复",
+      ownerInstanceId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    const runStore = {
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>, expected?: Record<string, unknown>) => {
+        updates.push({ runId, patch, expected });
+        // Simulate the peer instance winning the compare-and-set for run-raced.
+        if (runId === "run-raced") return undefined;
+        return { ...processing(runId), status: patch.status };
+      }),
+      listProcessingOlderThan: vi.fn(async () => [
+        processing("run-self", "chat-b:1"),
+        processing("run-peer-alive", "chat-a:1"),
+        processing("run-peer-dead", "chat-a:0"),
+        processing("run-raced", "chat-a:0")
+      ]),
+      listDeferred: vi.fn(async () => [])
+    };
+    const isOwnerAlive = vi.fn(async (owner: string | undefined) => owner === "chat-a:1");
+    const service = new ZendeskIntegrationService(
+      { ownerInstanceId: "chat-b:1", isOwnerAlive },
+      { getForInstance: vi.fn(async () => baseSettings) } as never,
+      undefined as never,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.recoverInterruptedProcessingRuns({ reprocess: false });
+
+    expect(result).toEqual({ markedFailed: 1, requeued: 0, deferredRequeued: 0, deferredSkipped: 0, ownerAlive: 2 });
+    expect(isOwnerAlive).not.toHaveBeenCalledWith("chat-b:1");
+    expect(updates.map((item) => item.runId)).toEqual(["run-peer-dead", "run-raced"]);
+    expect(updates[0]?.expected).toEqual({ status: "processing", ownerInstanceId: "chat-a:0" });
+  });
+
+  it("claims deferred webhook runs with compare-and-set and records the owner", async () => {
+    const updates: Array<{ runId: string; patch: Record<string, unknown>; expected?: Record<string, unknown> }> = [];
+    const deferred = (id: string) => ({
+      id,
+      instanceId: "zendesk-1",
+      ticketId: id,
+      source: "webhook" as const,
+      status: "deferred" as const,
+      detail: "Agent Studio 正在部署，已暂存 webhook",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    const runStore = {
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>, expected?: Record<string, unknown>) => {
+        updates.push({ runId, patch, expected });
+        // Another instance already claimed it.
+        return undefined;
+      }),
+      listProcessingOlderThan: vi.fn(async () => []),
+      listDeferred: vi.fn(async () => [deferred("run-deferred-2")])
+    };
+    const service = new ZendeskIntegrationService(
+      { ownerInstanceId: "chat-b:1", isOwnerAlive: async () => false },
+      { getForInstance: vi.fn(async () => baseSettings) } as never,
+      undefined as never,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.recoverInterruptedProcessingRuns({ reprocess: true });
+
+    expect(result).toEqual({ markedFailed: 0, requeued: 0, deferredRequeued: 0, deferredSkipped: 0, ownerAlive: 0 });
+    expect(updates[0]).toMatchObject({
+      runId: "run-deferred-2",
+      patch: { status: "received", ownerInstanceId: "chat-b:1" },
+      expected: { status: "deferred", ownerInstanceId: undefined }
+    });
+    expect(service.activeWorkCount()).toBe(0);
   });
 
   it("settles deferred webhook runs during restart recovery when Zendesk is disabled", async () => {
@@ -401,7 +484,7 @@ describe("ZendeskIntegrationService", () => {
 
     const result = await service.recoverInterruptedProcessingRuns({ reprocess: true });
 
-    expect(result).toEqual({ markedFailed: 0, requeued: 0, deferredRequeued: 0, deferredSkipped: 1 });
+    expect(result).toEqual({ markedFailed: 0, requeued: 0, deferredRequeued: 0, deferredSkipped: 1, ownerAlive: 0 });
     expect(runStore.listDeferred).toHaveBeenCalledWith(50);
     expect(updates[0]).toMatchObject({
       runId: "run-deferred-1",

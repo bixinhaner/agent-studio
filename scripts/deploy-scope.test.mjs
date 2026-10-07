@@ -21,7 +21,9 @@ test("admin-only backend modules restart admin but keep chat running", () => {
   const { targets } = classifyChanges([
     "agent-api/src/admin/operations-insights.ts",
     "agent-api/src/org-sync/service.ts",
-    "agent-api/src/ops/report.ts"
+    "agent-api/src/ops/report.ts",
+    "agent-api/src/portal/team-usage-service.ts",
+    "agent-api/src/portal/personal-usage-service.ts"
   ]);
   assert.deepEqual(targets, { frontend: false, admin: true, chat: false, caddy: false });
 });

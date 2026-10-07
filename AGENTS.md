@@ -41,7 +41,8 @@
   `ssh agent-studio 'cd /usr/local/agent-studio && bash scripts/deploy-agent-studio.sh'`
 - 部署脚本会执行后端依赖安装、Prisma client 生成、数据库迁移、后端构建、前端依赖安装、前端构建、PM2 重启、Caddy 配置校验和 reload。
 - 部署脚本默认 `--auto`：按各目标（frontend/admin/chat/caddy）上次部署的提交比对改动，只构建和重启受影响的部分；部署前可先执行 `ssh agent-studio 'cd /usr/local/agent-studio && bash scripts/deploy-agent-studio.sh --plan'` 预览计划，并在回复中告知用户是否会重启聊天服务。
-- 聊天服务重启默认等待自然空闲（不阻塞新会话），超时则保留为待重启并在日志末尾 WARN；此时向用户说明，待空闲后执行 `--chat-only --skip-git-pull` 补齐，不要擅自改用 `--chat-restart drain` 或 `--skip-agent-drain`。
+- 聊天服务默认蓝绿切换（`--chat-restart bluegreen`）：新 release 在空闲槽位（a=8791 `agent-studio-chat-api`，b=8792 `agent-studio-chat-api-b`）启动并就绪后，Caddy 按 `/internal/ready` 切流，旧槽位跑完在途会话后自行退出（上限 1800s，超时的会话标记为“因系统更新中断”）；当前槽位记录在 `releases/state/chat.slot`。不要擅自改用 `--chat-restart drain` 或 `--skip-agent-drain`。
+- 数据库迁移在构建前由 `scripts/check-migration-compat.mjs` 检查，破坏性迁移会阻止部署；只有确认旧代码不受影响时才可加 `--allow-breaking-migration`，并向用户说明。
 - 后端代码运行在 `releases/<时间>-<提交>/agent-api`，`agent-api/dist`、`agent-api/node_modules` 是指向当前 release 的软链接；回滚使用 `--activate-release <release 目录名>`。不要手工删除 `releases/` 下被 `releases/state/*.release` 引用的目录。
 - 数据库迁移必须兼容旧代码（只增不删/先扩后收），因为聊天服务可能在一段时间内继续运行上一版 release。
 - 部署后检查：

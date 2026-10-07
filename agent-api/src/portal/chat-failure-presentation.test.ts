@@ -15,6 +15,22 @@ describe("presentPortalFailure", () => {
     expect(result.code).toBe("DEPLOYMENT_DRAIN");
   });
 
+  it("explains runs interrupted by a system update and keeps the code for retry handling", () => {
+    const result = presentPortalFailure({
+      payload: {
+        detail: "Interrupted by a system update",
+        code: "SYSTEM_UPDATE_INTERRUPTED",
+        reason_code: "system_update"
+      },
+      locale: "en-US"
+    });
+    expect(result.userMessage).toContain("interrupted by a system update");
+    expect(result.code).toBe("SYSTEM_UPDATE_INTERRUPTED");
+    expect(
+      presentPortalFailure({ payload: { detail: "x", code: "SYSTEM_UPDATE_INTERRUPTED" }, locale: "zh-CN" }).userMessage
+    ).toContain("系统更新");
+  });
+
   it("keeps diagnostic detail separate from the user-safe message", () => {
     const result = presentPortalFailure({
       payload: { detail: "Chat stream failed" },

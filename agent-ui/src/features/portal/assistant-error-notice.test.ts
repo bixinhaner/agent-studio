@@ -6,6 +6,9 @@ describe("portalAssistantErrorMessageKey", () => {
     expect(portalAssistantErrorMessageKey("任意服务端文案", "DEPLOYMENT_DRAIN")).toBe(
       "thread.errorDeploymentDrain"
     );
+    expect(portalAssistantErrorMessageKey("任意服务端文案", "SYSTEM_UPDATE_INTERRUPTED")).toBe(
+      "thread.errorSystemUpdateInterrupted"
+    );
     expect(portalAssistantErrorMessageKey("任意服务端文案", "AI_SERVICE_BUSY")).toBe(
       "thread.errorAiServiceBusy"
     );

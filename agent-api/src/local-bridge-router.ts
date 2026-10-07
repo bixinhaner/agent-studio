@@ -9,7 +9,7 @@ const fail = (message: string, status = 400): never => { throw Object.assign(new
 const bearer = (req: Request) => req.header('authorization')?.replace(/^Bearer\s+/i, '') || '';
 function user(req: Request) { if (!req.currentUser || !req.currentOrganization) return fail('Unauthorized', 401); return req.currentUser; }
 function selection(root: any) { return bindingOut({ id: `selection-${root.id}`, rootId: root.id, root }); }
-export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (threadId: string) => boolean } = {}) {
+export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (threadId: string) => boolean | Promise<boolean> } = {}) {
   const router = Router();
   let nextCleanupAt = 0;
   router.use((_req, _res, next) => {
@@ -67,7 +67,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   router.get('/threads/:threadId/binding', wrap(async (req, res) => { const t = await ownedThread(req); res.json({ binding: bindingOut(await localBridgeBinding(db, t.id)) }); }));
   router.put('/threads/:threadId/binding', wrap(async (req, res) => {
     const t = await ownedThread(req);
-    if (options.isTaskRunning?.(t.id)) return fail('请先停止当前任务，再切换工作目录。', 409);
+    if (await options.isTaskRunning?.(t.id)) return fail('请先停止当前任务，再切换工作目录。', 409);
     const rootId = z.string().min(1).nullable().parse(req.body.root_id);
     res.json({ binding: bindingOut(await bindLocalRoot(db, user(req).id, t.id, rootId)) });
   }));

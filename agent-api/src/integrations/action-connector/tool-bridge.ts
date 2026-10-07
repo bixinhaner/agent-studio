@@ -76,6 +76,8 @@ export interface ActionConnectorToolBridgeLike {
     result: ExternalToolResultInput;
   }): Promise<void>;
   disposeRun(connectorId: string, runId: string): void;
+  /** Interactive runs registered in this process; tool results for them must reach this instance. */
+  activeRunIds?(): string[];
 }
 
 type PendingToolRequest = RegisteredRun & {
@@ -227,6 +229,10 @@ export class ActionConnectorToolBridge implements ActionConnectorToolBridgeLike 
       this.pending.delete(key);
       pending.reject(new Error("External tool run was disposed."));
     }
+  }
+
+  activeRunIds(): string[] {
+    return [...new Set([...this.runs.values()].map((run) => run.runId))];
   }
 
   private runKey(connectorId: string, runId: string): string {

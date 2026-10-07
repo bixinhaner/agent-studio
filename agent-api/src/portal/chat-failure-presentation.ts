@@ -14,6 +14,7 @@ export type PortalFailurePresentation = {
 type PortalFailureMessageKey =
   | "generic"
   | "deploymentDrain"
+  | "systemUpdateInterrupted"
   | "aiServiceBusy"
   | "skillLoadFailed"
   | "messageTooLarge"
@@ -27,6 +28,7 @@ const MESSAGES: Record<"en" | "zh", Record<PortalFailureMessageKey, string>> = {
   en: {
     generic: "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.",
     deploymentDrain: "The system is being updated. Please try again in a few minutes.",
+    systemUpdateInterrupted: "This response was interrupted by a system update. The partial answer is kept above; send your message again to continue.",
     aiServiceBusy: "The AI service is currently busy. Please try again later.",
     skillLoadFailed: "The selected Skill could not be loaded, so this request was not started. Select it again and retry.",
     messageTooLarge: "This message is too large to send directly. Upload it as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.",
@@ -39,6 +41,7 @@ const MESSAGES: Record<"en" | "zh", Record<PortalFailureMessageKey, string>> = {
   zh: {
     generic: "暂时无法完成本次回答，请重试；如果问题持续出现，请联系工作区管理员。",
     deploymentDrain: "系统正在升级，请几分钟后重试。",
+    systemUpdateInterrupted: "本次回答因系统更新被中断，已保留已生成的内容，请重新发送以继续。",
     aiServiceBusy: "AI 服务当前繁忙，请稍后重试。",
     skillLoadFailed: "所选 Skill 暂时未能加载，本次尚未开始执行。请重新选择后重试。",
     messageTooLarge: "消息内容过长，无法直接发送。请将内容上传为 .txt 或 .log 文件，再发送简短问题。单条消息最多 20,000 个字符。",
@@ -59,6 +62,7 @@ function messageKey(detail: string, code?: string): PortalFailureMessageKey {
   const normalizedCode = (code || "").trim().toUpperCase();
   const normalizedDetail = detail.replace(/\s+/g, " ").trim();
   if (normalizedCode === "DEPLOYMENT_DRAIN") return "deploymentDrain";
+  if (normalizedCode === "SYSTEM_UPDATE_INTERRUPTED") return "systemUpdateInterrupted";
   if (normalizedCode === "AI_SERVICE_BUSY") return "aiServiceBusy";
   if (normalizedCode === "SKILL_LOAD_FAILED") return "skillLoadFailed";
   if (normalizedCode === "DIRECT_CHAT_MESSAGE_TOO_LARGE") return "messageTooLarge";

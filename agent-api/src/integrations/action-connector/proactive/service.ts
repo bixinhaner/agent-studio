@@ -4,7 +4,7 @@ import { ActionConnectorRuntimeService, type ActionConnectorCodexRunner, type Ag
 import type { IntegrationInstanceRepositoryDb } from "../../../persistence/integration-instance-repository.js";
 import { connectorEventSchema, findingSchema, XOMC_PACKAGE, type ConnectorEventEnvelope } from "./contracts.js";
 import { DurableActionConnectorToolBridge } from "./durable-tool-bridge.js";
-import { resourcesWithinScope, type ScenarioSpec } from "./scenario-catalog.js";
+import { reloadScenarioCatalog, resourcesWithinScope, type ScenarioSpec } from "./scenario-catalog.js";
 import { ProactiveScenarioRegistry } from "./scenario-registry.js";
 import { AssistantPlanner } from "../assistants/planner.js";
 import { executionRequestSchema, parseModelJSON } from "../assistants/contracts.js";
@@ -26,8 +26,11 @@ export class ProactiveActionConnectorService {
   private readonly workerId = randomUUID();
   private readonly active = new Map<string, AbortController>();
   private timer?: ReturnType<typeof setInterval>;
+  private catalogTimer?: ReturnType<typeof setInterval>;
+  private lastCatalogError?: string;
   private stopping = false;
   private pumping = false;
+  private claimsPaused = false;
 
   constructor(private readonly db: PrismaClient, private readonly bridge: DurableActionConnectorToolBridge, runner: ActionConnectorCodexRunner) {
     this.registry = new ProactiveScenarioRegistry(db);
@@ -41,12 +44,36 @@ export class ProactiveActionConnectorService {
     await this.pump();
     this.timer = setInterval(() => { void this.pump().catch((error) => console.error("proactive worker poll failed", error)); }, 1_000);
     this.timer.unref();
+    this.catalogTimer = setInterval(() => { void this.reloadCatalog(); }, 30_000);
+    this.catalogTimer.unref();
+  }
+  /** Applies edits to the scenario catalog file without a restart; new runs use the reseeded specs. */
+  async reloadCatalog(): Promise<boolean> {
+    try {
+      const next = reloadScenarioCatalog();
+      this.lastCatalogError = undefined;
+      if (!next) return false;
+      await this.registry.seedBuiltins(next.specs);
+      console.info("proactive scenario catalog reloaded", { path: next.path, digest: next.digest.slice(0, 12), scenarios: next.specs.length });
+      return true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (detail !== this.lastCatalogError) console.warn("proactive scenario catalog reload rejected; keeping the current catalog", detail);
+      this.lastCatalogError = detail;
+      return false;
+    }
   }
   stop(): void {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.catalogTimer) clearInterval(this.catalogTimer);
     for (const controller of this.active.values()) controller.abort(new Error("WORKER_STOPPING"));
   }
+  /** A retiring chat instance finishes its runs but leaves queued work to the new instance. */
+  pauseClaims(): void { this.claimsPaused = true; }
+  resumeClaims(): void { this.claimsPaused = false; }
+  activeRunCount(): number { return this.active.size; }
+  activeRunIds(): string[] { return [...this.active.keys()]; }
 
   async planAssistant(connectorId: string, input: unknown, signal?: AbortSignal) { return this.planner.plan(connectorId, input, signal); }
 
@@ -169,7 +196,7 @@ export class ProactiveActionConnectorService {
   }
 
   private async pump(): Promise<void> {
-    if (this.stopping || this.pumping) return;
+    if (this.stopping || this.claimsPaused || this.pumping) return;
     this.pumping = true;
     try {
       const now = new Date();

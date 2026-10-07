@@ -155,6 +155,8 @@ rendered = (
     .replace("{$CADDY_ADMIN_UPSTREAM_PORT}", admin_upstream_port)
     .replace("{$CADDY_CHAT_UPSTREAM_HOST}", chat_upstream_host)
     .replace("{$CADDY_CHAT_UPSTREAM_PORT}", chat_upstream_port)
+    # Blue-green chat slot b listens on the next port.
+    .replace("{$CADDY_CHAT_B_UPSTREAM_PORT}", str(int(chat_upstream_port) + 1))
 )
 destination.write_text(rendered)
 PY

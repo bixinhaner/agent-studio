@@ -168,5 +168,9 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
     this.interactive.disposeRun(connectorId, runId);
   }
 
+  activeRunIds(): string[] {
+    return this.interactive.activeRunIds();
+  }
+
   private key(connectorId: string, runId: string): string { return `${connectorId}:${runId}`; }
 }

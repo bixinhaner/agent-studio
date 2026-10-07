@@ -28,6 +28,8 @@ const RULES = [
   { pattern: /^agent-api\/templates\//, targets: NONE, reason: "runtime templates read from checkout" },
   // Only mounted behind admin routes or run by admin-role schedulers / CLIs.
   { pattern: /^agent-api\/src\/(admin|org-sync|ops)\//, targets: ["admin"], reason: "admin-only backend" },
+  // Portal usage statistics are routed to admin by Caddy.
+  { pattern: /^agent-api\/src\/portal\/(team|personal)-usage-service\.ts$/, targets: ["admin"], reason: "admin-served portal statistics" },
   { pattern: /^agent-api\//, targets: BACKEND, reason: "backend" },
 
   { pattern: /^templates\/Caddyfile\.template$/, targets: ["caddy"], reason: "Caddy template" },

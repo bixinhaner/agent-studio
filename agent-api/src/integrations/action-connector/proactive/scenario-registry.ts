@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { XOMC_PACKAGE, type ConnectorEventEnvelope } from "./contracts.js";
 import {
-  BUILTIN_SCENARIOS,
+  currentScenarios,
   includedInRollout,
   matchesScenario,
   renderDedupeKey,
@@ -28,7 +28,7 @@ function asSpec(value: Prisma.JsonValue): ScenarioSpec {
 export class ProactiveScenarioRegistry {
   constructor(private readonly db: PrismaClient) {}
 
-  async seedBuiltins(): Promise<void> {
+  async seedBuiltins(scenarios: ScenarioSpec[] = currentScenarios()): Promise<void> {
     const now = new Date();
     const pkg = await this.db.proactiveIntegrationPackage.upsert({
       where: { digest: XOMC_PACKAGE.digest },
@@ -40,7 +40,7 @@ export class ProactiveScenarioRegistry {
           apiVersion: "agentstudio.integration-pack/v1",
           kind: "IntegrationPackage",
           metadata: { key: XOMC_PACKAGE.key, version: XOMC_PACKAGE.version, owner: "xOMC Team" },
-          scenarios: BUILTIN_SCENARIOS.map((scenario) => scenario.key)
+          scenarios: scenarios.map((scenario) => scenario.key)
         },
         status: "ACTIVE",
         validatedAt: now,
@@ -49,7 +49,7 @@ export class ProactiveScenarioRegistry {
       update: { status: "ACTIVE", validatedAt: now, activatedAt: now }
     });
 
-    for (const spec of BUILTIN_SCENARIOS) {
+    for (const spec of scenarios) {
       await this.db.proactiveAgentScenario.upsert({
         where: { packageId_scenarioKey: { packageId: pkg.id, scenarioKey: spec.key } },
         create: {

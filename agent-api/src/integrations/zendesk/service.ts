@@ -1265,6 +1265,10 @@ export class ZendeskIntegrationService {
       runtimeSession?: ZendeskRuntimeSessionBridge;
       codexExecution?: Pick<CodexExecutionService, "collectFromRuntime">;
       getDrainReason?: () => Promise<string | undefined>;
+      /** Chat instance id recorded on runs this process works on. */
+      ownerInstanceId?: string;
+      /** Whether the instance that owns a processing run may still be working on it. */
+      isOwnerAlive?: (ownerInstanceId: string | undefined) => Promise<boolean>;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
       registerGeneratedArtifacts?: (input: {
         sessionId?: string;
@@ -1314,25 +1318,52 @@ export class ZendeskIntegrationService {
     };
   }
 
+  /** Tickets queued or being processed in this process; a retiring chat instance waits for them. */
+  activeWorkCount(): number {
+    return this.queues.size;
+  }
+
   async recoverInterruptedProcessingRuns(options: {
     olderThanMs?: number;
     limit?: number;
     reprocess?: boolean;
-  } = {}): Promise<{ markedFailed: number; requeued: number; deferredRequeued: number; deferredSkipped: number }> {
+  } = {}): Promise<{
+    markedFailed: number;
+    requeued: number;
+    deferredRequeued: number;
+    deferredSkipped: number;
+    ownerAlive: number;
+  }> {
     const olderThanMs = Math.max(0, Number(options.olderThanMs ?? 0) || 0);
     const cutoff = new Date(Date.now() - olderThanMs);
     const limit = options.limit ?? 50;
+    const selfOwner = this.dependencies.ownerInstanceId;
     const interrupted = await this.runStore.listProcessingOlderThan(cutoff, limit);
     let markedFailed = 0;
     let requeued = 0;
     let deferredRequeued = 0;
     let deferredSkipped = 0;
+    let ownerAlive = 0;
     for (const run of interrupted) {
-      const updated = await this.runStore.update(run.id, {
-        status: "failed",
-        detail: "服务重启中断，已自动收尾",
-        error: "Interrupted by Agent Studio service restart before the agent completed."
-      });
+      // With blue-green chat another instance may still be finishing this run;
+      // only runs whose owner is gone were interrupted.
+      if (run.ownerInstanceId !== undefined && run.ownerInstanceId === selfOwner) {
+        ownerAlive += 1;
+        continue;
+      }
+      if (this.dependencies.isOwnerAlive && (await this.dependencies.isOwnerAlive(run.ownerInstanceId))) {
+        ownerAlive += 1;
+        continue;
+      }
+      const updated = await this.runStore.update(
+        run.id,
+        {
+          status: "failed",
+          detail: "服务重启中断，已自动收尾",
+          error: "Interrupted by Agent Studio service restart before the agent completed."
+        },
+        { status: "processing", ownerInstanceId: run.ownerInstanceId }
+      );
       if (!updated) continue;
       markedFailed += 1;
       if (options.reprocess === false) continue;
@@ -1365,17 +1396,27 @@ export class ZendeskIntegrationService {
         try {
           const settings = await this.loadSettings(run.instanceId);
           if (!settings.enabled) {
-            const skipped = await this.runStore.update(run.id, {
-              status: "skipped",
-              detail: "Zendesk 自动答复已关闭，延迟 webhook 未处理"
-            });
+            const skipped = await this.runStore.update(
+              run.id,
+              {
+                status: "skipped",
+                detail: "Zendesk 自动答复已关闭，延迟 webhook 未处理"
+              },
+              { status: "deferred", ownerInstanceId: run.ownerInstanceId }
+            );
             if (skipped) deferredSkipped += 1;
             continue;
           }
-          const updated = await this.runStore.update(run.id, {
-            status: "received",
-            detail: "部署完成，已重新进入后台处理队列"
-          });
+          // Claim with compare-and-set: every chat instance runs recovery.
+          const updated = await this.runStore.update(
+            run.id,
+            {
+              status: "received",
+              detail: "部署完成，已重新进入后台处理队列",
+              ...(selfOwner ? { ownerInstanceId: selfOwner } : {})
+            },
+            { status: "deferred", ownerInstanceId: run.ownerInstanceId }
+          );
           if (!updated) continue;
           requeued += 1;
           deferredRequeued += 1;
@@ -1405,7 +1446,7 @@ export class ZendeskIntegrationService {
         }
       }
     }
-    return { markedFailed, requeued, deferredRequeued, deferredSkipped };
+    return { markedFailed, requeued, deferredRequeued, deferredSkipped, ownerAlive };
   }
 
   async updateSettings(
@@ -1775,7 +1816,8 @@ export class ZendeskIntegrationService {
       await this.runStore.update(runId, {
         status: "processing",
         detail: "正在调用 agent 生成答复",
-        requesterCommentId: requesterComment.id
+        requesterCommentId: requesterComment.id,
+        ...(this.dependencies.ownerInstanceId ? { ownerInstanceId: this.dependencies.ownerInstanceId } : {})
       });
       processRows.push(
         zendeskProcessRow(

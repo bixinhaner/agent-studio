@@ -1896,6 +1896,8 @@ model ZendeskRun {
   requesterCommentId    BigInt?              @map("requester_comment_id")
   ticketSubject         String?              @map("ticket_subject")
   error                 String?
+  /// Chat instance processing the run; recovery only reclaims runs whose owner is gone.
+  ownerInstanceId       String?              @map("owner_instance_id")
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
 

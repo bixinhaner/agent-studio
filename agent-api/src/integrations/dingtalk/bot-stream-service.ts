@@ -343,6 +343,36 @@ export class DingTalkBotStreamService {
     this.syncTimer.unref?.();
   }
 
+  /** Messages still being answered; replies go over HTTP, so they finish after the stream disconnects. */
+  inFlightCount(): number {
+    return this.inFlight.size;
+  }
+
+  /**
+   * Blue-green handover: disconnect the stream so DingTalk delivers new
+   * messages to the instance taking over, but keep the robots registered for
+   * HTTP replies and proactive pushes from work this instance is finishing.
+   * start() reconnects them if the handover is cancelled.
+   */
+  stopReceiving(): void {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = undefined;
+    }
+    for (const [instanceId, managed] of this.clients) {
+      try {
+        managed.client?.disconnect();
+      } catch (error) {
+        this.dependencies.logger?.warn("failed to disconnect DingTalk bot stream client", { instanceId, error });
+      }
+      managed.client = undefined;
+      managed.connected = false;
+      managed.registered = false;
+      // Forces the next refresh to reconnect.
+      managed.fingerprint = "";
+    }
+  }
+
   stop(): void {
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
