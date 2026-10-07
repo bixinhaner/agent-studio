@@ -5,7 +5,11 @@ import { z } from "zod";
 import { DEFAULT_MODEL, REASONING_EFFORT_VALUES } from "../model-config.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultSessionWorkspaceRoot = path.resolve(moduleDir, "..", "..", "..", "sessions");
+// Releases live outside the repository checkout, so production pins the root via env
+// instead of deriving it from the compiled module location.
+const defaultSessionWorkspaceRoot = process.env.SESSION_WORKSPACE_ROOT?.trim()
+  ? path.resolve(process.env.SESSION_WORKSPACE_ROOT.trim())
+  : path.resolve(moduleDir, "..", "..", "..", "sessions");
 
 export const systemSettingsVersionStatusSchema = z.enum(["draft", "published"]);
 export type SystemSettingsVersionStatus = z.infer<typeof systemSettingsVersionStatusSchema>;

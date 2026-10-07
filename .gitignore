@@ -38,3 +38,8 @@ zendesk-data/
 **/*.pyo
 **/*.pyd
 .Python
+
+# Deploy releases and the symlinks pointing at the active release.
+/releases/
+/agent-api/dist
+/agent-api/node_modules

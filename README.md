@@ -198,12 +198,19 @@ The production layout expected by the scripts is configurable through environmen
 
 Deployment scopes:
 
-- `scripts/deploy-agent-studio.sh --frontend-only`: rebuilds static frontend assets only; it does not enable deployment drain or restart PM2.
-- `scripts/deploy-agent-studio.sh --admin-only`: rebuilds the backend and restarts only `agent-studio-api`; active chat/runtime turns keep running.
-- `scripts/deploy-agent-studio.sh --chat-only`: rebuilds the backend, enables deployment drain, waits for active chat/runtime turns, and restarts only `agent-studio-chat-api`.
-- `scripts/deploy-agent-studio.sh --all`: full deploy; this remains the default for production updates that touch shared backend, chat, Caddy, or frontend assets.
+- `scripts/deploy-agent-studio.sh` (`--auto`, default): compares each target (frontend, admin, chat, Caddy) with the commit it last deployed (`releases/state/<target>.commit`) and only rebuilds or restarts targets whose files changed. Rules live in `scripts/deploy-scope.mjs`; admin-only modules (`agent-api/src/admin|org-sync|ops`) restart admin only, and any other backend change conservatively restarts chat too.
+- `scripts/deploy-agent-studio.sh --plan`: fetches the remote branch and prints the auto plan without changing anything.
+- `scripts/deploy-agent-studio.sh --frontend-only`: rebuilds static frontend assets only; it does not drain or restart PM2.
+- `scripts/deploy-agent-studio.sh --admin-only`: builds a backend release and restarts only `agent-studio-api`; chat keeps accepting conversations.
+- `scripts/deploy-agent-studio.sh --chat-only`: builds (or reuses) a backend release and restarts only `agent-studio-chat-api`.
+- `scripts/deploy-agent-studio.sh --all`: rebuilds everything, restarts both APIs and refreshes Caddy.
+- `scripts/deploy-agent-studio.sh --activate-release <id>`: rolls back to an existing release under `releases/` and restarts both APIs.
 
-Full backend deployments inspect both the admin API and chat API drain endpoints before restarting; scoped deployments inspect the process they restart. If a target process still owns a runtime turn when the drain timeout expires, deployment stops without restarting; `--skip-agent-drain` remains the explicit emergency override. Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.
+Backend releases: every backend build goes into `releases/<UTC time>-<commit>/agent-api` with its own `node_modules`, Prisma client and `dist`. `agent-api/dist` and `agent-api/node_modules` are symlinks to the active release; Node resolves the entry point to its real path, so a running process keeps the release it started with while a new build is activated. The active release, releases still used by a running app (`releases/state/<role>.release`) and the newest `AGENT_STUDIO_RELEASE_RETENTION` (default 3) releases are kept. PM2 pins `SESSION_WORKSPACE_ROOT` to `<repo>/sessions` because the code no longer lives inside the checkout.
+
+Restart behavior: drain files are per role (`temp/deploy-drain-admin.json`, `temp/deploy-drain-chat.json`), so restarting admin never blocks new conversations. With `--chat-restart idle` (default) the deploy waits up to `--chat-idle-timeout` (default 1800s) for chat to have no active runs while conversations keep starting normally, then drains only for the seconds the restart takes; if chat never becomes idle the restart is left pending and the next deploy (or `--chat-only --skip-git-pull`) retries it. `--chat-restart drain` restores the old blocking wait bounded by `--drain-timeout`, and `--chat-restart skip` defers chat explicitly. Caddy retries upstream dials for up to 30s, so requests arriving during the restart wait instead of failing. Deploys hold `/tmp/agent-studio-deploy.lock`, so two deploys cannot run at once; `--skip-agent-drain` remains the explicit emergency override.
+
+Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.
 
 Artifact plugins use one shared runtime instead of copying dependencies into every conversation workspace. Build the Linux runtime archive from a Codex workspace dependency bundle, then place it at the deployment script's default path:
 

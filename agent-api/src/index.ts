@@ -14,6 +14,7 @@ import { createAdminRouter } from "./admin/router.js";
 import { SecurityDomainAccessControl } from "./security-domains/access-control.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
+import { deployDrainFilesForRole, readDeploymentDrainReason } from "./deploy-drain.js";
 import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
@@ -2289,21 +2290,12 @@ function runtimeEventHasTurnSideEffect(event: { delta?: string; text?: string; r
 }
 
 async function getDeploymentDrainReason(): Promise<string | undefined> {
-  try {
-    const raw = await fs.readFile(appConfig.deployDrainFile, "utf8");
-    const parsed = asRecord(JSON.parse(raw));
-    const reason = typeof parsed?.reason === "string" ? parsed.reason.trim() : "";
-    return reason || "System is updating. Please retry in a few minutes.";
-  } catch (error) {
-    if ((error as { code?: string })?.code === "ENOENT") {
-      return undefined;
-    }
+  return readDeploymentDrainReason(deployDrainFilesForRole(appConfig.deployDrainFile, appConfig.serviceRole), (file, error) => {
     console.warn("failed to read deploy drain file", {
-      path: appConfig.deployDrainFile,
+      path: file,
       detail: error instanceof Error ? error.message : String(error)
     });
-    return undefined;
-  }
+  });
 }
 
 async function restoreLiveRuntimeThreadUnlocked(

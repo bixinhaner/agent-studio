@@ -13,7 +13,7 @@ API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
 ADMIN_API_PORT="${ADMIN_API_PORT:-}"
 CHAT_API_PORT="${CHAT_API_PORT:-}"
-DEPLOY_SCOPE="${AGENT_STUDIO_DEPLOY_SCOPE:-all}"
+DEPLOY_SCOPE="${AGENT_STUDIO_DEPLOY_SCOPE:-auto}"
 DOMAIN="${DOMAIN:-}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
 CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
@@ -40,6 +40,21 @@ AGENT_DRAIN_STATUS_URL="${AGENT_DRAIN_STATUS_URL:-}"
 AGENT_ADMIN_DRAIN_STATUS_URL="${AGENT_ADMIN_DRAIN_STATUS_URL:-}"
 AGENT_CHAT_DRAIN_STATUS_URL="${AGENT_CHAT_DRAIN_STATUS_URL:-}"
 DEPLOY_DRAIN_FILE="${AGENT_STUDIO_DEPLOY_DRAIN_FILE:-}"
+CHAT_RESTART_MODE="${AGENT_STUDIO_CHAT_RESTART_MODE:-idle}"
+CHAT_IDLE_TIMEOUT_SECONDS="${AGENT_CHAT_IDLE_TIMEOUT_SECONDS:-1800}"
+RELEASE_RETENTION="${AGENT_STUDIO_RELEASE_RETENTION:-3}"
+DEPLOY_LOCK_FILE="${AGENT_STUDIO_DEPLOY_LOCK_FILE:-/tmp/agent-studio-deploy.lock}"
+PLAN_ONLY=0
+ACTIVATE_RELEASE=""
+PLAN_FRONTEND=0
+PLAN_ADMIN=0
+PLAN_CHAT=0
+PLAN_CADDY=0
+PREVIOUS_HEAD=""
+TARGET_COMMIT=""
+RELEASE_DIR=""
+CHAT_RESTART_PENDING=0
+ACTIVE_DRAIN_FILES=()
 
 usage() {
   cat <<USAGE
@@ -52,10 +67,22 @@ Options:
   --remote <name>        Git remote name [default: $GIT_REMOTE]
   --ref <name>           Git branch to deploy [default: $GIT_REF]
   --domain <name>        Public domain used to render Caddy config [default: install state domain]
+  --auto                 Deploy only the targets whose files changed since each target's
+                         last deployed commit [default]
   --frontend-only        Build and publish frontend assets only; do not drain or restart API
   --admin-only           Build backend and restart the admin API only
-  --chat-only            Build backend, drain active runs, and restart the chat API only
-  --all                  Build frontend/backend and restart both APIs [default]
+  --chat-only            Build backend and restart the chat API only
+  --all                  Build frontend/backend, restart both APIs and refresh Caddy
+  --plan                 Fetch and print the auto deploy plan without changing anything
+  --activate-release <id>
+                         Switch the backend to an existing release (rollback) and restart
+                         admin and chat
+  --chat-restart <mode>  idle: wait until no conversation is running, then restart with only a
+                         brief drain; on timeout leave the chat restart pending [default]
+                         drain: block new conversations until active runs finish (legacy)
+                         skip: do not restart chat; it stays pending for a later deploy
+  --chat-idle-timeout <sec>
+                         Seconds to wait for chat to become idle [default: $CHAT_IDLE_TIMEOUT_SECONDS]
   --api-host <host>      Host written into PM2 env [default: $API_HOST]
   --api-port <port>      Backward-compatible admin API port [default: $API_PORT]
   --admin-api-port <port>
@@ -84,7 +111,8 @@ Options:
   --skip-caddy-reload    Skip rendering/reloading Caddy
   --refresh-caddy        Also refresh Caddy during an admin-only or chat-only deploy
   --skip-agent-drain     Restart immediately without deployment drain/wait
-  --drain-timeout <sec>  Seconds to wait for active agent runs before restart [default: $AGENT_DRAIN_TIMEOUT_SECONDS]
+  --drain-timeout <sec>  Seconds a drained service waits for active runs before restart
+                         [default: $AGENT_DRAIN_TIMEOUT_SECONDS]
   -h, --help             Show this help text
 USAGE
 }
@@ -106,6 +134,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --domain)
       DOMAIN="$2"
+      shift 2
+      ;;
+    --auto)
+      DEPLOY_SCOPE="auto"
+      shift
+      ;;
+    --plan)
+      PLAN_ONLY=1
+      shift
+      ;;
+    --activate-release)
+      ACTIVATE_RELEASE="$2"
+      shift 2
+      ;;
+    --chat-restart)
+      CHAT_RESTART_MODE="$2"
+      shift 2
+      ;;
+    --chat-idle-timeout)
+      CHAT_IDLE_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
     --frontend-only)
@@ -222,13 +270,25 @@ elif [[ "$DEPLOY_DRAIN_FILE" != /* ]]; then
   DEPLOY_DRAIN_FILE="$APP_API_DIR/$DEPLOY_DRAIN_FILE"
 fi
 
+RELEASES_DIR="$APP_REPO_DIR/releases"
+DEPLOY_STATE_DIR="$RELEASES_DIR/state"
+
 pm2_template_path="$script_dir/../templates/pm2-ecosystem.config.cjs.template"
 caddy_template_path="$script_dir/../templates/Caddyfile.template"
 
 case "$DEPLOY_SCOPE" in
-  all|frontend|admin|chat) ;;
+  auto|all|frontend|admin|chat) ;;
   *) die "unknown deploy scope: $DEPLOY_SCOPE" ;;
 esac
+
+case "$CHAT_RESTART_MODE" in
+  idle|drain|skip) ;;
+  *) die "--chat-restart must be idle, drain or skip" ;;
+esac
+
+if [[ -n "$ACTIVATE_RELEASE" && ! "$ACTIVATE_RELEASE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  die "--activate-release must be a release directory name"
+fi
 
 if [[ -z "$ADMIN_API_PORT" ]]; then
   ADMIN_API_PORT="$API_PORT"
@@ -278,6 +338,14 @@ if [[ ! "$AGENT_DRAIN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
   die "--drain-timeout must be a non-negative integer"
 fi
 
+if [[ ! "$CHAT_IDLE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  die "--chat-idle-timeout must be a non-negative integer"
+fi
+
+if [[ ! "$RELEASE_RETENTION" =~ ^[0-9]+$ || "$RELEASE_RETENTION" == "0" ]]; then
+  die "AGENT_STUDIO_RELEASE_RETENTION must be a positive integer"
+fi
+
 if [[ ! "$AGENT_DRAIN_POLL_SECONDS" =~ ^[0-9]+$ || "$AGENT_DRAIN_POLL_SECONDS" == "0" ]]; then
   die "AGENT_DRAIN_POLL_SECONDS must be a positive integer"
 fi
@@ -286,24 +354,74 @@ shell_quote() {
   printf '%q' "$1"
 }
 
+# The plan flags are filled by resolve_deploy_plan from the scope option or,
+# for --auto, from the files changed since each target's last deployed commit.
 deploy_builds_backend() {
-  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "admin" || "$DEPLOY_SCOPE" == "chat" ]]
+  [[ -z "$ACTIVATE_RELEASE" ]] && { [[ "$PLAN_ADMIN" == "1" ]] || [[ "$PLAN_CHAT" == "1" ]]; }
 }
 
 deploy_builds_frontend() {
-  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "frontend" ]]
+  [[ "$PLAN_FRONTEND" == "1" ]]
 }
 
 deploy_restarts_admin() {
-  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "admin" ]]
+  [[ "$PLAN_ADMIN" == "1" ]]
 }
 
 deploy_restarts_chat() {
-  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "chat" ]]
+  [[ "$PLAN_CHAT" == "1" ]]
 }
 
 deploy_refreshes_caddy() {
-  [[ "$DEPLOY_SCOPE" == "all" || "$REFRESH_CADDY" == "1" ]]
+  [[ "$PLAN_CADDY" == "1" || "$REFRESH_CADDY" == "1" ]]
+}
+
+read_deploy_state() {
+  local key="$1"
+  local file="$DEPLOY_STATE_DIR/$key"
+  [[ -f "$file" ]] || return 0
+  tr -d '[:space:]' < "$file"
+}
+
+write_deploy_state() {
+  local key="$1"
+  local value="$2"
+  run_as_app_user_shell "mkdir -p '$DEPLOY_STATE_DIR' && printf '%s\\n' '$value' > '$DEPLOY_STATE_DIR/$key.tmp' && mv -f '$DEPLOY_STATE_DIR/$key.tmp' '$DEPLOY_STATE_DIR/$key'"
+}
+
+resolve_deploy_plan() {
+  case "$DEPLOY_SCOPE" in
+    all) PLAN_FRONTEND=1; PLAN_ADMIN=1; PLAN_CHAT=1; PLAN_CADDY=1 ;;
+    frontend) PLAN_FRONTEND=1 ;;
+    admin) PLAN_ADMIN=1 ;;
+    chat) PLAN_CHAT=1 ;;
+    auto)
+      local target base args=()
+      for target in frontend admin chat caddy; do
+        base="$(read_deploy_state "$target.commit")"
+        # Before the first auto deploy every target runs the pre-pull checkout.
+        args+=("--$target-base" "${base:-$PREVIOUS_HEAD}")
+      done
+      log_step "Resolving deploy plan for $TARGET_COMMIT"
+      local plan_output
+      plan_output="$(node "$script_dir/deploy-scope.mjs" --repo "$APP_REPO_DIR" --head "$TARGET_COMMIT" "${args[@]}")" ||
+        die "failed to resolve deploy plan"
+      local line
+      while IFS= read -r line; do
+        case "$line" in
+          PLAN_FRONTEND=[01]) PLAN_FRONTEND="${line#*=}" ;;
+          PLAN_ADMIN=[01]) PLAN_ADMIN="${line#*=}" ;;
+          PLAN_CHAT=[01]) PLAN_CHAT="${line#*=}" ;;
+          PLAN_CADDY=[01]) PLAN_CADDY="${line#*=}" ;;
+          *) die "unexpected deploy plan output: $line" ;;
+        esac
+      done <<< "$plan_output"
+      ;;
+  esac
+  if [[ -n "$ACTIVATE_RELEASE" ]]; then
+    PLAN_FRONTEND=0; PLAN_ADMIN=1; PLAN_CHAT=1; PLAN_CADDY=0
+  fi
+  log_info "Deploy plan: frontend=$PLAN_FRONTEND admin=$PLAN_ADMIN chat=$PLAN_CHAT caddy=$PLAN_CADDY (scope=$DEPLOY_SCOPE, chat restart=$CHAT_RESTART_MODE)"
 }
 
 require_repo_checkout() {
@@ -327,7 +445,7 @@ render_pm2_ecosystem() {
 
   local rendered_ecosystem
   rendered_ecosystem="$(mktemp)"
-  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" <<'PY'
+  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" "$APP_REPO_DIR" <<'PY'
 from pathlib import Path
 import sys
 
@@ -341,6 +459,7 @@ rendered = (
     .replace("__API_HOST__", sys.argv[6])
     .replace("__ADMIN_API_PORT__", sys.argv[7])
     .replace("__CHAT_API_PORT__", sys.argv[8])
+    .replace("__APP_REPO_DIR__", sys.argv[9])
 )
 destination.write_text(rendered)
 PY
@@ -504,25 +623,58 @@ refresh_caddy_config() {
   rm -f "$rendered_config"
 }
 
+git_head() {
+  run_as_app_user_shell "git -C '$APP_REPO_DIR' rev-parse '${1:-HEAD}'"
+}
+
 git_update() {
-  if [[ "$SKIP_GIT_PULL" == "1" ]]; then
+  PREVIOUS_HEAD="$(git_head)"
+  if [[ "$SKIP_GIT_PULL" == "1" || -n "$ACTIVATE_RELEASE" ]]; then
     log_info "Skipping git fetch/pull"
+    TARGET_COMMIT="$PREVIOUS_HEAD"
+    return 0
+  fi
+
+  if [[ "$PLAN_ONLY" == "1" ]]; then
+    log_step "Fetching $GIT_REMOTE/$GIT_REF for deploy plan"
+    run_as_app_user_shell "cd '$APP_REPO_DIR' && git fetch '$GIT_REMOTE'"
+    TARGET_COMMIT="$(git_head "$GIT_REMOTE/$GIT_REF")"
     return 0
   fi
 
   log_step "Updating repository checkout"
   run_as_app_user_shell "cd '$APP_REPO_DIR' && git fetch '$GIT_REMOTE' && git checkout '$GIT_REF' && git pull --ff-only '$GIT_REMOTE' '$GIT_REF'"
+  TARGET_COMMIT="$(git_head)"
 }
 
+acquire_deploy_lock() {
+  require_command flock
+  exec 9>>"$DEPLOY_LOCK_FILE"
+  flock -n 9 || die "another deploy is already running (lock: $DEPLOY_LOCK_FILE)"
+}
+
+deploy_drain_file_for_role() {
+  local role="$1"
+  local dir name
+  dir="$(dirname "$DEPLOY_DRAIN_FILE")"
+  name="$(basename "$DEPLOY_DRAIN_FILE" .json)"
+  printf '%s/%s-%s.json\n' "$dir" "$name" "$role"
+}
+
+# Drain only the role being restarted: draining chat rejects new conversations,
+# draining admin must not.
 enable_deploy_drain() {
+  local role="$1"
   if [[ "$SKIP_AGENT_DRAIN" == "1" ]]; then
-    log_info "Skipping deployment drain signal"
+    log_info "Skipping deployment drain signal for $role"
     return 0
   fi
 
-  log_step "Enabling deployment drain"
+  local drain_target
+  drain_target="$(deploy_drain_file_for_role "$role")"
+  log_step "Enabling deployment drain for $role"
   local drain_dir
-  drain_dir="$(dirname "$DEPLOY_DRAIN_FILE")"
+  drain_dir="$(dirname "$drain_target")"
   if is_app_user; then
     mkdir -p "$drain_dir"
   else
@@ -546,23 +698,38 @@ Path(sys.argv[1]).write_text(json.dumps({
 PY
 
   if is_app_user; then
-    install -m 644 "$drain_file" "$DEPLOY_DRAIN_FILE"
+    install -m 644 "$drain_file" "$drain_target"
   else
-    run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$drain_file" "$DEPLOY_DRAIN_FILE"
+    run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$drain_file" "$drain_target"
   fi
   rm -f "$drain_file"
-  log_info "Deployment drain file: $DEPLOY_DRAIN_FILE"
+  ACTIVE_DRAIN_FILES+=("$drain_target")
+  log_info "Deployment drain file: $drain_target"
 }
 
 disable_deploy_drain() {
-  [[ "$SKIP_AGENT_DRAIN" == "1" ]] && return 0
-  if [[ -e "$DEPLOY_DRAIN_FILE" ]]; then
-    log_step "Disabling deployment drain"
-    if is_app_user; then
-      rm -f "$DEPLOY_DRAIN_FILE"
-    else
-      run_as_root rm -f "$DEPLOY_DRAIN_FILE"
+  local role="$1"
+  local drain_target
+  drain_target="$(deploy_drain_file_for_role "$role")"
+  [[ -e "$drain_target" ]] || return 0
+  log_step "Disabling deployment drain for $role"
+  if is_app_user; then
+    rm -f "$drain_target"
+  else
+    run_as_root rm -f "$drain_target"
+  fi
+}
+
+cleanup_deploy_drains() {
+  local drain_target
+  for drain_target in "${ACTIVE_DRAIN_FILES[@]}"; do
+    if [[ -e "$drain_target" ]]; then
+      if is_app_user; then rm -f "$drain_target"; else run_as_root rm -f "$drain_target"; fi
     fi
+  done
+  # The legacy shared drain file blocks every role; never leave it behind.
+  if [[ -e "$DEPLOY_DRAIN_FILE" ]]; then
+    if is_app_user; then rm -f "$DEPLOY_DRAIN_FILE"; else run_as_root rm -f "$DEPLOY_DRAIN_FILE"; fi
   fi
 }
 
@@ -627,74 +794,87 @@ PY
   '
 }
 
-wait_for_agent_drain() {
+pm2_app_name_for_role() {
+  [[ "$1" == "chat" ]] && printf '%s\n' "$PM2_CHAT_APP_NAME" || printf '%s\n' "$PM2_ADMIN_APP_NAME"
+}
+
+active_runs_for_role() {
+  local role="$1"
+  local app_name pid status_url
+  app_name="$(pm2_app_name_for_role "$role")"
+  pm2_app_exists "$app_name" || { printf '0\n'; return 0; }
+  pid="$(pm2_app_pid "$app_name" || true)"
+  if [[ "$role" == "chat" ]]; then
+    status_url="${AGENT_CHAT_DRAIN_STATUS_URL:-${AGENT_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$CHAT_API_PORT")}}"
+  else
+    status_url="${AGENT_ADMIN_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$ADMIN_API_PORT")}"
+  fi
+  active_agent_run_count "$pid" "$status_url"
+}
+
+# Drained wait: new runs on this role are rejected while existing ones finish.
+wait_for_role_drain() {
+  local role="$1"
   if [[ "$SKIP_AGENT_DRAIN" == "1" ]]; then
-    log_info "Skipping active agent run wait"
+    log_info "Skipping active agent run wait for $role"
     return 0
   fi
-
-  local admin_pid=""
-  local chat_pid=""
-  if deploy_restarts_admin && pm2_app_exists "$PM2_ADMIN_APP_NAME"; then
-    admin_pid="$(pm2_app_pid "$PM2_ADMIN_APP_NAME" || true)"
-  fi
-  if deploy_restarts_chat && pm2_app_exists "$PM2_CHAT_APP_NAME"; then
-    chat_pid="$(pm2_app_pid "$PM2_CHAT_APP_NAME" || true)"
-  fi
-  if [[ -z "$admin_pid" || "$admin_pid" == "0" ]]; then
-    admin_pid=""
-  fi
-  if [[ -z "$chat_pid" || "$chat_pid" == "0" ]]; then
-    chat_pid=""
-  fi
-  if [[ -z "$admin_pid" && -z "$chat_pid" ]]; then
-    log_info "Neither PM2 API app is running; no active agent runs to drain"
-    return 0
-  fi
-
-  log_step "Waiting for active agent runs to finish"
-  local admin_status_url
-  local chat_status_url
-  admin_status_url="${AGENT_ADMIN_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$ADMIN_API_PORT")}"
-  chat_status_url="${AGENT_CHAT_DRAIN_STATUS_URL:-$(drain_status_url_for_port "$CHAT_API_PORT")}"
-  if [[ -n "$AGENT_DRAIN_STATUS_URL" ]]; then
-    if [[ -n "$chat_pid" ]]; then
-      chat_status_url="$AGENT_DRAIN_STATUS_URL"
-    else
-      admin_status_url="$AGENT_DRAIN_STATUS_URL"
-    fi
-  fi
-  if [[ -n "$admin_pid" ]]; then
-    log_info "Admin drain target: $PM2_ADMIN_APP_NAME ($admin_status_url)"
-  fi
-  if [[ -n "$chat_pid" ]]; then
-    log_info "Chat drain target: $PM2_CHAT_APP_NAME ($chat_status_url)"
-  fi
-  local started
+  log_step "Waiting for active $role runs to finish"
+  local started elapsed active_count
   started="$(date +%s)"
   while true; do
-    local admin_active_count="0"
-    local chat_active_count="0"
-    if [[ -n "$admin_pid" ]]; then
-      admin_active_count="$(active_agent_run_count "$admin_pid" "$admin_status_url")"
-    fi
-    if [[ -n "$chat_pid" ]]; then
-      chat_active_count="$(active_agent_run_count "$chat_pid" "$chat_status_url")"
-    fi
-    local active_count=$((admin_active_count + chat_active_count))
+    active_count="$(active_runs_for_role "$role")"
     if [[ "$active_count" == "0" ]]; then
-      log_info "No active agent runs remain"
+      log_info "No active $role runs remain"
       return 0
     fi
-
-    local elapsed
     elapsed=$(( $(date +%s) - started ))
     if (( elapsed >= AGENT_DRAIN_TIMEOUT_SECONDS )); then
-      log_warn "Timed out waiting for $active_count active agent run(s) (admin=$admin_active_count, chat=$chat_active_count); deployment stopped before restart"
+      log_warn "Timed out waiting for $active_count active $role run(s); deployment stopped before restart"
       return 1
     fi
+    log_info "Waiting for $active_count active $role run(s) before restart (${elapsed}s elapsed)"
+    sleep "$AGENT_DRAIN_POLL_SECONDS"
+  done
+}
 
-    log_info "Waiting for $active_count active agent run(s) before restart (admin=$admin_active_count, chat=$chat_active_count, ${elapsed}s elapsed)"
+restart_role_with_drain() {
+  local role="$1"
+  enable_deploy_drain "$role"
+  wait_for_role_drain "$role" || die "$role still has active runs after ${AGENT_DRAIN_TIMEOUT_SECONDS}s"
+  restart_pm2_app "$(pm2_app_name_for_role "$role")"
+  disable_deploy_drain "$role"
+}
+
+# Wait without draining: conversations keep starting normally until chat is
+# naturally idle, then drain only for the few seconds the restart takes.
+restart_chat_when_idle() {
+  log_step "Waiting for chat to become idle (no drain, up to ${CHAT_IDLE_TIMEOUT_SECONDS}s)"
+  local started elapsed active_count last_log=-60
+  started="$(date +%s)"
+  while true; do
+    active_count="$(active_runs_for_role chat)"
+    if [[ "$active_count" == "0" ]]; then
+      enable_deploy_drain chat
+      # A run may have started between the check and the drain signal.
+      active_count="$(active_runs_for_role chat)"
+      if [[ "$active_count" == "0" ]]; then
+        restart_pm2_app "$PM2_CHAT_APP_NAME"
+        disable_deploy_drain chat
+        return 0
+      fi
+      disable_deploy_drain chat
+      log_info "A chat run started while preparing the restart; waiting again"
+    fi
+    elapsed=$(( $(date +%s) - started ))
+    if (( elapsed >= CHAT_IDLE_TIMEOUT_SECONDS )); then
+      log_warn "Chat did not become idle within ${CHAT_IDLE_TIMEOUT_SECONDS}s ($active_count active run(s)); chat restart left pending"
+      return 1
+    fi
+    if (( elapsed - last_log >= 60 )); then
+      log_info "Chat has $active_count active run(s); new conversations are still accepted (${elapsed}s elapsed)"
+      last_log="$elapsed"
+    fi
     sleep "$AGENT_DRAIN_POLL_SECONDS"
   done
 }
@@ -886,20 +1066,116 @@ ensure_shared_plugin_runtime() {
 }
 
 build_backend() {
+  local api_dir="$1"
   log_step "Installing backend dependencies"
-  run_as_app_user_shell "cd '$APP_API_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
+  run_as_app_user_shell "cd '$api_dir' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
 
   log_step "Verifying project-pinned Codex runtime"
-  run_as_app_user_shell "cd '$APP_API_DIR' && expected=\$(node -p \"require('./node_modules/@openai/codex-sdk/package.json').version\") && package_version=\$(node -p \"require('./node_modules/@openai/codex/package.json').version\") && runtime_version=\$(node_modules/.bin/codex --version) && test \"\$package_version\" = \"\$expected\" && test \"\$runtime_version\" = \"codex-cli \$expected\" && printf 'Codex SDK, package and runtime verified at %s\\n' \"\$expected\""
+  run_as_app_user_shell "cd '$api_dir' && expected=\$(node -p \"require('./node_modules/@openai/codex-sdk/package.json').version\") && package_version=\$(node -p \"require('./node_modules/@openai/codex/package.json').version\") && runtime_version=\$(node_modules/.bin/codex --version) && test \"\$package_version\" = \"\$expected\" && test \"\$runtime_version\" = \"codex-cli \$expected\" && printf 'Codex SDK, package and runtime verified at %s\\n' \"\$expected\""
 
   log_step "Generating Prisma client"
-  run_as_app_user_shell "cd '$APP_API_DIR' && npm run prisma:generate"
+  run_as_app_user_shell "cd '$api_dir' && npm run prisma:generate"
 
   log_step "Applying database migrations"
-  run_as_app_user_shell "cd '$APP_API_DIR' && npx prisma migrate deploy"
+  run_as_app_user_shell "cd '$api_dir' && npx prisma migrate deploy"
 
   log_step "Building backend"
-  run_as_app_user_shell "cd '$APP_API_DIR' && npm run build"
+  run_as_app_user_shell "cd '$api_dir' && npm run build"
+}
+
+release_commit() {
+  local release_dir="$1"
+  [[ -f "$release_dir/COMMIT" ]] || return 0
+  tr -d '[:space:]' < "$release_dir/COMMIT"
+}
+
+current_release_dir() {
+  local target
+  target="$(readlink "$APP_API_DIR/dist" 2>/dev/null || true)"
+  [[ "$target" == "$RELEASES_DIR/"*/agent-api/dist ]] || return 0
+  printf '%s\n' "${target%/agent-api/dist}"
+}
+
+# Each backend build gets its own directory (code, node_modules, Prisma client),
+# so building never rewrites files that running processes still load lazily.
+build_backend_release() {
+  local current
+  current="$(current_release_dir)"
+  if [[ -n "$current" && "$(release_commit "$current")" == "$TARGET_COMMIT" && -f "$current/agent-api/dist/index.js" ]]; then
+    log_info "Reusing release $(basename "$current") already built for $TARGET_COMMIT"
+    RELEASE_DIR="$current"
+    return 0
+  fi
+
+  local release_id
+  release_id="$(date -u +%Y%m%dT%H%M%SZ)-${TARGET_COMMIT:0:12}"
+  RELEASE_DIR="$RELEASES_DIR/$release_id"
+  log_step "Preparing backend release $release_id"
+  run_as_app_user_shell "mkdir -p '$RELEASE_DIR' && git -C '$APP_REPO_DIR' archive --format=tar '$TARGET_COMMIT' agent-api | tar -x -C '$RELEASE_DIR' && ln -s '$BACKEND_ENV_FILE' '$RELEASE_DIR/agent-api/.env'"
+  build_backend "$RELEASE_DIR/agent-api"
+  write_release_commit "$RELEASE_DIR" "$TARGET_COMMIT"
+}
+
+write_release_commit() {
+  run_as_app_user_shell "printf '%s\\n' '$2' > '$1/COMMIT'"
+}
+
+# dist and node_modules under agent-api become symlinks to the active release so
+# PM2 and ops scripts keep their paths. Node resolves the entry point to its real
+# path, which keeps an already running process on the release it started with.
+activate_release() {
+  local release_dir="$1"
+  [[ -f "$release_dir/agent-api/dist/index.js" && -d "$release_dir/agent-api/node_modules" ]] ||
+    die "release is incomplete: $release_dir"
+  log_step "Activating release $(basename "$release_dir")"
+  local legacy_dir="" name
+  for name in dist node_modules; do
+    run_as_app_user_shell "ln -sfn '$release_dir/agent-api/$name' '$APP_API_DIR/.$name.next'"
+    if [[ -d "$APP_API_DIR/$name" && ! -L "$APP_API_DIR/$name" ]]; then
+      # First activation: keep the in-place build for processes still using it.
+      if [[ -z "$legacy_dir" ]]; then
+        legacy_dir="$RELEASES_DIR/legacy-$(date -u +%Y%m%dT%H%M%SZ)"
+        run_as_app_user_shell "mkdir -p '$legacy_dir/agent-api'"
+        write_release_commit "$legacy_dir" "$PREVIOUS_HEAD"
+      fi
+      run_as_app_user_shell "mv '$APP_API_DIR/$name' '$legacy_dir/agent-api/$name'"
+    fi
+    run_as_app_user_shell "mv -Tf '$APP_API_DIR/.$name.next' '$APP_API_DIR/$name'"
+  done
+  if [[ -n "$legacy_dir" ]]; then
+    local role
+    for role in admin chat; do
+      [[ -n "$(read_deploy_state "$role.release")" ]] || write_deploy_state "$role.release" "$(basename "$legacy_dir")"
+    done
+  fi
+}
+
+# Keep the active release, any release a running app may still use, and the
+# newest few for rollback.
+prune_releases() {
+  [[ -d "$RELEASES_DIR" ]] || return 0
+  local keep=() current role release
+  current="$(current_release_dir)"
+  [[ -n "$current" ]] && keep+=("$(basename "$current")")
+  for role in admin chat; do
+    release="$(read_deploy_state "$role.release")"
+    [[ -n "$release" ]] && keep+=("$release")
+  done
+  local candidates=() index=0 name
+  while IFS= read -r name; do
+    candidates+=("$name")
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d \( -name '20*' -o -name 'legacy-*' \) -printf '%f\n' | sort -r)
+  for name in "${candidates[@]}"; do
+    if [[ " ${keep[*]} " == *" $name "* ]]; then
+      continue
+    fi
+    if [[ "$name" != legacy-* ]]; then
+      index=$((index + 1))
+      (( index <= RELEASE_RETENTION )) && continue
+    fi
+    log_info "Removing old release $name"
+    run_as_app_user_shell "rm -rf '$RELEASES_DIR/$name'"
+  done
 }
 
 migrate_portal_user_workspaces() {
@@ -988,19 +1264,70 @@ restart_pm2_app() {
   fi
 }
 
-restart_pm2_targets() {
+record_app_release() {
+  local role="$1"
+  local current
+  current="$(current_release_dir)"
+  [[ -n "$current" ]] || return 0
+  write_deploy_state "$role.release" "$(basename "$current")"
+}
+
+restart_targets() {
   log_step "Rendering PM2 ecosystem file"
   render_pm2_ecosystem
 
   if deploy_restarts_admin; then
-    restart_pm2_app "$PM2_ADMIN_APP_NAME"
+    restart_role_with_drain admin
+    record_app_release admin
   fi
 
   if deploy_restarts_chat; then
-    restart_pm2_app "$PM2_CHAT_APP_NAME"
+    case "$CHAT_RESTART_MODE" in
+      idle)
+        if restart_chat_when_idle; then
+          record_app_release chat
+        else
+          CHAT_RESTART_PENDING=1
+        fi
+        ;;
+      drain)
+        restart_role_with_drain chat
+        record_app_release chat
+        ;;
+      skip)
+        log_info "Skipping chat restart as requested"
+        CHAT_RESTART_PENDING=1
+        ;;
+    esac
   fi
 
   run_as_app_user_shell "pm2 save"
+}
+
+record_deployed_commits() {
+  local target_commit="$TARGET_COMMIT"
+  if [[ -n "$ACTIVATE_RELEASE" ]]; then
+    target_commit="$(release_commit "$RELEASE_DIR")"
+  fi
+  [[ -n "$target_commit" ]] || return 0
+  local target planned
+  for target in frontend admin chat caddy; do
+    case "$target" in
+      frontend) planned="$PLAN_FRONTEND" ;;
+      admin) planned="$PLAN_ADMIN" ;;
+      chat) planned="$PLAN_CHAT" ;;
+      caddy) planned="$PLAN_CADDY" ;;
+    esac
+    # A pending chat restart keeps its old commit so the next auto deploy retries it.
+    if [[ "$target" == "chat" && "$CHAT_RESTART_PENDING" == "1" ]]; then
+      continue
+    fi
+    # Auto mode found no relevant change for unplanned targets, so they are up to
+    # date; explicit scopes and rollbacks only record what they actually deployed.
+    if [[ "$planned" == "1" ]] || [[ "$DEPLOY_SCOPE" == "auto" && -z "$ACTIVATE_RELEASE" ]]; then
+      write_deploy_state "$target.commit" "$target_commit"
+    fi
+  done
 }
 
 verify_api_health() {
@@ -1027,15 +1354,26 @@ main() {
   require_command node
   require_command python3
   require_command curl
+  require_repo_checkout
+  acquire_deploy_lock
+  git_update
+  resolve_deploy_plan
+  if [[ "$PLAN_ONLY" == "1" ]]; then
+    log_step "Plan only; nothing was changed"
+    return 0
+  fi
+  if [[ "$PLAN_FRONTEND$PLAN_ADMIN$PLAN_CHAT$PLAN_CADDY" == "0000" && "$REFRESH_CADDY" != "1" ]]; then
+    record_deployed_commits
+    log_step "Nothing to deploy for $TARGET_COMMIT"
+    return 0
+  fi
+
   if deploy_restarts_admin || deploy_restarts_chat; then
     require_command pm2
   fi
-
   if deploy_restarts_chat; then
     check_codex_linux_sandbox_prerequisites
   fi
-  require_repo_checkout
-  git_update
   if deploy_restarts_admin || deploy_restarts_chat; then
     bash "$script_dir/ensure-host-memory-guard.sh" --allow-missing-service
   fi
@@ -1044,8 +1382,13 @@ main() {
     ensure_shared_python_runtime
     ensure_shared_plugin_runtime
   fi
-  if deploy_builds_backend; then
-    build_backend
+  if [[ -n "$ACTIVATE_RELEASE" ]]; then
+    RELEASE_DIR="$RELEASES_DIR/$ACTIVATE_RELEASE"
+    [[ -d "$RELEASE_DIR" ]] || die "release not found: $RELEASE_DIR"
+    activate_release "$RELEASE_DIR"
+  elif deploy_builds_backend; then
+    build_backend_release
+    activate_release "$RELEASE_DIR"
     log_step "Skipping Portal historical workspace migration (run npm run workspace:migrate explicitly when required)"
   fi
   if deploy_restarts_admin; then
@@ -1054,34 +1397,39 @@ main() {
   if deploy_builds_frontend; then
     build_frontend
   fi
+  trap cleanup_deploy_drains EXIT
   if deploy_restarts_admin || deploy_restarts_chat; then
-    enable_deploy_drain
-    trap disable_deploy_drain EXIT
-    wait_for_agent_drain
-  fi
-  if deploy_restarts_admin || deploy_restarts_chat; then
-    restart_pm2_targets
+    restart_targets
   fi
   if deploy_refreshes_caddy; then
     refresh_caddy_config
   else
-    log_info "Skipping Caddy config refresh for deploy scope: $DEPLOY_SCOPE"
+    log_info "Skipping Caddy config refresh"
   fi
+  cleanup_deploy_drains
+  trap - EXIT
   if deploy_restarts_admin || deploy_restarts_chat; then
-    disable_deploy_drain
-    trap - EXIT
     log_step "Checking admin and chat API health independently"
     verify_api_health
   fi
+  record_deployed_commits
+  prune_releases
 
   log_step "Deploy complete"
   log_info "Repo: $APP_REPO_DIR"
-  log_info "Deploy scope: $DEPLOY_SCOPE"
+  log_info "Commit: $TARGET_COMMIT"
+  log_info "Deploy plan: frontend=$PLAN_FRONTEND admin=$PLAN_ADMIN chat=$PLAN_CHAT caddy=$PLAN_CADDY"
+  if [[ -n "$RELEASE_DIR" ]]; then
+    log_info "Backend release: $(basename "$RELEASE_DIR")"
+  fi
   log_info "PM2 admin app: $PM2_ADMIN_APP_NAME on $API_HOST:$ADMIN_API_PORT"
   log_info "PM2 chat app: $PM2_CHAT_APP_NAME on $API_HOST:$CHAT_API_PORT"
   log_info "PM2 ecosystem: $PM2_ECOSYSTEM_FILE"
   log_info "Caddy config: $CADDY_CONFIG_FILE"
   log_info "Public domain: ${DOMAIN:-<unset>}"
+  if [[ "$CHAT_RESTART_PENDING" == "1" ]]; then
+    log_warn "Chat restart is pending; it still runs its previous release. Retry later with: bash scripts/deploy-agent-studio.sh --chat-only --skip-git-pull"
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

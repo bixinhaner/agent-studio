@@ -21,13 +21,21 @@
   }
 
   @chat_api path /api/local-bridge/threads/* /api/chat/* /api/session /api/threads /api/threads/* /api/portal/* /api/fs/* /api/ai-response-reviews /api/ai-response-reviews/* /api/integrations/crest/* /api/integrations/zendesk/* /api/action-connectors/* /openai/* /public-api/thread-shares/* /public-api/thread-shares
+  # During a restart the upstream port is briefly closed. Retrying the dial
+  # holds new requests for a few seconds instead of failing them with 502.
   handle @chat_api {
-    reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT}
+    reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT} {
+      lb_try_duration 30s
+      lb_try_interval 250ms
+    }
   }
 
   @api path /api/* /public-api/* /healthz
   handle @api {
-    reverse_proxy {$CADDY_ADMIN_UPSTREAM_HOST}:{$CADDY_ADMIN_UPSTREAM_PORT}
+    reverse_proxy {$CADDY_ADMIN_UPSTREAM_HOST}:{$CADDY_ADMIN_UPSTREAM_PORT} {
+      lb_try_duration 30s
+      lb_try_interval 250ms
+    }
   }
 
   handle /internal/* {

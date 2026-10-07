@@ -4,6 +4,8 @@ module.exports = {
       // Default app name: agent-studio-api
       name: "__PM2_ADMIN_APP_NAME__",
       cwd: "__APP_API_DIR__",
+      // dist is a symlink to the active release; Node resolves it to the real
+      // path at startup, so a running process keeps its release after a switch.
       script: "dist/index.js",
       interpreter: "node",
       instances: 1,
@@ -14,6 +16,8 @@ module.exports = {
         NODE_ENV: "production",
         HOST: "__API_HOST__",
         PORT: "__ADMIN_API_PORT__",
+        // Code runs from releases/<id>, so pin the session root to the checkout.
+        SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
         AGENT_STUDIO_SERVICE_ROLE: "admin",
         AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL: "http://127.0.0.1:__CHAT_API_PORT__/internal/deploy/drain-status"
       }
@@ -32,6 +36,7 @@ module.exports = {
         NODE_ENV: "production",
         HOST: "__API_HOST__",
         PORT: "__CHAT_API_PORT__",
+        SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
         AGENT_STUDIO_SERVICE_ROLE: "chat"
       }
     }
