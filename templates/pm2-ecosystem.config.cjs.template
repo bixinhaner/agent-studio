@@ -4,9 +4,9 @@ module.exports = {
       // Default app name: agent-studio-api
       name: "__PM2_ADMIN_APP_NAME__",
       cwd: "__APP_API_DIR__",
-      // dist is a symlink to the active release; Node resolves it to the real
-      // path at startup, so a running process keeps its release after a switch.
-      script: "dist/index.js",
+      // Loads dist/index.js by its real path so a running process keeps the
+      // release it started with after a deploy switches the dist symlink.
+      script: "scripts/run-active-release.mjs",
       interpreter: "node",
       instances: 1,
       exec_mode: "fork",
@@ -26,7 +26,7 @@ module.exports = {
       // Dedicated chat/runtime app. Restart only this app for conversation changes.
       name: "__PM2_CHAT_APP_NAME__",
       cwd: "__APP_API_DIR__",
-      script: "dist/index.js",
+      script: "scripts/run-active-release.mjs",
       interpreter: "node",
       instances: 1,
       exec_mode: "fork",

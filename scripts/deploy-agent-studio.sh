@@ -1254,10 +1254,27 @@ build_frontend() {
   [[ -d "$APP_UI_DIR/dist/assets" ]] || die "frontend build did not produce dist/assets"
 }
 
+pm2_app_exec_path() {
+  run_as_app_user_shell "pm2 jlist" 2>/dev/null | python3 -c '
+import json, sys
+name = sys.argv[1]
+for app in json.load(sys.stdin):
+    if app.get("name") == name:
+        print(app.get("pm2_env", {}).get("pm_exec_path", ""))
+        break
+' "$1" || true
+}
+
 restart_pm2_app() {
   local app_name="$1"
   log_step "Restarting PM2 app: $app_name"
-  if pm2_app_exists "$app_name"; then
+  local expected_exec_path="$APP_API_DIR/scripts/run-active-release.mjs"
+  if pm2_app_exists "$app_name" && [[ "$(pm2_app_exec_path "$app_name")" != "$expected_exec_path" ]]; then
+    # pm2 restart keeps the stored entry script, so re-create the app once to
+    # switch it to the release launcher. Downtime matches a normal restart.
+    log_info "Switching $app_name entry point to $expected_exec_path"
+    run_as_app_user_shell "pm2 delete '$app_name' && pm2 start '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
+  elif pm2_app_exists "$app_name"; then
     run_as_app_user_shell "pm2 restart '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
   else
     run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
