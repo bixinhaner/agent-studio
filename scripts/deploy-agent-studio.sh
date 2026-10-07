@@ -50,6 +50,7 @@ CHAT_READY_TIMEOUT_SECONDS="${AGENT_CHAT_READY_TIMEOUT_SECONDS:-180}"
 ALLOW_BREAKING_MIGRATION="${AGENT_STUDIO_ALLOW_BREAKING_MIGRATION:-0}"
 RELEASE_RETENTION="${AGENT_STUDIO_RELEASE_RETENTION:-3}"
 DEPLOY_LOCK_FILE="${AGENT_STUDIO_DEPLOY_LOCK_FILE:-/tmp/agent-studio-deploy.lock}"
+PM2_LOG_DIR="${AGENT_STUDIO_PM2_LOG_DIR:-$APP_HOME/.pm2/logs}"
 PLAN_ONLY=0
 ACTIVATE_RELEASE=""
 PLAN_FRONTEND=0
@@ -291,6 +292,7 @@ RELEASES_DIR="$APP_REPO_DIR/releases"
 DEPLOY_STATE_DIR="$RELEASES_DIR/state"
 
 pm2_template_path="$script_dir/../templates/pm2-ecosystem.config.cjs.template"
+logrotate_template_path="$script_dir/../templates/logrotate-pm2.conf.template"
 caddy_template_path="$script_dir/../templates/Caddyfile.template"
 
 case "$DEPLOY_SCOPE" in
@@ -470,6 +472,11 @@ require_repo_checkout() {
 
 render_pm2_ecosystem() {
   [[ -f "$pm2_template_path" ]] || die "missing PM2 template: $pm2_template_path"
+  if is_app_user; then
+    ensure_dir "$PM2_LOG_DIR"
+  else
+    run_as_root install -d -o "$APP_USER" -g "$APP_GROUP" -m 755 "$PM2_LOG_DIR"
+  fi
   local pm2_ecosystem_dir
   pm2_ecosystem_dir="$(dirname "$PM2_ECOSYSTEM_FILE")"
   if is_app_user; then
@@ -482,7 +489,7 @@ render_pm2_ecosystem() {
   rendered_ecosystem="$(mktemp)"
   local peer_urls
   peer_urls="$(chat_slot_base_url a),$(chat_slot_base_url b)"
-  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" "$APP_REPO_DIR" "$PM2_CHAT_B_APP_NAME" "$CHAT_B_API_PORT" "$peer_urls" <<'PY'
+  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" "$APP_REPO_DIR" "$PM2_CHAT_B_APP_NAME" "$CHAT_B_API_PORT" "$peer_urls" "$PM2_LOG_DIR" <<'PY'
 from pathlib import Path
 import sys
 
@@ -494,6 +501,7 @@ rendered = (
     .replace("__PM2_CHAT_B_APP_NAME__", sys.argv[10])
     .replace("__CHAT_B_API_PORT__", sys.argv[11])
     .replace("__CHAT_PEER_URLS__", sys.argv[12])
+    .replace("__PM2_LOG_DIR__", sys.argv[13])
     .replace("__PM2_CHAT_APP_NAME__", sys.argv[4])
     .replace("__APP_API_DIR__", sys.argv[5])
     .replace("__API_HOST__", sys.argv[6])
@@ -510,6 +518,49 @@ PY
     run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$rendered_ecosystem" "$PM2_ECOSYSTEM_FILE"
   fi
   rm -f "$rendered_ecosystem"
+}
+
+# PM2 appends to the fixed per-app log files forever; logrotate bounds them.
+install_pm2_logrotate() {
+  [[ -f "$logrotate_template_path" ]] || die "missing logrotate template: $logrotate_template_path"
+  if ! command -v logrotate >/dev/null 2>&1; then
+    log_warn "logrotate is not installed; PM2 logs in $PM2_LOG_DIR are not rotated"
+    return 0
+  fi
+  local destination="/etc/logrotate.d/${PM2_ADMIN_APP_NAME}-pm2"
+  local files="" app
+  for app in "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$PM2_CHAT_B_APP_NAME"; do
+    files+="$PM2_LOG_DIR/$app-out.log $PM2_LOG_DIR/$app-error.log "
+  done
+  local rendered
+  rendered="$(mktemp)"
+  python3 - "$logrotate_template_path" "$rendered" "${files% }" "$APP_USER" "$APP_GROUP" <<'PY'
+from pathlib import Path
+import sys
+
+template = Path(sys.argv[1]).read_text()
+Path(sys.argv[2]).write_text(
+    template
+    .replace("__PM2_LOG_FILES__", sys.argv[3])
+    .replace("__APP_USER__", sys.argv[4])
+    .replace("__APP_GROUP__", sys.argv[5])
+)
+PY
+  if run_as_root cmp -s "$rendered" "$destination" 2>/dev/null; then
+    rm -f "$rendered"
+    return 0
+  fi
+  # logrotate only accepts root-owned configs; validate a root copy before installing.
+  local candidate
+  candidate="$(run_as_root mktemp)"
+  run_as_root install -o root -g root -m 644 "$rendered" "$candidate"
+  rm -f "$rendered"
+  if ! run_as_root logrotate -d "$candidate" >/dev/null 2>&1; then
+    run_as_root rm -f "$candidate"
+    die "rendered PM2 logrotate config failed validation"
+  fi
+  run_as_root mv -f "$candidate" "$destination"
+  log_info "Installed PM2 log rotation: $destination"
 }
 
 render_caddy_config() {
@@ -1552,25 +1603,29 @@ build_frontend() {
   [[ -d "$APP_UI_DIR/dist/assets" ]] || die "frontend build did not produce dist/assets"
 }
 
-pm2_app_exec_path() {
+pm2_app_env_field() {
   run_as_app_user_shell "pm2 jlist" 2>/dev/null | python3 -c '
 import json, sys
-name = sys.argv[1]
+name, field = sys.argv[1], sys.argv[2]
 for app in json.load(sys.stdin):
     if app.get("name") == name:
-        print(app.get("pm2_env", {}).get("pm_exec_path", ""))
+        print(app.get("pm2_env", {}).get(field, ""))
         break
-' "$1" || true
+' "$1" "$2" || true
 }
 
 restart_pm2_app() {
   local app_name="$1"
   log_step "Restarting PM2 app: $app_name"
   local expected_exec_path="$APP_API_DIR/scripts/run-active-release.mjs"
-  if pm2_app_exists "$app_name" && [[ "$(pm2_app_exec_path "$app_name")" != "$expected_exec_path" ]]; then
-    # pm2 restart keeps the stored entry script, so re-create the app once to
-    # switch it to the release launcher. Downtime matches a normal restart.
-    log_info "Switching $app_name entry point to $expected_exec_path"
+  local expected_out_log="$PM2_LOG_DIR/$app_name-out.log"
+  if pm2_app_exists "$app_name" && {
+    [[ "$(pm2_app_env_field "$app_name" pm_exec_path)" != "$expected_exec_path" ]] ||
+      [[ "$(pm2_app_env_field "$app_name" pm_out_log_path)" != "$expected_out_log" ]]
+  }; then
+    # pm2 restart keeps the stored entry script and log paths, so re-create the
+    # app once to apply them. Downtime matches a normal restart.
+    log_info "Re-creating $app_name with entry point $expected_exec_path and logs in $PM2_LOG_DIR"
     run_as_app_user_shell "pm2 delete '$app_name' && pm2 start '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
   elif pm2_app_exists "$app_name"; then
     run_as_app_user_shell "pm2 restart '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
@@ -1590,6 +1645,7 @@ record_app_release() {
 restart_targets() {
   log_step "Rendering PM2 ecosystem file"
   render_pm2_ecosystem
+  install_pm2_logrotate
 
   if deploy_restarts_admin; then
     restart_role_with_drain admin

@@ -3,6 +3,9 @@ module.exports = {
     {
       // Default app name: agent-studio-api
       name: "__PM2_ADMIN_APP_NAME__",
+      // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      out_file: "__PM2_LOG_DIR__/__PM2_ADMIN_APP_NAME__-out.log",
+      error_file: "__PM2_LOG_DIR__/__PM2_ADMIN_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
       // Loads dist/index.js by its real path so a running process keeps the
       // release it started with after a deploy switches the dist symlink.
@@ -27,6 +30,9 @@ module.exports = {
       // Blue-green chat slot a. A deploy starts the idle slot with the new release,
       // switches traffic once it is ready, and the old slot retires after its runs.
       name: "__PM2_CHAT_APP_NAME__",
+      // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      out_file: "__PM2_LOG_DIR__/__PM2_CHAT_APP_NAME__-out.log",
+      error_file: "__PM2_LOG_DIR__/__PM2_CHAT_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
       script: "scripts/run-active-release.mjs",
       interpreter: "node",
@@ -51,6 +57,9 @@ module.exports = {
     {
       // Blue-green chat slot b.
       name: "__PM2_CHAT_B_APP_NAME__",
+      // Fixed paths: PM2 ids change on every slot switch, the files should not.
+      out_file: "__PM2_LOG_DIR__/__PM2_CHAT_B_APP_NAME__-out.log",
+      error_file: "__PM2_LOG_DIR__/__PM2_CHAT_B_APP_NAME__-error.log",
       cwd: "__APP_API_DIR__",
       script: "scripts/run-active-release.mjs",
       interpreter: "node",

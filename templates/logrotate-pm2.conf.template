@@ -1,0 +1,15 @@
+# Managed by scripts/deploy-agent-studio.sh; local edits are overwritten on deploy.
+# PM2 keeps its log file descriptors open, so copytruncate rotates in place.
+__PM2_LOG_FILES__ {
+    su __APP_USER__ __APP_GROUP__
+    daily
+    maxsize 100M
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d-%s
+    copytruncate
+}

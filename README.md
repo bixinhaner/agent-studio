@@ -212,6 +212,8 @@ Restart behavior (blue-green chat, `--chat-restart bluegreen`, default): the dep
 
 Migrations must stay compatible with the release that is still running: `scripts/check-migration-compat.mjs` runs before every backend build and rejects DROP/RENAME/type changes/SET NOT NULL/required columns without default added since the running release. Split such changes into expand-then-contract deploys, or pass `--allow-breaking-migration` after confirming the old code does not use the affected schema.
 
+PM2 logs: every app writes to fixed files `~agentstudio/.pm2/logs/<app>-out.log` / `<app>-error.log` (so slot switches keep one file per app), rotated by `/etc/logrotate.d/<admin app>-pm2` (daily or at 100M, 14 compressed copies), which the deploy script renders from `templates/logrotate-pm2.conf.template`.
+
 Hot-loaded data: the proactive scenario catalog lives in `agent-api/templates/runtime-content/proactive-scenarios.json` and is reloaded every 30s, so catalog edits only need `git pull` (no restart). Deploys hold `/tmp/agent-studio-deploy.lock`, so two deploys cannot run at once; `--skip-agent-drain` remains the explicit emergency override.
 
 Configure every Portal hostname through `--portal-domains <comma-separated-list>`. The normalized list is persisted in install state and rendered as one Caddy site block, so every current and future Portal domain shares the same admin/chat route split without hand-written per-domain routing.
