@@ -1342,12 +1342,12 @@ ensure_shared_runtime_system_packages() {
     log_info "Shared runtime system packages are installed"
     return 0
   fi
-  log_step "Installing shared runtime system packages: ${missing[*]}"
+  log_step "Installing shared runtime system packages: $(printf '%s ' "${missing[@]}")"
   if run_as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq &&
     run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"; then
     log_info "Installed shared runtime system packages"
   else
-    log_warn "Shared runtime system packages failed to install: ${missing[*]}"
+    log_warn "Shared runtime system packages failed to install: $(printf '%s ' "${missing[@]}")"
   fi
 }
 

@@ -8,3 +8,6 @@ Environment=SHARED_RUNTIME_STATE_ROOT=__STATE_ROOT__
 ExecStart=/usr/local/sbin/agent-studio-thread-tmp-cleanup
 Nice=19
 IOSchedulingClass=idle
+# Reading many files fills page cache; keep it reclaimable instead of crowding the chat service.
+MemoryHigh=512M
+MemoryMax=2G

@@ -8,3 +8,6 @@ Group=__APP_GROUP__
 ExecStart=/usr/bin/python3 /usr/local/lib/agent-studio/runtime-gap-scan.py --codex-homes __CODEX_HOMES_ROOT__ --sessions __SESSIONS_ROOT__ --output __STATE_ROOT__/runtime-gaps.json --days 30
 Nice=19
 IOSchedulingClass=idle
+# Reading many files fills page cache; keep it reclaimable instead of crowding the chat service.
+MemoryHigh=768M
+MemoryMax=2G
