@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  isCodexThreadWriterConflict,
+  releaseIdleCodexThreadWriters,
   resolveCodexAppServerBinaryPath,
   shutdownCodexAppServerRuntime
 } from "./codex-app-server-runtime.js";
@@ -666,6 +668,41 @@ describe("Codex app-server runtime", () => {
 
     const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean);
     expect(starts).toHaveLength(1);
+  });
+
+  it("stops idle app-servers so a retiring chat slot hands their thread writers over", async () => {
+    const startLog = path.join(testTempDir, "release-idle-starts.log");
+    await fs.rm(startLog, { force: true });
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-release-idle"),
+        FAKE_APP_SERVER_START_LOG: startLog
+      }
+    });
+    const threadOptions = {
+      model: "gpt-5.5",
+      reasoningEffort: "high" as const,
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    };
+
+    await runtime.startThreadWithOptions(threadOptions);
+    const [firstPid] = (await fs.readFile(startLog, "utf8")).trim().split("\n").map(Number);
+    await expect(releaseIdleCodexThreadWriters("test retire")).resolves.toEqual({ stoppedProcesses: 1, unsubscribedThreads: 0 });
+    expect(isPidAlive(firstPid)).toBe(false);
+    await expect(releaseIdleCodexThreadWriters("test retire")).resolves.toEqual({ stoppedProcesses: 0, unsubscribedThreads: 0 });
+
+    await runtime.startThreadWithOptions(threadOptions);
+    expect((await fs.readFile(startLog, "utf8")).trim().split("\n")).toHaveLength(2);
+  });
+
+  it("recognizes Codex thread writer conflicts", () => {
+    expect(isCodexThreadWriterConflict(new Error("thread 01a0 already has an active writer"))).toBe(true);
+    expect(isCodexThreadWriterConflict(new Error("no rollout found"))).toBe(false);
+    expect(isCodexThreadWriterConflict("already has an active writer")).toBe(false);
   });
 
   it("terminates the full app-server process group before reusing LRU capacity", async () => {

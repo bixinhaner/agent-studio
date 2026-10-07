@@ -1370,7 +1370,9 @@ class CodexAppServerManager {
           // A fresh process cannot own a thread whose writer is still held by a
           // retired process. Reap this candidate before the caller retries so it
           // never leaves a second writer alive in the shared Codex home.
-          if (error instanceof Error && /already has an active writer/i.test(error.message)) {
+          // Only reap a candidate that holds nothing else: when another chat
+          // slot owns the writer this process may be serving other threads.
+          if (isCodexThreadWriterConflict(error) && process.activeTurns === 0 && process.loadedThreads.size === 0) {
             await process.stopAndWait("thread writer conflict");
           }
           throw error;
@@ -1957,6 +1959,34 @@ class CodexAppServerManager {
     }
   }
 
+  /**
+   * Gives up the Codex thread writers this instance is not using, so another
+   * chat slot can resume those threads. Idle processes are stopped, which
+   * releases their writers at once; busy processes unsubscribe their idle
+   * threads, which Codex unloads (and releases) after about a minute.
+   */
+  async releaseIdleThreadWriters(reason: string): Promise<{ stoppedProcesses: number; unsubscribedThreads: number }> {
+    return await this.withProcessPoolLock(async () => {
+      let stoppedProcesses = 0;
+      let unsubscribedThreads = 0;
+      for (const process of [...this.processes.values()]) {
+        if (process.closed || !process.busy) {
+          await process.stopAndWait(reason);
+          this.forgetProcess(process);
+          stoppedProcesses += 1;
+          continue;
+        }
+        for (const threadId of [...process.loadedThreads]) {
+          if (this.lockedThreads.has(threadId) || this.activeTurnsByThread.has(`${process.scopeKey}\u0000${threadId}`)) continue;
+          process.loadedThreads.delete(threadId);
+          await process.request("thread/unsubscribe", { threadId }).catch(() => undefined);
+          unsubscribedThreads += 1;
+        }
+      }
+      return { stoppedProcesses, unsubscribedThreads };
+    });
+  }
+
   async stopAll(reason = "stopped"): Promise<void> {
     const processes = [...this.processes.values()];
     this.processes.clear();
@@ -2077,6 +2107,14 @@ export class CodexAppServerRuntime {
 export function isAppServerRuntimeEnabled(): boolean {
   const value = (process.env.CODEX_RUNTIME_DRIVER || "").trim().toLowerCase();
   return value === TOML_DRIVER_APP_SERVER || value === "app-server" || value === "appserver";
+}
+
+export function isCodexThreadWriterConflict(error: unknown): boolean {
+  return error instanceof Error && /already has an active writer/i.test(error.message);
+}
+
+export async function releaseIdleCodexThreadWriters(reason: string): Promise<{ stoppedProcesses: number; unsubscribedThreads: number }> {
+  return await appServerManager.releaseIdleThreadWriters(reason);
 }
 
 export async function shutdownCodexAppServerRuntime(reason = "shutdown"): Promise<void> {

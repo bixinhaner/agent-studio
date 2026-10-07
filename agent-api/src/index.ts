@@ -97,7 +97,12 @@ import { CodexRuntime } from "./codex-runtime.js";
 import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { sendBufferContent, sendFileContent } from "./files/raw-content-response.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
-import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
+import {
+  isAppServerRuntimeEnabled,
+  isCodexThreadWriterConflict,
+  releaseIdleCodexThreadWriters,
+  shutdownCodexAppServerRuntime
+} from "./codex-app-server-runtime.js";
 import { CodexQuotaSnapshotService } from "./operations/codex-quota-snapshot-service.js";
 import { CodexQuotaSnapshotRepository, type CodexQuotaSnapshotRepositoryDb } from "./persistence/codex-quota-snapshot-repository.js";
 import { closeCodexThreadRuntimeLeasePool, withCodexThreadRuntimeLease } from "./codex-thread-runtime-lease.js";
@@ -2333,9 +2338,37 @@ async function getDeploymentDrainReason(): Promise<string | undefined> {
   return chatRetirement.isRetiring() ? undefined : chatRetirement.userFacingDrainReason();
 }
 
+// A retiring chat slot releases the writers of threads it no longer runs: at
+// once for idle app-server processes, within about a minute otherwise.
+const PEER_THREAD_WRITER_WAIT_MS = 90_000;
+const PEER_THREAD_WRITER_RETRY_MS = 2_000;
+
+async function resumeCodexThreadAcrossChatSlots<T>(
+  resume: () => Promise<T>,
+  input: { sessionId: string; codexThreadId: string; wait: boolean }
+): Promise<T> {
+  const deadline = Date.now() + PEER_THREAD_WRITER_WAIT_MS;
+  let waiting = false;
+  while (true) {
+    try {
+      const resumed = await resume();
+      if (waiting) console.info("codex thread writer released by the other chat slot", input);
+      return resumed;
+    } catch (error) {
+      // Resuming without the writer would continue the conversation without its
+      // Codex context, so wait for the handover instead.
+      if (!input.wait || !chatCluster.enabled || !isCodexThreadWriterConflict(error) || Date.now() >= deadline) throw error;
+      if (!waiting) console.info("codex thread writer is held by another chat slot; waiting for release", input);
+      waiting = true;
+      await new Promise<void>((resolve) => setTimeout(resolve, PEER_THREAD_WRITER_RETRY_MS));
+    }
+  }
+}
+
 async function restoreLiveRuntimeThreadUnlocked(
   session: SessionRecord,
-  timing?: RuntimeStartupTimer
+  timing?: RuntimeStartupTimer,
+  options: { waitForPeerWriter?: boolean } = {}
 ): Promise<LiveRuntimeThread | undefined> {
   const cached = liveRuntimeThreads.get(session.sessionId);
   if (cached) {
@@ -2418,17 +2451,21 @@ async function restoreLiveRuntimeThreadUnlocked(
       }
     });
     const liveThread = await time("restore_runtime.resume_thread", () =>
-      sessionRuntime.resumeThreadWithOptions({
-        threadId: codexThreadId,
-        model: session.model,
-        reasoningEffort: session.reasoningEffort,
-        workspace: session.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
-        skillRefresh: {
-          cwds: [session.workspace],
-          fingerprint: capabilityReconciliation.fingerprint
-        }
-      })
+      resumeCodexThreadAcrossChatSlots(
+        () =>
+          sessionRuntime.resumeThreadWithOptions({
+            threadId: codexThreadId,
+            model: session.model,
+            reasoningEffort: session.reasoningEffort,
+            workspace: session.workspace,
+            codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig),
+            skillRefresh: {
+              cwds: [session.workspace],
+              fingerprint: capabilityReconciliation.fingerprint
+            }
+          }),
+        { sessionId: session.sessionId, codexThreadId, wait: options.waitForPeerWriter !== false }
+      )
     );
     if (stableJson(session.codexRunConfig) !== stableJson(runtimeLaunch.codexRunConfig)) {
       await time("restore_runtime.persist_updated_config", () =>
@@ -2452,10 +2489,11 @@ async function restoreLiveRuntimeThreadUnlocked(
 
 async function restoreLiveRuntimeThread(
   session: SessionRecord,
-  timing?: RuntimeStartupTimer
+  timing?: RuntimeStartupTimer,
+  options: { waitForPeerWriter?: boolean } = {}
 ): Promise<LiveRuntimeThread | undefined> {
   return await withCodexThreadRuntimeLease(session.threadId ?? session.sessionId, () =>
-    restoreLiveRuntimeThreadUnlocked(session, timing)
+    restoreLiveRuntimeThreadUnlocked(session, timing, options)
   );
 }
 
@@ -2515,7 +2553,10 @@ async function prewarmAppServerRuntimeSessions(options: { skipThreadIds?: Set<st
     if (seenScopes.has(scopeKey)) continue;
     seenScopes.add(scopeKey);
     attempted += 1;
-    const liveThread = await withCodexThreadRuntimeLease(leaseThreadId, () => restoreLiveRuntimeThread(session));
+    // Prewarm is opportunistic; never wait for another slot to release a thread.
+    const liveThread = await withCodexThreadRuntimeLease(leaseThreadId, () =>
+      restoreLiveRuntimeThread(session, undefined, { waitForPeerWriter: false })
+    );
     if (liveThread) restored += 1;
   }
   console.log("app-server runtime prewarm completed", {
@@ -14823,6 +14864,18 @@ async function bootstrap() {
         proactiveActionConnectors.pauseClaims();
         scheduledTasks.stop();
         notificationSubscriptions.stop();
+      },
+      onRetiringPoll: async () => {
+        // Threads this slot is not running belong to the new slot now; release
+        // their Codex writers so follow-up messages resume with full context.
+        const runningSessions = new Set([...activeRuntimeTurns.values()].map((turn) => turn.sessionId).filter(Boolean));
+        for (const sessionId of [...liveRuntimeThreads.keys()]) {
+          if (!runningSessions.has(sessionId) && !portalActiveChatRuns.has(sessionId)) liveRuntimeThreads.delete(sessionId);
+        }
+        const released = await releaseIdleCodexThreadWriters("chat slot retiring");
+        if (released.stoppedProcesses || released.unsubscribedThreads) {
+          console.info("retiring chat slot released codex thread writers", released);
+        }
       },
       onRetireCancel: async () => {
         // Serving again (the new slot went away): the handover drain must not

@@ -31,6 +31,8 @@ export class ChatRetirementController {
       retireMaxMs: number;
       onRetireStart(): void | Promise<void>;
       onRetireCancel(): void | Promise<void>;
+      /** Runs on every poll while retiring, e.g. to hand idle thread state to the peer. */
+      onRetiringPoll?(): void | Promise<void>;
       exit(input: { interruptRemaining: boolean; reason: string }): Promise<void>;
       pollMs?: number;
       now?: () => number;
@@ -124,6 +126,12 @@ export class ChatRetirementController {
       return;
     }
     this.peerLostChecks = 0;
+
+    try {
+      await this.options.onRetiringPoll?.();
+    } catch (error) {
+      this.options.logger?.warn("chat retirement poll hook failed", error instanceof Error ? error.message : String(error));
+    }
 
     const busy = this.options.busyCount() + inFlightForwardCount();
     this.idleChecks = busy === 0 ? this.idleChecks + 1 : 0;

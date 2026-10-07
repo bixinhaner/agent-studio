@@ -275,7 +275,13 @@ describe("chat cluster forwarding", () => {
 });
 
 describe("chat retirement", () => {
-  function controller(input: { drain?: string; peerReady?: boolean; busy?: number; maxMs?: number }) {
+  function controller(input: {
+    drain?: string;
+    peerReady?: boolean;
+    busy?: number;
+    maxMs?: number;
+    onRetiringPoll?: () => void | Promise<void>;
+  }) {
     const state = { drain: input.drain, peerReady: input.peerReady ?? true, busy: input.busy ?? 0, now: 0 };
     const cluster = new ChatClusterView({ peerUrls: [], selfPort: 1 });
     vi.spyOn(cluster, "readyPeer").mockImplementation(async () =>
@@ -293,6 +299,7 @@ describe("chat retirement", () => {
       onRetireCancel: () => {
         events.push("cancel");
       },
+      onRetiringPoll: input.onRetiringPoll,
       exit: async ({ interruptRemaining }) => {
         events.push(interruptRemaining ? "exit:interrupt" : "exit:idle");
       },
@@ -324,6 +331,25 @@ describe("chat retirement", () => {
     await retirement.poll();
     expect(events).toEqual(["start"]);
     await retirement.poll();
+    expect(events).toEqual(["start", "exit:idle"]);
+  });
+
+  it("runs the retiring hook on every retiring poll and still exits when it fails", async () => {
+    let calls = 0;
+    const { retirement, state, events } = controller({
+      drain: "updating",
+      busy: 1,
+      onRetiringPoll: () => {
+        calls += 1;
+        if (calls === 2) throw new Error("release failed");
+      }
+    });
+    await retirement.poll();
+    expect(calls).toBe(1);
+    state.busy = 0;
+    await retirement.poll();
+    await retirement.poll();
+    expect(calls).toBe(3);
     expect(events).toEqual(["start", "exit:idle"]);
   });
 
