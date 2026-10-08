@@ -105,6 +105,13 @@ def link_over(source, target):
 
 def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
     cutoff = time.time() - settle_seconds
+    error_samples = []
+
+    def record_error(path, error):
+        if len(error_samples) < 10:
+            # Plugin-relative path only; a file vanishing here usually means Codex was upgrading that plugin.
+            error_samples.append(f"{path.split('/plugins/cache/')[-1]}: {type(error).__name__} {error.strerror or error}")
+
     groups = defaultdict(list)
     for home in homes:
         for key, path, st in plugin_files(home, cutoff):
@@ -125,8 +132,9 @@ def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
         for ino, (path, st) in by_inode.items():
             try:
                 by_hash[sha256(path)].append((path, st))
-            except OSError:
+            except OSError as error:
                 errors += 1
+                record_error(path, error)
         for _digest, copies in by_hash.items():
             # Keep the inode that already has the most links so repeated runs converge.
             copies.sort(key=lambda item: -item[1].st_nlink)
@@ -149,8 +157,9 @@ def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
                             break
                         link_over(keep_path, target)
                         moved += 1
-                    except OSError:
+                    except OSError as error:
                         errors += 1
+                        record_error(target, error)
                 linked += moved
                 if moved == len(paths) and st.st_nlink == len(paths):
                     reclaimed += st.st_blocks * 512
@@ -160,6 +169,7 @@ def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
         "pluginBytesBefore": total_bytes,
         "pluginUniqueBytes": unique_bytes,
         "errors": errors,
+        "errorSamples": error_samples,
     }
 
 
