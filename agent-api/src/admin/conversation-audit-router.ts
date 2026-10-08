@@ -1225,8 +1225,10 @@ function collectFallbackParts(value: unknown): string[] {
   return [];
 }
 
-export function extractMessageText(message: unknown): string {
+export function extractMessageText(message: unknown, options: { errorFallback?: boolean } = {}): string {
   const primaryText = collectTextParts(message).join("\n\n").trim();
+  // Unfinished turns show their cause in a dedicated outcome panel; keep the body to what the user saw.
+  if (options.errorFallback === false && primaryText) return primaryText;
   const fallbackText = collectFallbackParts(message).join("\n\n").trim();
   if (!primaryText) return fallbackText;
   if (!fallbackText) return primaryText;
@@ -1471,17 +1473,18 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
   const fileChangeData = role === "assistant" ? extractMessageFileChangeData(normalizedMessage) : [];
   const turnStatus = projectConversationTurnStatus(normalizedMessage, role, { hasAssistantResponse: true });
   const turnOutcome = role === "assistant" ? extractTranscriptTurnOutcome(normalizedMessage) : null;
+  const showsOutcome = Boolean(turnOutcome) && turnStatus.turnStatus !== "completed";
   const memoryUsed = role === "assistant" && messageUsedMemory(normalizedMessage);
   return {
     id,
     role,
-    text: extractMessageText(normalizedMessage),
+    text: extractMessageText(normalizedMessage, { errorFallback: !showsOutcome }),
     attachments: extractMessageAttachments(threadId, normalizedMessage, id),
     ...(processRows.length > 0 ? { processRows } : {}),
     ...(instructionReads.length > 0 ? { instructionReads } : {}),
     ...(fileChangeData.length > 0 ? { fileChangeData } : {}),
     ...turnStatus,
-    ...(turnOutcome && turnStatus.turnStatus !== "completed"
+    ...(turnOutcome && showsOutcome
       ? { turnOutcome, turnStatusReason: turnOutcome.reason }
       : {}),
     ...(memoryUsed ? { memoryUsed: true } : {}),

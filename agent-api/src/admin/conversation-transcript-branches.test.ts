@@ -106,6 +106,8 @@ describe("buildTranscriptMessages with a thread head", () => {
     expect(assistant.turnStatus).toBe("failed");
     expect(assistant.turnOutcome).toMatchObject({ kind: "system_update", code: "SYSTEM_UPDATE_INTERRUPTED", rawDetail: "Interrupted by a system update" });
     expect(assistant.turnStatusReason).toBe(assistant.turnOutcome?.reason);
+    // Body keeps only what the user saw; the cause lives in turnOutcome.
+    expect(assistant.text).toBe("The system is being updated.");
     // Audit row stays in the timeline even when trace batches exist.
     expect(assistant.processRows?.map((row) => row.title)).toContain("Needs attention");
   });

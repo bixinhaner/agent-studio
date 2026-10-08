@@ -48,6 +48,13 @@ describe("buildTranscriptProcessTimeline", () => {
         status: "answered"
       }],
       steerEvents: [{
+        id: "s1",
+        message: "Team",
+        status: "accepted",
+        errorCode: null,
+        userInputRequestId: "call_1",
+        createdAt: "2026-10-08T01:00:20.000Z"
+      }, {
         id: "s2",
         message: "add a summary",
         status: "accepted",

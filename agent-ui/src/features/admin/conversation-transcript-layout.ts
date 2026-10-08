@@ -78,7 +78,12 @@ export function buildTranscriptProcessTimeline(message: AdminConversationTranscr
       });
     }
   }
+  const answeredBySteer = new Set(
+    (message.userInputRequests ?? []).filter((request) => request.answer?.via === "steer").map((request) => request.id)
+  );
   for (const event of message.steerEvents ?? []) {
+    // A steer that answered a question card is already shown as that card's answer.
+    if (event.status === "accepted" && event.userInputRequestId && answeredBySteer.has(event.userInputRequestId)) continue;
     rows.push({
       id: `steer-${event.id}`,
       kind: event.status === "failed" ? "error" : "meta",
