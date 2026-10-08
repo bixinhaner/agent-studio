@@ -1,0 +1,19 @@
+[Unit]
+Description=Record agent-studio disk usage for the admin console trend
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/lib/agent-studio/disk-usage-snapshot.py --output __STATE_ROOT__/disk-usage.json \
+  --area sessions=会话目录=__DATA_ROOT__/sessions \
+  --area workspaces=用户工作区=__DATA_ROOT__/workspaces \
+  --area codexHomes=Codex会话配置=__CODEX_HOMES_ROOT__ \
+  --area shared=共享运行环境=__SHARED_RUNTIME_ROOT__ \
+  --area releases=后端发布版本=__APP_REPO_DIR__/releases \
+  --area appHome=应用用户目录=__APP_HOME__ \
+  --area database=数据库=/var/lib/postgresql \
+  --area systemTmp=系统临时目录=/tmp \
+  --area systemLogs=系统日志=/var/log
+Nice=19
+IOSchedulingClass=idle
+MemoryHigh=512M
+MemoryMax=2G

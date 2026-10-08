@@ -114,6 +114,37 @@ export type SharedRuntimeGapReport = {
   duplicateCaches: Array<{ name: string; threads: number; bytes: number }>;
 };
 
+export type DiskUsageArea = {
+  key: string;
+  label: string;
+  bytes: number | null;
+  change7dBytes: number | null;
+};
+
+export type DiskUsageReport = {
+  generatedAt: string;
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  dailyGrowthBytes: number | null;
+  daysUntilFull: number | null;
+  areas: DiskUsageArea[];
+  history: Array<{ date: string; recordedAt: string; usedBytes: number; totalBytes: number }>;
+};
+
+export type CodexHomeDedupeRun = {
+  finishedAt: string;
+  homes: number;
+  filesLinked: number;
+  reclaimedBytes: number;
+  pluginBytesBefore: number;
+  pluginUniqueBytes: number;
+  catalogRetentionDays: number;
+  catalogFilesRemoved: number;
+  catalogFreedBytes: number;
+  errors: number;
+};
+
 export type SharedRuntimeStatus = {
   enabled: boolean;
   runtimeExists: boolean;
@@ -129,6 +160,11 @@ export type SharedRuntimeStatus = {
     lastRun: SharedRuntimeCleanupRun | null;
   };
   gaps: SharedRuntimeGapReport | null;
+  /** Missing when talking to an API release older than the disk usage report. */
+  storage?: {
+    disk: DiskUsageReport | null;
+    codexHomeDedupe: CodexHomeDedupeRun | null;
+  };
   checkedAt: string;
 };
 

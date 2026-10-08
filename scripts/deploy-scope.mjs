@@ -38,7 +38,7 @@ const RULES = [
   { pattern: /^templates\/pm2-ecosystem\.config\.cjs\.template$/, targets: BACKEND, reason: "PM2 template" },
   { pattern: /^templates\//, targets: NONE, reason: "install templates" },
 
-  { pattern: /^scripts\/shared-runtime\/(thread-cleanup\.sh|gap-scan\.py)$/, targets: ["admin"], reason: "shared runtime maintenance jobs" },
+  { pattern: /^scripts\/shared-runtime\/(thread-cleanup\.sh|gap-scan\.py|codex-home-dedupe\.py|disk-usage-snapshot\.py)$/, targets: ["admin"], reason: "shared runtime maintenance jobs" },
   // Conversation runtime prerequisites are only installed when chat restarts.
   {
     pattern:

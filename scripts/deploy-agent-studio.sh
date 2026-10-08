@@ -1417,16 +1417,22 @@ install_shared_runtime_maintenance() {
 
   install_if_changed "$shared_runtime_dir/thread-cleanup.sh" /usr/local/sbin/agent-studio-thread-tmp-cleanup 755
   install_if_changed "$shared_runtime_dir/gap-scan.py" /usr/local/lib/agent-studio/runtime-gap-scan.py 755
+  install_if_changed "$shared_runtime_dir/codex-home-dedupe.py" /usr/local/lib/agent-studio/codex-home-dedupe.py 755
+  install_if_changed "$shared_runtime_dir/disk-usage-snapshot.py" /usr/local/lib/agent-studio/disk-usage-snapshot.py 755
 
   local unit rendered
-  for unit in agent-studio-thread-tmp-cleanup.service agent-studio-thread-tmp-cleanup.timer \
-    agent-studio-runtime-gap-scan.service agent-studio-runtime-gap-scan.timer; do
+  local timers=(agent-studio-thread-tmp-cleanup agent-studio-runtime-gap-scan agent-studio-codex-home-dedupe
+    agent-studio-disk-usage-snapshot)
+  for unit in "${timers[@]/%/.service}" "${timers[@]/%/.timer}"; do
     rendered="$(mktemp)"
     sed \
       -e "s#__DATA_ROOT__#$data_root#g" \
       -e "s#__STATE_ROOT__#$SHARED_RUNTIME_STATE_ROOT#g" \
       -e "s#__SESSIONS_ROOT__#$data_root/sessions#g" \
       -e "s#__CODEX_HOMES_ROOT__#$APP_API_DIR/temp/codex-homes#g" \
+      -e "s#__SHARED_RUNTIME_ROOT__#$SHARED_RUNTIME_ROOT#g" \
+      -e "s#__APP_REPO_DIR__#$APP_REPO_DIR#g" \
+      -e "s#__APP_HOME__#$APP_HOME#g" \
       -e "s#__APP_USER__#$APP_USER#g" \
       -e "s#__APP_GROUP__#$APP_GROUP#g" \
       "$template_dir/$unit.template" > "$rendered"
@@ -1439,11 +1445,17 @@ install_shared_runtime_maintenance() {
     run_as_root systemctl daemon-reload
     log_info "Installed shared runtime cleanup and gap scan jobs"
   fi
-  run_as_root systemctl enable --now agent-studio-thread-tmp-cleanup.timer agent-studio-runtime-gap-scan.timer >/dev/null 2>&1 ||
+  run_as_root systemctl enable --now "${timers[@]/%/.timer}" >/dev/null 2>&1 ||
     log_warn "failed to enable shared runtime maintenance timers"
-  if ! run_as_root test -f "$SHARED_RUNTIME_STATE_ROOT/runtime-gaps.json"; then
-    run_as_root systemctl start --no-block agent-studio-runtime-gap-scan.service || true
-  fi
+  # Produce the first reports right away instead of waiting for the nightly timers.
+  local state_file
+  for unit in agent-studio-runtime-gap-scan:runtime-gaps.json agent-studio-codex-home-dedupe:codex-home-dedupe-last-run.json \
+    agent-studio-disk-usage-snapshot:disk-usage.json; do
+    state_file="$SHARED_RUNTIME_STATE_ROOT/${unit#*:}"
+    if ! run_as_root test -f "$state_file"; then
+      run_as_root systemctl start --no-block "${unit%%:*}.service" || true
+    fi
+  done
 }
 
 check_plugin_runtime() {

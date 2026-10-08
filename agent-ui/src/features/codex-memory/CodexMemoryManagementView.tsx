@@ -85,6 +85,8 @@ import type {
   SharedRuntimeCacheStatus,
   SharedRuntimeCapabilityStatus,
   SharedRuntimeGapItem,
+  DiskUsageArea,
+  DiskUsageReport,
   PythonRuntimeSettings,
   SharedRuntimeStatus
 } from "./types";
@@ -252,6 +254,84 @@ function formatBytes(value: number): string {
     index += 1;
   }
   return `${size >= 10 || index === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
+}
+
+function formatSignedBytes(value: number | null): string {
+  if (value === null) return "—";
+  if (Math.abs(value) < 1024 * 1024) return "基本不变";
+  return `${value > 0 ? "增加" : "减少"} ${formatBytes(Math.abs(value))}`;
+}
+
+// No timeZone option: the day follows the viewer's local time zone.
+const localDayFormatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" });
+const percentFormatter = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
+
+function formatLocalDay(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : localDayFormatter.format(date);
+}
+
+const DISK_TREND_POINTS = 60;
+
+function DiskUsageTrend(props: { history: DiskUsageReport["history"] }) {
+  const points = (props.history ?? []).slice(-DISK_TREND_POINTS);
+  if (points.length < 2) {
+    return (
+      <Typography.Text type="secondary" style={{ display: "block", fontSize: 12 }}>
+        每天记录一次，记录满两天后显示趋势。
+      </Typography.Text>
+    );
+  }
+  const width = 640;
+  const height = 120;
+  const pad = 6;
+  const values = points.map((point) => point.usedBytes);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  // Keep at least 2% of the disk as the vertical range so a flat line does not look like a cliff.
+  const span = Math.max(max - min, (points.at(-1)?.totalBytes ?? max) * 0.02, 1);
+  const low = min - (span - (max - min)) / 2;
+  const x = (index: number) => pad + (index / (points.length - 1)) * (width - pad * 2);
+  const y = (value: number) => height - pad - ((value - low) / span) * (height - pad * 2);
+  const line = points.map((point, index) => `${x(index).toFixed(1)},${y(point.usedBytes).toFixed(1)}`).join(" ");
+  const first = points[0];
+  const last = points[points.length - 1];
+  const summary = `${formatLocalDay(first.recordedAt)} 已用 ${formatBytes(first.usedBytes)}，${formatLocalDay(last.recordedAt)} 已用 ${formatBytes(last.usedBytes)}，期间最高 ${formatBytes(max)}、最低 ${formatBytes(min)}`;
+  return (
+    <figure className="codex-memory-disk-trend">
+      {/* Stretched horizontally so the line spans the card and lines up with the date labels. */}
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`磁盘已用空间趋势：${summary}`}>
+        <polyline
+          points={line}
+          fill="none"
+          stroke="var(--admin-color-accent)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {points.map((point, index) => (
+          // One transparent column per day carries the hover tooltip.
+          <rect
+            key={point.date}
+            x={x(index) - (width - pad * 2) / (points.length - 1) / 2}
+            y={0}
+            width={(width - pad * 2) / (points.length - 1)}
+            height={height}
+            fill="transparent"
+          >
+            <title>{`${formatLocalDay(point.recordedAt)}：已用 ${formatBytes(point.usedBytes)}（${percentFormatter.format(point.totalBytes ? point.usedBytes / point.totalBytes : 0)}）`}</title>
+          </rect>
+        ))}
+      </svg>
+      <figcaption>
+        <span>{formatLocalDay(first.recordedAt)}</span>
+        <span>
+          {formatBytes(min)} – {formatBytes(max)}
+        </span>
+        <span>{formatLocalDay(last.recordedAt)}</span>
+      </figcaption>
+    </figure>
+  );
 }
 
 function formatLocalTime(value?: string | null): string {
@@ -1503,6 +1583,39 @@ export function CodexMemoryManagementView() {
     const openGaps = gaps?.items.filter((item) => !item.covered) ?? [];
     const duplicateCaches = gaps?.duplicateCaches ?? [];
     const retentionDays = pythonRuntimeSettings.cleanupSessionArtifactsOlderThanDays;
+    const disk = status?.storage?.disk ?? null;
+    const dedupe = status?.storage?.codexHomeDedupe ?? null;
+    const diskUsedRatio = disk && disk.totalBytes > 0 ? disk.usedBytes / disk.totalBytes : 0;
+    const diskNeedsAttention = Boolean(disk && (diskUsedRatio >= 0.85 || (disk.daysUntilFull !== null && disk.daysUntilFull < 30)));
+    const diskAreas = (disk?.areas ?? []).filter((area) => area.bytes !== null);
+
+    const diskAreaColumns: ColumnsType<DiskUsageArea> = [
+      { title: "区域", dataIndex: "label" },
+      {
+        title: "占用",
+        dataIndex: "bytes",
+        width: 96,
+        align: "right",
+        defaultSortOrder: "descend",
+        sorter: (left, right) => (left.bytes ?? 0) - (right.bytes ?? 0),
+        render: (value: number) => <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatBytes(value)}</span>
+      },
+      {
+        title: "近 7 天",
+        dataIndex: "change7dBytes",
+        width: 112,
+        align: "right",
+        sorter: (left, right) => (left.change7dBytes ?? 0) - (right.change7dBytes ?? 0),
+        render: (value: number | null) => (
+          <Typography.Text
+            type={value !== null && value >= 1024 ** 3 ? "warning" : value !== null && value <= -(1024 ** 3) ? "success" : "secondary"}
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {formatSignedBytes(value)}
+          </Typography.Text>
+        )
+      }
+    ];
 
     const cacheColumns: ColumnsType<SharedRuntimeCacheStatus> = [
       {
@@ -1712,7 +1825,78 @@ export function CodexMemoryManagementView() {
             </div>
           </div>
 
-          <div className="admin-card" style={{ padding: 20, marginTop: 16 }}>
+          <div className="admin-card" style={{ padding: 20, marginTop: 16, width: "100%" }}>
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              磁盘用量
+            </Typography.Title>
+            <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+              {disk
+                ? `每天在清理完成后记录一次，最近一次 ${formatLocalDateTime(disk.generatedAt)}。`
+                : "每天记录一次服务器磁盘用量，首次记录完成后显示在这里。"}
+            </Typography.Text>
+            {diskNeedsAttention ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={
+                  disk?.daysUntilFull !== null && disk?.daysUntilFull !== undefined && disk.daysUntilFull < 30
+                    ? `按近 7 天的速度，约 ${formatCount(disk.daysUntilFull)} 天后磁盘写满`
+                    : `磁盘已用 ${percentFormatter.format(diskUsedRatio)}`
+                }
+                description="先看下方哪个区域增长最快。会话目录增长可调低临时目录保留天数；其它区域需要运维处理。"
+              />
+            ) : null}
+            <div className="codex-memory-python-status-grid" style={{ marginBottom: 12 }}>
+              <MemoryMetric
+                label="已用"
+                value={disk ? percentFormatter.format(diskUsedRatio) : "—"}
+                hint={disk ? `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}，剩余 ${formatBytes(disk.availableBytes)}` : undefined}
+              />
+              <MemoryMetric
+                label="日均增长"
+                value={
+                  disk?.dailyGrowthBytes === null || disk?.dailyGrowthBytes === undefined
+                    ? "—"
+                    : disk.dailyGrowthBytes > 0
+                      ? `${formatBytes(disk.dailyGrowthBytes)}/天`
+                      : "未增长"
+                }
+                hint={disk?.dailyGrowthBytes === null || !disk ? "记录满两天后计算" : "按近 7 天的记录计算"}
+              />
+              <MemoryMetric
+                label="预计写满"
+                value={disk?.daysUntilFull !== null && disk?.daysUntilFull !== undefined ? `约 ${formatCount(disk.daysUntilFull)} 天` : "—"}
+                hint={disk?.daysUntilFull === null && disk?.dailyGrowthBytes !== null ? "近 7 天未增长" : "按日均增长估算"}
+              />
+              <MemoryMetric
+                label="插件去重"
+                value={dedupe ? `回收 ${formatBytes(dedupe.reclaimedBytes + dedupe.catalogFreedBytes)}` : "尚未运行"}
+                hint={
+                  dedupe
+                    ? `${formatLocalDateTime(dedupe.finishedAt)} · 合并 ${formatCount(dedupe.filesLinked)} 个重复文件，删除 ${formatCount(dedupe.catalogFilesRemoved)} 个过期插件目录缓存`
+                    : "每天自动合并各会话重复的插件文件"
+                }
+              />
+            </div>
+            {disk ? <DiskUsageTrend history={disk.history} /> : null}
+            <Table<DiskUsageArea>
+              rowKey="key"
+              size="small"
+              pagination={false}
+              style={{ marginTop: 12 }}
+              columns={diskAreaColumns}
+              dataSource={diskAreas}
+              locale={{ emptyText: disk ? "暂无分区数据" : "暂无记录" }}
+            />
+            {dedupe?.errors ? (
+              <Typography.Text type="warning" style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+                上次插件去重有 {formatCount(dedupe.errors)} 个文件未能处理，会在下次运行时重试。
+              </Typography.Text>
+            ) : null}
+          </div>
+
+          <div className="admin-card" style={{ padding: 20, marginTop: 16, width: "100%" }}>
             <Typography.Title level={4} style={{ margin: 0 }}>
               共享缓存
             </Typography.Title>
@@ -1741,7 +1925,7 @@ export function CodexMemoryManagementView() {
             ) : null}
           </div>
 
-          <div className="admin-card" style={{ padding: 20, marginTop: 16 }}>
+          <div className="admin-card" style={{ padding: 20, marginTop: 16, width: "100%" }}>
             <Typography.Title level={4} style={{ margin: 0 }}>
               缺口监测
             </Typography.Title>
@@ -2225,14 +2409,14 @@ export function CodexMemoryManagementView() {
               <Space>
                 <FileText size={20} />
                 <Typography.Title level={4} style={{ margin: 0 }}>
-                  Python 运行时
+                  共享运行环境
                 </Typography.Title>
                 <Tag color={pythonRuntimeSettings.enabled ? "green" : "orange"}>
                   {pythonRuntimeSettings.enabled ? "草稿启用" : "草稿关闭"}
                 </Tag>
               </Space>
               <Typography.Text type="secondary">
-                统一复用表格、文档、图片和翻译相关 Python 包，减少重复下载、重复建环境和磁盘膨胀。
+                所有会话共用预装的 Python 包、命令行工具、浏览器和下载缓存，减少重复下载、重复建环境和磁盘膨胀。
               </Typography.Text>
               <Space wrap>
                 <Tag>{pythonRuntimeSettings.preferSharedPackages ? "优先共享包" : "不强制共享包"}</Tag>

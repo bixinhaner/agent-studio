@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily agent-studio disk usage snapshot
+
+[Timer]
+# After the dedupe (19:00) and cleanup (19:30) jobs, so each day shows the cleaned state.
+OnCalendar=*-*-* 20:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

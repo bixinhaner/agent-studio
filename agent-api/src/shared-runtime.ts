@@ -225,6 +225,48 @@ export type SharedRuntimeGapReport = {
   duplicateCaches: Array<{ name: string; threads: number; bytes: number }>;
 };
 
+export type DiskUsageArea = {
+  key: string;
+  label: string;
+  bytes: number | null;
+  /** Change against the oldest snapshot of the last 7 days; null until two days are recorded. */
+  change7dBytes: number | null;
+};
+
+export type DiskUsageHistoryEntry = {
+  /** UTC day of the snapshot, one entry per day. */
+  date: string;
+  recordedAt: string;
+  usedBytes: number;
+  totalBytes: number;
+};
+
+export type DiskUsageReport = {
+  generatedAt: string;
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  /** Average daily growth of used bytes over the last 7 days of snapshots. */
+  dailyGrowthBytes: number | null;
+  /** Days until the disk is full at dailyGrowthBytes; null when not growing. */
+  daysUntilFull: number | null;
+  areas: DiskUsageArea[];
+  history: DiskUsageHistoryEntry[];
+};
+
+export type CodexHomeDedupeRun = {
+  finishedAt: string;
+  homes: number;
+  filesLinked: number;
+  reclaimedBytes: number;
+  pluginBytesBefore: number;
+  pluginUniqueBytes: number;
+  catalogRetentionDays: number;
+  catalogFilesRemoved: number;
+  catalogFreedBytes: number;
+  errors: number;
+};
+
 export type SharedRuntimeStatus = {
   enabled: boolean;
   runtimeExists: boolean;
@@ -240,6 +282,10 @@ export type SharedRuntimeStatus = {
     lastRun: SharedRuntimeCleanupRun | null;
   };
   gaps: SharedRuntimeGapReport | null;
+  storage: {
+    disk: DiskUsageReport | null;
+    codexHomeDedupe: CodexHomeDedupeRun | null;
+  };
   checkedAt: string;
 };
 
@@ -531,6 +577,86 @@ async function readGapReport(paths: SharedRuntimePaths, dirs: string[]): Promise
   };
 }
 
+const DAY_MS = 86_400_000;
+const DISK_TREND_DAYS = 7;
+const MAX_DISK_HISTORY = 180;
+
+function dateMs(value: unknown): number | undefined {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const ms = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+async function readDiskUsage(paths: SharedRuntimePaths): Promise<DiskUsageReport | null> {
+  const raw = await readJson<Record<string, unknown>>(path.join(paths.stateRoot, "disk-usage.json"));
+  if (!raw || typeof raw.generatedAt !== "string") return null;
+  const filesystem = raw.filesystem && typeof raw.filesystem === "object" ? (raw.filesystem as Record<string, unknown>) : {};
+  const history = (Array.isArray(raw.history) ? raw.history : [])
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && dateMs(item.date) !== undefined)
+    .map((item) => ({
+      date: String(item.date),
+      recordedAt: typeof item.recordedAt === "string" ? item.recordedAt : `${String(item.date)}T00:00:00Z`,
+      usedBytes: toNumber(item.usedBytes),
+      totalBytes: toNumber(item.totalBytes),
+      areas: item.areas && typeof item.areas === "object" ? (item.areas as Record<string, unknown>) : {}
+    }))
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-MAX_DISK_HISTORY);
+
+  const latest = history.at(-1);
+  const latestMs = latest ? dateMs(latest.date)! : undefined;
+  const baseline =
+    latestMs === undefined
+      ? undefined
+      : history.find((entry) => entry !== latest && dateMs(entry.date)! >= latestMs - DISK_TREND_DAYS * DAY_MS);
+  const spanDays = baseline && latestMs !== undefined ? (latestMs - dateMs(baseline.date)!) / DAY_MS : 0;
+  const dailyGrowthBytes = baseline && latest && spanDays > 0 ? Math.round((latest.usedBytes - baseline.usedBytes) / spanDays) : null;
+  const availableBytes = toNumber(filesystem.availableBytes);
+
+  const areas = (Array.isArray(raw.areas) ? raw.areas : [])
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && typeof item.key === "string")
+    .slice(0, 20)
+    .map((item): DiskUsageArea => {
+      const key = String(item.key);
+      const bytes = typeof item.bytes === "number" && Number.isFinite(item.bytes) ? item.bytes : null;
+      const before = baseline?.areas[key];
+      return {
+        key,
+        label: String(item.label ?? key),
+        bytes,
+        change7dBytes: bytes !== null && typeof before === "number" ? bytes - before : null
+      };
+    });
+
+  return {
+    generatedAt: raw.generatedAt,
+    totalBytes: toNumber(filesystem.totalBytes),
+    usedBytes: toNumber(filesystem.usedBytes),
+    availableBytes,
+    dailyGrowthBytes,
+    daysUntilFull: dailyGrowthBytes && dailyGrowthBytes > 0 ? Math.floor(availableBytes / dailyGrowthBytes) : null,
+    areas,
+    history: history.map(({ date, recordedAt, usedBytes, totalBytes }) => ({ date, recordedAt, usedBytes, totalBytes }))
+  };
+}
+
+async function readCodexHomeDedupe(paths: SharedRuntimePaths): Promise<CodexHomeDedupeRun | null> {
+  const raw = await readJson<Record<string, unknown>>(path.join(paths.stateRoot, "codex-home-dedupe-last-run.json"));
+  if (!raw || typeof raw.finishedAt !== "string") return null;
+  return {
+    finishedAt: raw.finishedAt,
+    homes: toNumber(raw.homes),
+    filesLinked: toNumber(raw.filesLinked),
+    reclaimedBytes: toNumber(raw.reclaimedBytes),
+    pluginBytesBefore: toNumber(raw.pluginBytesBefore),
+    pluginUniqueBytes: toNumber(raw.pluginUniqueBytes),
+    catalogRetentionDays: toNumber(raw.catalogRetentionDays),
+    catalogFilesRemoved: toNumber(raw.catalogFilesRemoved),
+    catalogFreedBytes: toNumber(raw.catalogFreedBytes),
+    errors: toNumber(raw.errors)
+  };
+}
+
 export async function inspectSharedRuntime(input: {
   settings?: SystemSettingsPythonRuntime;
   paths?: SharedRuntimePaths;
@@ -539,7 +665,7 @@ export async function inspectSharedRuntime(input: {
   const paths = input.paths ?? sharedRuntimePaths();
   const dirs = commandSearchDirs(paths);
   const runtimeExists = await exists(paths.pythonRoot);
-  const [runtimeBytes, version, capabilities, caches, lastRun, gaps] = await Promise.all([
+  const [runtimeBytes, version, capabilities, caches, lastRun, gaps, disk, codexHomeDedupe] = await Promise.all([
     runtimeExists ? duBytes(paths.pythonRoot) : Promise.resolve(0),
     pythonVersion(),
     Promise.all(CAPABILITIES.map((definition) => capabilityStatus(definition, paths, dirs))),
@@ -559,7 +685,9 @@ export async function inspectSharedRuntime(input: {
       })
     ),
     readCleanupRun(paths),
-    readGapReport(paths, dirs)
+    readGapReport(paths, dirs),
+    readDiskUsage(paths),
+    readCodexHomeDedupe(paths)
   ]);
   return {
     enabled: settings.enabled,
@@ -578,6 +706,7 @@ export async function inspectSharedRuntime(input: {
       lastRun
     },
     gaps,
+    storage: { disk, codexHomeDedupe },
     checkedAt: new Date().toISOString()
   };
 }

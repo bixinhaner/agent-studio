@@ -69,7 +69,10 @@ test("shared runtime maintenance jobs reinstall with an admin restart only", () 
     classifyChanges([
       "scripts/shared-runtime/thread-cleanup.sh",
       "scripts/shared-runtime/gap-scan.py",
-      "templates/shared-runtime/agent-studio-runtime-gap-scan.timer.template"
+      "scripts/shared-runtime/codex-home-dedupe.py",
+      "scripts/shared-runtime/disk-usage-snapshot.py",
+      "templates/shared-runtime/agent-studio-runtime-gap-scan.timer.template",
+      "templates/shared-runtime/agent-studio-disk-usage-snapshot.service.template"
     ]).targets,
     { frontend: false, admin: true, chat: false, caddy: false }
   );

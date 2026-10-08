@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily de-duplication of agent-studio Codex homes
+
+[Timer]
+OnCalendar=*-*-* 19:00:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1029,6 +1029,31 @@
   min-width: 0;
 }
 
+.codex-memory-disk-trend {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 12px;
+  background: var(--admin-color-surface-solid);
+}
+
+.codex-memory-disk-trend svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  overflow: visible;
+}
+
+.codex-memory-disk-trend figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .codex-memory-capability-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

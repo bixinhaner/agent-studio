@@ -213,5 +213,78 @@ describe("shared runtime", () => {
     expect(status.runtimeExists).toBe(false);
     expect(status.cleanup.lastRun).toBeNull();
     expect(status.gaps).toBeNull();
+    expect(status.storage).toEqual({ disk: null, codexHomeDedupe: null });
+  });
+
+  it("derives disk growth, days until full and per-area 7 day change from the daily snapshots", async () => {
+    const paths = await makeSharedRoot();
+    await fs.mkdir(paths.stateRoot, { recursive: true });
+    const GB = 1_000_000_000;
+    const day = (date: string, used: number, codexHomes?: number) => ({
+      date,
+      usedBytes: used * GB,
+      totalBytes: 500 * GB,
+      areas: codexHomes === undefined ? {} : { codexHomes: codexHomes * GB }
+    });
+    await fs.writeFile(
+      path.join(paths.stateRoot, "disk-usage.json"),
+      JSON.stringify({
+        generatedAt: "2026-10-12T20:31:00Z",
+        filesystem: { totalBytes: 500 * GB, usedBytes: 340 * GB, availableBytes: 160 * GB },
+        areas: [
+          { key: "codexHomes", label: "Codex会话配置", bytes: 44 * GB },
+          { key: "sessions", label: "会话目录", bytes: 150 * GB },
+          { key: "database", label: "数据库", bytes: null },
+          { label: "missing key" }
+        ],
+        history: [
+          day("2026-10-12", 340, 44),
+          day("2026-09-01", 200, 10),
+          day("2026-10-08", 332, 60),
+          day("not-a-date", 1),
+          day("2026-10-10", 336)
+        ]
+      })
+    );
+    await fs.writeFile(
+      path.join(paths.stateRoot, "codex-home-dedupe-last-run.json"),
+      JSON.stringify({ finishedAt: "2026-10-12T19:05:00Z", homes: 516, filesLinked: 81914, reclaimedBytes: 10 * GB, catalogFilesRemoved: 340 })
+    );
+
+    const { disk, codexHomeDedupe } = (await inspectSharedRuntime({ settings: enabledSettings, paths })).storage;
+
+    expect(disk?.history.map((entry) => entry.date)).toEqual(["2026-09-01", "2026-10-08", "2026-10-10", "2026-10-12"]);
+    expect(disk?.history[0].recordedAt).toBe("2026-09-01T00:00:00Z");
+    // Baseline is the oldest snapshot within 7 days of the latest one (10-08): 8 GB over 4 days.
+    expect(disk?.dailyGrowthBytes).toBe(2 * GB);
+    expect(disk?.daysUntilFull).toBe(80);
+    expect(disk?.areas).toEqual([
+      { key: "codexHomes", label: "Codex会话配置", bytes: 44 * GB, change7dBytes: -16 * GB },
+      { key: "sessions", label: "会话目录", bytes: 150 * GB, change7dBytes: null },
+      { key: "database", label: "数据库", bytes: null, change7dBytes: null }
+    ]);
+    expect(codexHomeDedupe).toMatchObject({ homes: 516, filesLinked: 81914, reclaimedBytes: 10 * GB, catalogFilesRemoved: 340, errors: 0 });
+  });
+
+  it("reports no growth until a second day is recorded and none when usage shrinks", async () => {
+    const paths = await makeSharedRoot();
+    await fs.mkdir(paths.stateRoot, { recursive: true });
+    const write = (history: unknown[]) =>
+      fs.writeFile(
+        path.join(paths.stateRoot, "disk-usage.json"),
+        JSON.stringify({ generatedAt: "2026-10-08T20:31:00Z", filesystem: { availableBytes: 100 }, areas: [], history })
+      );
+    await write([{ date: "2026-10-08", usedBytes: 10, totalBytes: 100 }]);
+    let disk = (await inspectSharedRuntime({ settings: enabledSettings, paths })).storage.disk;
+    expect(disk?.dailyGrowthBytes).toBeNull();
+    expect(disk?.daysUntilFull).toBeNull();
+
+    await write([
+      { date: "2026-10-07", usedBytes: 20, totalBytes: 100 },
+      { date: "2026-10-08", usedBytes: 10, totalBytes: 100 }
+    ]);
+    disk = (await inspectSharedRuntime({ settings: enabledSettings, paths })).storage.disk;
+    expect(disk?.dailyGrowthBytes).toBe(-10);
+    expect(disk?.daysUntilFull).toBeNull();
   });
 });
