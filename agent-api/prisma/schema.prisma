@@ -1185,6 +1185,7 @@ model PortalSteerEvent {
   sourceUserMessageId String?                @map("source_user_message_id")
   turnId              String?                @map("turn_id")
   message             String                 @db.Text
+  userInputRequestId  String?                @map("user_input_request_id")
   status              PortalSteerEventStatus @default(pending)
   errorCode           String?                @map("error_code")
   resolvedAt          DateTime?              @map("resolved_at")

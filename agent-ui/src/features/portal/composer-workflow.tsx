@@ -52,11 +52,17 @@ export type PortalSteerEvent = {
   sourceUserMessageId?: string;
   turnId?: string;
   message: string;
+  /** Set when the steer answers an "ask while working" question card. */
+  userInputRequestId?: string;
   status: PortalSteerEventStatus;
   errorCode?: string;
   resolvedAt?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PortalSteerOptions = {
+  userInputRequestId?: string;
 };
 
 export type PortalComposerWorkflowContextValue = {
@@ -75,7 +81,7 @@ export type PortalComposerWorkflowContextValue = {
   retryItem(itemId: string): void;
   beginDispatch(itemId: string): void;
   markOrphanedDispatch(itemId: string): void;
-  steer(text: string, queuedItemId?: string): Promise<PortalSteerEvent>;
+  steer(text: string, queuedItemId?: string, options?: PortalSteerOptions): Promise<PortalSteerEvent>;
   retrySteer(eventId: string): Promise<PortalSteerEvent>;
   resumeQueue(): void;
   clearPause(): void;
@@ -155,7 +161,7 @@ function mergeSteerEvents(
 export function usePortalComposerWorkflowController(input: {
   userId: string;
   activeThreadId: string;
-  onSteer(text: string, clientSteerId: string): Promise<PortalSteerEvent>;
+  onSteer(text: string, clientSteerId: string, options?: PortalSteerOptions): Promise<PortalSteerEvent>;
   loadSteerEvents?(threadId: string): Promise<PortalSteerEvent[]>;
   getSteerSourceUserMessageId?(): string | undefined;
 }) {
@@ -396,7 +402,9 @@ export function usePortalComposerWorkflowController(input: {
       setSteeringThreadId(threadId);
       const request = (async () => {
         try {
-          const accepted = await onSteer(pending.message, pending.id);
+          const accepted = pending.userInputRequestId
+            ? await onSteer(pending.message, pending.id, { userInputRequestId: pending.userInputRequestId })
+            : await onSteer(pending.message, pending.id);
           commitSteerEvent(threadId, accepted);
           if (queuedItemId) removeItemFromThread(threadId, queuedItemId);
           return accepted;
@@ -423,7 +431,7 @@ export function usePortalComposerWorkflowController(input: {
   );
 
   const steer = useCallback(
-    async (text: string, queuedItemId?: string): Promise<PortalSteerEvent> => {
+    async (text: string, queuedItemId?: string, options?: PortalSteerOptions): Promise<PortalSteerEvent> => {
       const message = text.trim();
       if (!activeThreadId || activeThreadId === "__new_task__") throw new Error("missing_thread");
       if (!message) throw new Error("missing_steer_message");
@@ -433,6 +441,7 @@ export function usePortalComposerWorkflowController(input: {
         threadId: activeThreadId,
         sourceUserMessageId: getSteerSourceUserMessageId?.(),
         message,
+        ...(options?.userInputRequestId ? { userInputRequestId: options.userInputRequestId } : {}),
         status: "pending",
         createdAt: now,
         updatedAt: now
@@ -500,6 +509,28 @@ export function usePortalComposerWorkflowController(input: {
     [updateThread]
   );
 
+  /**
+   * The server rejected a send because the previous response is still running. Put the
+   * message back at the head of the queue so it is sent once that response finishes.
+   */
+  const requeueRejectedSend = useCallback(
+    (threadId: string, text: string) => {
+      updateThread(threadId, (state) => {
+        const sending = state.queue.find((item) => item.status === "sending");
+        if (sending) {
+          return {
+            ...state,
+            queue: state.queue.map((item) => (item.id === sending.id ? { ...item, status: "queued" } : item))
+          };
+        }
+        const message = text.trim();
+        if (!message) return state;
+        return { ...state, queue: [createPortalQueueItem(message), ...state.queue] };
+      });
+    },
+    [updateThread]
+  );
+
   const markInterrupted = useCallback(
     (threadId: string) => {
       updateThread(threadId, (state) => ({
@@ -563,7 +594,8 @@ export function usePortalComposerWorkflowController(input: {
     contextValue,
     markRunCompleted,
     markRunFailed,
-    markInterrupted
+    markInterrupted,
+    requeueRejectedSend
   };
 }
 

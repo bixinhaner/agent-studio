@@ -6,6 +6,7 @@ import {
   Gift,
   HardDrive,
   Mail,
+  MessageCircleQuestion,
   MessageSquareText,
   Network,
   Package,
@@ -84,6 +85,8 @@ import type {
   AdminConversationTranscriptAttachment,
   AdminConversationTranscriptProcessRow,
   AdminConversationTranscriptMessage,
+  AdminConversationTranscriptSteerEvent,
+  AdminConversationTranscriptUserInputRequest,
   AdminConversationUser,
   AdminProductFeedbackDetailResponse,
   AdminProductFeedbackListResponse,
@@ -1287,6 +1290,80 @@ function TranscriptInstructionReadModal(props: {
   );
 }
 
+function userInputRequestStatusLabel(request: AdminConversationTranscriptUserInputRequest): string {
+  if (request.status === "answered") {
+    return request.answer?.via === "steer" ? "已回答（运行中引导）" : "已回答（后续消息）";
+  }
+  return request.status === "skipped" ? "未回答（用户继续了对话）" : "等待回答";
+}
+
+function TranscriptUserInputRequestCard(props: { request: AdminConversationTranscriptUserInputRequest }) {
+  const { request } = props;
+  return (
+    <section className={`admin-user-input-card is-${request.status}`} aria-label="助手提问">
+      <header className="admin-user-input-head">
+        <MessageCircleQuestion size={15} aria-hidden="true" />
+        <span className="admin-user-input-title">助手提问（边问边干）</span>
+        <span className={`admin-user-input-status is-${request.status}`}>{userInputRequestStatusLabel(request)}</span>
+        {request.askedAt ? <span className="admin-user-input-time">{formatLocalDateTime(request.askedAt)}</span> : null}
+      </header>
+      <ol className="admin-user-input-questions">
+        {request.questions.map((question, index) => (
+          <li key={`${request.id}-${index}`}>
+            <p className="admin-user-input-question">
+              {request.questions.length > 1 ? <span className="admin-user-input-index">{index + 1}/{request.questions.length}</span> : null}
+              {question.title}
+            </p>
+            {question.options.length > 0 ? (
+              <ul className="admin-user-input-options">
+                {question.options.map((option, optionIndex) => (
+                  <li key={`${request.id}-${index}-${optionIndex}`}>
+                    <span className="admin-user-input-option-text">{option}</span>
+                    {optionIndex === 0 ? <span className="admin-user-input-recommended">推荐</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="admin-user-input-freeform">自由作答</span>
+            )}
+          </li>
+        ))}
+      </ol>
+      {request.answer ? (
+        <div className="admin-user-input-answer">
+          <span className="admin-user-input-answer-label">
+            用户回答{request.answer.at ? ` · ${formatLocalDateTime(request.answer.at)}` : ""}
+          </span>
+          <p className="admin-user-input-answer-text">{request.answer.text}</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function steerStatusLabel(event: AdminConversationTranscriptSteerEvent): string {
+  if (event.status === "accepted") return "已送达";
+  if (event.status === "failed") return event.errorCode ? `未送达 · ${event.errorCode}` : "未送达";
+  return "发送中";
+}
+
+function TranscriptSteerEventList(props: { events: AdminConversationTranscriptSteerEvent[] }) {
+  return (
+    <div className="admin-steer-event-list" aria-label="运行中引导">
+      {props.events.map((event) => (
+        <div key={event.id} className={`admin-steer-event is-${event.status}`}>
+          <div className="admin-steer-event-meta">
+            <span className="admin-steer-event-label">用户运行中引导</span>
+            <span className={`admin-steer-event-status is-${event.status}`}>{steerStatusLabel(event)}</span>
+            <span className="admin-steer-event-time">{formatLocalDateTime(event.createdAt)}</span>
+          </div>
+          <p className="admin-steer-event-message">{event.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
@@ -1306,6 +1383,16 @@ function TranscriptMessageBubble(props: {
   const statusLabel = props.message.turnStatus === "completed"
     ? ""
     : turnStatusLabel(props.message.turnStatus, props.message.role);
+  const userInputRequests = isAssistant && Array.isArray(props.message.userInputRequests) ? props.message.userInputRequests : [];
+  // Steers that answered a question card are shown inside that card, like in the portal.
+  const answeredRequestIds = new Set(
+    userInputRequests.filter((request) => request.answer?.via === "steer").map((request) => request.id)
+  );
+  const steerEvents = (isAssistant && Array.isArray(props.message.steerEvents) ? props.message.steerEvents : [])
+    .filter((event) => !(event.status === "accepted" && event.userInputRequestId && answeredRequestIds.has(event.userInputRequestId)));
+  const questionTexts = new Set(userInputRequests.map((request) => request.text?.trim()).filter(Boolean));
+  const bodyText = questionTexts.has(props.message.text.trim()) ? "" : props.message.text;
+  const hasInteractions = userInputRequests.length > 0 || steerEvents.length > 0;
   
   // Exclude system/tool for cleaner view unless needed
   if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0 && instructionReads.length === 0) return null;
@@ -1356,9 +1443,9 @@ function TranscriptMessageBubble(props: {
               ) : null}
             </div>
           ) : null}
-          {props.message.text ? (
-            <ConversationAuditMarkdown text={props.message.text} threadId={props.threadId} workspace={props.workspace} />
-          ) : (
+          {bodyText ? (
+            <ConversationAuditMarkdown text={bodyText} threadId={props.threadId} workspace={props.workspace} />
+          ) : hasInteractions ? null : (
             <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
               {attachmentCount > 0
                 ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述`
@@ -1367,6 +1454,10 @@ function TranscriptMessageBubble(props: {
                   : "[无文本内容]"}
             </span>
           )}
+          {userInputRequests.map((request) => (
+            <TranscriptUserInputRequestCard key={request.id} request={request} />
+          ))}
+          {steerEvents.length > 0 ? <TranscriptSteerEventList events={steerEvents} /> : null}
           <TranscriptAttachmentList
             attachments={props.message.attachments}
             threadId={props.threadId}

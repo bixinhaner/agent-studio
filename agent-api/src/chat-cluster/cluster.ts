@@ -127,6 +127,14 @@ export function peerOwnsRun(status: ChatPeerStatus, key: RunKey): boolean {
   return status.turns.some((turn) => turn.session_id === key.id);
 }
 
+/** Whether a peer is running a portal response on the thread for this user (sessions are per instance and per tab). */
+export function peerRunsPortalThread(status: ChatPeerStatus, threadId: string, userId: string): boolean {
+  if (status.state !== "up") return false;
+  return status.activeThreads.some(
+    (item) => item.thread_id === threadId && item.user_id === userId && item.channel === "portal"
+  );
+}
+
 export class ChatClusterView {
   private readonly peers: string[];
   private readyCache?: { at: number; peer?: ChatPeerStatus };
@@ -160,6 +168,13 @@ export class ChatClusterView {
   async findOwner(key: RunKey): Promise<ChatPeerStatus | undefined> {
     for (const status of await this.statuses()) {
       if (peerOwnsRun(status, key)) return status;
+    }
+    return undefined;
+  }
+
+  async findPortalThreadOwner(threadId: string, userId: string): Promise<ChatPeerStatus | undefined> {
+    for (const status of await this.statuses()) {
+      if (peerRunsPortalThread(status, threadId, userId)) return status;
     }
     return undefined;
   }

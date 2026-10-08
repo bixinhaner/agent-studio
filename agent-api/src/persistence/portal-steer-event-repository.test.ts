@@ -53,6 +53,31 @@ describe("PortalSteerEventRepository", () => {
     });
   });
 
+  it("stores which assistant question a steer answers", async () => {
+    const db: PortalSteerEventRepositoryDb = {
+      portalSteerEvent: {
+        findUnique: vi.fn(async () => null),
+        findMany: vi.fn(),
+        create: vi.fn(async ({ data }) => row(data)),
+        update: vi.fn()
+      }
+    };
+    const repository = new PortalSteerEventRepository(db);
+    const created = await repository.begin({
+      id: "steer-2",
+      threadId: "thread-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      message: "Jakarta",
+      userInputRequestId: "call_1"
+    });
+    expect(db.portalSteerEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ userInputRequestId: "call_1" })
+    });
+    expect(created.event.userInputRequestId).toBe("call_1");
+  });
+
   it("returns accepted duplicate events without steering twice", async () => {
     const db: PortalSteerEventRepositoryDb = {
       portalSteerEvent: {

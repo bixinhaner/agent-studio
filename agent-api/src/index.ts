@@ -15,8 +15,13 @@ import { SecurityDomainAccessControl } from "./security-domains/access-control.j
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
 import { deployDrainFilesForRole, readDeploymentDrainReason } from "./deploy-drain.js";
-import { ChatClusterView, type OwnedRuns, type RunKey } from "./chat-cluster/cluster.js";
-import { createChatClusterRoutingMiddleware, inFlightForwardCount, resolveChatRunKey } from "./chat-cluster/forwarding.js";
+import { ChatClusterView, FORWARDED_BY_HEADER, type ChatPeerStatus, type OwnedRuns, type RunKey } from "./chat-cluster/cluster.js";
+import {
+  createChatClusterRoutingMiddleware,
+  forwardRequestToPeer,
+  inFlightForwardCount,
+  resolveChatRunKey
+} from "./chat-cluster/forwarding.js";
 import { ChatRetirementController } from "./chat-cluster/retirement.js";
 import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
@@ -397,6 +402,10 @@ import {
   type CodexRunProjectionFinalized,
   type CodexRuntimeTurnTrackerInput
 } from "./operations/codex-execution-service.js";
+import {
+  codexUserInputRequestFromItem,
+  codexUserInputRequestToContentPart
+} from "./operations/codex-user-input-request.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { ConversationRecoveryService } from "./operations/conversation-recovery-service.js";
 import { ProductFeedbackReplyService } from "./operations/product-feedback-reply-service.js";
@@ -2696,7 +2705,8 @@ const streamSchema = z.object({
 });
 
 const portalChatCancelSchema = z.object({
-  session_id: z.string().trim().min(1),
+  /** Optional after a page reload: the running response is then located by thread. */
+  session_id: z.string().trim().min(1).optional(),
   thread_id: z.string().trim().min(1).optional(),
   client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
   user_message_id: z.string().trim().min(1).optional(),
@@ -2705,11 +2715,14 @@ const portalChatCancelSchema = z.object({
 });
 
 const portalChatSteerSchema = z.object({
-  session_id: z.string().trim().min(1),
+  /** Optional after a page reload: the running response is then located by thread. */
+  session_id: z.string().trim().min(1).optional(),
   thread_id: z.string().trim().min(1),
   client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
   client_steer_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/),
-  message: z.string().trim().min(1)
+  message: z.string().trim().min(1),
+  /** Set when the steer answers a request_user_input_async question card. */
+  user_input_request_id: z.string().trim().min(1).max(200).optional()
 });
 
 const DIRECT_CHAT_MESSAGE_MAX_CHARS = 20_000;
@@ -3302,6 +3315,7 @@ function portalSteerEventOut(event: PortalSteerEventRecord) {
     source_user_message_id: event.sourceUserMessageId ?? null,
     turn_id: event.turnId ?? null,
     message: event.message,
+    user_input_request_id: event.userInputRequestId ?? null,
     status: event.status,
     error_code: event.errorCode ?? null,
     resolved_at: event.resolvedAt ?? null,
@@ -4634,6 +4648,7 @@ type PortalActiveChatRun = {
 };
 
 const portalActiveChatRuns = new Map<string, PortalActiveChatRun>();
+const PORTAL_RUN_ACTIVE_ERROR_CODE = "PORTAL_RUN_ACTIVE";
 const PORTAL_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
 
 function gcPortalActiveChatRuns(): void {
@@ -4720,6 +4735,81 @@ function logPortalStreamLifecycle(stage: string, details: Record<string, unknown
   }
 }
 
+function sameNormalizedText(left: unknown, right: unknown): boolean {
+  const normalize = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "");
+  const normalizedLeft = normalize(left);
+  return Boolean(normalizedLeft) && normalizedLeft === normalize(right);
+}
+
+function portalUserInputPendingText(locale: string | undefined): string {
+  return /^zh/i.test(locale ?? "")
+    ? "请先回答上面的问题，我会据此继续。"
+    : "Please answer the question above so I can continue.";
+}
+
+/** request_user_input_async items are rendered from the dedicated user_input_request SSE event. */
+function runtimeEventCarriesUserInputRequest(event: RuntimeStreamEvent): boolean {
+  const raw = asRecord(event.raw);
+  return Boolean(codexUserInputRequestFromItem(raw?.item));
+}
+
+/**
+ * Returns the response that is still running for this session, if any. A new portal
+ * message must not start (and must not abort it); the client queues or steers instead.
+ */
+function findBlockingPortalActiveChatRun(
+  sessionId: string,
+  userId: string,
+  threadId?: string
+): PortalActiveChatRun | undefined {
+  gcPortalActiveChatRuns();
+  const live = (run: PortalActiveChatRun | undefined) =>
+    run && run.userId === userId && !run.controller.signal.aborted && !run.systemInterrupt?.signal.aborted
+      ? run
+      : undefined;
+  const normalizedSessionId = trimOrUndefined(sessionId);
+  const bySession = normalizedSessionId ? live(portalActiveChatRuns.get(normalizedSessionId)) : undefined;
+  if (bySession) return bySession;
+  // Sessions are per tab, so a reloaded or second tab reaches the same thread with a new session id.
+  const normalizedThreadId = trimOrUndefined(threadId);
+  if (!normalizedThreadId) return undefined;
+  for (const run of portalActiveChatRuns.values()) {
+    const runThreadId = trimOrUndefined(run.session?.threadId) ?? run.threadId;
+    if (runThreadId === normalizedThreadId && live(run)) return run;
+  }
+  return undefined;
+}
+
+/**
+ * The other chat slot running a portal response on this thread for the user. Requests forwarded
+ * by a peer are never forwarded again, so a request is relayed at most once.
+ */
+async function portalThreadRunOwnerPeer(
+  req: Request,
+  threadId: string | undefined,
+  userId: string
+): Promise<ChatPeerStatus | undefined> {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  if (!normalizedThreadId || !chatCluster.enabled || req.header(FORWARDED_BY_HEADER)) return undefined;
+  try {
+    return await chatCluster.findPortalThreadOwner(normalizedThreadId, userId);
+  } catch {
+    return undefined;
+  }
+}
+
+function findPortalActiveChatRunSessionIdForThread(threadId: string, userId: string): string | undefined {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  if (!normalizedThreadId) return undefined;
+  gcPortalActiveChatRuns();
+  for (const [sessionId, entry] of portalActiveChatRuns.entries()) {
+    if (entry.userId !== userId || entry.controller.signal.aborted) continue;
+    const entryThreadId = trimOrUndefined(entry.session?.threadId) ?? entry.threadId;
+    if (entryThreadId === normalizedThreadId) return sessionId;
+  }
+  return undefined;
+}
+
 function registerPortalActiveChatRun(input: {
   sessionId: string;
   runId: string;
@@ -4735,10 +4825,8 @@ function registerPortalActiveChatRun(input: {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return () => undefined;
   gcPortalActiveChatRuns();
-  const existing = portalActiveChatRuns.get(sessionId);
-  if (existing && existing.userId === input.userId && !existing.controller.signal.aborted) {
-    existing.controller.abort(new Error("portal_run_superseded"));
-  }
+  // Callers must check findBlockingPortalActiveChatRun() first: a new message never
+  // silently aborts a response that is still running.
   portalActiveChatRuns.set(sessionId, {
     userId: input.userId,
     organizationId: input.organizationId,
@@ -11758,6 +11846,7 @@ registerCommonApiRoutes(app, {
     users,
     threads,
     isThreadActive: isThreadActiveForAdmin,
+    listSteerEvents: (threadId) => portalSteerEvents.listForThread(threadId),
     sessions: {
       countActive: async () => liveRuntimeThreads.size
     },
@@ -13724,8 +13813,21 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
       client_cancel_clicked_at: input.client_cancel_clicked_at,
       client_cancel_source: input.client_cancel_source
     });
+    const threadSessionId =
+      input.session_id || !input.thread_id
+        ? undefined
+        : findPortalActiveChatRunSessionIdForThread(input.thread_id, currentUser.id);
+    if (!input.session_id && !threadSessionId) {
+      // Stopping a response this tab does not stream: it may run on the other chat slot.
+      const ownerPeer = await portalThreadRunOwnerPeer(req, input.thread_id, currentUser.id);
+      if (ownerPeer) {
+        await forwardRequestToPeer(req, res, ownerPeer.url, chatInstanceId);
+        return;
+      }
+    }
+    const cancelSessionId = input.session_id ?? threadSessionId ?? "";
     const result = await cancelPortalActiveChatRun({
-      sessionId: input.session_id,
+      sessionId: cancelSessionId,
       currentUser,
       threadId: input.thread_id,
       runId: input.client_run_id,
@@ -13785,13 +13887,29 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
+    const steerSessionId =
+      input.session_id ?? findPortalActiveChatRunSessionIdForThread(input.thread_id, currentUser.id);
+    if (!steerSessionId) {
+      // Steering a response this tab does not stream: it may run on the other chat slot.
+      const ownerPeer = await portalThreadRunOwnerPeer(req, input.thread_id, currentUser.id);
+      if (ownerPeer) {
+        await forwardRequestToPeer(req, res, ownerPeer.url, chatInstanceId);
+        return;
+      }
+      res.status(409).json({
+        detail: "The current response is no longer running. Add this instruction to the queue instead.",
+        code: "response_not_running"
+      });
+      return;
+    }
     const initialPending = await portalSteerEvents.begin({
       id: input.client_steer_id,
       threadId: input.thread_id,
       organizationId: currentUser.organizationId,
       userId: currentUser.id,
-      sessionId: input.session_id,
-      message: input.message
+      sessionId: steerSessionId,
+      message: input.message,
+      userInputRequestId: input.user_input_request_id
     });
     pendingEventId = initialPending.event.id;
     if (initialPending.alreadyAccepted) {
@@ -13822,7 +13940,7 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
 
     gcPortalActiveChatRuns();
 
-    const activeRun = portalActiveChatRuns.get(input.session_id);
+    const activeRun = portalActiveChatRuns.get(steerSessionId);
     if (!activeRun || activeRun.controller.signal.aborted) {
       await rejectSteer(409, "The current response is no longer running. Add this instruction to the queue instead.", "response_not_running");
       return;
@@ -13838,7 +13956,7 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
 
     const session =
       activeRun.session ??
-      (await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId));
+      (await sessions.getOwned(steerSessionId, currentUser.id, currentUser.organizationId));
     if (!session) {
       await rejectSteer(404, "Session does not exist or has expired", "session_missing");
       return;
@@ -13865,7 +13983,8 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       userId: currentUser.id,
       sessionId: session.sessionId,
       sourceUserMessageId: activeRun.userMessageId,
-      message: input.message
+      message: input.message,
+      userInputRequestId: input.user_input_request_id
     });
     pendingEventId = pending.event.id;
     if (pending.alreadyAccepted) {
@@ -13906,7 +14025,8 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       turn_id: turnId,
       user_id: currentUser.id,
       organization_id: currentUser.organizationId,
-      input_length: input.message.length
+      input_length: input.message.length,
+      ...(input.user_input_request_id ? { user_input_request_id: input.user_input_request_id } : {})
     });
     res.json({
       accepted: true,
@@ -14115,6 +14235,29 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     }
     portalThreadId = currentSession.threadId ?? requestedThreadId;
+    const blockingPeer = await portalThreadRunOwnerPeer(req, portalThreadId, currentUser.id);
+    // The local check and registration run in the same tick so two requests cannot both pass.
+    const blockingRun = findBlockingPortalActiveChatRun(currentSession.sessionId, currentUser.id, portalThreadId);
+    if (blockingRun || blockingPeer) {
+      // The user message is not persisted: the client keeps it and offers queue/steer.
+      logPortalStream("rejected_while_response_running", {
+        active_run_id: blockingRun?.runId,
+        active_trace_id: blockingRun?.traceId,
+        active_age_ms: blockingRun ? Date.now() - blockingRun.createdAt : undefined,
+        active_peer: blockingPeer?.url,
+        lifecycle: streamAbort.snapshot()
+      });
+      sendTrackedSSE("error", {
+        detail: "The previous response is still running. Your message was kept so you can queue it or send it as guidance.",
+        code: PORTAL_RUN_ACTIVE_ERROR_CODE,
+        reason_code: "response_still_running",
+        active_run_id: blockingRun?.runId,
+        thread_id: blockingRun?.threadId ?? portalThreadId
+      });
+      finishTiming("error", { reason: "response_still_running" });
+      res.end();
+      return;
+    }
     unregisterPortalRun = registerPortalActiveChatRun({
       sessionId: currentSession.sessionId,
       runId: portalRunId,
@@ -14220,7 +14363,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    const portalRunProjection = new CodexRunProjection();
+    const portalRunProjection = new CodexRunProjection({ captureUserInputRequests: true });
     const portalPartialAnswer = new PortalPartialAnswerCollector();
     let firstCodexEventSeen = false;
     const portalThread = await timing.time("chat_stream.load_bound_thread", () =>
@@ -14332,7 +14475,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           }
         },
         onEvent(event) {
-          portalPartialAnswer.push(portalRunProjection.push(event));
+          const eventProjection = portalRunProjection.push(event);
+          portalPartialAnswer.push(eventProjection);
+          if (eventProjection.userInputRequest) {
+            // Sent on its own channel so brand output protection never hides a question
+            // the assistant is waiting on; the raw agent message is not forwarded below.
+            sendTrackedSSE("user_input_request", {
+              content_part: codexUserInputRequestToContentPart(eventProjection.userInputRequest)
+            });
+            logPortalStream("user_input_requested", {
+              request_id: eventProjection.userInputRequest.id,
+              question_count: eventProjection.userInputRequest.questions.length,
+              lifecycle: streamAbort.snapshot()
+            });
+          }
           if (attempt === 1 && portalRuntimeEventIndicatesTurnStarted(event)) {
             portalFirstAttemptTurnStarted = true;
           }
@@ -14383,7 +14539,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
           }
           const protectedEvent = portalBrand ? sanitizeRuntimeEventForBrand(event, portalBrand) : event;
-          if (!(portalBrand?.outputProtectionEnabled && portalRuntimeEventStartsFinalAnswer(event))) {
+          if (
+            !runtimeEventCarriesUserInputRequest(event) &&
+            !(portalBrand?.outputProtectionEnabled && portalRuntimeEventStartsFinalAnswer(event))
+          ) {
             sendTrackedSSE("codex", protectedEvent);
           }
         },
@@ -14428,8 +14587,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
             sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
           }
+          // When the turn ends on an "ask while working" question, the question card
+          // already shows it; keep the body text from repeating the same question.
+          const answerRepeatsQuestion = portalRunProjection
+            .finalize()
+            .userInputRequests.some((request) => sameNormalizedText(request.text, payload.answer));
           const resolvedAnswerText = resolveCompletedAssistantText({
-            answerText: payload.answer,
+            answerText: answerRepeatsQuestion ? "" : payload.answer,
+            emptyAnswerText: answerRepeatsQuestion ? portalUserInputPendingText(portalLocale) : undefined,
             generatedArtifactCount: artifactContentPart ? artifacts.length : 0,
             locale: portalLocale
           });

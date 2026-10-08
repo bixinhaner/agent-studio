@@ -1,3 +1,4 @@
+import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
 import { Router, type Request, type Response } from "express";
 
 import { appConfig } from "../config.js";
@@ -87,6 +88,7 @@ type AdminRouterOptions = {
   securityDomains?: SecurityDomainService;
   securityDomainAccess?: SecurityDomainAccessControl;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
+  listSteerEvents?: (threadId: string) => Promise<PortalSteerEventRecord[]>;
   conversationSecurityReviewTest?: (input: {
     settings: SystemSettingsConversationSecurityReview;
     question: string;
@@ -861,6 +863,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
     createConversationAuditRouter({
       getDb: () => getDbInstance() as never,
       isThreadActive: options.isThreadActive,
+      listSteerEvents: options.listSteerEvents,
       productFeedbackReply: options.productFeedbackReply,
       summaryIndex: true
     })

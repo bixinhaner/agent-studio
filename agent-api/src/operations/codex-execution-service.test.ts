@@ -807,4 +807,40 @@ describe("CodexExecutionService", () => {
     });
     expect(JSON.stringify(finalized.contentParts[0])).not.toContain("ACME was updated today.");
   });
+
+  it("captures ask-while-working questions as cards instead of answer text when enabled", () => {
+    const questionEvent = {
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "call_1",
+          type: "agent_message",
+          text: "Which region should I deploy to?",
+          phase: "final_answer",
+          questions: [{ title: "Which region should I deploy to?", options: ["Jakarta", "Singapore"] }]
+        }
+      }
+    };
+    const portal = new CodexRunProjection({ now: () => 1781100000000, captureUserInputRequests: true });
+    const captured = portal.push(questionEvent);
+    expect(captured.userInputRequest).toMatchObject({ id: "call_1", askedAt: "2026-06-10T14:00:00.000Z" });
+    expect(captured.completedAgentMessage).toBeUndefined();
+    expect(captured.answerDelta).toBeUndefined();
+    const finalized = portal.finalize({ finalAnswer: "Deployed to Jakarta." });
+    expect(finalized.userInputRequests).toHaveLength(1);
+    expect(finalized.contentParts.at(-1)).toMatchObject({
+      type: "data",
+      name: "codex_user_input_request",
+      data: { id: "call_1", questions: [{ title: "Which region should I deploy to?", options: ["Jakarta", "Singapore"] }] }
+    });
+    portal.reset();
+    expect(portal.finalize().userInputRequests).toEqual([]);
+
+    // Channels without a question UI keep the question as plain agent text.
+    const other = new CodexRunProjection({ now: () => 1781100000000 });
+    const passthrough = other.push(questionEvent);
+    expect(passthrough.completedAgentMessage).toBeDefined();
+    expect(other.finalize().userInputRequests).toEqual([]);
+  });
 });

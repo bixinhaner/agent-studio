@@ -9,6 +9,8 @@ export type PortalSteerEventRecord = {
   sourceUserMessageId?: string;
   turnId?: string;
   message: string;
+  /** Set when this steer answers a request_user_input_async question card. */
+  userInputRequestId?: string;
   status: PortalSteerEventStatus;
   errorCode?: string;
   resolvedAt?: string;
@@ -25,6 +27,7 @@ type PortalSteerEventRow = {
   sourceUserMessageId: string | null;
   turnId: string | null;
   message: string;
+  userInputRequestId?: string | null;
   status: string;
   errorCode: string | null;
   resolvedAt: Date | string | null;
@@ -47,6 +50,7 @@ type PortalSteerEventTable = {
       sessionId: string;
       sourceUserMessageId: string | null;
       message: string;
+      userInputRequestId?: string | null;
       status: "pending";
     };
   }): Promise<PortalSteerEventRow>;
@@ -98,6 +102,7 @@ function toRecord(row: PortalSteerEventRow): PortalSteerEventRecord {
     sourceUserMessageId: optionalString(row.sourceUserMessageId),
     turnId: optionalString(row.turnId),
     message: row.message,
+    userInputRequestId: optionalString(row.userInputRequestId),
     status: normalizeStatus(row.status),
     errorCode: optionalString(row.errorCode),
     resolvedAt: toOptionalIsoString(row.resolvedAt),
@@ -134,6 +139,7 @@ export class PortalSteerEventRepository {
     sessionId: string;
     sourceUserMessageId?: string;
     message: string;
+    userInputRequestId?: string;
   }): Promise<{ event: PortalSteerEventRecord; alreadyAccepted: boolean }> {
     const id = normalized(input.id);
     const threadId = normalized(input.threadId);
@@ -181,6 +187,7 @@ export class PortalSteerEventRepository {
         sessionId,
         sourceUserMessageId: optionalString(input.sourceUserMessageId) ?? null,
         message,
+        ...(optionalString(input.userInputRequestId) ? { userInputRequestId: optionalString(input.userInputRequestId) } : {}),
         status: "pending"
       }
     });

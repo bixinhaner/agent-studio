@@ -451,6 +451,29 @@ export type AdminConversationTranscriptProcessRow = {
   at?: string;
 };
 
+export type AdminConversationTranscriptSteerEvent = {
+  id: string;
+  message: string;
+  status: "pending" | "accepted" | "failed";
+  errorCode: string | null;
+  userInputRequestId: string | null;
+  createdAt: string;
+};
+
+export type AdminConversationTranscriptUserInputRequest = {
+  id: string;
+  questions: Array<{ title: string; options: string[] }>;
+  text: string | null;
+  askedAt: string | null;
+  answer: {
+    text: string;
+    via: "steer" | "message";
+    at: string | null;
+    messageId: string | null;
+  } | null;
+  status: "answered" | "pending" | "skipped";
+};
+
 export type AdminConversationTranscriptMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
@@ -465,6 +488,10 @@ export type AdminConversationTranscriptMessage = {
     readAt: string | null;
   }>;
   fileChangeData?: unknown[];
+  /** Messages the user steered into this running response (mirrors the portal). */
+  steerEvents?: AdminConversationTranscriptSteerEvent[];
+  /** "Ask while working" question cards raised by this response and how they were answered. */
+  userInputRequests?: AdminConversationTranscriptUserInputRequest[];
   turnStatus?: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason?: string | null;
   parentId: string | null;

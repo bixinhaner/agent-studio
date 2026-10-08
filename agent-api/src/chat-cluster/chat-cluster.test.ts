@@ -9,6 +9,7 @@ import {
   fetchChatPeerStatus,
   parseChatPeerStatus,
   peerOwnsRun,
+  peerRunsPortalThread,
   peerUrlsExcludingSelf,
   type ChatPeerStatus
 } from "./cluster.js";
@@ -57,6 +58,20 @@ describe("chat cluster peers", () => {
       ["http://127.0.0.1:8791", "http://127.0.0.1:8792", "http://localhost:8791", "not a url"],
       8791
     )).toEqual(["http://127.0.0.1:8792"]);
+  });
+
+  it("finds the peer running a portal thread for the same user only", () => {
+    const status = parseChatPeerStatus("http://127.0.0.1:8792", {
+      ready: true,
+      active_threads: [
+        { thread_id: "t-1", user_id: "u-1", organization_id: "o-1", channel: "portal" },
+        { thread_id: "t-2", user_id: "u-1", organization_id: "o-1", channel: "dingtalk" }
+      ]
+    });
+    expect(peerRunsPortalThread(status, "t-1", "u-1")).toBe(true);
+    expect(peerRunsPortalThread(status, "t-1", "u-2")).toBe(false);
+    expect(peerRunsPortalThread(status, "t-2", "u-1")).toBe(false);
+    expect(peerRunsPortalThread({ ...status, state: "down" }, "t-1", "u-1")).toBe(false);
   });
 
   it("finds run owners from slot-aware and legacy status payloads", () => {

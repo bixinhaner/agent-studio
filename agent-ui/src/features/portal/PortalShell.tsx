@@ -175,8 +175,15 @@ import {
   usePortalComposerWorkflow,
   usePortalComposerWorkflowController,
   usePortalQueueDispatcher,
-  type PortalSteerEvent
+  type PortalSteerEvent,
+  type PortalSteerOptions
 } from "./composer-workflow";
+import {
+  PortalBackgroundRunContext,
+  USER_INPUT_REQUEST_PART_NAME,
+  UserInputReadOnlyContext,
+  UserInputRequestCard
+} from "./user-input-request";
 import {
   createPortalSkillDraftNewVersion,
   fetchPortalManagedSkills,
@@ -330,6 +337,7 @@ type PortalSteerEventOut = {
   source_user_message_id?: string | null;
   turn_id?: string | null;
   message: string;
+  user_input_request_id?: string | null;
   status: "pending" | "accepted" | "failed";
   error_code?: string | null;
   resolved_at?: string | null;
@@ -349,6 +357,7 @@ function portalSteerEventFromOut(event: PortalSteerEventOut): PortalSteerEvent {
     sourceUserMessageId: event.source_user_message_id || undefined,
     turnId: event.turn_id || undefined,
     message: event.message,
+    userInputRequestId: event.user_input_request_id || undefined,
     status: event.status,
     errorCode: event.error_code || undefined,
     resolvedAt: event.resolved_at || undefined,
@@ -2557,7 +2566,12 @@ const UploadAwareComposer: FC = () => {
   const baseRuntimeReadiness = useContext(RuntimeReadinessContext);
   const localWorkspaceReadiness = useLocalWorkspaceReadiness();
   const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
-  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const localThreadRunning = useAuiState((state) => state.thread.isRunning);
+  // The server may still run a response this tab is not streaming (reload, lost
+  // connection, another tab). Treat it as running so input is queued or steered
+  // instead of starting a new run.
+  const { backgroundRunning } = useContext(PortalBackgroundRunContext);
+  const threadRunning = localThreadRunning || backgroundRunning;
   const runtimeThreadId = useAuiState(state => state.threadListItem.id);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => !hasInlineComposerRequest(state.composer.text, state.composer.attachments.length));
@@ -2773,6 +2787,10 @@ const UploadAwareComposer: FC = () => {
           <p className="portal-upload-composer-hint" role="status">
             {workflowNotice}
           </p>
+        ) : backgroundRunning && !localThreadRunning ? (
+          <p className="portal-upload-composer-hint" role="status">
+            {t("thread.backgroundRunning")}
+          </p>
         ) : null}
         <div className="portal-composer-input-row">
           <InlineAttachmentComposer
@@ -2815,9 +2833,21 @@ const UploadAwareComposer: FC = () => {
                   </button>
                 </>
               ) : null}
-              <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
-                <SquareIcon size={13} />
-              </Composer.Cancel>
+              {localThreadRunning ? (
+                <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
+                  <SquareIcon size={13} />
+                </Composer.Cancel>
+              ) : (
+                <button
+                  type="button"
+                  className="portal-stop-btn"
+                  aria-label={t("thread.stopBackground")}
+                  title={t("thread.stopBackground")}
+                  onClick={requestPortalRunCancel}
+                >
+                  <SquareIcon size={13} />
+                </button>
+              )}
             </div>
           ) : (
             <div className="portal-idle-composer-actions">
@@ -2853,7 +2883,12 @@ const MobileAwareComposer: FC = () => {
   const baseRuntimeReadiness = useContext(RuntimeReadinessContext);
   const localWorkspaceReadiness = useLocalWorkspaceReadiness();
   const runtimeReadiness = localWorkspaceReadiness ?? baseRuntimeReadiness;
-  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const localThreadRunning = useAuiState((state) => state.thread.isRunning);
+  // The server may still run a response this tab is not streaming (reload, lost
+  // connection, another tab). Treat it as running so input is queued or steered
+  // instead of starting a new run.
+  const { backgroundRunning } = useContext(PortalBackgroundRunContext);
+  const threadRunning = localThreadRunning || backgroundRunning;
   const handleComposerKeyDown = usePortalComposerKeyDown(threadRunning);
   const runtimeThreadId = useAuiState(state => state.threadListItem.id);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
@@ -2982,6 +3017,8 @@ const MobileAwareComposer: FC = () => {
           </p>
         ) : workflowNotice ? (
           <p className="portal-upload-composer-hint" role="status">{workflowNotice}</p>
+        ) : backgroundRunning && !localThreadRunning ? (
+          <p className="portal-upload-composer-hint" role="status">{t("thread.backgroundRunning")}</p>
         ) : null}
         <div className="portal-composer-input-row">
           <Composer.Input
@@ -3022,9 +3059,21 @@ const MobileAwareComposer: FC = () => {
                   </button>
                 </>
               ) : null}
-              <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
-                <SquareIcon size={13} />
-              </Composer.Cancel>
+              {localThreadRunning ? (
+                <Composer.Cancel className="portal-stop-btn" onClick={requestPortalRunCancel}>
+                  <SquareIcon size={13} />
+                </Composer.Cancel>
+              ) : (
+                <button
+                  type="button"
+                  className="portal-stop-btn"
+                  aria-label={t("thread.stopBackground")}
+                  title={t("thread.stopBackground")}
+                  onClick={requestPortalRunCancel}
+                >
+                  <SquareIcon size={13} />
+                </button>
+              )}
             </div>
           ) : (
             <div className="portal-idle-composer-actions">
@@ -4968,6 +5017,10 @@ const ProcessDataFallback: FC<any> = ({
     return <MemoryContextChip data={data} />;
   }
 
+  if (name === USER_INPUT_REQUEST_PART_NAME) {
+    return <UserInputRequestCard data={data} />;
+  }
+
   if (name === "codex_connection_recovery") {
     return <PortalChatRecoveryNotice state="recovering" />;
   }
@@ -5955,7 +6008,9 @@ const PortalSteerEventsForAssistantMessage: FC = () => {
     return previous?.role === "user" ? previous.id : "";
   });
   const events = useMemo(
-    () => workflow.steerEvents.filter((event) => event.sourceUserMessageId === sourceUserMessageId),
+    () => workflow.steerEvents.filter(
+      (event) => event.sourceUserMessageId === sourceUserMessageId && !event.userInputRequestId
+    ),
     [sourceUserMessageId, workflow.steerEvents]
   );
   return <PortalSteerEventsView events={events} />;
@@ -6004,7 +6059,7 @@ const AgentAssistantMessage: FC = () => {
 const PortalSteerEventsFooter: FC = () => {
   const workflow = usePortalComposerWorkflow();
   const unanchoredEvents = useMemo(
-    () => workflow.steerEvents.filter((event) => !event.sourceUserMessageId),
+    () => workflow.steerEvents.filter((event) => !event.sourceUserMessageId && !event.userInputRequestId),
     [workflow.steerEvents]
   );
   return <PortalSteerEventsView events={unanchoredEvents} />;
@@ -7071,6 +7126,32 @@ const ActiveThreadIdentityBridge: FC<{ onChange: (identity: ThreadIdentity) => v
   return null;
 };
 
+function threadMessagesOutToRepository(out: ThreadMessagesOut): ExportedMessageRepository {
+  const feedbackByMessageId = new Map<string, ThreadFeedbackOut>();
+  for (const item of out.feedback ?? []) {
+    const messageId = typeof item.message_id === "string" ? item.message_id.trim() : "";
+    if (!messageId) continue;
+    const previous = feedbackByMessageId.get(messageId);
+    const previousTime = Date.parse(previous?.updated_at || previous?.created_at || "");
+    const itemTime = Date.parse(item.updated_at || item.created_at || "");
+    if (!previous || itemTime >= previousTime) {
+      feedbackByMessageId.set(messageId, item);
+    }
+  }
+  return {
+    headId: out.head_id ?? null,
+    messages: (out.messages || []).map((item) => {
+      const revived = reviveMessage(item.message, item.created_at);
+      const messageId = typeof asRecord(revived)?.id === "string" ? String(asRecord(revived)?.id).trim() : "";
+      return {
+        parentId: item.parent_id ?? null,
+        message: applyStoredFeedback(revived, messageId ? feedbackByMessageId.get(messageId) : undefined) as any,
+        ...(item.run_config ? { runConfig: item.run_config } : undefined)
+      };
+    })
+  };
+}
+
 const AgentRuntimeAdapterProvider: FC<
   PropsWithChildren<{
     onThreadIdentityChange?: (identity: ThreadIdentity) => void;
@@ -7104,30 +7185,7 @@ const AgentRuntimeAdapterProvider: FC<
             ? `/api/portal/training/threads/${encodeURIComponent(remoteId)}/messages${locale === "en" ? "?lang=en" : ""}`
             : `/api/threads/${encodeURIComponent(remoteId)}/messages`
         );
-        const feedbackByMessageId = new Map<string, ThreadFeedbackOut>();
-        for (const item of out.feedback ?? []) {
-          const messageId = typeof item.message_id === "string" ? item.message_id.trim() : "";
-          if (!messageId) continue;
-          const previous = feedbackByMessageId.get(messageId);
-          const previousTime = Date.parse(previous?.updated_at || previous?.created_at || "");
-          const itemTime = Date.parse(item.updated_at || item.created_at || "");
-          if (!previous || itemTime >= previousTime) {
-            feedbackByMessageId.set(messageId, item);
-          }
-        }
-        const repository: ExportedMessageRepository = {
-          headId: out.head_id ?? null,
-          messages: (out.messages || []).map((item) => {
-            const revived = reviveMessage(item.message, item.created_at);
-            const messageId = typeof asRecord(revived)?.id === "string" ? String(asRecord(revived)?.id).trim() : "";
-            return {
-              parentId: item.parent_id ?? null,
-              message: applyStoredFeedback(revived, messageId ? feedbackByMessageId.get(messageId) : undefined) as any,
-              ...(item.run_config ? { runConfig: item.run_config } : undefined)
-            };
-          })
-        };
-        return repository;
+        return threadMessagesOutToRepository(out);
       },
       async append(item: ExportedMessageRepositoryItem) {
         const init = await aui.threadListItem().initialize();
@@ -7545,23 +7603,27 @@ export function PortalShell(props: {
   const activeLocalThreadIdRef = useRef("");
   const runtimeModeOverrideRef = useRef<{ threadId: string; modeId: string } | null>(null);
   const activePortalRunRef = useRef<PortalActiveRun | null>(null);
+  const reloadThreadHistoryRef = useRef<((threadId: string) => Promise<void>) | null>(null);
   const getSteerSourceUserMessageId = useCallback(
     () => activePortalRunRef.current?.userMessageId,
     []
   );
-  const requestPortalRunSteer = useCallback(async (message: string, clientSteerId: string) => {
+  const requestPortalRunSteer = useCallback(async (message: string, clientSteerId: string, options?: PortalSteerOptions) => {
     const run = activePortalRunRef.current;
-    if (!run?.sessionId || !run.threadId) {
+    // After a reload this tab no longer streams the response; the server then locates
+    // the still-running response by thread.
+    const threadId = run?.threadId || activeRemoteThreadIdRef.current;
+    if (!threadId) {
       throw new Error("The current response is no longer running");
     }
     const out = await api<{ accepted: boolean; turn_id: string; steer_event: PortalSteerEventOut }>("/api/chat/steer", {
       method: "POST",
       json: {
-        session_id: run.sessionId,
-        client_run_id: run.runId,
-        thread_id: run.threadId,
+        ...(run?.sessionId ? { session_id: run.sessionId, client_run_id: run.runId } : {}),
+        thread_id: threadId,
         client_steer_id: clientSteerId,
-        message: inlineReferencePlainText(message)
+        message: inlineReferencePlainText(message),
+        ...(options?.userInputRequestId ? { user_input_request_id: options.userInputRequestId } : {})
       }
     });
     return portalSteerEventFromOut(out.steer_event);
@@ -9139,7 +9201,23 @@ export function PortalShell(props: {
 
   const requestPortalRunCancel = useCallback(() => {
     const run = activePortalRunRef.current;
-    if (!run?.sessionId) return;
+    if (!run?.sessionId) {
+      // Background response (this tab reloaded or lost the stream): cancel by thread.
+      const threadId = activeRemoteThreadIdRef.current;
+      if (!threadId) return;
+      composerWorkflowController.markInterrupted(threadId);
+      void api<{ cancelled: boolean }>("/api/chat/cancel", {
+        method: "POST",
+        json: {
+          thread_id: threadId,
+          client_cancel_clicked_at: new Date().toISOString(),
+          client_cancel_source: "portal_stop_button_background"
+        }
+      }).catch((error) => {
+        console.warn("portal chat cancel failed", error);
+      });
+      return;
+    }
     composerWorkflowController.markInterrupted(run.threadId);
     void api<{ cancelled: boolean }>("/api/chat/cancel", {
       method: "POST",
@@ -9359,6 +9437,7 @@ export function PortalShell(props: {
         let doneAnswer = "";
         let portalRunCompleted = false;
         let portalRunFailed = false;
+        let portalRunRejectedWhileRunning = false;
         const orderedParts: any[] = [];
         let activeTextPart: { type: "text"; text: string } | null = null;
         let activeCommentaryPart:
@@ -9726,7 +9805,8 @@ export function PortalShell(props: {
               name !== "codex_instruction_reads" &&
               name !== "agent_studio_memory_context" &&
               name !== "codex_connection_recovery" &&
-              name !== "codex_recovery_failure"
+              name !== "codex_recovery_failure" &&
+              name !== USER_INPUT_REQUEST_PART_NAME
             ) continue;
             if (isExternalPortalUser && name === "codex_file_change") {
               const dataObj = asRecord(partObj.data);
@@ -9745,6 +9825,14 @@ export function PortalShell(props: {
             if (name === "codex_file_change") {
               const consolidated = consolidateCodexFileChangeParts([...orderedParts, displayPart]);
               orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
+            } else if (name === USER_INPUT_REQUEST_PART_NAME) {
+              const requestId = asRecord(partObj.data)?.id;
+              const existingIndex = orderedParts.findIndex((item) => {
+                const existing = asRecord(item);
+                return existing?.type === "data" && existing.name === name && asRecord(existing.data)?.id === requestId;
+              });
+              if (existingIndex >= 0) orderedParts.splice(existingIndex, 1, displayPart);
+              else orderedParts.push(displayPart);
             } else if (
               name === "codex_instruction_reads" ||
               name === "agent_studio_memory_context" ||
@@ -9873,6 +9961,16 @@ export function PortalShell(props: {
             const updates: any[] = [];
             let textChanged = false;
             const payload = asRecord(data);
+
+            if (event === "error" && payload?.code === "PORTAL_RUN_ACTIVE") {
+              // The previous response is still running on the server (this tab lost its
+              // stream). Nothing was persisted: queue the message and show that response.
+              portalRunRejectedWhileRunning = true;
+              composerWorkflowController.requeueRejectedSend(threadId, prompt);
+              setServerRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, true));
+              setErrorText(t("thread.runActiveQueued"));
+              break;
+            }
 
             if (event === "error") {
               portalRunFailed = true;
@@ -10032,6 +10130,18 @@ export function PortalShell(props: {
               if (contentPart?.type !== "data" || contentPart.name !== "agent_studio_memory_context") continue;
               const changed = appendDisplayDataParts([contentPart]);
               if (changed) {
+                const content = snapshotContent();
+                if (content.length > 0) yield { content };
+              }
+              continue;
+            }
+
+            if (event === "user_input_request") {
+              const contentPart = asRecord(payload?.content_part ?? payload?.contentPart);
+              if (contentPart?.type !== "data" || contentPart.name !== USER_INPUT_REQUEST_PART_NAME) continue;
+              const changed = appendDisplayDataParts([contentPart]);
+              if (changed) {
+                updateRunningStage(t("userInput.title"), { fallback: false, kind: "text" });
                 const content = snapshotContent();
                 if (content.length > 0) yield { content };
               }
@@ -10582,7 +10692,7 @@ export function PortalShell(props: {
               }
             }
           }
-          if (!portalRunCompleted && !portalRunFailed && !options.abortSignal.aborted) {
+          if (!portalRunCompleted && !portalRunFailed && !portalRunRejectedWhileRunning && !options.abortSignal.aborted) {
             throw new Error("connection closed before response completion");
           }
           } catch (error) {
@@ -10678,6 +10788,13 @@ export function PortalShell(props: {
           }
           setActiveRunThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
           setRuntimeRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
+          if (portalRunRejectedWhileRunning) {
+            // Drop the optimistic user message: the server did not accept it.
+            window.setTimeout(() => void reloadThreadHistoryRef.current?.(threadId).catch(() => undefined), 0);
+          } else {
+            // The finished run is no longer running; don't wait for the next status poll.
+            setServerRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
+          }
           setCompletedNoticeThreadIds((prev) =>
             updateRunningThreadMapForKeys(prev, runningThreadKeys, !completedInActiveThread)
           );
@@ -10690,6 +10807,7 @@ export function PortalShell(props: {
     [
       composerWorkflowController.markRunCompleted,
       composerWorkflowController.markRunFailed,
+      composerWorkflowController.requeueRejectedSend,
       markPortalThreadRead,
       t,
       trainingReadOnly
@@ -10702,6 +10820,52 @@ export function PortalShell(props: {
       return useLocalRuntime(chatAdapter);
     }
   });
+
+  // A response can keep running on the server while this tab does not stream it
+  // (page reload, lost connection, another tab). The composer then queues/steers
+  // instead of starting a run, and the history reloads once that response ends.
+  const activeThreadBackgroundRunning = Boolean(
+    !trainingReadOnly &&
+      activeRemoteThreadId &&
+      serverRunningThreadIds[activeRemoteThreadId] &&
+      !activeRunThreadIds[activeRemoteThreadId]
+  );
+  // Until the finished response is loaded, keep queued messages from being sent on
+  // top of stale history (they would branch off the previous user message).
+  const [backgroundHistorySyncThreadId, setBackgroundHistorySyncThreadId] = useState("");
+  const backgroundRunContextValue = useMemo(
+    () => ({
+      backgroundRunning:
+        activeThreadBackgroundRunning ||
+        Boolean(activeRemoteThreadId && backgroundHistorySyncThreadId === activeRemoteThreadId)
+    }),
+    [activeRemoteThreadId, activeThreadBackgroundRunning, backgroundHistorySyncThreadId]
+  );
+  const reloadThreadHistory = useCallback(async (threadId: string) => {
+    if (!threadId || trainingReadOnly) return;
+    const out = await api<ThreadMessagesOut>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
+    if (activeRemoteThreadIdRef.current !== threadId) return;
+    if (runtime.thread.getState().isRunning) return;
+    runtime.thread.import(threadMessagesOutToRepository(out));
+  }, [runtime, trainingReadOnly]);
+  reloadThreadHistoryRef.current = reloadThreadHistory;
+  const previousBackgroundRunRef = useRef({ threadId: "", running: false });
+  useEffect(() => {
+    const previous = previousBackgroundRunRef.current;
+    previousBackgroundRunRef.current = { threadId: activeRemoteThreadId, running: activeThreadBackgroundRunning };
+    if (
+      previous.threadId === activeRemoteThreadId &&
+      previous.running &&
+      !activeThreadBackgroundRunning &&
+      !activeRunThreadIds[activeRemoteThreadId]
+    ) {
+      const threadId = activeRemoteThreadId;
+      setBackgroundHistorySyncThreadId(threadId);
+      void reloadThreadHistory(threadId)
+        .catch(() => undefined)
+        .finally(() => setBackgroundHistorySyncThreadId((current) => (current === threadId ? "" : current)));
+    }
+  }, [activeRemoteThreadId, activeRunThreadIds, activeThreadBackgroundRunning, reloadThreadHistory]);
 
   const openWorkspaceTask = useCallback(async (task: PortalWorkspaceTask | { id: string; folder_id?: string | null }) => {
     const folderId = task.folder_id || selectedWorkspaceFolderId;
@@ -11002,6 +11166,8 @@ export function PortalShell(props: {
         <PortalInlineErrorBanner message={externalInlineErrorText} />
       )}
       <RunningThreadIdsContext.Provider value={runningThreadIds}>
+        <PortalBackgroundRunContext.Provider value={backgroundRunContextValue}>
+        <UserInputReadOnlyContext.Provider value={threadReadOnly}>
         <ThreadPublicShareControls
           threadId={activeRemoteThreadId}
           disabled={threadReadOnly}
@@ -11108,6 +11274,8 @@ export function PortalShell(props: {
           </AnswerFeedbackConfigContext.Provider>
         </ActiveThreadIdContext.Provider>
         </ThreadPublicShareControls>
+        </UserInputReadOnlyContext.Provider>
+        </PortalBackgroundRunContext.Provider>
       </RunningThreadIdsContext.Provider>
       {sharedThreadReadonly && !trainingReadOnly ? (
         <div className="thread-readonly-shield" aria-hidden="true">

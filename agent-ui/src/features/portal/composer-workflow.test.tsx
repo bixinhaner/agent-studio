@@ -184,6 +184,34 @@ describe("portal composer workflow controller", () => {
     expect(result.current.contextValue.queue.map((item) => item.text)).toEqual(["queued after stop"]);
   });
 
+  it("puts a send rejected by a still-running response back at the head of the queue", () => {
+    const { result } = renderHook(() =>
+      usePortalComposerWorkflowController({
+        userId: "user-1",
+        activeThreadId: "thread-1",
+        onSteer: unusedSteer
+      })
+    );
+
+    act(() => {
+      const item = result.current.contextValue.enqueue("dispatched from queue");
+      result.current.contextValue.enqueue("next");
+      result.current.contextValue.beginDispatch(item.id);
+      result.current.requeueRejectedSend("thread-1", "dispatched from queue");
+    });
+    expect(result.current.contextValue.queue.map((item) => [item.text, item.status])).toEqual([
+      ["dispatched from queue", "queued"],
+      ["next", "queued"]
+    ]);
+
+    act(() => result.current.requeueRejectedSend("thread-1", "typed directly"));
+    expect(result.current.contextValue.queue.map((item) => item.text)).toEqual([
+      "typed directly",
+      "dispatched from queue",
+      "next"
+    ]);
+  });
+
   it("unpauses the queue when its failed instruction is removed", () => {
     const { result } = renderHook(() =>
       usePortalComposerWorkflowController({

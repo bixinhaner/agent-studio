@@ -11,6 +11,12 @@ import {
   loadInlineVisualization
 } from "../artifacts/inline-visualization-artifact.js";
 import { getDbClient } from "../db/client.js";
+import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
+import {
+  attachTranscriptInteractions,
+  type TranscriptSteerEvent,
+  type TranscriptUserInputRequest
+} from "./conversation-transcript-interactions.js";
 import { ThreadArtifactRepository, type ThreadArtifactRepositoryDb } from "../persistence/thread-artifact-repository.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
 import { sendFileContent } from "../files/raw-content-response.js";
@@ -226,6 +232,10 @@ type ConversationTranscriptMessage = {
     readAt: string | null;
   }>;
   fileChangeData?: unknown[];
+  /** Mid-run guidance the user sent while this response was running. */
+  steerEvents?: TranscriptSteerEvent[];
+  /** "Ask while working" question cards and how each one was answered. */
+  userInputRequests?: TranscriptUserInputRequest[];
   turnStatus: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason: string | null;
   parentId: string | null;
@@ -1468,9 +1478,13 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
 export function buildTranscriptMessages(
   threadId: string,
   messages: StoredMessageItem[],
-  options: { activeTurn?: boolean } = {}
+  options: { activeTurn?: boolean; steerEvents?: PortalSteerEventRecord[] } = {}
 ): ConversationTranscriptMessage[] {
-  const transcript = messages.map((item, index) => toTranscriptMessage(threadId, item, index));
+  const transcript = attachTranscriptInteractions(
+    messages.map((item, index) => toTranscriptMessage(threadId, item, index)),
+    messages.map((item) => item.message),
+    options.steerEvents
+  );
   return transcript.map((message, index) => {
     if (message.role !== "user") return message;
     const nextUserIndex = transcript.findIndex((candidate, candidateIndex) => (
@@ -1963,6 +1977,7 @@ export function createConversationAuditRouter(options: {
   db?: ConversationAuditDb;
   getDb?: () => ConversationAuditDb;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
+  listSteerEvents?: (threadId: string) => Promise<PortalSteerEventRecord[]>;
   productFeedbackReply?: ProductFeedbackReplyService;
   /** Serve the conversation list from the thread_audit_summaries table (requires raw SQL support). */
   summaryIndex?: boolean;
@@ -2688,9 +2703,19 @@ export function createConversationAuditRouter(options: {
       const [binding] = bindings;
       const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
       const agentModeMap = new Map(agentModeRows.map((item) => [item.id, item] as const));
-      const activeTurn = await options.isThreadActive?.(thread.id);
+      const [activeTurn, steerEvents] = await Promise.all([
+        options.isThreadActive?.(thread.id),
+        Promise.resolve(options.listSteerEvents?.(thread.id)).catch((error) => {
+          console.warn("conversation audit failed to load steer events", {
+            threadId: thread.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+          return undefined;
+        })
+      ]);
       const transcript = buildTranscriptMessages(thread.id, thread.messages, {
-        activeTurn: activeTurn === true
+        activeTurn: activeTurn === true,
+        steerEvents: steerEvents ?? []
       });
 
       res.json({

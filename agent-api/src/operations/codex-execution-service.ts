@@ -8,6 +8,11 @@ import {
 import type { CodexMemoryRunInput, CodexMemoryRunRecorder } from "../codex-memory/engine.js";
 import type { CodexRunStreamOptions } from "../codex-runtime.js";
 import { applyEnterpriseContextToPrompt, type EnterpriseContextResolution } from "../enterprise-context-service.js";
+import {
+  codexUserInputRequestFromItem,
+  codexUserInputRequestToContentPart,
+  type CodexUserInputRequest
+} from "./codex-user-input-request.js";
 
 export type CodexStreamCompletionInput = Parameters<typeof streamRuntimeCompletionWithBestEffortUsage>[0];
 export type CodexCollectCompletionInput = Parameters<typeof collectRuntimeCompletion>[0];
@@ -70,6 +75,8 @@ export type CodexRuntimeEventProjection = {
     phase?: string;
   };
   toolCall?: CodexProjectedToolCall;
+  /** request_user_input_async question carried by a completed agent message. */
+  userInputRequest?: CodexUserInputRequest;
   traceRows: CodexTraceRow[];
   liveCommentaryEntries?: CodexCommentaryEntry[];
 };
@@ -87,11 +94,18 @@ export type CodexRunProjectionFinalized = {
   commentaryEntries: CodexCommentaryEntry[];
   liveCommentaryEntries: CodexCommentaryEntry[];
   traceRows: CodexTraceRow[];
+  userInputRequests: CodexUserInputRequest[];
   contentParts: Record<string, unknown>[];
 };
 export type CodexRunProjectionOptions = {
   now?: () => number;
   streamAnswerDeltas?: boolean;
+  /**
+   * Channels with an interactive question card (portal) capture request_user_input_async
+   * questions as dedicated content parts instead of answer/commentary text. Other channels
+   * keep the question as plain text so the user can still reply in their next message.
+   */
+  captureUserInputRequests?: boolean;
 };
 
 type RuntimeStreamSource<TThread> = {
@@ -333,6 +347,8 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
 
   if (itemType === "agent_message" && isCompleted) {
     const text = trimOrUndefined(item?.text) ?? trimOrUndefined(event.text);
+    const userInputRequest = codexUserInputRequestFromItem(item);
+    if (userInputRequest) projection.userInputRequest = userInputRequest;
     if (text) {
       projection.completedAgentMessage = {
         id: itemId,
@@ -586,6 +602,7 @@ export class CodexRunProjection {
   private readonly traceRows: CodexTraceRow[] = [];
   private readonly localToolParts = new Map<string, Record<string, unknown>>();
   private readonly commentaryEntries: CodexCommentaryEntry[] = [];
+  private readonly userInputRequests = new Map<string, CodexUserInputRequest>();
   private readonly agentMessagePhaseById = new Map<string, string>();
   private pendingLiveCommentaryEntry: CodexCommentaryEntry | undefined;
   private commentarySeq = 0;
@@ -594,6 +611,15 @@ export class CodexRunProjection {
 
   push(event: RuntimeStreamEvent): CodexRuntimeEventProjection {
     const projection = projectCodexRuntimeEvent(event);
+    if (projection.userInputRequest && this.options.captureUserInputRequests) {
+      const request = { ...projection.userInputRequest, askedAt: new Date(this.now()).toISOString() };
+      projection.userInputRequest = request;
+      this.userInputRequests.set(request.id, request);
+      // The question is rendered as its own card, not as answer or commentary text.
+      projection.completedAgentMessage = undefined;
+      projection.answerDelta = undefined;
+      return projection;
+    }
     const agentMessagePhase = this.resolveAgentMessagePhase(projection);
     if (agentMessagePhase) {
       projection.agentMessagePhase = agentMessagePhase;
@@ -668,11 +694,18 @@ export class CodexRunProjection {
     const traceRows = normalizeTraceRows(this.traceRows, input);
     const commentaryPart = codexCommentaryEntriesToContentPart(commentaryEntries);
     const tracePart = codexTraceRowsToContentPart(traceRows);
+    const userInputRequests = [...this.userInputRequests.values()];
     return {
       commentaryEntries,
       liveCommentaryEntries,
       traceRows,
-      contentParts: [commentaryPart, tracePart, ...this.localToolParts.values()].filter((part): part is Record<string, unknown> => Boolean(part))
+      userInputRequests,
+      contentParts: [
+        commentaryPart,
+        tracePart,
+        ...this.localToolParts.values(),
+        ...userInputRequests.map(codexUserInputRequestToContentPart)
+      ].filter((part): part is Record<string, unknown> => Boolean(part))
     };
   }
 
@@ -680,6 +713,7 @@ export class CodexRunProjection {
     this.traceRows.length = 0;
     this.localToolParts.clear();
     this.commentaryEntries.length = 0;
+    this.userInputRequests.clear();
     this.pendingLiveCommentaryEntry = undefined;
     this.commentarySeq = 0;
     this.agentMessagePhaseById.clear();
