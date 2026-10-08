@@ -219,6 +219,7 @@ Shared runtime (admin console "上下文与记忆 → 共享运行环境"): ever
 - `agent-studio-runtime-gap-scan` (18:30 UTC, runs as the app user) writes `shared/state/runtime-gaps.json`: packages and commands agents were missing in the last 30 days. Use it to decide what to add to the lists.
 - `agent-studio-codex-home-dedupe` (19:00 UTC, runs as the app user) hard-links byte-identical files inside plugin version directories across all Codex homes (Codex installs remote plugins into every home separately and never edits a version directory in place), and removes `cache/remote_plugin_catalog` snapshots not refreshed for 7 days (Codex re-downloads them when needed). Result: `shared/state/codex-home-dedupe-last-run.json`. Preview with `--dry-run`.
 - `agent-studio-disk-usage-snapshot` (20:30 UTC) records disk usage and the size of each data area (one entry per day, 180 days) in `shared/state/disk-usage.json`; the console shows the trend, daily growth and which area grows.
+- Ubuntu unattended upgrades: the deploy installs `/etc/needrestart/conf.d/agent-studio.conf` so needrestart never restarts `pm2-<app user>.service` (that stopped every chat slot at once and interrupted running conversations as "system update"; the next deploy picks up the new libraries), and moves `apt-daily-upgrade.timer` from Ubuntu's 06:00 UTC to the quietest hour, 22:00 UTC.
 
 Shared caches are not cleaned automatically.
 

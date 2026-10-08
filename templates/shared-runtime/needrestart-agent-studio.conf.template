@@ -1,0 +1,6 @@
+# Installed by scripts/deploy-agent-studio.sh as /etc/needrestart/conf.d/agent-studio.conf.
+# After unattended security upgrades needrestart restarts services that still map an old
+# library. Restarting the PM2 service stops every chat slot at once and interrupts running
+# conversations ("system update"), so it is deferred here: the next deploy's blue-green
+# switch starts processes on the new libraries without interrupting anyone.
+$nrconf{override_rc}->{qr(^pm2-__APP_USER__\.service$)} = 0;

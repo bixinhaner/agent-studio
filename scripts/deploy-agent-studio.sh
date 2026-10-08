@@ -1458,6 +1458,38 @@ install_shared_runtime_maintenance() {
   done
 }
 
+# Unattended security upgrades must not restart the PM2 service (that stops every chat slot
+# at once and interrupts running conversations), and run in the quietest hour.
+install_os_update_policy() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  local template_dir="$script_dir/../templates/shared-runtime" rendered timer_changed=0
+
+  if [[ -d /etc/needrestart ]]; then
+    rendered="$(mktemp)"
+    sed -e "s#__APP_USER__#$APP_USER#g" "$template_dir/needrestart-agent-studio.conf.template" > "$rendered"
+    if ! run_as_root cmp -s "$rendered" /etc/needrestart/conf.d/agent-studio.conf 2>/dev/null; then
+      run_as_root install -d -m 755 /etc/needrestart/conf.d
+      run_as_root install -o root -g root -m 644 "$rendered" /etc/needrestart/conf.d/agent-studio.conf
+      log_info "Unattended upgrades no longer restart pm2-$APP_USER.service"
+    fi
+    rm -f "$rendered"
+  fi
+
+  if systemctl list-unit-files apt-daily-upgrade.timer >/dev/null 2>&1; then
+    local destination=/etc/systemd/system/apt-daily-upgrade.timer.d/agent-studio.conf
+    if ! run_as_root cmp -s "$template_dir/apt-daily-upgrade-agent-studio.conf.template" "$destination" 2>/dev/null; then
+      run_as_root install -d -m 755 "$(dirname "$destination")"
+      run_as_root install -o root -g root -m 644 "$template_dir/apt-daily-upgrade-agent-studio.conf.template" "$destination"
+      timer_changed=1
+    fi
+    if [[ "$timer_changed" == "1" ]]; then
+      run_as_root systemctl daemon-reload
+      run_as_root systemctl restart apt-daily-upgrade.timer || log_warn "failed to reschedule apt-daily-upgrade.timer"
+      log_info "Unattended upgrades rescheduled to 22:00 UTC"
+    fi
+  fi
+}
+
 check_plugin_runtime() {
   local roots=(
     "$APP_HOME/.codex"
@@ -1804,6 +1836,7 @@ restart_targets() {
   render_pm2_ecosystem
   install_pm2_logrotate
   install_shared_runtime_maintenance
+  install_os_update_policy
 
   if deploy_restarts_admin; then
     restart_role_with_drain admin

@@ -1,0 +1,9 @@
+# Installed by scripts/deploy-agent-studio.sh as
+# /etc/systemd/system/apt-daily-upgrade.timer.d/agent-studio.conf.
+# Ubuntu installs security upgrades at 06:00-07:00 UTC by default, the busiest hour of
+# portal traffic; move them to the quietest hour (22:00 UTC) so service restarts that
+# needrestart still performs (e.g. PostgreSQL) land outside working hours.
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 22:00
+RandomizedDelaySec=30m
