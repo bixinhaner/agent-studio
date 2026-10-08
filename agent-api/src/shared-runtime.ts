@@ -261,6 +261,10 @@ export type CodexHomeDedupeRun = {
   reclaimedBytes: number;
   pluginBytesBefore: number;
   pluginUniqueBytes: number;
+  /** Size of all plugin files counted per home, i.e. without de-duplication. */
+  pluginLogicalBytes: number;
+  /** Space the plugin files actually occupy after this run. */
+  pluginAllocatedBytes: number;
   catalogRetentionDays: number;
   catalogFilesRemoved: number;
   catalogFreedBytes: number;
@@ -650,6 +654,8 @@ async function readCodexHomeDedupe(paths: SharedRuntimePaths): Promise<CodexHome
     reclaimedBytes: toNumber(raw.reclaimedBytes),
     pluginBytesBefore: toNumber(raw.pluginBytesBefore),
     pluginUniqueBytes: toNumber(raw.pluginUniqueBytes),
+    pluginLogicalBytes: toNumber(raw.pluginLogicalBytes),
+    pluginAllocatedBytes: toNumber(raw.pluginAllocatedBytes),
     catalogRetentionDays: toNumber(raw.catalogRetentionDays),
     catalogFilesRemoved: toNumber(raw.catalogFilesRemoved),
     catalogFreedBytes: toNumber(raw.catalogFreedBytes),

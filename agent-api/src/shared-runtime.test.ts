@@ -248,7 +248,15 @@ describe("shared runtime", () => {
     );
     await fs.writeFile(
       path.join(paths.stateRoot, "codex-home-dedupe-last-run.json"),
-      JSON.stringify({ finishedAt: "2026-10-12T19:05:00Z", homes: 516, filesLinked: 81914, reclaimedBytes: 10 * GB, catalogFilesRemoved: 340 })
+      JSON.stringify({
+        finishedAt: "2026-10-12T19:05:00Z",
+        homes: 516,
+        filesLinked: 81914,
+        reclaimedBytes: 10 * GB,
+        pluginLogicalBytes: 11 * GB,
+        pluginAllocatedBytes: 0.1 * GB,
+        catalogFilesRemoved: 340
+      })
     );
 
     const { disk, codexHomeDedupe } = (await inspectSharedRuntime({ settings: enabledSettings, paths })).storage;
@@ -263,7 +271,15 @@ describe("shared runtime", () => {
       { key: "sessions", label: "会话目录", bytes: 150 * GB, change7dBytes: null },
       { key: "database", label: "数据库", bytes: null, change7dBytes: null }
     ]);
-    expect(codexHomeDedupe).toMatchObject({ homes: 516, filesLinked: 81914, reclaimedBytes: 10 * GB, catalogFilesRemoved: 340, errors: 0 });
+    expect(codexHomeDedupe).toMatchObject({
+      homes: 516,
+      filesLinked: 81914,
+      reclaimedBytes: 10 * GB,
+      pluginLogicalBytes: 11 * GB,
+      pluginAllocatedBytes: 0.1 * GB,
+      catalogFilesRemoved: 340,
+      errors: 0
+    });
   });
 
   it("reports no growth until a second day is recorded and none when usage shrinks", async () => {

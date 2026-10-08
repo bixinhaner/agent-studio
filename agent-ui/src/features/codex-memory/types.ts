@@ -139,6 +139,8 @@ export type CodexHomeDedupeRun = {
   reclaimedBytes: number;
   pluginBytesBefore: number;
   pluginUniqueBytes: number;
+  pluginLogicalBytes: number;
+  pluginAllocatedBytes: number;
   catalogRetentionDays: number;
   catalogFilesRemoved: number;
   catalogFreedBytes: number;

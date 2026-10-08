@@ -48,7 +48,7 @@ def find_homes(root):
 
 
 def plugin_files(home, cutoff):
-    """Yields (relative key, path, stat) for files inside plugin version directories."""
+    """Yields (relative key, path, stat, settled) for files inside plugin version directories."""
     cache = os.path.join(home, "plugins", "cache")
     try:
         marketplaces = os.listdir(cache)
@@ -76,9 +76,8 @@ def plugin_files(home, cutoff):
                             continue
                         if not os.path.isfile(path) or os.path.islink(path) or st.st_size == 0:
                             continue
-                        if st.st_mtime > cutoff or st.st_ctime > cutoff:
-                            continue
-                        yield os.path.relpath(path, cache), path, st
+                        settled = st.st_mtime <= cutoff and st.st_ctime <= cutoff
+                        yield os.path.relpath(path, cache), path, st, settled
 
 
 def sha256(path):
@@ -113,9 +112,15 @@ def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
             error_samples.append(f"{path.split('/plugins/cache/')[-1]}: {type(error).__name__} {error.strerror or error}")
 
     groups = defaultdict(list)
+    # What the plugin files would take without de-duplication versus what they occupy now.
+    logical_bytes = 0
+    allocated = {}
     for home in homes:
-        for key, path, st in plugin_files(home, cutoff):
-            groups[(key, st.st_size, st.st_mode, st.st_uid, st.st_gid, st.st_dev)].append((path, st))
+        for key, path, st, settled in plugin_files(home, cutoff):
+            logical_bytes += st.st_blocks * 512
+            allocated[(st.st_dev, st.st_ino)] = st.st_blocks * 512
+            if settled:
+                groups[(key, st.st_size, st.st_mode, st.st_uid, st.st_gid, st.st_dev)].append((path, st))
 
     linked = reclaimed = errors = 0
     total_bytes = unique_bytes = 0
@@ -168,6 +173,8 @@ def dedupe_plugins(homes, dry_run, settle_seconds=SETTLE_SECONDS):
         "reclaimedBytes": reclaimed,
         "pluginBytesBefore": total_bytes,
         "pluginUniqueBytes": unique_bytes,
+        "pluginLogicalBytes": logical_bytes,
+        "pluginAllocatedBytes": max(0, sum(allocated.values()) - reclaimed),
         "errors": errors,
         "errorSamples": error_samples,
     }

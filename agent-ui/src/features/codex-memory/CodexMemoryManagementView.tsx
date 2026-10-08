@@ -1871,10 +1871,23 @@ export function CodexMemoryManagementView() {
               />
               <MemoryMetric
                 label="插件去重"
-                value={dedupe ? `回收 ${formatBytes(dedupe.reclaimedBytes + dedupe.catalogFreedBytes)}` : "尚未运行"}
+                value={
+                  !dedupe
+                    ? "尚未运行"
+                    : dedupe.pluginLogicalBytes > 0
+                      ? `节省 ${formatBytes(dedupe.pluginLogicalBytes - dedupe.pluginAllocatedBytes)}`
+                      : `回收 ${formatBytes(dedupe.reclaimedBytes + dedupe.catalogFreedBytes)}`
+                }
                 hint={
                   dedupe
-                    ? `${formatLocalDateTime(dedupe.finishedAt)} · 合并 ${formatCount(dedupe.filesLinked)} 个重复文件，删除 ${formatCount(dedupe.catalogFilesRemoved)} 个过期插件目录缓存`
+                    ? [
+                        dedupe.pluginLogicalBytes > 0
+                          ? `${formatCount(dedupe.homes)} 个会话的插件文件 ${formatBytes(dedupe.pluginLogicalBytes)}，实际占用 ${formatBytes(dedupe.pluginAllocatedBytes)}`
+                          : null,
+                        `${formatLocalDateTime(dedupe.finishedAt)} 合并 ${formatCount(dedupe.filesLinked)} 个文件，删除 ${formatCount(dedupe.catalogFilesRemoved)} 个过期目录缓存`
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
                     : "每天自动合并各会话重复的插件文件"
                 }
               />
