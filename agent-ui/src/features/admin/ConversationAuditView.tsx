@@ -2,7 +2,9 @@ import { Alert, Button, Empty, Input, InputNumber, Modal, Pagination, Select, Sp
 import { createPortal } from "react-dom";
 import {
   Activity,
+  Brain,
   Clock3,
+  GitBranch,
   Gift,
   HardDrive,
   Mail,
@@ -86,6 +88,7 @@ import type {
   AdminConversationTranscriptProcessRow,
   AdminConversationTranscriptMessage,
   AdminConversationTranscriptSteerEvent,
+  AdminConversationTranscriptTurnOutcome,
   AdminConversationTranscriptUserInputRequest,
   AdminConversationUser,
   AdminProductFeedbackDetailResponse,
@@ -99,6 +102,11 @@ import type {
   AdminProductFeedbackTypeFilter
 } from "./types";
 import { ProductFeedbackReplyModal } from "./ProductFeedbackReplyModal";
+import {
+  buildTranscriptProcessTimeline,
+  layoutTranscript,
+  type TranscriptTimelineRow
+} from "./conversation-transcript-layout";
 
 type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
@@ -534,6 +542,13 @@ function attachmentKindLabel(kind: AdminConversationTranscriptAttachment["kind"]
   return "文件";
 }
 
+function timelineRowLabel(row: TranscriptTimelineRow): string {
+  if (row.source === "question") return "助手提问";
+  if (row.source === "answer") return "用户回答";
+  if (row.source === "steer") return "用户引导";
+  return processKindLabel(row.kind);
+}
+
 function processKindLabel(kind: AdminConversationTranscriptProcessRow["kind"]): string {
   if (kind === "reasoning") return "思考摘要";
   if (kind === "tool") return "工具";
@@ -861,11 +876,15 @@ function resolveConversationAuditImageSrc(
   return "";
 }
 
+const INLINE_REFERENCE_HREF = /^(skill|attachment):[A-Za-z0-9%_.~-]+$/;
+
 export const conversationAuditMarkdownUrlTransform: UrlTransform = (url, key) => {
   const normalized = normalizeMarkdownDestination(url);
   if (key === "src" && (isAllowedInlineImageDataUrl(normalized) || isAllowedBlobImageUrl(normalized))) {
     return normalized;
   }
+  // Portal inline references (skill chips / attachment chips) — rendered as chips, never navigated.
+  if (key === "href" && INLINE_REFERENCE_HREF.test(normalized)) return normalized;
   return defaultUrlTransform(url);
 };
 
@@ -896,6 +915,21 @@ function ConversationAuditMarkdownLink(props: {
   [key: string]: unknown;
 }) {
   const { href, className, children, threadId, workspace, ...rest } = props;
+  const inlineReference = typeof href === "string" ? INLINE_REFERENCE_HREF.exec(href.trim()) : null;
+  if (inlineReference) {
+    const isSkill = inlineReference[1] === "skill";
+    const Icon = isSkill ? Package : Paperclip;
+    return (
+      <span
+        className={`admin-inline-reference-chip is-${inlineReference[1]}`}
+        title={isSkill ? "用户在输入框中指定的技能" : "用户在正文中引用的附件（文件见消息下方）"}
+      >
+        <Icon size={12} aria-hidden="true" />
+        <span className="admin-inline-reference-kind">{isSkill ? "技能" : "附件"}</span>
+        <span className="admin-inline-reference-name">{children}</span>
+      </span>
+    );
+  }
   const inlineVisualizationFile = threadId ? resolveInlineVisualizationFile(href) : "";
   if (threadId && inlineVisualizationFile) {
     const query = new URLSearchParams({ file: inlineVisualizationFile });
@@ -1160,7 +1194,7 @@ function TranscriptProcessModal(props: {
   onClose(): void;
   role: AdminConversationTranscriptMessage["role"];
   createdAt: string | null;
-  processRows: AdminConversationTranscriptProcessRow[];
+  processRows: TranscriptTimelineRow[];
   threadId: string;
   workspace: string | null;
 }) {
@@ -1189,7 +1223,9 @@ function TranscriptProcessModal(props: {
                   <span className={`trace-node trace-node-${row.kind} ${shouldOpen ? "trace-node-active" : ""}`} />
                   <details className={`trace-card trace-step ${shouldOpen ? "trace-step-active" : ""}`} open={shouldOpen}>
                     <summary className="trace-card-head trace-step-summary">
-                      <span className={`trace-pill trace-pill-${row.kind}`}>{processKindLabel(row.kind)}</span>
+                      <span className={`trace-pill trace-pill-${row.kind} ${row.source !== "process" ? "is-interaction" : ""}`}>
+                        {timelineRowLabel(row)}
+                      </span>
                       <span className="trace-item-title">{row.title}</span>
                       {row.at ? <span className="trace-item-time">{formatLocalDateTime(row.at)}</span> : null}
                     </summary>
@@ -1364,11 +1400,76 @@ function TranscriptSteerEventList(props: { events: AdminConversationTranscriptSt
   );
 }
 
+function TranscriptTurnOutcomePanel(props: { outcome: AdminConversationTranscriptTurnOutcome }) {
+  const { outcome } = props;
+  const codes = [outcome.code, outcome.reasonCode && outcome.reasonCode !== outcome.code?.toLowerCase() ? outcome.reasonCode : null]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <section className={`admin-turn-outcome is-${outcome.kind}`} aria-label="本轮未完成原因">
+      <div className="admin-turn-outcome-head">
+        <span className="admin-turn-outcome-label">{outcome.label}</span>
+        {codes ? <code className="admin-turn-outcome-code">{codes}</code> : null}
+        {outcome.autoRecoveryAttempted ? <span className="admin-turn-outcome-tag">已自动重试一次</span> : null}
+      </div>
+      <p className="admin-turn-outcome-reason">{outcome.reason}</p>
+      {outcome.rawDetail ? (
+        <details className="admin-turn-outcome-raw">
+          <summary>原始信息</summary>
+          <pre>{outcome.rawDetail}</pre>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function TranscriptFeedbackBadges(props: { feedback: AdminConversationFeedback[] }) {
+  if (props.feedback.length === 0) return null;
+  return (
+    <div className="admin-message-feedback-list" aria-label="用户对这条回答的反馈">
+      {props.feedback.map((item) => (
+        <div key={item.id} className={`admin-message-feedback is-${item.type}`}>
+          {item.type === "positive" ? <ThumbsUp size={13} aria-hidden="true" /> : <ThumbsDown size={13} aria-hidden="true" />}
+          <span className="admin-message-feedback-label">{item.type === "positive" ? "用户点赞" : "用户点踩"}</span>
+          {item.comment ? <span className="admin-message-feedback-comment">{item.comment}</span> : null}
+          <span className="admin-message-feedback-time">{formatLocalDateTime(item.updatedAt || item.createdAt)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TranscriptAlternateBranches(props: {
+  messages: AdminConversationTranscriptMessage[];
+  forceOpen: boolean;
+  renderMessage(message: AdminConversationTranscriptMessage): ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const expanded = open || props.forceOpen;
+  const userCount = props.messages.filter((message) => message.role === "user").length;
+  const assistantCount = props.messages.filter((message) => message.role === "assistant").length;
+  const counts = [userCount ? `${userCount} 条用户消息` : "", assistantCount ? `${assistantCount} 条助手回复` : ""]
+    .filter(Boolean)
+    .join("、");
+  return (
+    <section className={`admin-branch-group ${expanded ? "is-open" : ""}`} aria-label="其他分支版本">
+      <button type="button" className="admin-branch-group-toggle" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
+        <GitBranch size={14} aria-hidden="true" />
+        <span>其他版本：{counts || `${props.messages.length} 条消息`}</span>
+        <span className="admin-branch-group-hint">用户编辑、重新生成或运行中被拒的消息，portal 当前不显示</span>
+        <span className="admin-branch-group-action">{expanded ? "收起" : "展开"}</span>
+      </button>
+      {expanded ? <div className="admin-branch-group-body">{props.messages.map(props.renderMessage)}</div> : null}
+    </section>
+  );
+}
+
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
   threadId: string;
   workspace: string | null;
+  feedback?: AdminConversationFeedback[];
   onMount(node: HTMLElement | null): void;
 }) {
   const [processModalOpen, setProcessModalOpen] = useState(false);
@@ -1377,12 +1478,19 @@ function TranscriptMessageBubble(props: {
   const isAssistant = props.message.role === "assistant";
   const attachmentCount = props.message.attachments.length;
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
+  const timelineRows = useMemo(
+    () => (isAssistant ? buildTranscriptProcessTimeline(props.message) : []),
+    [isAssistant, props.message]
+  );
+  const turnOutcome = isAssistant ? props.message.turnOutcome : undefined;
+  const branch = props.message.branch;
+  const feedback = props.feedback ?? [];
   const instructionReads = Array.isArray(props.message.instructionReads) ? props.message.instructionReads : [];
   const fileChanges = collectCodexFileChanges(props.message.fileChangeData)
     .filter((change) => change.canPreview || change.canDownload);
   const statusLabel = props.message.turnStatus === "completed"
     ? ""
-    : turnStatusLabel(props.message.turnStatus, props.message.role);
+    : turnOutcome?.label || turnStatusLabel(props.message.turnStatus, props.message.role);
   const userInputRequests = isAssistant && Array.isArray(props.message.userInputRequests) ? props.message.userInputRequests : [];
   // Steers that answered a question card are shown inside that card, like in the portal.
   const answeredRequestIds = new Set(
@@ -1405,6 +1513,14 @@ function TranscriptMessageBubble(props: {
       >
         <div className="admin-chat-meta">
           <span>{roleLabel(props.message.role)} • {formatLocalDateTime(props.message.createdAt)}</span>
+          {branch && branch.siblingCount > 1 ? (
+            <span
+              className={`admin-chat-branch-tag ${branch.active ? "" : "is-alternate"}`}
+              title={branch.active ? "用户在 portal 中看到的是这个版本，可通过版本切换查看其他版本" : "portal 当前未显示这个版本"}
+            >
+              版本 {branch.siblingIndex}/{branch.siblingCount}
+            </span>
+          ) : null}
           {statusLabel ? (
             <span
               className={`admin-chat-turn-status ${turnStatusClassName(props.message.turnStatus)}`}
@@ -1415,8 +1531,14 @@ function TranscriptMessageBubble(props: {
           ) : null}
         </div>
         <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
-          {isAssistant && (instructionReads.length > 0 || processRows.length > 0) ? (
+          {isAssistant && (instructionReads.length > 0 || timelineRows.length > 0 || props.message.memoryUsed) ? (
             <div className="admin-chat-bubble-context">
+              {props.message.memoryUsed ? (
+                <span className="admin-memory-chip" title="portal 显示“已参考你的记忆”：本次回答查阅了用户记忆">
+                  <Brain size={13} aria-hidden="true" />
+                  已参考用户记忆
+                </span>
+              ) : null}
               {instructionReads.length > 0 ? (
                 <div className="admin-instruction-read-summary">
                   <span className="admin-instruction-read-summary-label">指令已读取</span>
@@ -1431,14 +1553,14 @@ function TranscriptMessageBubble(props: {
                   </Button>
                 </div>
               ) : null}
-              {processRows.length > 0 ? (
+              {timelineRows.length > 0 ? (
                 <Button
                   type="text"
                   size="small"
                   className="admin-conversation-trace-btn"
                   onClick={() => setProcessModalOpen(true)}
                 >
-                  查看过程 · {processRows.length}
+                  查看过程 · {timelineRows.length}
                 </Button>
               ) : null}
             </div>
@@ -1454,6 +1576,7 @@ function TranscriptMessageBubble(props: {
                   : "[无文本内容]"}
             </span>
           )}
+          {turnOutcome && props.message.turnStatus !== "completed" ? <TranscriptTurnOutcomePanel outcome={turnOutcome} /> : null}
           {userInputRequests.map((request) => (
             <TranscriptUserInputRequestCard key={request.id} request={request} />
           ))}
@@ -1467,14 +1590,15 @@ function TranscriptMessageBubble(props: {
             <ConversationAuditArtifactFiles changes={fileChanges} threadId={props.threadId} />
           ) : null}
         </div>
+        <TranscriptFeedbackBadges feedback={feedback} />
       </div>
-      {isAssistant && processRows.length > 0 ? (
+      {isAssistant && timelineRows.length > 0 ? (
         <TranscriptProcessModal
           open={processModalOpen}
           onClose={() => setProcessModalOpen(false)}
           role={props.message.role}
           createdAt={props.message.createdAt}
-          processRows={processRows}
+          processRows={timelineRows}
           threadId={props.threadId}
           workspace={props.workspace}
         />
@@ -1530,10 +1654,37 @@ function ConversationDetail(props: {
   const latestFeedbackPreview = latestFeedbackText.length > 72 ? `${latestFeedbackText.slice(0, 71)}…` : latestFeedbackText;
   const agentModeLabel = conversationAgentModeLabel(conversation.agentMode);
 
+  const transcriptLayout = layoutTranscript(transcript.messages);
+  const feedbackByMessageId = new Map<string, AdminConversationFeedback[]>();
+  for (const item of conversation.feedback) {
+    if (!item.messageId) continue;
+    feedbackByMessageId.set(item.messageId, [...(feedbackByMessageId.get(item.messageId) ?? []), item]);
+  }
+  const renderTranscriptMessage = (msg: AdminConversationTranscriptMessage) => (
+    <TranscriptMessageBubble
+      key={msg.id}
+      message={msg}
+      highlighted={highlightedMessageId === msg.id}
+      threadId={conversation.id}
+      workspace={conversation.workspace || null}
+      feedback={feedbackByMessageId.get(msg.id)}
+      onMount={(node) => {
+        if (node) {
+          messageRefs.current.set(msg.id, node);
+        } else {
+          messageRefs.current.delete(msg.id);
+        }
+      }}
+    />
+  );
+
   const focusFeedbackMessage = (messageId: string | null) => {
     if (!messageId) return;
     setHighlightedMessageId(messageId);
-    messageRefs.current.get(messageId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Messages on other branches mount only after their folded group opens.
+    window.requestAnimationFrame(() => {
+      messageRefs.current.get(messageId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   return (
@@ -1799,20 +1950,12 @@ function ConversationDetail(props: {
         {transcript.messages.length === 0 ? (
            <Empty description="暂无消息内容" />
         ) : (
-          transcript.messages.map((msg) => (
-            <TranscriptMessageBubble 
-              key={msg.id} 
-              message={msg} 
-              highlighted={highlightedMessageId === msg.id} 
-              threadId={conversation.id}
-              workspace={conversation.workspace || null}
-              onMount={(node) => {
-                if (node) {
-                  messageRefs.current.set(msg.id, node);
-                } else {
-                  messageRefs.current.delete(msg.id);
-                }
-              }} 
+          transcriptLayout.map((item) => item.kind === "message" ? renderTranscriptMessage(item.message) : (
+            <TranscriptAlternateBranches
+              key={`alternates-${item.anchorId ?? "unanchored"}`}
+              messages={item.messages}
+              forceOpen={item.messages.some((message) => message.id === highlightedMessageId)}
+              renderMessage={renderTranscriptMessage}
             />
           ))
         )}

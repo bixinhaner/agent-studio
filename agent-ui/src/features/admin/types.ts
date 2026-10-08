@@ -494,9 +494,40 @@ export type AdminConversationTranscriptMessage = {
   userInputRequests?: AdminConversationTranscriptUserInputRequest[];
   turnStatus?: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason?: string | null;
+  /** Concrete stop/failure cause for unfinished assistant turns. */
+  turnOutcome?: AdminConversationTranscriptTurnOutcome;
+  /** The portal showed "used your memory" on this answer. */
+  memoryUsed?: boolean;
+  /** Mirrors the portal's visible branch; absent for legacy/unresolvable graphs. */
+  branch?: AdminConversationTranscriptBranch;
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
+};
+
+export type AdminConversationTranscriptBranch = {
+  active: boolean;
+  siblingIndex: number;
+  siblingCount: number;
+  divergesFromId: string | null;
+};
+
+export type AdminConversationTranscriptTurnOutcome = {
+  kind:
+    | "user_stopped"
+    | "auto_closed"
+    | "system_update"
+    | "deployment_drain"
+    | "ai_service_busy"
+    | "auto_recovery_exhausted"
+    | "runtime_error"
+    | "unknown";
+  label: string;
+  reason: string;
+  code: string | null;
+  reasonCode: string | null;
+  rawDetail: string | null;
+  autoRecoveryAttempted: boolean;
 };
 
 export type AdminConversationDetailResponse = {

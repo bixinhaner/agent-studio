@@ -28,6 +28,17 @@ describe("ConversationAuditMarkdown", () => {
     expect(container.textContent).toContain("只读预览");
   });
 
+  it("renders portal skill and attachment references as chips instead of links", () => {
+    const { container } = render(
+      <ConversationAuditMarkdown threadId="thread-9" text={"用 [周报助手](skill:weekly-report) 整理 [Q3.xlsx](attachment:att_1) 的数据"} />
+    );
+    const skill = container.querySelector(".admin-inline-reference-chip.is-skill");
+    const attachment = container.querySelector(".admin-inline-reference-chip.is-attachment");
+    expect(skill?.textContent).toBe("技能周报助手");
+    expect(attachment?.textContent).toBe("附件Q3.xlsx");
+    expect(container.querySelector("a")).toBeNull();
+  });
+
   it("drops inline visualization directives when no thread is available", () => {
     const { container } = render(
       <ConversationAuditMarkdown text={'前文\n\n::codex-inline-vis{file="clt.html"}\n\n后文'} />

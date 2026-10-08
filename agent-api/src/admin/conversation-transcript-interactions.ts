@@ -62,7 +62,11 @@ function steerOut(event: PortalSteerEventRecord): TranscriptSteerEvent {
 export function attachTranscriptInteractions<T extends TranscriptMessageLike>(
   transcript: T[],
   rawMessages: unknown[],
-  steerEvents: PortalSteerEventRecord[] = []
+  steerEvents: PortalSteerEventRecord[] = [],
+  options: {
+    /** Branch-aware override; defaults to "any user message later in the list". */
+    hasLaterUserMessage?: (message: T, index: number) => boolean;
+  } = {}
 ): T[] {
   const assistantIndexByParent = new Map<string, number>();
   transcript.forEach((message, index) => {
@@ -100,7 +104,9 @@ export function attachTranscriptInteractions<T extends TranscriptMessageLike>(
     if (message.role !== "assistant") return message;
     const requests = codexUserInputRequestsFromContent((rawMessages[index] as { content?: unknown } | undefined)?.content);
     if (!steers && requests.length === 0) return message;
-    const hasLaterUserMessage = transcript.slice(index + 1).some((candidate) => candidate.role === "user");
+    const hasLaterUserMessage = options.hasLaterUserMessage
+      ? options.hasLaterUserMessage(message, index)
+      : transcript.slice(index + 1).some((candidate) => candidate.role === "user");
     const userInputRequests = requests.map<TranscriptUserInputRequest>((request) => {
       const steer = acceptedSteerAnswers.get(request.id);
       const followUp = messageAnswers.get(request.id);

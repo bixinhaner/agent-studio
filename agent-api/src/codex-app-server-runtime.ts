@@ -223,6 +223,22 @@ function streamEventTurnId(event: CodexStreamEvent): string | undefined {
   return trimOrUndefined(asRecord(event.raw)?.turn_id);
 }
 
+/**
+ * App-server `error` notifications carry `{ error: { message, codexErrorInfo, additionalDetails } }`;
+ * older/test payloads put `message` at the top level. Keep the real cause so failure
+ * records and admin transcripts don't collapse into a generic "runtime error".
+ */
+function appServerErrorText(params: Record<string, unknown>): string | undefined {
+  const error = asRecord(params.error);
+  const message = trimOrUndefined(params.message) ?? trimOrUndefined(error?.message);
+  if (!message) return undefined;
+  const details = [
+    trimOrUndefined(error?.additionalDetails),
+    trimOrUndefined(error?.codexErrorInfo) ? `codexErrorInfo=${trimOrUndefined(error?.codexErrorInfo)}` : undefined
+  ].filter((value): value is string => Boolean(value) && value !== message);
+  return details.length > 0 ? `${message} (${details.join("; ")})` : message;
+}
+
 function isRetryableRuntimeError(event: CodexStreamEvent): boolean {
   if (event.type !== "error") return false;
   const raw = asRecord(event.raw);
@@ -832,7 +848,7 @@ function normalizeNotification(message: JsonRecord): CodexStreamEvent | undefine
   if (method === "error") {
     return {
       type: "error",
-      text: trimOrUndefined(params.message),
+      text: appServerErrorText(params),
       raw: {
         type: "error",
         ...params

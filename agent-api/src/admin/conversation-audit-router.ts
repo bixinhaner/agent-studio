@@ -17,6 +17,8 @@ import {
   type TranscriptSteerEvent,
   type TranscriptUserInputRequest
 } from "./conversation-transcript-interactions.js";
+import { childrenByParent, computeTranscriptBranches, type TranscriptBranchInfo } from "./conversation-transcript-branches.js";
+import { extractTranscriptTurnOutcome, type TranscriptTurnOutcome } from "./conversation-transcript-outcome.js";
 import { ThreadArtifactRepository, type ThreadArtifactRepositoryDb } from "../persistence/thread-artifact-repository.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
 import { sendFileContent } from "../files/raw-content-response.js";
@@ -238,6 +240,12 @@ type ConversationTranscriptMessage = {
   userInputRequests?: TranscriptUserInputRequest[];
   turnStatus: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason: string | null;
+  /** Concrete stop/failure cause for unfinished assistant turns. */
+  turnOutcome?: TranscriptTurnOutcome;
+  /** The portal showed "used your memory" on this answer. */
+  memoryUsed?: boolean;
+  /** Present when the thread head is known; mirrors the portal's visible branch. */
+  branch?: TranscriptBranchInfo;
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
@@ -871,7 +879,9 @@ export function extractMessageProcessRows(
       continue;
     }
 
-    if (hasTraceBatch) continue;
+    // Stop/failure audit rows are not part of trace batches; keep them so the
+    // timeline ends with what actually happened to the turn.
+    if (hasTraceBatch && trimOrUndefined(part.name) !== "codex_process_audit") continue;
     rows.push(...extractFallbackProcessRows([part]));
   }
 
@@ -1379,7 +1389,7 @@ type ConversationTurnStatus = Pick<ConversationTranscriptMessage, "turnStatus" |
 const USER_TURN_DISCONNECTED_REASON =
   "未找到对应助手消息；可能是请求失败、连接中断或历史记录缺失。";
 const USER_TURN_RUNNING_REASON = "运行时仍在处理该请求，助手回复完成后会自动更新。";
-const ASSISTANT_CANCELLED_REASON = "用户发送了新消息或取消了上一轮生成，本轮未完成。";
+const ASSISTANT_CANCELLED_REASON = "本轮在完成前被停止。";
 const ASSISTANT_FAILED_REASON = "运行时异常，用户侧已显示通用失败提示。";
 const ASSISTANT_INCOMPLETE_REASON = "助手回复未完整结束，可能是连接断开或运行中途停止。";
 const PERSISTED_RUNNING_STATUS_MAX_AGE_MS = 2 * 60 * 60_000;
@@ -1460,6 +1470,8 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
   const instructionReads = role === "assistant" ? extractMessageInstructionReads(normalizedMessage) : [];
   const fileChangeData = role === "assistant" ? extractMessageFileChangeData(normalizedMessage) : [];
   const turnStatus = projectConversationTurnStatus(normalizedMessage, role, { hasAssistantResponse: true });
+  const turnOutcome = role === "assistant" ? extractTranscriptTurnOutcome(normalizedMessage) : null;
+  const memoryUsed = role === "assistant" && messageUsedMemory(normalizedMessage);
   return {
     id,
     role,
@@ -1469,34 +1481,86 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
     ...(instructionReads.length > 0 ? { instructionReads } : {}),
     ...(fileChangeData.length > 0 ? { fileChangeData } : {}),
     ...turnStatus,
+    ...(turnOutcome && turnStatus.turnStatus !== "completed"
+      ? { turnOutcome, turnStatusReason: turnOutcome.reason }
+      : {}),
+    ...(memoryUsed ? { memoryUsed: true } : {}),
     parentId: item.parentId ?? null,
     createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(normalizedMessage),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
   };
 }
 
+function messageUsedMemory(message: unknown): boolean {
+  const parts = asRecord(message)?.content;
+  return Array.isArray(parts) && parts.some((entry) => {
+    const part = asRecord(entry);
+    return part?.type === "data" && part.name === "agent_studio_memory_context" && asRecord(part.data)?.used === true;
+  });
+}
+
 export function buildTranscriptMessages(
   threadId: string,
   messages: StoredMessageItem[],
-  options: { activeTurn?: boolean; steerEvents?: PortalSteerEventRecord[] } = {}
+  options: {
+    activeTurn?: boolean;
+    steerEvents?: PortalSteerEventRecord[];
+    /**
+     * Thread head. When provided, messages carry branch info (the portal's visible
+     * path vs. other versions) and turn status follows the message graph instead
+     * of list order, so edits/regenerations don't distort it.
+     */
+    headId?: string | null;
+  } = {}
 ): ConversationTranscriptMessage[] {
+  const base = messages.map((item, index) => toTranscriptMessage(threadId, item, index));
+  const graph = base.map((message) => ({ id: message.id, parentId: message.parentId }));
+  const branches = options.headId !== undefined ? computeTranscriptBranches(graph, options.headId) : null;
+  const children = branches ? childrenByParent(graph) : null;
+  const byId = new Map(base.map((message) => [message.id, message] as const));
+  const hasDescendantUser = (id: string): boolean => {
+    const stack = [...(children?.get(id) ?? [])];
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const next = stack.pop()!;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      if (byId.get(next)?.role === "user") return true;
+      stack.push(...(children?.get(next) ?? []));
+    }
+    return false;
+  };
   const transcript = attachTranscriptInteractions(
-    messages.map((item, index) => toTranscriptMessage(threadId, item, index)),
+    base,
     messages.map((item) => item.message),
-    options.steerEvents
+    options.steerEvents,
+    children ? { hasLaterUserMessage: (message) => hasDescendantUser(message.id) } : undefined
   );
+  const activeHeadIndex = branches
+    ? transcript.reduce((last, message, index) => (branches.get(message.id)?.active ? index : last), -1)
+    : transcript.length - 1;
   return transcript.map((message, index) => {
-    if (message.role !== "user") return message;
-    const nextUserIndex = transcript.findIndex((candidate, candidateIndex) => (
-      candidateIndex > index && candidate.role === "user"
-    ));
-    const searchEnd = nextUserIndex >= 0 ? nextUserIndex : transcript.length;
-    const hasAssistantResponse = transcript
-      .slice(index + 1, searchEnd)
-      .some((candidate) => candidate.role === "assistant");
-    const activeTurn = options.activeTurn === true && nextUserIndex < 0 && !hasAssistantResponse;
+    const branch = branches?.get(message.id);
+    const withBranch = branch ? { ...message, branch } : message;
+    if (message.role !== "user") return withBranch;
+    let hasAssistantResponse: boolean;
+    let isLatestTurn: boolean;
+    if (children) {
+      hasAssistantResponse = (children.get(message.id) ?? []).some((id) => byId.get(id)?.role === "assistant");
+      isLatestTurn = Boolean(branch?.active) && !hasDescendantUser(message.id);
+    } else {
+      const nextUserIndex = transcript.findIndex((candidate, candidateIndex) => (
+        candidateIndex > index && candidate.role === "user"
+      ));
+      const searchEnd = nextUserIndex >= 0 ? nextUserIndex : transcript.length;
+      hasAssistantResponse = transcript
+        .slice(index + 1, searchEnd)
+        .some((candidate) => candidate.role === "assistant");
+      isLatestTurn = nextUserIndex < 0;
+    }
+    const activeTurn = options.activeTurn === true && isLatestTurn && index <= activeHeadIndex && !hasAssistantResponse;
     return {
-      ...message,
+      ...withBranch,
       ...projectConversationTurnStatus(
         messages[index]?.message,
         "user",
@@ -2714,6 +2778,7 @@ export function createConversationAuditRouter(options: {
         })
       ]);
       const transcript = buildTranscriptMessages(thread.id, thread.messages, {
+        headId: thread.headId ?? null,
         activeTurn: activeTurn === true,
         steerEvents: steerEvents ?? []
       });

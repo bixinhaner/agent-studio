@@ -356,14 +356,14 @@ describe("projectConversationTurnStatus", () => {
   it("marks cancelled assistant messages as user interruption", () => {
     expect(projectConversationTurnStatus({ role: "assistant", status: { type: "incomplete", reason: "cancelled" } }, "assistant")).toEqual({
       turnStatus: "cancelled",
-      turnStatusReason: "用户发送了新消息或取消了上一轮生成，本轮未完成。"
+      turnStatusReason: "本轮在完成前被停止。"
     });
   });
 
   it("recognizes historical stopped messages without a status field", () => {
     expect(projectConversationTurnStatus({ role: "assistant", metadata: { channel: "crest", stopped: true } }, "assistant")).toEqual({
       turnStatus: "cancelled",
-      turnStatusReason: "用户发送了新消息或取消了上一轮生成，本轮未完成。"
+      turnStatusReason: "本轮在完成前被停止。"
     });
   });
 

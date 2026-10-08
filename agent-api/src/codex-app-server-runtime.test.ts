@@ -406,6 +406,15 @@ rl.on("line", (line) => {
       if (inputText === "wait-for-steer") {
         return;
       }
+      if (inputText === "nested-runtime-error") {
+        notify("error", {
+          threadId,
+          turnId,
+          error: { message: "stream disconnected before completion", codexErrorInfo: "other", additionalDetails: "connection reset" },
+          willRetry: false
+        });
+        return;
+      }
       if (inputText === "runtime-error") {
         notify("error", { threadId, turnId, message: "sandbox denied", detail: "permission denied opening file" });
         return;
@@ -1369,6 +1378,26 @@ describe("Codex app-server runtime", () => {
     } satisfies Partial<CodexRuntimeUserError>);
     expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient AI service failure"))
       .toHaveLength(3);
+    warnSpy.mockRestore();
+  });
+
+  it("keeps the nested app-server error message instead of a generic runtime error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-nested-runtime-error") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    await expect(async () => {
+      for await (const _event of runtime.runStreamed(thread, "nested-runtime-error")) {
+        // drain until the app-server error is raised
+      }
+    }).rejects.toThrow("stream disconnected before completion (connection reset; codexErrorInfo=other)");
+    await new Promise((resolve) => setTimeout(resolve, 20));
     warnSpy.mockRestore();
   });
 
