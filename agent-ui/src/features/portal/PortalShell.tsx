@@ -9356,6 +9356,20 @@ export function PortalShell(props: {
             })
           });
         } catch (error) {
+          if (error instanceof ApiError && error.code === "PORTAL_RUN_ACTIVE") {
+            // This thread still runs a response this tab does not stream (another tab or a
+            // reload). The server kept nothing: queue the message and drop the optimistic copy.
+            composerWorkflowController.requeueRejectedSend(threadId, prompt);
+            setServerRunningThreadIds((prev) =>
+              updateRunningThreadMapForKeys(prev, normalizeThreadIdentityKeys(threadId, localThreadId), true)
+            );
+            setErrorText(t("thread.runActiveQueued"));
+            setStatusText("Ready");
+            stopRunningStageWaitTimers();
+            updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
+            window.setTimeout(() => void reloadThreadHistoryRef.current?.(threadId).catch(() => undefined), 0);
+            return;
+          }
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
           if (latestUserMessage) window.dispatchEvent(new CustomEvent("bailey-restore-composer", { detail: {
             threadId,
@@ -10844,6 +10858,11 @@ export function PortalShell(props: {
   const reloadThreadHistory = useCallback(async (threadId: string) => {
     if (!threadId || trainingReadOnly) return;
     const out = await api<ThreadMessagesOut>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
+    // A rejected send is still settling its local run when the reload starts; wait briefly
+    // so the optimistic message is replaced instead of lingering as a branch.
+    for (let attempt = 0; attempt < 30 && runtime.thread.getState().isRunning; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
     if (activeRemoteThreadIdRef.current !== threadId) return;
     if (runtime.thread.getState().isRunning) return;
     runtime.thread.import(threadMessagesOutToRepository(out));

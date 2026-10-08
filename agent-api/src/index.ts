@@ -13669,6 +13669,29 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       res.json({ ok: true, ignored: true, head_id: repository.headId ?? null });
       return;
     }
+    if (asRecord(input.message)?.role === "user") {
+      // A user message is saved before its stream starts. While another tab (or a reloaded
+      // page) still streams a response on this thread, keep nothing so the thread head stays
+      // on that response; the client queues the message instead.
+      const blockingRun = findBlockingPortalActiveChatRun("", currentUser.id, threadId);
+      const blockingPeer = blockingRun ? undefined : await portalThreadRunOwnerPeer(req, threadId, currentUser.id);
+      if (blockingRun || blockingPeer) {
+        logPortalStreamLifecycle("user_message_rejected_while_response_running", {
+          thread_id: threadId,
+          user_id: currentUser.id,
+          organization_id: currentUser.organizationId,
+          message_id: storedMessageId(input.message),
+          active_run_id: blockingRun?.runId,
+          active_peer: blockingPeer?.url
+        });
+        res.status(409).json({
+          detail: "The previous response is still running. Your message was kept so you can queue it or send it as guidance.",
+          code: PORTAL_RUN_ACTIVE_ERROR_CODE,
+          reason_code: "response_still_running"
+        });
+        return;
+      }
+    }
     const repository = await conversationRecords.getMessageRepository(threadId);
     const parentId = resolvePortalUserMessageParent({
       current: repository,
