@@ -57,4 +57,60 @@ printf '%s\\n' 'pdf@office not installed /tmp/pdf'
       })
     ]);
   });
+
+  async function visualizeFixture(input: { installedVersion: string; installedSkill: string; repoSkill: string; repoVersion: string }) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "installed-plugins-"));
+    roots.push(root);
+    const writePlugin = async (dir: string, version: string, skill: string) => {
+      await fs.mkdir(path.join(dir, ".codex-plugin"), { recursive: true });
+      await fs.mkdir(path.join(dir, "skills", "visualize"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "visualize", version, skills: "./skills/" }));
+      await fs.writeFile(path.join(dir, "skills", "visualize", "SKILL.md"), skill);
+    };
+    const marketplacePlugin = path.join(root, "marketplace", "plugins", "visualize");
+    const home = path.join(root, "home");
+    const repo = path.join(root, "repo");
+    await writePlugin(marketplacePlugin, input.installedVersion, input.installedSkill);
+    await writePlugin(path.join(home, "plugins", "cache", "agentstudio-office", "visualize", input.installedVersion), input.installedVersion, input.installedSkill);
+    await writePlugin(path.join(repo, "visualize"), input.repoVersion, input.repoSkill);
+    const executable = path.join(root, "fake-codex");
+    await fs.writeFile(executable, `#!/bin/sh
+printf '%s\\n' 'visualize@agentstudio-office installed, enabled ${input.installedVersion} ${marketplacePlugin}'
+`);
+    await fs.chmod(executable, 0o755);
+    return new InstalledPluginService({ baseHome: home, executable, cacheTtlMs: 0, managedPluginSourceRoot: repo });
+  }
+
+  const goodSkill = 'Write `<title>.html` in `.agent-studio/visualizations/`.\n::codex-inline-vis{file="<title>.html"}\n';
+  const legacySkill = 'Write in `.codex/visualizations/YYYY/MM/DD/<thread-id>`.\n::codex-inline-vis{file="<title>.html"}\n';
+
+  it("reports visualize as unavailable when the installed skill writes outside the served directory", async () => {
+    const service = await visualizeFixture({
+      installedVersion: "1.0.14",
+      installedSkill: legacySkill,
+      repoVersion: "1.0.14-agentstudio.1",
+      repoSkill: goodSkill
+    });
+    const [visualize] = await service.list();
+    expect(visualize.readiness).toBe("unavailable");
+    expect(visualize.capabilityHealth).toEqual([
+      expect.objectContaining({ id: "inline-visualization", status: "unavailable", detail: expect.stringContaining(".agent-studio/visualizations") }),
+      expect.objectContaining({ id: "repository-sync", status: "unavailable", detail: expect.stringContaining("仓库 1.0.14-agentstudio.1，已安装 1.0.14") })
+    ]);
+  });
+
+  it("reports visualize as ready when the installed files match the repository copy", async () => {
+    const service = await visualizeFixture({
+      installedVersion: "1.0.14-agentstudio.1",
+      installedSkill: goodSkill,
+      repoVersion: "1.0.14-agentstudio.1",
+      repoSkill: goodSkill
+    });
+    const [visualize] = await service.list();
+    expect(visualize.readiness).toBe("ready");
+    expect(visualize.capabilityHealth.map((capability) => [capability.id, capability.status])).toEqual([
+      ["inline-visualization", "ready"],
+      ["repository-sync", "ready"]
+    ]);
+  });
 });

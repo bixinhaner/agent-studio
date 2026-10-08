@@ -87,6 +87,7 @@ import type {
   SharedRuntimeGapItem,
   DiskUsageArea,
   DiskUsageReport,
+  ManagedCodexPluginStatus,
   PythonRuntimeSettings,
   SharedRuntimeStatus
 } from "./types";
@@ -1588,6 +1589,50 @@ export function CodexMemoryManagementView() {
     const diskUsedRatio = disk && disk.totalBytes > 0 ? disk.usedBytes / disk.totalBytes : 0;
     const diskNeedsAttention = Boolean(disk && (diskUsedRatio >= 0.85 || (disk.daysUntilFull !== null && disk.daysUntilFull < 30)));
     const diskAreas = (disk?.areas ?? []).filter((area) => area.bytes !== null);
+    const codexPlugins = status?.codexPlugins ?? null;
+
+    const pluginColumns: ColumnsType<ManagedCodexPluginStatus> = [
+      {
+        title: "插件",
+        dataIndex: "name",
+        render: (value: string) => <Typography.Text code>{value}</Typography.Text>
+      },
+      {
+        title: "仓库版本",
+        dataIndex: "expectedVersion",
+        render: (value: string | null) => <Typography.Text code>{value ?? "—"}</Typography.Text>
+      },
+      {
+        title: "已安装",
+        dataIndex: "installedVersions",
+        render: (value: string[]) =>
+          value.length ? <Typography.Text code>{value.join("、")}</Typography.Text> : <Typography.Text type="secondary">未安装</Typography.Text>
+      },
+      {
+        title: "状态",
+        key: "status",
+        width: 280,
+        render: (_value, plugin) => {
+          const failed = plugin.lastSync?.status === "failed";
+          return (
+            <div>
+              {plugin.problems.length ? (
+                <Tag color="red">不可用</Tag>
+              ) : plugin.inSync ? (
+                <Tag color="green" icon={<CheckCircle2 size={12} style={{ marginRight: 4 }} />}>已同步</Tag>
+              ) : (
+                <Tag color="orange">待同步</Tag>
+              )}
+              {[...plugin.problems, ...(failed && plugin.lastSync?.detail ? [`上次同步失败：${plugin.lastSync.detail}`] : [])].map((problem) => (
+                <Typography.Text key={problem} type="warning" style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+                  {problem}
+                </Typography.Text>
+              ))}
+            </div>
+          );
+        }
+      }
+    ];
 
     const diskAreaColumns: ColumnsType<DiskUsageArea> = [
       { title: "区域", dataIndex: "label" },
@@ -1937,6 +1982,27 @@ export function CodexMemoryManagementView() {
               />
             ) : null}
           </div>
+
+          {codexPlugins ? (
+            <div className="admin-card" style={{ padding: 20, marginTop: 16, width: "100%" }}>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                托管插件
+              </Typography.Title>
+              <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+                {`这些 Codex 插件随代码一起维护（scripts/shared-runtime/codex-plugins/），部署时自动安装，所有会话的新对话即可使用。${
+                  codexPlugins.lastSyncAt ? `上次同步 ${formatLocalDateTime(codexPlugins.lastSyncAt)}。` : "尚未通过部署同步。"
+                }`}
+              </Typography.Text>
+              <Table<ManagedCodexPluginStatus>
+                rowKey="name"
+                size="small"
+                pagination={false}
+                columns={pluginColumns}
+                dataSource={codexPlugins.plugins}
+                locale={{ emptyText: "没有托管插件" }}
+              />
+            </div>
+          ) : null}
 
           <div className="admin-card" style={{ padding: 20, marginTop: 16, width: "100%" }}>
             <Typography.Title level={4} style={{ margin: 0 }}>

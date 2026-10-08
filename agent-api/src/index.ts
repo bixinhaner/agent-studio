@@ -86,6 +86,7 @@ import {
   type MaterializedCodexSkillInput
 } from "./codex-skills/native-codex-skill-service.js";
 import { InstalledPluginService } from "./codex-plugins/installed-plugin-service.js";
+import { installedVisualizeSkillUsesDurableDirectory } from "./codex-plugins/managed-plugins.js";
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
@@ -3633,7 +3634,10 @@ async function resolveRuntimeLaunchConfig(input: {
     ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
     ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : []),
-    ...(input.workspace ? [inlineVisualizationRuntimeHint(input.workspace)] : [])
+    // Fallback only: the managed visualize skill already names this directory.
+    ...(input.workspace && !(await installedVisualizeSkillUsesDurableDirectory(appConfig.codex.baseHome))
+      ? [inlineVisualizationRuntimeHint(input.workspace)]
+      : [])
   ];
   const codexRunConfig = withRuntimeHints(
     withRuntimeCapabilityMetadata(
@@ -11831,7 +11835,7 @@ registerCommonApiRoutes(app, {
       await syncSharedRuntimeCleanupPolicy(settings).catch((error) => {
         console.warn("shared runtime cleanup policy sync failed", error instanceof Error ? error.message : String(error));
       });
-      return inspectSharedRuntime({ settings });
+      return inspectSharedRuntime({ settings, codexHome: appConfig.codex.baseHome });
     },
     users,
     agentModes,

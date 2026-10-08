@@ -78,6 +78,17 @@ test("shared runtime maintenance jobs reinstall with an admin restart only", () 
   );
 });
 
+test("repository-managed Codex plugins, including SKILL.md, deploy with an admin restart only", () => {
+  assert.deepEqual(
+    classifyChanges([
+      "scripts/shared-runtime/codex-plugins/visualize/skills/visualize/SKILL.md",
+      "scripts/shared-runtime/codex-plugins/visualize/.codex-plugin/plugin.json",
+      "scripts/shared-runtime/sync-codex-plugins.mjs"
+    ]).targets,
+    { frontend: false, admin: true, chat: false, caddy: false }
+  );
+});
+
 test("each target diffs from its own deployed commit so deferred restarts catch up", () => {
   const repo = mkdtempSync(path.join(tmpdir(), "deploy-scope-"));
   const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();

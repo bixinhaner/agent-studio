@@ -1535,6 +1535,29 @@ ensure_shared_plugin_runtime() {
   install_shared_codex_runtime_archive
 }
 
+# Codex plugins kept in the repo (scripts/shared-runtime/codex-plugins) are copied into the
+# local marketplace and installed into the base CODEX_HOME; conversation homes link to its
+# plugin cache, so new conversations use them without a chat restart. A failure only warns:
+# the admin console shows the plugin as out of sync and conversations keep the old version.
+sync_managed_codex_plugins() {
+  local source="$shared_runtime_dir/codex-plugins"
+  [[ -d "$source" ]] || return 0
+  local codex_bin="$APP_API_DIR/node_modules/.bin/codex"
+  run_as_app_user test -x "$codex_bin" || codex_bin="codex"
+  log_step "Syncing repository-managed Codex plugins"
+  run_as_root mkdir -p "$SHARED_RUNTIME_STATE_ROOT"
+  run_as_root chown "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_STATE_ROOT"
+  if run_as_app_user node "$shared_runtime_dir/sync-codex-plugins.mjs" \
+    --source "$source" \
+    --codex-home "$APP_HOME/.codex" \
+    --codex-bin "$codex_bin" \
+    --state "$SHARED_RUNTIME_STATE_ROOT/codex-plugins.json"; then
+    log_info "Repository-managed Codex plugins are installed"
+  else
+    log_warn "Repository-managed Codex plugin sync failed; see the admin console shared runtime page"
+  fi
+}
+
 build_backend() {
   local api_dir="$1"
   log_step "Installing backend dependencies"
@@ -1891,6 +1914,9 @@ main() {
     bash "$script_dir/ensure-dws-runtime.sh"
     ensure_shared_python_runtime
     ensure_shared_plugin_runtime
+  fi
+  if deploy_restarts_admin || deploy_restarts_chat; then
+    sync_managed_codex_plugins
   fi
   if [[ -n "$ACTIVATE_RELEASE" ]]; then
     RELEASE_DIR="$RELEASES_DIR/$ACTIVATE_RELEASE"

@@ -147,6 +147,21 @@ export type CodexHomeDedupeRun = {
   errors: number;
 };
 
+export type ManagedCodexPluginStatus = {
+  name: string;
+  expectedVersion: string | null;
+  installedVersions: string[];
+  inSync: boolean;
+  problems: string[];
+  lastSync: {
+    name: string;
+    version: string | null;
+    installedVersion: string | null;
+    status: "current" | "updated" | "failed" | "outdated";
+    detail?: string;
+  } | null;
+};
+
 export type SharedRuntimeStatus = {
   enabled: boolean;
   runtimeExists: boolean;
@@ -166,6 +181,11 @@ export type SharedRuntimeStatus = {
   storage?: {
     disk: DiskUsageReport | null;
     codexHomeDedupe: CodexHomeDedupeRun | null;
+  };
+  /** Missing when talking to an API release older than repository-managed plugins. */
+  codexPlugins?: {
+    lastSyncAt: string | null;
+    plugins: ManagedCodexPluginStatus[];
   };
   checkedAt: string;
 };

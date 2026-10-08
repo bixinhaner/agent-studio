@@ -4,6 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  inspectManagedPlugins,
+  readManagedPluginSyncReport,
+  type ManagedPluginStatus,
+  type ManagedPluginSyncReport
+} from "./codex-plugins/managed-plugins.js";
 import { appConfig } from "./config.js";
 import type { SystemSettingsPythonRuntime } from "./system-settings/types.js";
 
@@ -271,6 +277,10 @@ export type CodexHomeDedupeRun = {
   errors: number;
 };
 
+export type ManagedCodexPluginStatus = ManagedPluginStatus & {
+  lastSync: ManagedPluginSyncReport["plugins"][number] | null;
+};
+
 export type SharedRuntimeStatus = {
   enabled: boolean;
   runtimeExists: boolean;
@@ -289,6 +299,11 @@ export type SharedRuntimeStatus = {
   storage: {
     disk: DiskUsageReport | null;
     codexHomeDedupe: CodexHomeDedupeRun | null;
+  };
+  /** Codex plugins kept in the repository and installed by the deploy. */
+  codexPlugins: {
+    lastSyncAt: string | null;
+    plugins: ManagedCodexPluginStatus[];
   };
   checkedAt: string;
 };
@@ -663,15 +678,31 @@ async function readCodexHomeDedupe(paths: SharedRuntimePaths): Promise<CodexHome
   };
 }
 
+async function inspectCodexPlugins(paths: SharedRuntimePaths, codexHome?: string): Promise<SharedRuntimeStatus["codexPlugins"]> {
+  const [lastSync, plugins] = await Promise.all([
+    readManagedPluginSyncReport(paths.stateRoot),
+    codexHome ? inspectManagedPlugins({ codexHome }).catch(() => []) : Promise.resolve([])
+  ]);
+  return {
+    lastSyncAt: lastSync?.checkedAt ?? null,
+    plugins: plugins.map((plugin) => ({
+      ...plugin,
+      lastSync: lastSync?.plugins.find((entry) => entry.name === plugin.name) ?? null
+    }))
+  };
+}
+
 export async function inspectSharedRuntime(input: {
   settings?: SystemSettingsPythonRuntime;
   paths?: SharedRuntimePaths;
+  /** Base CODEX_HOME whose plugin cache every conversation links to. */
+  codexHome?: string;
 }): Promise<SharedRuntimeStatus> {
   const settings = effectivePythonRuntimeSettings(input.settings);
   const paths = input.paths ?? sharedRuntimePaths();
   const dirs = commandSearchDirs(paths);
   const runtimeExists = await exists(paths.pythonRoot);
-  const [runtimeBytes, version, capabilities, caches, lastRun, gaps, disk, codexHomeDedupe] = await Promise.all([
+  const [runtimeBytes, version, capabilities, caches, lastRun, gaps, disk, codexHomeDedupe, codexPlugins] = await Promise.all([
     runtimeExists ? duBytes(paths.pythonRoot) : Promise.resolve(0),
     pythonVersion(),
     Promise.all(CAPABILITIES.map((definition) => capabilityStatus(definition, paths, dirs))),
@@ -693,7 +724,8 @@ export async function inspectSharedRuntime(input: {
     readCleanupRun(paths),
     readGapReport(paths, dirs),
     readDiskUsage(paths),
-    readCodexHomeDedupe(paths)
+    readCodexHomeDedupe(paths),
+    inspectCodexPlugins(paths, input.codexHome)
   ]);
   return {
     enabled: settings.enabled,
@@ -713,6 +745,7 @@ export async function inspectSharedRuntime(input: {
     },
     gaps,
     storage: { disk, codexHomeDedupe },
+    codexPlugins,
     checkedAt: new Date().toISOString()
   };
 }

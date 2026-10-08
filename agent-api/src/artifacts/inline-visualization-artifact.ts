@@ -6,7 +6,8 @@ import type { ThreadArtifactRecord } from "../persistence/thread-artifact-reposi
 /** Legacy location (July 2026): lived under the thread tmp dir and was only readable via artifact records. */
 export const INLINE_VISUALIZATION_ROOT = ".agent-studio/tmp/home/.codex/visualizations";
 /**
- * Durable per-workspace directory the runtime hint points the model at. It sits
+ * Durable per-workspace directory the managed visualize skill (and the fallback
+ * runtime hint) points the model at. It sits
  * outside `.agent-studio/tmp` (cleaned after idle days) and outside `.codex`
  * (read-only inside the Codex sandbox), and is read directly without artifact
  * records because shell-written files never produce file-change events.

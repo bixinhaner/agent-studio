@@ -3,6 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  inspectManagedPlugins,
+  installedPluginDirectory,
+  pluginContractProblems,
+  type ManagedPluginStatus
+} from "./managed-plugins.js";
+
 const execFileAsync = promisify(execFile);
 const DEFAULT_VISIBLE_PLUGIN_NAMES = [
   "documents",
@@ -60,6 +67,8 @@ type InstalledPluginServiceOptions = {
   executable?: string;
   visiblePluginNames?: string[];
   cacheTtlMs?: number;
+  /** Repository copies of managed plugins; defaults to scripts/shared-runtime/codex-plugins. */
+  managedPluginSourceRoot?: string;
 };
 
 function text(value: unknown): string | undefined {
@@ -145,6 +154,45 @@ function pluginRuntimeProfile(name: string): Pick<
   }
 }
 
+type RuntimeProfile = Pick<InstalledPluginRecord, "readiness" | "visibleToUsers" | "capabilityHealth">;
+
+/**
+ * Replaces assumed health with what is installed: plugin-specific contract checks
+ * (visualize must write where the backend serves files) and, for plugins kept in the
+ * repository, whether the installed files match the repository copy.
+ */
+function withInstalledHealth(
+  profile: RuntimeProfile,
+  contractProblems: string[],
+  managed: ManagedPluginStatus | undefined
+): RuntimeProfile {
+  let capabilityHealth = profile.capabilityHealth.map((capability) =>
+    contractProblems.length && capability.id === "inline-visualization"
+      ? { ...capability, status: "unavailable" as const, detail: contractProblems.join("；") }
+      : capability
+  );
+  if (managed) {
+    capabilityHealth = [
+      ...capabilityHealth,
+      managed.inSync
+        ? { id: "repository-sync", label: "与仓库版本同步", status: "ready" as const }
+        : {
+            id: "repository-sync",
+            label: "与仓库版本同步",
+            status: "unavailable" as const,
+            detail: `仓库 ${managed.expectedVersion ?? "未知"}，已安装 ${managed.installedVersions.join("、") || "无"}；重新部署后同步`
+          }
+    ];
+  }
+  let readiness = profile.readiness;
+  if (contractProblems.length && profile.capabilityHealth.some((capability) => capability.id === "inline-visualization")) {
+    readiness = "unavailable";
+  } else if (readiness === "ready" && managed && !managed.inSync) {
+    readiness = "degraded";
+  }
+  return { ...profile, readiness, capabilityHealth };
+}
+
 function parseInstalledPluginLine(line: string): {
   pluginRef: string;
   version: string;
@@ -173,6 +221,7 @@ export class InstalledPluginService {
   private readonly executable: string;
   private readonly visiblePluginNames: Set<string>;
   private readonly cacheTtlMs: number;
+  private readonly managedPluginSourceRoot?: string;
   private cached?: { expiresAt: number; records: InstalledPluginRecord[] };
 
   constructor(options: InstalledPluginServiceOptions) {
@@ -184,6 +233,7 @@ export class InstalledPluginService {
         .filter(Boolean)
     );
     this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
+    this.managedPluginSourceRoot = options.managedPluginSourceRoot;
   }
 
   async list(): Promise<InstalledPluginRecord[]> {
@@ -199,6 +249,11 @@ export class InstalledPluginService {
       timeout: 15_000,
       maxBuffer: 4 * 1024 * 1024
     });
+    const managedPlugins = new Map(
+      (await inspectManagedPlugins({ codexHome: this.baseHome, sourceRoot: this.managedPluginSourceRoot }).catch(() => [])).map(
+        (plugin) => [plugin.name.toLowerCase(), plugin] as const
+      )
+    );
     const records: InstalledPluginRecord[] = [];
     for (const line of stdout.split(/\r?\n/)) {
       const installed = parseInstalledPluginLine(line);
@@ -213,7 +268,14 @@ export class InstalledPluginService {
       const manifestName = text(manifest.name) ?? name;
       const manifestVersion = text(manifest.version) ?? installed.version;
       const interfaceConfig = manifest.interface ?? {};
-      const runtimeProfile = pluginRuntimeProfile(manifestName);
+      const runtimeProfile = withInstalledHealth(
+        pluginRuntimeProfile(manifestName),
+        await pluginContractProblems(
+          name.toLowerCase(),
+          installedPluginDirectory(this.baseHome, marketplace, name, installed.version)
+        ),
+        managedPlugins.get(name.toLowerCase())
+      );
       records.push({
         name: manifestName,
         pluginRef: installed.pluginRef,

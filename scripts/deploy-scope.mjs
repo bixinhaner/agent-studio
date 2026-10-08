@@ -13,6 +13,13 @@ const BACKEND = ["admin", "chat"];
 
 // First matching rule wins. Patterns are matched against repo-relative paths.
 const RULES = [
+  // Repo-managed Codex plugins (SKILL.md included) are synced on any backend deploy and read
+  // by new conversations directly, so an admin restart is enough; checked before `.md` docs.
+  {
+    pattern: /^scripts\/shared-runtime\/(codex-plugins\/|sync-codex-plugins\.mjs$)/,
+    targets: ["admin"],
+    reason: "repository-managed Codex plugins"
+  },
   // Documentation, CI, local tooling and desktop packages never run on the server.
   { pattern: /(^|\/)[^/]+\.md$/, targets: NONE, reason: "documentation" },
   { pattern: /^(docs|deliverables|tmp|temp|\.github|packages)\//, targets: NONE, reason: "non-server files" },
