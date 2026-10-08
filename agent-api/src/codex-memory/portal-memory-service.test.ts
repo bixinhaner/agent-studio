@@ -147,7 +147,6 @@ describe("PortalMemoryService", () => {
     await service.remove(await homeFor(), (await service.list("user1"))[0].userItems[1].id);
     expect((await service.list("user1"))[0].userItems.map((item) => item.text)).toEqual(["回答用中文"]);
     expect(edited.createdAt).toBe(first.createdAt);
-    expect(await service.countForCodexHome(newer)).toBe(1 + 2);
 
     await service.remove(await homeFor(), edited.id);
     expect(await readFile(path.join(newer, "memories", "memory_summary.md"), "utf8")).toBe(`${NATIVE_SUMMARY.trim()}\n`);

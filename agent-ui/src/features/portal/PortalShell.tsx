@@ -221,7 +221,7 @@ import { recommendSkills, roleSuggestions } from "./roadmap/role-home";
 import { AccountMenu } from "./roadmap/AccountMenu";
 import { AutomationRailSection } from "./roadmap/AutomationRailSection";
 import { tourTarget } from "./roadmap/OnboardingTour";
-import { PortalRoadmapProvider, usePortalRoadmap } from "./roadmap/PortalRoadmapContext";
+import { PortalRoadmapProvider } from "./roadmap/PortalRoadmapContext";
 import { usePortalTheme } from "./roadmap/use-portal-theme";
 import { dispatchPortalRunFinished, useRunCompletionAttention } from "./roadmap/run-attention";
 import { updatePortalPreferences } from "./roadmap/api";
@@ -4132,21 +4132,15 @@ const MessageArtifactFileList: FC<ComponentProps<typeof ArtifactFileList>> = (pr
   return <ArtifactFileList {...props} fresh={running} />;
 };
 
+/** Shown only on turns where Codex actually looked something up in the user's memory. */
 const MemoryContextChip: FC<{ data?: unknown }> = ({ data }) => {
   const { t } = usePortalI18n();
-  const roadmap = usePortalRoadmap();
-  const record = asRecord(data);
-  const count = typeof record?.item_count === "number" ? record.item_count : 0;
-  if (count <= 0) return null;
+  // Older turns stored `item_count` for "memory available", which said nothing about the answer.
+  if (asRecord(data)?.used !== true) return null;
   return (
     <div className="assistant-memory-chip" role="note">
       <BrainIcon size={14} aria-hidden="true" />
-      <span title={t("memory.usedDetail", { count })}>{t("memory.used")}</span>
-      {roadmap?.personalFeaturesEnabled ? (
-        <button type="button" className="assistant-memory-chip-link" onClick={() => roadmap.openMemory()}>
-          {t("memory.manage")}
-        </button>
-      ) : null}
+      <span title={t("memory.usedDetail")}>{t("memory.used")}</span>
     </div>
   );
 };

@@ -231,8 +231,6 @@
   animation: roadmap-fade-up var(--motion-base) var(--ease-emphasized) both;
 }
 .assistant-memory-chip svg { color: var(--roadmap-accent); }
-.assistant-memory-chip-link { border: 0; background: none; padding: 0; color: var(--roadmap-accent); font-size: 12px; cursor: pointer; }
-.assistant-memory-chip-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* ---- U5 skill tags ---- */
 .assistant-skill-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

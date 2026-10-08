@@ -148,8 +148,7 @@ export const ROADMAP_EN_MESSAGES = {
   "memory.scopeGeneral": "General assistant",
   "memory.scopeOther": "Other assistant",
   "memory.used": "Used your memory",
-  "memory.usedDetail": "This answer could draw on {count} memories: the ones you added and what Bailey knows about you.",
-  "memory.manage": "Manage",
+  "memory.usedDetail": "Bailey looked up your memories for this answer: the ones you added and what Bailey knows about you.",
 
   "tour.skip": "Skip",
   "tour.close": "Close tour",
@@ -459,8 +458,7 @@ export const ROADMAP_ZH_MESSAGES: Record<RoadmapMessageKey, string> = {
   "memory.scopeGeneral": "通用助手",
   "memory.scopeOther": "其他助手",
   "memory.used": "已参考你的记忆",
-  "memory.usedDetail": "本次回答可参考 {count} 条记忆，包括你添加的和 Bailey 了解到的。",
-  "memory.manage": "管理",
+  "memory.usedDetail": "本次回答查阅了你的记忆，包括你添加的和 Bailey 了解到的。",
 
   "tour.skip": "跳过",
   "tour.close": "关闭引导",

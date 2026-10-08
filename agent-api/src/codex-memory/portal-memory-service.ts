@@ -226,17 +226,6 @@ export class PortalMemoryService {
     return [...scopes].sort((a, b) => (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? "")).slice(0, 1);
   }
 
-  /** Memories a run in `codexHome` can draw on: the user's own items plus Codex's preference bullets. */
-  async countForCodexHome(codexHome: string | undefined): Promise<number> {
-    if (!codexHome) return 0;
-    try {
-      const [items, learned] = await Promise.all([readUserMemories(codexHome), learnedMemoryForHome(codexHome)]);
-      return items.length + (learned?.preferences.length ?? 0);
-    } catch {
-      return 0;
-    }
-  }
-
   private async mutate<T>(home: PortalMemoryHome, change: (items: UserMemoryItem[]) => T): Promise<T> {
     // All homes of one assistant share a store, so serialize on the store, not the home.
     return this.withLock(userMemoryStoreDir(home.codexHome), async () => {

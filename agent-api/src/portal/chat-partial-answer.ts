@@ -58,6 +58,7 @@ export function createPortalPartialSnapshot(input: {
   projection: Pick<CodexRunProjection, "finalize">;
   answer: Pick<PortalPartialAnswerCollector, "text">;
   instructionReadPart: () => Record<string, unknown> | undefined;
+  memoryReadPart?: () => Record<string, unknown> | undefined;
   answerProtected: boolean;
 }): () => PortalPartialAssistantSnapshot {
   return () => {
@@ -65,7 +66,7 @@ export function createPortalPartialSnapshot(input: {
     const process = input.projection.finalize({ finalAnswer: answerText });
     return {
       answerText,
-      contentParts: [input.instructionReadPart(), ...process.contentParts]
+      contentParts: [input.memoryReadPart?.(), input.instructionReadPart(), ...process.contentParts]
         .filter((part): part is Record<string, unknown> => Boolean(part))
     };
   };

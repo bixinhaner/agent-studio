@@ -35,6 +35,7 @@ import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audi
 import { classifyPortalRole } from "./portal/role-profile.js";
 import { createTeamUsageService, TeamUsageAccessError } from "./portal/team-usage-service.js";
 import { createPersonalUsageService } from "./portal/personal-usage-service.js";
+import { CodexMemoryReadObserver } from "./codex-memory/memory-read-observer.js";
 import { createPortalMemoryRouter } from "./codex-memory/portal-memory-router.js";
 import { PortalMemoryService } from "./codex-memory/portal-memory-service.js";
 import { DingTalkPushService } from "./notifications/dingtalk-push-service.js";
@@ -12009,24 +12010,6 @@ app.use(
   })
 );
 
-/** Marks a portal turn that ran with the user's durable memories available. */
-async function resolvePortalMemoryContextPart(
-  codexRunConfig: Record<string, unknown> | undefined
-): Promise<Record<string, unknown> | undefined> {
-  try {
-    const settings =
-      (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
-      createDefaultSystemSettingsPayload().codexMemory;
-    if (!settings.enabled || !settings.useMemories) return undefined;
-    const itemCount = await portalMemory.countForCodexHome(codexHomeFromRunConfig(codexRunConfig));
-    return itemCount > 0
-      ? { type: "data", name: "agent_studio_memory_context", data: { item_count: itemCount } }
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 const personalUsage = createPersonalUsageService({ db, ledger: usageLedger });
 const teamUsage = createTeamUsageService({
   db,
@@ -14260,12 +14243,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       resolvePortalTurnSkillInputs(turnSkills)
     );
     const instructionReadObserver = new CodexInstructionReadObserver({ selectedSkills: turnSkillInputs });
-    const portalMemoryContextPart = await timing.time("chat_stream.resolve_memory_context", () =>
-      resolvePortalMemoryContextPart(currentSession.codexRunConfig)
-    );
-    if (portalMemoryContextPart) {
-      sendTrackedSSE("memory_context", { content_part: portalMemoryContextPart });
-    }
+    // The memory chip marks only turns where Codex really looked something up in its memory.
+    const memoryReadObserver = new CodexMemoryReadObserver({ codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig) });
     const baseRuntimeMessage = withExplicitSkillMentions(
       withSkillActivationPrompts(input.message, turnRunConfig),
       turnSkills
@@ -14277,6 +14256,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       projection: portalRunProjection,
       answer: portalPartialAnswer,
       instructionReadPart: () => instructionReadObserver.contentPart(),
+      memoryReadPart: () => memoryReadObserver.contentPart(),
       answerProtected: Boolean(portalBrand?.outputProtectionEnabled)
     });
     attachPortalActiveChatRun({
@@ -14375,6 +14355,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
           }
           runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+          if (memoryReadObserver.push(event)) {
+            sendTrackedSSE("memory_context", { content_part: memoryReadObserver.contentPart() });
+          }
           const instructionReads = instructionReadObserver.push(event);
           if (instructionReads.length > 0) {
             sendTrackedSSE("instruction_reads", {
@@ -14453,7 +14436,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             const instructionReadContentPart = instructionReadObserver.contentPart();
             const finalizedProcess = portalRunProjection.finalize({ finalAnswer: completedAnswerText });
             const persistedContentParts = [
-              portalMemoryContextPart,
+              memoryReadObserver.contentPart(),
               instructionReadContentPart,
               ...finalizedProcess.contentParts,
               artifactContentPart
