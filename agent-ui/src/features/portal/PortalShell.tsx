@@ -135,6 +135,8 @@ import {
   MarkdownTable
 } from "../markdown/markdown-rendering";
 import { expandAssistantControlDirectives } from "../markdown/control-directives";
+import { InlineVisualization, resolveInlineVisualizationFile } from "../inline-visualization/InlineVisualization";
+import type { InlineVisualizationFollowUp } from "../inline-visualization/InlineVisualizationFrame";
 import {
   codexFileCitationPreviewPath,
   parseCodexFileCitationHref,
@@ -201,10 +203,7 @@ import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
 import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
 import { WorkspaceTaskFilesPanel } from "./workbench/WorkspaceTaskFilesPanel";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
-import {
-  prepareInteractiveHtmlPreview,
-  PreviewWorkbenchPanel
-} from "./workbench/PreviewWorkbenchPanel";
+import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
 import { PortalSkillPicker } from "./workbench/SkillPicker";
 import { inlineAttachmentIds, missingInlineAttachments, takeAttachmentId, uploadedAttachmentHint, AttachmentUploadAttempts, type InlineAttachment } from "./inline-attachments";
@@ -835,75 +834,47 @@ function preprocessAssistantMarkdown(text: string): string {
   );
 }
 
-function resolveInlineVisualizationPath(href?: string): string {
-  if (!href) return "";
-  try {
-    const parsed = new URL(href, window.location.origin);
-    if (parsed.origin !== window.location.origin || parsed.pathname !== "/__codex-inline-vis") return "";
-    return normalizePreviewFilePath(parsed.searchParams.get("file") || "");
-  } catch {
-    return "";
-  }
-}
-
-function InlineVisualization(props: { filePath: string; label: ReactNode }) {
+function PortalInlineVisualization(props: { filePath: string; label: ReactNode }) {
   const { filePath, label } = props;
   const activeThreadId = useContext(ActiveThreadIdContext);
-  const [html, setHtml] = useState("");
-  const [error, setError] = useState("");
+  const aui = useAui();
+  const [followUpNotice, setFollowUpNotice] = useState("");
 
   useEffect(() => {
-    const controller = new AbortController();
-    setHtml("");
-    setError("");
-    if (!activeThreadId || !filePath) {
-      setError("可视化文件不可用");
-      return () => controller.abort();
-    }
-    const query = new URLSearchParams({ file: filePath });
-    fetch(
-      `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId)}/visualizations/content?${query.toString()}`,
-      {
-        credentials: "include",
-        headers: authHeaders(),
-        signal: controller.signal
-      }
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          notifyAuthInvalidStatus(response.status);
-          throw new Error(`可视化文件读取失败（${response.status}）`);
-        }
-        const contentType = response.headers.get("content-type")?.toLowerCase() || "";
-        if (!contentType.includes("html")) throw new Error("仅支持内联展示 HTML 可视化");
-        return response.text();
-      })
-      .then((content) => setHtml(prepareInteractiveHtmlPreview(content)))
-      .catch((reason) => {
-        if ((reason as Error).name !== "AbortError") {
-          setError(reason instanceof Error ? reason.message : "可视化加载失败");
-        }
-      });
-    return () => controller.abort();
-  }, [activeThreadId, filePath]);
+    if (!followUpNotice) return;
+    const timer = window.setTimeout(() => setFollowUpNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [followUpNotice]);
 
+  // Follow-ups from the visual are drafted into the composer, never sent: the
+  // user reviews and edits the prompt before deciding to send it.
+  const fillComposer = useCallback(
+    ({ prompt }: InlineVisualizationFollowUp) => {
+      const composer = aui.composer();
+      const current = composer.getState().text.trim();
+      composer.setText(current ? `${current}\n\n${prompt}` : prompt);
+      setFollowUpNotice("已填入输入框，确认后再发送");
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(".portal-composer-input-row [contenteditable='true'], .portal-composer-input-row textarea")
+          ?.focus();
+      });
+    },
+    [aui]
+  );
+
+  const contentPath =
+    activeThreadId && filePath
+      ? `/api/threads/${encodeURIComponent(activeThreadId)}/visualizations/content?${new URLSearchParams({ file: filePath }).toString()}`
+      : "";
   return (
-    <section className="assistant-inline-vis" aria-label="交互式可视化">
-      <header className="assistant-inline-vis-header">
-        <span>{label}</span>
-      </header>
-      {error ? <div className="assistant-inline-vis-state" role="alert">{error}</div> : null}
-      {!error && !html ? <div className="assistant-inline-vis-state">正在加载可视化…</div> : null}
-      {html ? (
-        <iframe
-          className="assistant-inline-vis-frame"
-          title={typeof label === "string" ? label : "交互式可视化"}
-          srcDoc={html}
-          sandbox="allow-scripts"
-          referrerPolicy="no-referrer"
-        />
-      ) : null}
-    </section>
+    <InlineVisualization
+      contentPath={contentPath}
+      storageKey={`${activeThreadId}:${filePath}`}
+      label={label}
+      onFollowUp={fillComposer}
+      notice={followUpNotice}
+    />
   );
 }
 
@@ -1234,9 +1205,9 @@ function AssistantMarkdownLink(props: {
       </a>
     );
   }
-  const inlineVisualizationPath = resolveInlineVisualizationPath(href);
+  const inlineVisualizationPath = resolveInlineVisualizationFile(href);
   if (inlineVisualizationPath) {
-    return <InlineVisualization filePath={inlineVisualizationPath} label={children} />;
+    return <PortalInlineVisualization filePath={inlineVisualizationPath} label={children} />;
   }
   const previewPath = typeof href === "string" ? resolveThreadPreviewPathFromHref(href, activeThreadId) : null;
   const linkBehavior =

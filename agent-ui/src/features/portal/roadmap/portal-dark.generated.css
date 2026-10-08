@@ -4605,25 +4605,6 @@
   border-color: color-mix(in srgb, var(--workbench-accent-strong) 46%, var(--border-subtle));
   background: color-mix(in srgb, var(--workbench-accent-strong) 11%, var(--surface-primary));
 }
-:root[data-portal-theme="dark"] .assistant-inline-vis {
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-primary);
-}
-:root[data-portal-theme="dark"] .assistant-inline-vis-header {
-  border-bottom: 1px solid var(--border-subtle);
-}
-:root[data-portal-theme="dark"] .assistant-inline-vis-header button {
-  border: 0;
-  background: transparent;
-  color: var(--text-link);
-}
-:root[data-portal-theme="dark"] .assistant-inline-vis-frame {
-  border: 0;
-  background: #1b1b1b;
-}
-:root[data-portal-theme="dark"] .assistant-inline-vis-state {
-  color: var(--text-secondary);
-}
 :root[data-portal-theme="dark"] .assistant-inline-image-trigger {
   border: none;
   background: transparent;
@@ -5376,6 +5357,25 @@
 }
 :root[data-portal-theme="dark"] .artifact-file-list-error {
   color: #e85e54;
+}
+
+/* ---- features/inline-visualization/inline-visualization.css ---- */
+:root[data-portal-theme="dark"] .assistant-inline-vis {
+  border: 1px solid var(--border-subtle, #323640);
+  background: var(--surface-primary, #1b1b1b);
+}
+:root[data-portal-theme="dark"] .assistant-inline-vis-header {
+  border-bottom: 1px solid var(--border-subtle, #323640);
+}
+:root[data-portal-theme="dark"] .assistant-inline-vis-notice {
+  color: var(--text-secondary, #a3a8b2);
+}
+:root[data-portal-theme="dark"] .assistant-inline-vis-frame {
+  border: 0;
+  background: transparent;
+}
+:root[data-portal-theme="dark"] .assistant-inline-vis-state {
+  color: var(--text-secondary, #a3a8b2);
 }
 
 /* ---- features/portal/roadmap/roadmap.css ---- */

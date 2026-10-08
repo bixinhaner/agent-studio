@@ -112,7 +112,10 @@ export default defineConfig({
     }
   },
   test: {
-    environment: "jsdom"
+    environment: "jsdom",
+    // The inline visualization host kit is imported with `?raw`; keep its CSS
+    // text in tests instead of Vitest's default empty stylesheet stub.
+    css: { include: [/inline-visualization\/host-kit\//] }
   },
   server: {
     port: 5179,

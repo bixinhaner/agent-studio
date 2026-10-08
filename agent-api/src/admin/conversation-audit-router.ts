@@ -4,7 +4,14 @@ import path from "node:path";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import multer, { MulterError } from "multer";
 
+import {
+  detectSecretLikeContent,
+  INLINE_VISUALIZATION_MAX_BYTES,
+  InlineVisualizationArtifactError,
+  loadInlineVisualization
+} from "../artifacts/inline-visualization-artifact.js";
 import { getDbClient } from "../db/client.js";
+import { ThreadArtifactRepository, type ThreadArtifactRepositoryDb } from "../persistence/thread-artifact-repository.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
 import { sendFileContent } from "../files/raw-content-response.js";
 import { repairPortalAssistantCompletionStatus } from "../portal/chat-message-precedence.js";
@@ -2598,6 +2605,50 @@ export function createConversationAuditRouter(options: {
     } catch (error) {
       const detail = error instanceof Error ? error.message : "读取会话附件失败";
       if (!res.headersSent) res.status(400).json({ detail });
+    }
+  });
+
+  router.get("/conversations/:threadId/visualizations/content", async (req: Request, res: Response) => {
+    try {
+      const threadId = trimOrUndefined(req.params.threadId);
+      const fileName = trimOrUndefined(req.query.file);
+      if (!threadId || !fileName) {
+        res.status(400).json({ detail: "threadId 和 file 不能为空" });
+        return;
+      }
+
+      const thread = await conversationRecords().getThread(threadId);
+      if (!thread || thread.securityDomainId) {
+        res.status(404).json({ detail: "thread 不存在" });
+        return;
+      }
+      const workspacePath = trimOrUndefined(thread.workspace);
+      if (!workspacePath) {
+        res.status(404).json({ detail: "thread workspace 不存在" });
+        return;
+      }
+
+      const artifactRepository = new ThreadArtifactRepository(getDb() as unknown as ThreadArtifactRepositoryDb);
+      const { buffer, fileName: resolvedFileName } = await loadInlineVisualization({
+        workspacePath,
+        fileName,
+        maxFileBytes: INLINE_VISUALIZATION_MAX_BYTES,
+        listArtifacts: () => artifactRepository.listForThread(threadId)
+      });
+      const blockedReason = detectSecretLikeContent(buffer);
+      if (blockedReason) {
+        res.status(403).json({ detail: `Visualization preview is blocked: ${blockedReason}` });
+        return;
+      }
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(resolvedFileName)}`);
+      res.type("text/html; charset=utf-8");
+      res.status(200).send(buffer);
+    } catch (error) {
+      const status = error instanceof InlineVisualizationArtifactError ? error.status : 400;
+      const detail = error instanceof Error ? error.message : "读取可视化失败";
+      if (!res.headersSent) res.status(status).json({ detail });
     }
   });
 

@@ -1,0 +1,49 @@
+/*
+ * In-conversation visualization card, shared by the portal chat and the admin
+ * conversation record. Rendered with spans because markdown places it inside
+ * a paragraph; fallbacks keep it readable where portal tokens are not loaded.
+ */
+.assistant-inline-vis {
+  display: block;
+  width: min(100%, 920px);
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-primary, #fff);
+}
+
+.assistant-inline-vis-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assistant-inline-vis-notice {
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Height follows the visualization's content (reported over postMessage). */
+.assistant-inline-vis-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.assistant-inline-vis-state {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: 20px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+}

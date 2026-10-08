@@ -33,7 +33,8 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown/markdown-rendering";
-import { stripAssistantControlDirectives } from "../markdown/control-directives";
+import { expandAssistantControlDirectives, stripAssistantControlDirectives } from "../markdown/control-directives";
+import { InlineVisualization, resolveInlineVisualizationFile } from "../inline-visualization/InlineVisualization";
 import { parseCodexFileCitationHref, projectCodexFileCitations } from "../markdown/file-citations";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { ArtifactFileList } from "../artifacts/ArtifactFileList";
@@ -673,10 +674,14 @@ function adminThreadFileContentUrl(
   return `/api/admin/conversations/${encodeURIComponent(normalizedThreadId)}/files/content?${query.toString()}`;
 }
 
-function preprocessConversationAuditMarkdown(text: string): string {
+function preprocessConversationAuditMarkdown(text: string, options: { inlineVisualizations: boolean }): string {
   const fileCitations = projectCodexFileCitations(text, "zh");
+  // Visualizations need a thread to load from; elsewhere drop the directive line.
+  const withDirectives = options.inlineVisualizations
+    ? expandAssistantControlDirectives(fileCitations.markdown)
+    : stripAssistantControlDirectives(fileCitations.markdown);
   return normalizeLatexDelimiters(
-    stripAssistantControlDirectives(fileCitations.markdown)
+    withDirectives
       .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
         return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
       })
@@ -888,6 +893,18 @@ function ConversationAuditMarkdownLink(props: {
   [key: string]: unknown;
 }) {
   const { href, className, children, threadId, workspace, ...rest } = props;
+  const inlineVisualizationFile = threadId ? resolveInlineVisualizationFile(href) : "";
+  if (threadId && inlineVisualizationFile) {
+    const query = new URLSearchParams({ file: inlineVisualizationFile });
+    return (
+      <InlineVisualization
+        contentPath={`/api/admin/conversations/${encodeURIComponent(threadId)}/visualizations/content?${query.toString()}`}
+        storageKey={`admin:${threadId}:${inlineVisualizationFile}`}
+        label={children}
+        notice="只读预览"
+      />
+    );
+  }
   const fileCitation = typeof href === "string" ? parseCodexFileCitationHref(href) : null;
   if (fileCitation) {
     const contentUrl = adminThreadFileContentUrl(threadId || "", { filePath: fileCitation.previewPath });
@@ -1031,7 +1048,11 @@ export function ConversationAuditMarkdown(props: {
   threadId?: string;
   workspace?: string | null;
 }) {
-  const processedText = useMemo(() => preprocessConversationAuditMarkdown(props.text), [props.text]);
+  const inlineVisualizations = Boolean(props.threadId);
+  const processedText = useMemo(
+    () => preprocessConversationAuditMarkdown(props.text, { inlineVisualizations }),
+    [props.text, inlineVisualizations]
+  );
   return (
     <div className={props.className ? `conversation-audit-markdown ${props.className}` : "conversation-audit-markdown"}>
       <ReactMarkdown

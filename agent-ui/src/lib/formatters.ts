@@ -22,6 +22,9 @@ export function formatUsdAmount(value: string | number | null | undefined): stri
 export function plainTextPreview(value: string | null | undefined, maxLength = 140): string {
   if (!value) return "";
   const text = value
+    // Assistant control directives (e.g. inline visualizations) are not prose.
+    // Previews may already be whitespace-collapsed or truncated mid-directive.
+    .replace(/::codex-inline-vis(?:\{[^}\n]*\}?)?/g, " ")
     .replace(/```[\s\S]*?(```|$)/g, " ")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")

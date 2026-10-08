@@ -23,6 +23,12 @@ describe("plainTextPreview", () => {
     expect(plainTextPreview("a".repeat(10), 5)).toBe("aaaa…");
   });
 
+  it("drops inline visualization directives, including truncated ones", () => {
+    expect(plainTextPreview('拖动滑块比较。\n\n::codex-inline-vis{file="clt.html"}\n\n样本均值方差')).toBe("拖动滑块比较。 样本均值方差");
+    expect(plainTextPreview('拖动滑块比较。 ::codex-inline-vis{file="clt.html"} 样本均值方差')).toBe("拖动滑块比较。 样本均值方差");
+    expect(plainTextPreview('拖动滑块比较。 ::codex-inline-vis{file="clt-sa')).toBe("拖动滑块比较。");
+  });
+
   it("removes dangling bold markers from truncated text", () => {
     expect(plainTextPreview("**未闭合的加粗")).toBe("未闭合的加粗");
   });

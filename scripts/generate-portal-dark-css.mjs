@@ -22,6 +22,7 @@ const SOURCES = [
   "features/portal/inline-composer.css",
   "features/portal/workbench/local-workspace.css",
   "features/artifacts/artifact-file-list.css",
+  "features/inline-visualization/inline-visualization.css",
   "features/portal/roadmap/roadmap.css"
 ];
 const OUTPUT = "features/portal/roadmap/portal-dark.generated.css";

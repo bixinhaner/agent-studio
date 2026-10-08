@@ -1,9 +1,41 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConversationAuditMarkdown } from "../ConversationAuditView";
 
 describe("ConversationAuditMarkdown", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders inline visualizations read-only through the admin endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response('<div id="clt">chart</div>', { status: 200, headers: { "content-type": "text/html; charset=utf-8" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(
+      <ConversationAuditMarkdown
+        threadId="thread-9"
+        text={'拖动滑块比较。\n\n::codex-inline-vis{file="clt-sampling.html"}\n\n结论'}
+      />
+    );
+
+    await waitFor(() => expect(container.querySelector("iframe.assistant-inline-vis-frame")).toBeTruthy());
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/api/admin/conversations/thread-9/visualizations/content?file=clt-sampling.html"
+    );
+    expect(container.textContent).not.toContain("codex-inline-vis");
+    expect(container.textContent).toContain("只读预览");
+  });
+
+  it("drops inline visualization directives when no thread is available", () => {
+    const { container } = render(
+      <ConversationAuditMarkdown text={'前文\n\n::codex-inline-vis{file="clt.html"}\n\n后文'} />
+    );
+    expect(container.textContent).not.toContain("codex-inline-vis");
+    expect(container.querySelector(".assistant-inline-vis")).toBeNull();
+  });
+
   it("renders agent-style LaTeX delimiters in conversation history", () => {
     const { container } = render(
       <ConversationAuditMarkdown

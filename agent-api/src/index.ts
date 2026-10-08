@@ -58,9 +58,11 @@ import {
   type ResolvedArtifactAccessPolicy
 } from "./artifacts/thread-artifact-policy.js";
 import {
+  detectSecretLikeContent,
+  inlineVisualizationDirectory,
+  inlineVisualizationRuntimeHint,
   InlineVisualizationArtifactError,
-  readInlineVisualizationArtifact,
-  selectInlineVisualizationArtifact
+  loadInlineVisualization
 } from "./artifacts/inline-visualization-artifact.js";
 import {
   collectRuntimeGeneratedImageChanges,
@@ -3615,6 +3617,7 @@ async function resolveRuntimeLaunchConfig(input: {
   }
   if (input.workspace) {
     await ensureToolRuntimeEnvDirs(input.workspace, appConfig.sharedCodexRuntime.runtimeRoot);
+    await fs.mkdir(inlineVisualizationDirectory(input.workspace), { recursive: true });
   }
   const toolEnv = buildToolRuntimeEnv({
     workspace: input.workspace
@@ -3628,7 +3631,8 @@ async function resolveRuntimeLaunchConfig(input: {
   const runtimeHints = [
     ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
-    ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : [])
+    ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : []),
+    ...(input.workspace ? [inlineVisualizationRuntimeHint(input.workspace)] : [])
   ];
   const codexRunConfig = withRuntimeHints(
     withRuntimeCapabilityMetadata(
@@ -10599,19 +10603,6 @@ function detectBlockedArtifactPath(relativePath: string, policy: ResolvedArtifac
   return undefined;
 }
 
-function detectSecretLikeContent(buffer: Buffer): string | undefined {
-  const text = buffer.toString("utf8");
-  const patterns: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i, reason: "Private key content was detected" },
-    { pattern: /\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{16,}/i, reason: "Secret-like credential content was detected" },
-    { pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/, reason: "API key-like content was detected" }
-  ];
-  for (const item of patterns) {
-    if (item.pattern.test(text)) return item.reason;
-  }
-  return undefined;
-}
-
 type ArtifactFileInspection = {
   missing: boolean;
   updating: boolean;
@@ -12636,17 +12627,13 @@ app.get("/api/threads/:threadId/visualizations/content", async (req: Request, re
       res.status(404).json({ detail: "Thread workspace does not exist" });
       return;
     }
-    const artifacts = await threadArtifacts.listForThread(threadId);
-    const artifact = selectInlineVisualizationArtifact(artifacts, query.file);
-    if (!artifact) {
-      res.status(404).json({ detail: "Visualization artifact does not exist" });
-      return;
-    }
-    const { buffer, fileName } = await readInlineVisualizationArtifact({
+    const visualization = await loadInlineVisualization({
       workspacePath,
-      artifact,
-      maxFileBytes: policy.maxFileBytes
+      fileName: query.file,
+      maxFileBytes: policy.maxFileBytes,
+      listArtifacts: () => threadArtifacts.listForThread(threadId)
     });
+    const { buffer, fileName } = visualization;
     const blockedReason =
       buffer.length <= 2 * 1024 * 1024 ? detectSecretLikeContent(buffer) : undefined;
     if (blockedReason) {
@@ -12655,10 +12642,10 @@ app.get("/api/threads/:threadId/visualizations/content", async (req: Request, re
         userId: currentUser.id,
         threadId,
         resourceType: "thread_artifact",
-        resourceId: artifact.id,
+        resourceId: visualization.artifactId ?? `visualization:${fileName}`,
         actionType: "artifact.visualization_preview",
         resultStatus: "denied",
-        metadata: { reason: blockedReason }
+        metadata: { reason: blockedReason, visualization_source: visualization.source }
       });
       res.status(403).json({ detail: `Visualization preview is blocked: ${blockedReason}` });
       return;
@@ -12668,10 +12655,10 @@ app.get("/api/threads/:threadId/visualizations/content", async (req: Request, re
       userId: currentUser.id,
       threadId,
       resourceType: "thread_artifact",
-      resourceId: artifact.id,
+      resourceId: visualization.artifactId ?? `visualization:${fileName}`,
       actionType: "artifact.visualization_preview",
       resultStatus: "success",
-      metadata: { protected_visualization_path: true }
+      metadata: { protected_visualization_path: true, visualization_source: visualization.source }
     });
     res.setHeader("Cache-Control", "private, max-age=60");
     res.setHeader("X-Content-Type-Options", "nosniff");
