@@ -8388,3 +8388,40 @@ button.admin-menu-item:focus-visible {
 .admin-chat-bubble-container.is-user .admin-inline-reference-kind {
   opacity: 0.85;
 }
+
+/* Sends that never produced a saved user message (empty or partially empty conversations). */
+.admin-send-failures {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-send-failures-title {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-send-failures .admin-turn-outcome {
+  margin-top: 0;
+}
+
+.admin-send-failure-time {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-send-failure-field {
+  margin: 6px 0 0;
+  color: #334155;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.admin-send-failure-field > span {
+  margin-right: 8px;
+  color: #64748b;
+  font-size: 12px;
+}

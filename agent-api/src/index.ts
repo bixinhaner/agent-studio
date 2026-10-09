@@ -8,6 +8,15 @@ import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
 import { createClientErrorReportRouter } from "./operations/client-error-report-router.js";
+import {
+  createPortalSendFailureRecorder,
+  createPortalSendFailureRouter,
+  portalSendFailureMessageFields
+} from "./operations/portal-send-failure-recorder.js";
+import {
+  PortalSendFailureRepository,
+  type PortalSendFailureRepositoryDb
+} from "./persistence/portal-send-failure-repository.js";
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createTrainingCatalogAdminRouter } from "./admin/training-catalog-admin-router.js";
 import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
@@ -678,6 +687,8 @@ const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, app
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const threadReadStates = new ThreadReadStateRepository(db as unknown as ThreadReadStateRepositoryDb);
 const portalSteerEvents = new PortalSteerEventRepository(db as unknown as PortalSteerEventRepositoryDb);
+const portalSendFailures = new PortalSendFailureRepository(db as unknown as PortalSendFailureRepositoryDb);
+const recordPortalSendFailure = createPortalSendFailureRecorder({ store: portalSendFailures });
 const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
 const organizationMemberships = new OrganizationMembershipRepository(db as unknown as OrganizationMembershipRepositoryDb);
 const authIdentities = new AuthIdentityRepository(db as unknown as AuthIdentityRepositoryDb);
@@ -11848,6 +11859,7 @@ registerCommonApiRoutes(app, {
     threads,
     isThreadActive: isThreadActiveForAdmin,
     listSteerEvents: (threadId) => portalSteerEvents.listForThread(threadId),
+    listSendFailures: (threadId) => portalSendFailures.listForThread(threadId),
     sessions: {
       countActive: async () => liveRuntimeThreads.size
     },
@@ -11947,6 +11959,17 @@ registerCommonApiRoutes(app, {
   skillCatalogAdminRouter: createSkillCatalogAdminRouter(skillCatalog),
   dwsRouter: dwsIntegrationRouter,
   clientErrorReportRouter: createClientErrorReportRouter(),
+  sendFailureRouter: createPortalSendFailureRouter({
+    record: recordPortalSendFailure,
+    resolveOwnedThreadId: async (rawThreadId, req) => {
+      const actor = currentActorFromRequest(req);
+      const row = await db.thread.findFirst({
+        where: { userId: actor.id, OR: [{ id: rawThreadId }, { externalId: rawThreadId }] },
+        select: { id: true }
+      });
+      return row?.id;
+    }
+  }),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     modelCatalog: codexModelCatalog,
@@ -13245,7 +13268,33 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     timing.finish("success", { modeId: allocated.modeId, sessionStarted: shouldStartSession });
   } catch (error) {
     timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
-    res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to create thread"));
+    const status = statusCodeForSessionAccessError(error);
+    const payload = payloadForSessionAccessError(error, "Failed to create thread");
+    let actor: CurrentActor | undefined;
+    try {
+      actor = currentActorFromRequest(req);
+    } catch {
+      actor = undefined;
+    }
+    if (actor) {
+      // No thread exists yet; the browser's local id ties the record to a later retry.
+      const externalId = asRecord(req.body)?.external_id;
+      void recordPortalSendFailure({
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        source: "server",
+        stage: "thread_create",
+        errorCode: errorCodeFromUnknown(error) ?? (typeof payload.code === "string" ? payload.code : undefined),
+        httpStatus: status,
+        detail: [
+          typeof payload.detail === "string" ? payload.detail : undefined,
+          error instanceof Error && error.message !== payload.detail ? error.message : undefined,
+          typeof externalId === "string" ? `external_id=${externalId}` : undefined
+        ].filter(Boolean).join(" | "),
+        userAgent: req.get("user-agent")
+      });
+    }
+    res.status(status).json(payload);
   }
 });
 
@@ -13650,12 +13699,29 @@ app.delete(
   }
 );
 
+function errorCodeFromUnknown(error: unknown): string | undefined {
+  if (error instanceof z.ZodError) return "invalid_request";
+  const code = asRecord(error)?.code;
+  return typeof code === "string" && code ? code : undefined;
+}
+
 app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
+      void recordPortalSendFailure({
+        userId: currentUser.id,
+        organizationId: currentUser.organizationId,
+        source: "server",
+        stage: "message_save",
+        errorCode: "thread_not_found",
+        httpStatus: 404,
+        detail: `Thread does not exist: ${threadId}`,
+        ...portalSendFailureMessageFields(asRecord(req.body)?.message),
+        userAgent: req.get("user-agent")
+      });
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
@@ -13711,6 +13777,28 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
     res.json({ ok: true, head_id: updated.headId ?? null });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to append message";
+    const message = asRecord(req.body)?.message;
+    // Only user messages: the browser's assistant snapshots are best-effort projections.
+    if (asRecord(message)?.role === "user") {
+      let actor: CurrentActor | undefined;
+      try {
+        actor = currentActorFromRequest(req);
+      } catch {
+        actor = undefined;
+      }
+      void recordPortalSendFailure({
+        threadId: String(req.params.threadId || "").trim() || undefined,
+        userId: actor?.id,
+        organizationId: actor?.organizationId,
+        source: "server",
+        stage: "message_save",
+        errorCode: errorCodeFromUnknown(error),
+        httpStatus: 400,
+        detail,
+        ...portalSendFailureMessageFields(message),
+        userAgent: req.get("user-agent")
+      });
+    }
     res.status(400).json({ detail });
   }
 });

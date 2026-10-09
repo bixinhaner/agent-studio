@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
+import { createReportRateLimiter } from "./report-rate-limiter.js";
+
 /**
  * Browser-side render failures (React error boundaries) never reach the server on their own,
  * so the portal reports them here. Reports are only written to the service log as one JSON
@@ -8,10 +10,6 @@ import { z } from "zod";
  */
 
 const MAX_TEXT = 4000;
-const WINDOW_MS = 10 * 60 * 1000;
-const MAX_REPORTS_PER_WINDOW = 20;
-const DUPLICATE_WINDOW_MS = 60 * 1000;
-const MAX_TRACKED_USERS = 5000;
 
 const clientErrorReportSchema = z.object({
   source: z.string().trim().min(1).max(80),
@@ -27,8 +25,6 @@ const clientErrorReportSchema = z.object({
 });
 
 export type ClientErrorReport = z.infer<typeof clientErrorReportSchema>;
-
-type UserWindow = { startedAt: number; count: number; recent: Map<string, number> };
 
 function clip(value: string | null | undefined, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -54,7 +50,7 @@ export function createClientErrorReportRouter(options: {
 } = {}): Router {
   const now = options.now ?? Date.now;
   const log = options.log ?? ((line: string) => console.warn(line));
-  const windows = new Map<string, UserWindow>();
+  const limiter = createReportRateLimiter({ now });
   const router = Router();
 
   router.post("/", (req: Request, res: Response) => {
@@ -65,22 +61,12 @@ export function createClientErrorReportRouter(options: {
     }
     const report = parsed.data;
     const userId = req.currentUser?.id ?? "anonymous";
-    const at = now();
-
-    let window = windows.get(userId);
-    if (!window || at - window.startedAt > WINDOW_MS) {
-      if (!window && windows.size >= MAX_TRACKED_USERS) windows.clear();
-      window = { startedAt: at, count: 0, recent: new Map() };
-      windows.set(userId, window);
-    }
     const signature = `${report.source}|${report.message.slice(0, 200)}|${report.thread_id ?? ""}`;
-    const lastSeen = window.recent.get(signature);
-    if (window.count >= MAX_REPORTS_PER_WINDOW || (lastSeen !== undefined && at - lastSeen < DUPLICATE_WINDOW_MS)) {
+    const at = limiter.accept(userId, signature);
+    if (at === undefined) {
       res.status(202).json({ ok: true, dropped: true });
       return;
     }
-    window.count += 1;
-    window.recent.set(signature, at);
 
     log(
       `[portal-client-error] ${JSON.stringify({

@@ -530,12 +530,29 @@ export type AdminConversationTranscriptTurnOutcome = {
   autoRecoveryAttempted: boolean;
 };
 
+export type AdminConversationSendFailure = {
+  id: string;
+  source: "server" | "client";
+  stage: string;
+  errorCode: string | null;
+  httpStatus: number | null;
+  detail: string | null;
+  messagePreview: string | null;
+  attachments: Array<{ name: string; status?: string; failureCode?: string; sizeBytes?: number }>;
+  clientRunId: string | null;
+  buildId: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
 export type AdminConversationDetailResponse = {
   conversation: AdminConversationSummary;
   transcript: {
     messageCount: number;
     messages: AdminConversationTranscriptMessage[];
   };
+  /** Sends that never produced a saved user message; older servers omit it. */
+  sendFailures?: AdminConversationSendFailure[];
 };
 
 export type AdminApiAuditRecord = {

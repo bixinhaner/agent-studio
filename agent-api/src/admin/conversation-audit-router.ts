@@ -12,6 +12,7 @@ import {
 } from "../artifacts/inline-visualization-artifact.js";
 import { getDbClient } from "../db/client.js";
 import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
+import type { PortalSendFailureRecord } from "../persistence/portal-send-failure-repository.js";
 import {
   attachTranscriptInteractions,
   type TranscriptSteerEvent,
@@ -2045,6 +2046,7 @@ export function createConversationAuditRouter(options: {
   getDb?: () => ConversationAuditDb;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
   listSteerEvents?: (threadId: string) => Promise<PortalSteerEventRecord[]>;
+  listSendFailures?: (threadId: string) => Promise<PortalSendFailureRecord[]>;
   productFeedbackReply?: ProductFeedbackReplyService;
   /** Serve the conversation list from the thread_audit_summaries table (requires raw SQL support). */
   summaryIndex?: boolean;
@@ -2770,10 +2772,17 @@ export function createConversationAuditRouter(options: {
       const [binding] = bindings;
       const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
       const agentModeMap = new Map(agentModeRows.map((item) => [item.id, item] as const));
-      const [activeTurn, steerEvents] = await Promise.all([
+      const [activeTurn, steerEvents, sendFailures] = await Promise.all([
         options.isThreadActive?.(thread.id),
         Promise.resolve(options.listSteerEvents?.(thread.id)).catch((error) => {
           console.warn("conversation audit failed to load steer events", {
+            threadId: thread.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+          return undefined;
+        }),
+        Promise.resolve(options.listSendFailures?.(thread.id)).catch((error) => {
+          console.warn("conversation audit failed to load send failures", {
             threadId: thread.id,
             detail: error instanceof Error ? error.message : String(error)
           });
@@ -2791,7 +2800,22 @@ export function createConversationAuditRouter(options: {
         transcript: {
           messageCount: transcript.length,
           messages: transcript
-        }
+        },
+        // Sends that never produced a saved user message, e.g. why a conversation is empty.
+        sendFailures: (sendFailures ?? []).map((failure) => ({
+          id: failure.id,
+          source: failure.source,
+          stage: failure.stage,
+          errorCode: failure.errorCode ?? null,
+          httpStatus: failure.httpStatus ?? null,
+          detail: failure.detail ?? null,
+          messagePreview: failure.messagePreview ?? null,
+          attachments: failure.attachments,
+          clientRunId: failure.clientRunId ?? null,
+          buildId: failure.buildId ?? null,
+          userAgent: failure.userAgent ?? null,
+          createdAt: failure.createdAt
+        }))
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "加载会话审计详情失败";

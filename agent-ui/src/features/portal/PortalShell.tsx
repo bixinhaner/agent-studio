@@ -156,9 +156,15 @@ import { useLocalBridgeEntryVisibility } from "./local-bridge-visibility";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, PortalThreadSwitchingPlaceholder, usePortalThreadUserSendIntent } from "./PortalThread";
 import { reportClientError } from "../../lib/client-error-report";
+import {
+  reportSendFailure,
+  shouldBrowserReportSendFailure,
+  type SendFailureAttachment
+} from "../../lib/send-failure-report";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
 import { createProcessDataFallback } from "./process-data-part-dispatch";
+import { attachmentNotReadyReason, type AttachmentNotReady } from "./attachment-send-readiness";
 import {
   managedSkillInstallConflictFromError,
   SkillInstallConflictDialog
@@ -2036,6 +2042,15 @@ function buildUploadedAttachmentDownloadHref(threadId: string, meta: UploadedAtt
   return `${apiBase()}/api/threads/${encodeURIComponent(normalizedThreadId)}/attachments/${encodeURIComponent(meta.id)}/content?${query.toString()}`;
 }
 
+const COMPOSER_ATTACHMENT_SEND_FAILED_EVENT = "bailey-composer-attachment-send-failed";
+
+type ComposerAttachmentSendFailure = { attachmentId: string; reason: string; detail: string };
+
+function announceComposerAttachmentSendFailure(detail: ComposerAttachmentSendFailure) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<ComposerAttachmentSendFailure>(COMPOSER_ATTACHMENT_SEND_FAILED_EVENT, { detail }));
+}
+
 class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
   public accept = "*";
 
@@ -2073,8 +2088,10 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
     yield baseAttachment;
 
     const progressQueue = createUploadProgressQueue();
+    let uploadThreadId = "";
     const uploadPromise = (async () => {
       const threadId = await this.resolveThreadId();
+      uploadThreadId = threadId;
       if (!threadId) {
         throw createUploadFailure("session", "Failed to initialize the current session.");
       }
@@ -2121,6 +2138,15 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
     } catch (error) {
       if (attempt.cancelled) return;
       const failure = uploadFailureFromUnknown(error);
+      if (failure.uploadFailureCode !== "cancelled") {
+        reportSendFailure({
+          stage: "attachment_upload",
+          threadId: uploadThreadId,
+          error,
+          errorCode: failure.uploadFailureCode,
+          attachments: [{ name, status: "incomplete", failureCode: failure.uploadFailureCode, sizeBytes: state.file.size }]
+        });
+      }
       yield {
         ...baseAttachment,
         uploadError: failure.message,
@@ -2134,11 +2160,13 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
 
   public async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
     const workspaceAttachment = attachment as WorkspacePendingAttachment;
-    if (workspaceAttachment.status.type === "running") {
-      throw new Error("Attachment is still uploading. Wait for it to finish before sending.");
-    }
-    if (workspaceAttachment.status.type === "incomplete") {
-      throw new Error(workspaceAttachment.uploadError || "Attachment upload failed. Retry or remove the file before sending.");
+    // assistant-ui clears the composer before awaiting this call and drops the whole message
+    // when it throws, without surfacing the error. The composer checks readiness first
+    // (attachmentNotReadyReason); this path announces the loss so the composer can restore it.
+    const notReady = attachmentNotReadyReason(workspaceAttachment, this.uploadedByAttachmentId.has(attachment.id));
+    if (notReady) {
+      announceComposerAttachmentSendFailure({ attachmentId: attachment.id, reason: notReady.code, detail: notReady.message });
+      throw new Error(notReady.message);
     }
 
     const uploaded = workspaceAttachment.uploadedMeta ?? this.uploadedByAttachmentId.get(attachment.id);
@@ -2561,6 +2589,47 @@ function usePortalComposerKeyDown(threadRunning: boolean) {
   }, [threadRunning]);
 }
 
+function sendFailureAttachmentsFrom(attachments: unknown): SendFailureAttachment[] {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.flatMap((item) => {
+    const record = asRecord(item);
+    const name = typeof record?.name === "string" ? record.name : "";
+    if (!name) return [];
+    const status = asRecord(record?.status)?.type;
+    const failureCode = record?.uploadFailureCode;
+    const file = record?.file;
+    return [{
+      name,
+      ...(typeof status === "string" ? { status } : {}),
+      ...(typeof failureCode === "string" ? { failureCode } : {}),
+      ...(typeof File !== "undefined" && file instanceof File ? { sizeBytes: file.size } : {})
+    }];
+  });
+}
+
+function sendFailureContextFromMessages(messages: readonly unknown[]): {
+  messagePreview?: string;
+  attachments: SendFailureAttachment[];
+} {
+  const latestUser = [...messages].reverse().find((message) => asRecord(message)?.role === "user");
+  if (!latestUser) return { attachments: [] };
+  return {
+    messagePreview: userTextFromUnknownMessage(latestUser) || undefined,
+    attachments: sendFailureAttachmentsFrom(asRecord(latestUser)?.attachments)
+  };
+}
+
+/** Lets the shell warn before leaving a task whose composer still holds unsent attachments. */
+const ComposerPendingAttachmentsContext = createContext<(count: number) => void>(() => undefined);
+
+type ComposerSendSnapshot = {
+  at: number;
+  threadId: string;
+  text: string;
+  attachments: readonly unknown[];
+  restored: boolean;
+};
+
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const notifyUserSendIntent = usePortalThreadUserSendIntent();
@@ -2678,6 +2747,82 @@ const UploadAwareComposer: FC = () => {
     window.setTimeout(() => setWorkflowNotice((current) => (current === notice ? "" : current)), 7000);
   }, []);
 
+  const lastSendSnapshotRef = useRef<ComposerSendSnapshot | null>(null);
+  // assistant-ui empties the composer before it finishes attachments and silently drops the
+  // message if one is not ready, so readiness is checked here before handing over.
+  const attachmentsBlockSend = useCallback((): boolean => {
+    const state = aui.composer().getState();
+    const blocked = state.attachments
+      .map((attachment) => attachmentNotReadyReason(attachment))
+      .find((reason): reason is AttachmentNotReady => reason !== null);
+    if (blocked) {
+      showWorkflowNotice(blocked.code === "uploading" ? t("thread.waitUploads") : t("thread.fixUploads"));
+      reportSendFailure({
+        stage: "attachment_not_ready",
+        threadId: workflow.threadId,
+        errorCode: blocked.code,
+        error: blocked.message,
+        messagePreview: state.text,
+        attachments: sendFailureAttachmentsFrom(state.attachments)
+      });
+      return true;
+    }
+    return false;
+  }, [aui, showWorkflowNotice, t, workflow.threadId]);
+  const sendComposerWithSnapshot = useCallback(() => {
+    const state = aui.composer().getState();
+    lastSendSnapshotRef.current = {
+      at: Date.now(),
+      threadId: workflow.threadId,
+      text: state.text,
+      attachments: state.attachments,
+      restored: false
+    };
+    aui.composer().send();
+  }, [aui, workflow.threadId]);
+
+  useEffect(() => {
+    const restoreDroppedSend = (event: Event) => {
+      const detail = (event as CustomEvent<ComposerAttachmentSendFailure>).detail;
+      const snapshot = lastSendSnapshotRef.current;
+      if (!snapshot || snapshot.restored || Date.now() - snapshot.at > 15_000) return;
+      if (!snapshot.attachments.some((attachment) => asRecord(attachment)?.id === detail.attachmentId)) return;
+      snapshot.restored = true;
+      reportSendFailure({
+        stage: "composer_send",
+        threadId: snapshot.threadId,
+        errorCode: detail.reason,
+        error: detail.detail,
+        messagePreview: snapshot.text,
+        attachments: sendFailureAttachmentsFrom(snapshot.attachments)
+      });
+      // The adapter runs before assistant-ui clears the composer; restore after that.
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("bailey-restore-composer", {
+          detail: { threadId: snapshot.threadId, text: snapshot.text, attachments: snapshot.attachments }
+        }));
+        showWorkflowNotice(t("thread.sendRestored"));
+      }, 0);
+    };
+    window.addEventListener(COMPOSER_ATTACHMENT_SEND_FAILED_EVENT, restoreDroppedSend);
+    return () => window.removeEventListener(COMPOSER_ATTACHMENT_SEND_FAILED_EVENT, restoreDroppedSend);
+  }, [showWorkflowNotice, t]);
+
+  const reportPendingAttachments = useContext(ComposerPendingAttachmentsContext);
+  useEffect(() => {
+    reportPendingAttachments(composerAttachments.length);
+    return () => reportPendingAttachments(0);
+  }, [composerAttachments.length, reportPendingAttachments]);
+  useEffect(() => {
+    if (!hasAttachments) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasAttachments]);
+
   const enqueueCurrent = useCallback(() => {
     const text = getComposerText().trim();
     if (!hasInlineComposerRequest(text) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
@@ -2738,22 +2883,24 @@ const UploadAwareComposer: FC = () => {
       event.stopPropagation();
       return;
     }
-    if (!sendDisabled) {
-      workflow.clearPause();
-      clearStoredDraft();
-      triggerComposerSendAnimation();
-      notifyUserSendIntent();
-    }
+    // Send here instead of letting the primitive send, so attachment readiness is checked first.
+    event.preventDefault();
+    event.stopPropagation();
+    sendCurrentDraft();
   };
 
-  const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    if (sendDisabled) return;
+  const sendCurrentDraft = () => {
+    if (sendDisabled || attachmentsBlockSend()) return;
     workflow.clearPause();
     clearStoredDraft();
     triggerComposerSendAnimation();
     notifyUserSendIntent();
-    aui.composer().send();
+    sendComposerWithSnapshot();
+  };
+
+  const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    sendCurrentDraft();
   };
 
   return (
@@ -8530,6 +8677,9 @@ export function PortalShell(props: {
             }
           });
         } catch (error) {
+          if (shouldBrowserReportSendFailure(error)) {
+            reportSendFailure({ stage: "thread_create", threadId, error });
+          }
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to create thread", t);
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
@@ -9332,12 +9482,19 @@ export function PortalShell(props: {
         if (trainingReadOnly) {
           throw new Error("Training catalog is read-only.");
         }
+        const sendFailureContext = sendFailureContextFromMessages(options.messages);
+        const knownThreadId = () =>
+          String(activeRemoteThreadIdRef.current || options.unstable_threadId || activeLocalThreadIdRef.current || "").trim();
         if (!findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current)) {
-          throw new Error(t("runtime.sendBlocked"));
+          const error = new Error(t("runtime.sendBlocked"));
+          reportSendFailure({ stage: "run_blocked", threadId: knownThreadId(), error, errorCode: "runtime_mode_unavailable", ...sendFailureContext });
+          throw error;
         }
         const prompt = extractLatestPrompt(options.messages);
         if (!prompt) {
-          throw new Error("No user input text detected");
+          const error = new Error("No user input text detected");
+          reportSendFailure({ stage: "run_blocked", threadId: knownThreadId(), error, errorCode: "empty_prompt", ...sendFailureContext });
+          throw error;
         }
         const latestUserMessage = findLatestUserMessageForStream(options.messages);
         const latestUserMessageId = latestUserMessage?.message.id;
@@ -9359,7 +9516,9 @@ export function PortalShell(props: {
           waitMs: 80
         });
         if (!threadId) {
-          throw new Error("Unable to resolve the current thread ID (the thread may still be initializing, please try again).");
+          const error = new Error("Unable to resolve the current thread ID (the thread may still be initializing, please try again).");
+          reportSendFailure({ stage: "thread_resolve", threadId: knownThreadId(), error, ...sendFailureContext });
+          throw error;
         }
         const localThreadId = String(activeLocalThreadIdRef.current || options.unstable_threadId || "").trim();
         activeRemoteThreadIdRef.current = threadId;
@@ -9419,6 +9578,9 @@ export function PortalShell(props: {
             updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
             window.setTimeout(() => void reloadThreadHistoryRef.current?.(threadId).catch(() => undefined), 0);
             return;
+          }
+          if (shouldBrowserReportSendFailure(error)) {
+            reportSendFailure({ stage: "message_save", threadId, error, ...sendFailureContext });
           }
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
           if (latestUserMessage) window.dispatchEvent(new CustomEvent("bailey-restore-composer", { detail: {
@@ -9481,6 +9643,9 @@ export function PortalShell(props: {
             ));
           }
         } catch (error) {
+          if (shouldBrowserReportSendFailure(error)) {
+            reportSendFailure({ stage: "session_start", threadId, error, clientRunId, ...sendFailureContext });
+          }
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session", t);
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
@@ -10936,6 +11101,20 @@ export function PortalShell(props: {
     }
   }, [activeRemoteThreadId, activeRunThreadIds, activeThreadBackgroundRunning, reloadThreadHistory]);
 
+  const pendingComposerAttachmentsRef = useRef(0);
+  const setPendingComposerAttachments = useCallback((count: number) => {
+    pendingComposerAttachmentsRef.current = count;
+  }, []);
+  // Unsent attachments stay in the task's draft, but users who never come back leave an
+  // empty task behind; ask before switching away from them.
+  const confirmLeavingPendingAttachments = useCallback((targetThreadId?: string) => {
+    const count = pendingComposerAttachmentsRef.current;
+    if (count <= 0) return true;
+    const target = String(targetThreadId || "").trim();
+    if (target && (target === activeRemoteThreadIdRef.current || target === activeLocalThreadIdRef.current)) return true;
+    return window.confirm(tRef.current("thread.leavePendingAttachments", { count: String(count) }));
+  }, []);
+
   const threadSwitchGateRef = useRef<ExistingTaskSwitchGate>({ current: 0 });
   const [threadSwitchPending, setThreadSwitchPending] = useState(false);
   const switchToExistingThread = useCallback((
@@ -10959,13 +11138,14 @@ export function PortalShell(props: {
   }, [runtime]);
 
   const openWorkspaceTask = useCallback(async (task: PortalWorkspaceTask | { id: string; folder_id?: string | null }) => {
+    if (!confirmLeavingPendingAttachments(task.id)) return;
     const folderId = task.folder_id || selectedWorkspaceFolderId;
     if (task.folder_id) setSelectedWorkspaceFolderId(task.folder_id);
     setWorkspaceMainView("task");
     setSelectedWorkspaceFile(null);
     writePortalWorkspaceLocation({ folderId, threadId: task.id }, "push");
     await switchToExistingThread(task.id, { errorFallback: "Failed to open task" });
-  }, [selectedWorkspaceFolderId, switchToExistingThread]);
+  }, [confirmLeavingPendingAttachments, selectedWorkspaceFolderId, switchToExistingThread]);
 
   const attentionThreadsRef = useRef(workspaceThreads);
   attentionThreadsRef.current = workspaceThreads;
@@ -10977,6 +11157,7 @@ export function PortalShell(props: {
   });
 
   const startWorkspaceTask = useCallback(async () => {
+    if (!confirmLeavingPendingAttachments()) return false;
     const folderId = selectedWorkspaceFolderIdRef.current;
     setWorkspaceErrorText("");
     return startWorkspaceTaskInFolder(folderId, {
@@ -10995,7 +11176,7 @@ export function PortalShell(props: {
       switchToNewThread: () => runtime.threads.switchToNewThread(),
       reportError: () => setWorkspaceErrorText(t("workspace.createTaskFailed"))
     });
-  }, [runtime, syncActiveThreadIdentity, t]);
+  }, [confirmLeavingPendingAttachments, runtime, syncActiveThreadIdentity, t]);
 
   // The tour points at the composer, which only exists in a task view.
   const prepareOnboardingTour = useCallback(async () => {
@@ -11431,6 +11612,7 @@ export function PortalShell(props: {
                 visibleRemoteIds={visibleWorkspaceThreadIds}
                 orderedRemoteIds={orderedWorkspaceThreadIds}
                 onSelectThread={(threadId, switchToThread) => {
+                  if (!confirmLeavingPendingAttachments(threadId)) return;
                   setWorkspaceMainView("task");
                   setSelectedWorkspaceFile(null);
                   const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
@@ -11583,6 +11765,7 @@ export function PortalShell(props: {
   return (
     <LocalWorkspaceContext.Provider value={{ ...localWorkspace, showEntry: showLocalBridgeEntry, running: Boolean(runningThreadIds[activeRemoteThreadId]) }}>
     <AgentRuntimeAdapterSettingsContext.Provider value={runtimeAdapterSettings}>
+    <ComposerPendingAttachmentsContext.Provider value={setPendingComposerAttachments}>
     <AssistantRuntimeProvider runtime={runtime}>
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalChatRecoveryContext.Provider value={portalChatRecoveryContextValue}>
@@ -12168,6 +12351,7 @@ export function PortalShell(props: {
       </PortalChatRecoveryContext.Provider>
       </PortalComposerWorkflowProvider>
     </AssistantRuntimeProvider>
+    </ComposerPendingAttachmentsContext.Provider>
     </AgentRuntimeAdapterSettingsContext.Provider>
     </LocalWorkspaceContext.Provider>
   );

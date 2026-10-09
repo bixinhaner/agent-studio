@@ -1,4 +1,5 @@
 import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
+import type { PortalSendFailureRecord } from "../persistence/portal-send-failure-repository.js";
 import { Router, type Request, type Response } from "express";
 
 import { appConfig } from "../config.js";
@@ -89,6 +90,7 @@ type AdminRouterOptions = {
   securityDomainAccess?: SecurityDomainAccessControl;
   isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
   listSteerEvents?: (threadId: string) => Promise<PortalSteerEventRecord[]>;
+  listSendFailures?: (threadId: string) => Promise<PortalSendFailureRecord[]>;
   conversationSecurityReviewTest?: (input: {
     settings: SystemSettingsConversationSecurityReview;
     question: string;
@@ -864,6 +866,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       getDb: () => getDbInstance() as never,
       isThreadActive: options.isThreadActive,
       listSteerEvents: options.listSteerEvents,
+      listSendFailures: options.listSendFailures,
       productFeedbackReply: options.productFeedbackReply,
       summaryIndex: true
     })

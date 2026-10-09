@@ -29,6 +29,7 @@ import type { UrlTransform } from "react-markdown";
 import { formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPreview } from "../../lib/formatters";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { useAuth } from "../auth/AuthProvider";
+import { ConversationSendFailures } from "./ConversationSendFailures";
 import {
   extractMermaidCodeFromPreChildren,
   MARKDOWN_REHYPE_PLUGINS,
@@ -1947,8 +1948,9 @@ function ConversationDetail(props: {
 
       {/* Messages Area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 10%', background: '#f9fafb' }}>
+        <ConversationSendFailures failures={props.detail.sendFailures ?? []} />
         {transcript.messages.length === 0 ? (
-           <Empty description="暂无消息内容" />
+           <Empty description={(props.detail.sendFailures ?? []).length > 0 ? "用户的消息没有成功发出，原因见上方发送失败记录" : "暂无消息内容"} />
         ) : (
           transcriptLayout.map((item) => item.kind === "message" ? renderTranscriptMessage(item.message) : (
             <TranscriptAlternateBranches

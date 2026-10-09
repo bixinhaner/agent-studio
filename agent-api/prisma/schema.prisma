@@ -1198,6 +1198,32 @@ model PortalSteerEvent {
   @@map("portal_steer_events")
 }
 
+/// A portal send that never produced a saved user message (or a thread that could not be
+/// created). Written by the API handlers and by the browser for failures that never reach
+/// the server, so empty conversations in the admin console show why they are empty.
+/// thread_id has no foreign key: the thread may not exist, and records outlive deletions.
+model PortalSendFailure {
+  id             String   @id @default(cuid())
+  threadId       String?  @map("thread_id")
+  organizationId String?  @map("organization_id")
+  userId         String?  @map("user_id")
+  source         String
+  stage          String
+  errorCode      String?  @map("error_code")
+  httpStatus     Int?     @map("http_status")
+  detail         String?  @db.Text
+  messagePreview String?  @map("message_preview") @db.Text
+  attachments    Json?
+  clientRunId    String?  @map("client_run_id")
+  buildId        String?  @map("build_id")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([threadId, createdAt])
+  @@index([createdAt])
+  @@map("portal_send_failures")
+}
+
 model ThreadReadState {
   id         String   @id @default(cuid())
   threadId   String   @map("thread_id")
