@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
+import { createClientErrorReportRouter } from "./operations/client-error-report-router.js";
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createTrainingCatalogAdminRouter } from "./admin/training-catalog-admin-router.js";
 import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
@@ -11945,6 +11946,7 @@ registerCommonApiRoutes(app, {
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   skillCatalogAdminRouter: createSkillCatalogAdminRouter(skillCatalog),
   dwsRouter: dwsIntegrationRouter,
+  clientErrorReportRouter: createClientErrorReportRouter(),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     modelCatalog: codexModelCatalog,

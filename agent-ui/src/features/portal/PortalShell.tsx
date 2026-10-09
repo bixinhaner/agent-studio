@@ -154,9 +154,11 @@ import { LocalToolCard } from "./workbench/LocalToolCard";
 import { isLocalToolPart, upsertLocalToolParts } from "./workbench/local-tool-parts";
 import { useLocalBridgeEntryVisibility } from "./local-bridge-visibility";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
-import { PortalThread, usePortalThreadUserSendIntent } from "./PortalThread";
+import { PortalThread, PortalThreadSwitchingPlaceholder, usePortalThreadUserSendIntent } from "./PortalThread";
+import { reportClientError } from "../../lib/client-error-report";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
+import { createProcessDataFallback } from "./process-data-part-dispatch";
 import {
   managedSkillInstallConflictFromError,
   SkillInstallConflictDialog
@@ -204,7 +206,11 @@ import {
   WORKSPACE_RAIL_TASK_LIMIT
 } from "./workbench/WorkspaceRail";
 import { expandWorkspaceFolderIds } from "./workspace-folder-state";
-import { startWorkspaceTaskInFolder } from "./workspace-task-navigation";
+import {
+  startWorkspaceTaskInFolder,
+  switchToExistingWorkspaceTask,
+  type ExistingTaskSwitchGate
+} from "./workspace-task-navigation";
 import { filterStaleRuntimeThreadIds } from "./thread-running-state";
 import { WorkspaceFolderHome } from "./workbench/WorkspaceFolderHome";
 import { CreateWorkspaceFolderModal } from "./workbench/CreateWorkspaceFolderModal";
@@ -4987,16 +4993,27 @@ const AssistantCommentaryBlock: FC<{
   );
 };
 
-const ProcessDataFallback: FC<any> = ({
-  name,
-  data
-}: {
+const RecoveryFailurePart: FC = () => {
+  const aui = useAui();
+  const notifyUserSendIntent = usePortalThreadUserSendIntent();
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
+  return (
+    <PortalChatRecoveryNotice
+      state="failed"
+      canRerun={!mutationReadOnly}
+      onRerun={() => {
+        notifyUserSendIntent();
+        aui.message().reload();
+      }}
+    />
+  );
+};
+
+const ProcessDataPart: FC<{
   name?: string;
   data?: ProcessData | unknown;
-}) => {
-  const aui = useAui();
+}> = ({ name, data }) => {
   const { t } = usePortalI18n();
-  const notifyUserSendIntent = usePortalThreadUserSendIntent();
   const requestPreview = useContext(PreviewRequestContext);
   const attachmentWorkspaceFiles = useContext(AttachmentWorkspaceFilesContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
@@ -5012,31 +5029,6 @@ const ProcessDataFallback: FC<any> = ({
     skillPath: string;
     conflict: ManagedSkillInstallConflict;
   }>();
-
-  if (name === "agent_studio_memory_context") {
-    return <MemoryContextChip data={data} />;
-  }
-
-  if (name === USER_INPUT_REQUEST_PART_NAME) {
-    return <UserInputRequestCard data={data} />;
-  }
-
-  if (name === "codex_connection_recovery") {
-    return <PortalChatRecoveryNotice state="recovering" />;
-  }
-
-  if (name === "codex_recovery_failure") {
-    return (
-      <PortalChatRecoveryNotice
-        state="failed"
-        canRerun={!mutationReadOnly}
-        onRerun={() => {
-          notifyUserSendIntent();
-          aui.message().reload();
-        }}
-      />
-    );
-  }
 
   useEffect(() => {
     if (name !== "codex_file_change") return;
@@ -5479,6 +5471,14 @@ const ProcessDataFallback: FC<any> = ({
     </details>
   );
 };
+
+const ProcessDataFallback = createProcessDataFallback({
+  memoryContext: MemoryContextChip,
+  userInputRequest: UserInputRequestCard,
+  connectionRecovery: () => <PortalChatRecoveryNotice state="recovering" />,
+  recoveryFailure: RecoveryFailurePart,
+  generic: ProcessDataPart
+});
 
 function extractTimelineRows(content: unknown): TimelineRow[] {
   if (!Array.isArray(content)) return [];
@@ -6067,7 +6067,9 @@ const PortalSteerEventsFooter: FC = () => {
 
 const ReadOnlyComposer: FC = () => null;
 
-const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void; readOnly?: boolean }> = ({
+type SelectThreadHandler = (threadId: string, switchToThread: () => Promise<void>) => void;
+
+const AgentThreadListItem: FC<{ onSelectThread?: SelectThreadHandler; readOnly?: boolean }> = ({
   onSelectThread,
   readOnly = false
 }) => {
@@ -6226,9 +6228,14 @@ const AgentThreadListItem: FC<{ onSelectThread?: (threadId: string) => void; rea
         ) : (
           <ThreadListItemPrimitive.Trigger
             className="aui-thread-list-item-trigger"
-            onClick={() => {
+            onClick={(event) => {
               clearCompletedThreadNotice(...identityKeys);
-              onSelectThread?.(remoteId || externalId || localId);
+              if (!onSelectThread) return;
+              // The shell unmounts the current messages before switching (see switchToExistingThread).
+              event.preventDefault();
+              onSelectThread(remoteId || externalId || localId, async () => {
+                await aui.threadListItem().switchTo();
+              });
             }}
           >
             <p className="aui-thread-list-item-title">
@@ -6347,7 +6354,7 @@ const StableThreadListItems: FC<{
   visibleRemoteIds?: ReadonlySet<string>;
   orderedRemoteIds?: readonly string[];
   maxItems?: number;
-  onSelectThread?: (threadId: string) => void;
+  onSelectThread?: SelectThreadHandler;
   readOnly?: boolean;
 }> = ({ visibleRemoteIds, orderedRemoteIds, maxItems, onSelectThread, readOnly = false }) => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
@@ -7152,6 +7159,40 @@ function threadMessagesOutToRepository(out: ThreadMessagesOut): ExportedMessageR
   };
 }
 
+type AgentRuntimeAdapterSettings = {
+  canUpload: boolean;
+  trainingReadOnly: boolean;
+  locale: "en" | "zh-CN";
+  onThreadIdentityChange?: (identity: ThreadIdentity) => void;
+};
+
+const AgentRuntimeAdapterSettingsContext = createContext<AgentRuntimeAdapterSettings>({
+  canUpload: false,
+  trainingReadOnly: false,
+  locale: "zh-CN"
+});
+
+// The thread list adapter's `unstable_Provider` must keep one component identity: assistant-ui
+// rebuilds every thread runtime when that type changes, which empties the messages while the
+// message views are still mounted (`tapClientLookup: Index N out of bounds`). Settings that can
+// change at runtime (locale, upload permission) are read from context instead.
+const AgentRuntimeAdapterBridge: FC<PropsWithChildren> = ({ children }) => {
+  const settings = useContext(AgentRuntimeAdapterSettingsContext);
+  return (
+    <AgentRuntimeAdapterProvider
+      // Training transcripts are localized server-side, so a language switch reloads them; the
+      // thread view is keyed by the same locale so it remounts instead of reading stale messages.
+      key={settings.trainingReadOnly ? settings.locale : "portal"}
+      canUpload={settings.canUpload}
+      onThreadIdentityChange={settings.onThreadIdentityChange}
+      trainingReadOnly={settings.trainingReadOnly}
+      locale={settings.locale}
+    >
+      {children}
+    </AgentRuntimeAdapterProvider>
+  );
+};
+
 const AgentRuntimeAdapterProvider: FC<
   PropsWithChildren<{
     onThreadIdentityChange?: (identity: ThreadIdentity) => void;
@@ -7595,6 +7636,8 @@ export function PortalShell(props: {
 
   const appliedConfigRef = useRef(appliedConfig);
   const localeRef = useRef(locale);
+  const tRef = useRef(t);
+  tRef.current = t;
   const runtimeOptionsRef = useRef(runtimeOptions);
   const runtimeModeRef = useRef(runtimeMode);
   const showProcessTraceRef = useRef(showProcessTrace);
@@ -7753,6 +7796,8 @@ export function PortalShell(props: {
     setSelectedWorkspaceFile(null);
     setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
   }, [markPortalThreadRead]);
+  const syncActiveThreadIdentityRef = useRef(syncActiveThreadIdentity);
+  syncActiveThreadIdentityRef.current = syncActiveThreadIdentity;
 
   appliedConfigRef.current = appliedConfig;
   localeRef.current = locale;
@@ -8415,7 +8460,7 @@ export function PortalShell(props: {
       async list() {
         const out = await api<ThreadListOut>(
           trainingReadOnly
-            ? `/api/portal/training/threads${locale === "en" ? "?lang=en" : ""}`
+            ? `/api/portal/training/threads${localeRef.current === "en" ? "?lang=en" : ""}`
             : "/api/threads"
         );
         const threads = Array.isArray(out.threads) ? out.threads : [];
@@ -8457,7 +8502,7 @@ export function PortalShell(props: {
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
         if (!selectedMode) {
-          throw new Error(t("runtime.sendBlocked"));
+          throw new Error(tRef.current("runtime.sendBlocked"));
         }
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
         const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
@@ -8490,7 +8535,7 @@ export function PortalShell(props: {
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
           throw new Error(notice);
         }
-        syncActiveThreadIdentity({
+        syncActiveThreadIdentityRef.current({
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
@@ -8554,7 +8599,7 @@ export function PortalShell(props: {
       async fetch(threadId: string) {
         const out = await api<ThreadOneOut>(
           trainingReadOnly
-            ? `/api/portal/training/threads/${encodeURIComponent(threadId)}${locale === "en" ? "?lang=en" : ""}`
+            ? `/api/portal/training/threads/${encodeURIComponent(threadId)}${localeRef.current === "en" ? "?lang=en" : ""}`
             : `/api/threads/${encodeURIComponent(threadId)}`
         );
         setWorkspaceThreads((current) => [
@@ -8597,21 +8642,26 @@ export function PortalShell(props: {
           controller.close();
         });
       },
-      unstable_Provider: ({ children }: PropsWithChildren) => (
-        <AgentRuntimeAdapterProvider
-          canUpload={!trainingReadOnly && (runtimeOptions?.canUpload ?? false)}
-          onThreadIdentityChange={syncActiveThreadIdentity}
-          trainingReadOnly={trainingReadOnly}
-          locale={locale}
-        >
-          {children}
-        </AgentRuntimeAdapterProvider>
-      )
+      unstable_Provider: AgentRuntimeAdapterBridge
     }),
-    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity, t, trainingReadOnly]
+    // Keep this adapter stable for the session: read locale, translations and the identity
+    // callback through refs so a language switch or late runtime options never rebuild it.
+    [trainingReadOnly]
   );
 
   const canUpload = !trainingReadOnly && (runtimeOptions?.canUpload ?? false);
+  const handleRuntimeThreadIdentityChange = useCallback((identity: ThreadIdentity) => {
+    syncActiveThreadIdentityRef.current(identity);
+  }, []);
+  const runtimeAdapterSettings = useMemo<AgentRuntimeAdapterSettings>(
+    () => ({
+      canUpload,
+      trainingReadOnly,
+      locale,
+      onThreadIdentityChange: handleRuntimeThreadIdentityChange
+    }),
+    [canUpload, handleRuntimeThreadIdentityChange, locale, trainingReadOnly]
+  );
   const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
   const activeRuntimeThread = workspaceThreads.find(
     (thread) => thread.id === activeRemoteThreadId || thread.external_id === activeRemoteThreadId
@@ -10886,18 +10936,36 @@ export function PortalShell(props: {
     }
   }, [activeRemoteThreadId, activeRunThreadIds, activeThreadBackgroundRunning, reloadThreadHistory]);
 
+  const threadSwitchGateRef = useRef<ExistingTaskSwitchGate>({ current: 0 });
+  const [threadSwitchPending, setThreadSwitchPending] = useState(false);
+  const switchToExistingThread = useCallback((
+    threadId: string,
+    options: { switchToThread?: () => Promise<void> | void; errorFallback: string }
+  ) => {
+    const normalizedThreadId = threadId.trim();
+    return switchToExistingWorkspaceTask(threadSwitchGateRef.current, {
+      isActive: Boolean(
+        normalizedThreadId &&
+          (normalizedThreadId === activeRemoteThreadIdRef.current ||
+            normalizedThreadId === activeLocalThreadIdRef.current)
+      ),
+      unmountThreadView: () => flushSync(() => setThreadSwitchPending(true)),
+      switchToThread: async () => {
+        await (options.switchToThread ? options.switchToThread() : runtime.threads.switchToThread(normalizedThreadId));
+      },
+      remountThreadView: () => setThreadSwitchPending(false),
+      reportError: (error) => setErrorText(error instanceof Error ? error.message : options.errorFallback)
+    });
+  }, [runtime]);
+
   const openWorkspaceTask = useCallback(async (task: PortalWorkspaceTask | { id: string; folder_id?: string | null }) => {
     const folderId = task.folder_id || selectedWorkspaceFolderId;
     if (task.folder_id) setSelectedWorkspaceFolderId(task.folder_id);
     setWorkspaceMainView("task");
     setSelectedWorkspaceFile(null);
     writePortalWorkspaceLocation({ folderId, threadId: task.id }, "push");
-    try {
-      await runtime.threads.switchToThread(task.id);
-    } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to open task");
-    }
-  }, [runtime, selectedWorkspaceFolderId]);
+    await switchToExistingThread(task.id, { errorFallback: "Failed to open task" });
+  }, [selectedWorkspaceFolderId, switchToExistingThread]);
 
   const attentionThreadsRef = useRef(workspaceThreads);
   attentionThreadsRef.current = workspaceThreads;
@@ -10950,7 +11018,9 @@ export function PortalShell(props: {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const restoreFromLocation = () => {
+    // `fromHistory` is false for the initial restore: nothing is mounted yet, and unmounting
+    // synchronously is not allowed while React is still committing this effect.
+    const restoreFromLocation = (fromHistory: boolean) => {
       const location = readPortalWorkspaceLocation(window.location.search);
       const threadId = readPortalThreadIdFromLocation(window.location.search);
       setSelectedWorkspaceFolderId(location.folderId);
@@ -10972,22 +11042,27 @@ export function PortalShell(props: {
       if (threadId) {
         setWorkspaceMainView("task");
         setSelectedWorkspaceFile(null);
-        void runtime.threads.switchToThread(threadId).catch((error) => {
-          setErrorText(error instanceof Error ? error.message : "Failed to restore task");
-        });
+        if (fromHistory) {
+          void switchToExistingThread(threadId, { errorFallback: "Failed to restore task" });
+        } else {
+          void runtime.threads.switchToThread(threadId).catch((error) => {
+            setErrorText(error instanceof Error ? error.message : "Failed to restore task");
+          });
+        }
         restoreFile();
         return;
       }
       setWorkspaceMainView("folder");
       restoreFile();
     };
-    window.addEventListener("popstate", restoreFromLocation);
+    const handlePopState = () => restoreFromLocation(true);
+    window.addEventListener("popstate", handlePopState);
     const initialLocation = readPortalWorkspaceLocation(window.location.search);
     if (initialLocation.fileId || readPortalThreadIdFromLocation(window.location.search)) {
-      restoreFromLocation();
+      restoreFromLocation(false);
     }
-    return () => window.removeEventListener("popstate", restoreFromLocation);
-  }, [runtime, workspaceDataSource]);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [runtime, switchToExistingThread, workspaceDataSource]);
 
   useEffect(() => {
     const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
@@ -11149,7 +11224,7 @@ export function PortalShell(props: {
 
   const threadViewKey = `thread-view-${String(
     activeThreadIdentity.localId || activeThreadIdentity.remoteId || "empty"
-  )}`;
+  )}${trainingReadOnly ? `-${locale}` : ""}`;
   const threadContent = (
     <div
       className={threadReadOnly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
@@ -11203,7 +11278,18 @@ export function PortalShell(props: {
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <PortalThreadErrorBoundary
               resetKey={threadViewKey}
-              fallback={(
+              autoRetryLimit={1}
+              onError={(error, errorInfo) =>
+                reportClientError({
+                  source: "portal-thread",
+                  error,
+                  componentStack: errorInfo.componentStack,
+                  threadId: activeRemoteThreadId || activeThreadIdentity.localId,
+                  locale,
+                  context: { running: Boolean(activeRemoteThreadId && runningThreadIds[activeRemoteThreadId]) }
+                })
+              }
+              fallback={({ retry }) => (
                 <div className="thread-access-banner thread-access-banner-secondary" role="alert">
                   <div className="thread-access-banner-head">
                     <AlertCircleIcon size={18} aria-hidden="true" />
@@ -11211,9 +11297,11 @@ export function PortalShell(props: {
                   </div>
                   <p>{t("thread.renderFailedHelp")}</p>
                   <div className="thread-access-banner-actions">
+                    <Button size="small" type="primary" onClick={retry}>
+                      {t("thread.renderRetry")}
+                    </Button>
                     <Button
                       size="small"
-                      type="primary"
                       onClick={() => selectWorkspaceFolder(selectedWorkspaceFolderId, selectedWorkspaceFolderName)}
                     >
                       {t("workspace.returnToFolder")}
@@ -11222,6 +11310,9 @@ export function PortalShell(props: {
                 </div>
               )}
             >
+            {threadSwitchPending ? (
+              <PortalThreadSwitchingPlaceholder label={t("thread.loadingConversation")} />
+            ) : (
             <PortalThread
               key={threadViewKey}
               readingPositionKey={`${portalPreferenceUser?.id || "anonymous"}:${String(
@@ -11285,6 +11376,7 @@ export function PortalShell(props: {
               }}
               userMessage={{ allowEdit: !threadReadOnly }}
             />
+            )}
             </PortalThreadErrorBoundary>
           </PreviewRequestContext.Provider>
           </AttachmentWorkspaceFilesContext.Provider>
@@ -11338,11 +11430,12 @@ export function PortalShell(props: {
               <StableThreadListItems
                 visibleRemoteIds={visibleWorkspaceThreadIds}
                 orderedRemoteIds={orderedWorkspaceThreadIds}
-                onSelectThread={(threadId) => {
+                onSelectThread={(threadId, switchToThread) => {
                   setWorkspaceMainView("task");
                   setSelectedWorkspaceFile(null);
                   const thread = workspaceThreads.find((item) => item.id === threadId || item.external_id === threadId);
                   if (thread?.folder_id) setSelectedWorkspaceFolderId(thread.folder_id);
+                  void switchToExistingThread(threadId, { switchToThread, errorFallback: "Failed to open task" });
                 }}
                 readOnly={trainingReadOnly}
               />
@@ -11489,6 +11582,7 @@ export function PortalShell(props: {
 
   return (
     <LocalWorkspaceContext.Provider value={{ ...localWorkspace, showEntry: showLocalBridgeEntry, running: Boolean(runningThreadIds[activeRemoteThreadId]) }}>
+    <AgentRuntimeAdapterSettingsContext.Provider value={runtimeAdapterSettings}>
     <AssistantRuntimeProvider runtime={runtime}>
       <PortalComposerWorkflowProvider value={composerWorkflowController.contextValue}>
       <PortalChatRecoveryContext.Provider value={portalChatRecoveryContextValue}>
@@ -12074,6 +12168,7 @@ export function PortalShell(props: {
       </PortalChatRecoveryContext.Provider>
       </PortalComposerWorkflowProvider>
     </AssistantRuntimeProvider>
+    </AgentRuntimeAdapterSettingsContext.Provider>
     </LocalWorkspaceContext.Provider>
   );
 }

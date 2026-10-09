@@ -459,23 +459,32 @@ export const PortalThread: FC<PortalThreadProps> = (config) => {
         </Thread.Root>
       </PortalThreadUserSendIntentContext.Provider>
       {showPositioningPlaceholder || showLoadingPlaceholder ? (
-        <div className="portal-thread-position-placeholder" role="status" aria-live="polite">
-          <span className="aui-sr-only">{threadLoading ? loadingLabel : positioningLabel}</span>
-          <div className="portal-thread-position-placeholder-content">
-            <div className="portal-thread-position-placeholder-avatar" aria-hidden="true" />
-            <div className="portal-thread-position-placeholder-copy">
-              <strong className="portal-thread-position-placeholder-label">
-                {threadLoading ? loadingLabel : positioningLabel}
-              </strong>
-              <div className="portal-thread-position-placeholder-lines" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          </div>
-        </div>
+        <ThreadPositionPlaceholder label={threadLoading ? loadingLabel : positioningLabel} />
       ) : null}
     </div>
   );
 };
+
+const ThreadPositionPlaceholder: FC<{ label: string }> = ({ label }) => (
+  <div className="portal-thread-position-placeholder" role="status" aria-live="polite">
+    <span className="aui-sr-only">{label}</span>
+    <div className="portal-thread-position-placeholder-content">
+      <div className="portal-thread-position-placeholder-avatar" aria-hidden="true" />
+      <div className="portal-thread-position-placeholder-copy">
+        <strong className="portal-thread-position-placeholder-label">{label}</strong>
+        <div className="portal-thread-position-placeholder-lines" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/** Shown while the previous task's messages are unmounted and the next task is being opened. */
+export const PortalThreadSwitchingPlaceholder: FC<{ label: string }> = ({ label }) => (
+  <div className="portal-thread-position-shell is-positioning" aria-busy="true">
+    <ThreadPositionPlaceholder label={label} />
+  </div>
+);

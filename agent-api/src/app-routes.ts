@@ -33,6 +33,7 @@ export function registerCommonApiRoutes(
     dwsRouter?: Router;
     actionConnectorProvisionRouter?: Router;
     actionConnectorRuntimeRouter?: Router;
+    clientErrorReportRouter?: Router;
   }
 ): void {
   const systemSettingsMount = Router();
@@ -82,6 +83,8 @@ export function registerCommonApiRoutes(
     options.actionConnectorProvisionRouter ?? Router()
   );
   app.use("/api/action-connectors", options.actionConnectorRuntimeRouter ?? Router());
+  // Outside /api/portal so Caddy routes it to the admin process instead of the chat slots.
+  app.use("/api/client-errors", requireCurrentUser, options.clientErrorReportRouter ?? Router());
   app.use(
     "/api",
     requireCurrentUser,

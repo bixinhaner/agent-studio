@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { startWorkspaceTaskInFolder, type StartWorkspaceTaskActions } from "./workspace-task-navigation";
+import {
+  startWorkspaceTaskInFolder,
+  switchToExistingWorkspaceTask,
+  type StartWorkspaceTaskActions,
+  type SwitchToExistingTaskActions
+} from "./workspace-task-navigation";
 
 function navigationActions(events: string[], switchToNewThread = vi.fn(async () => undefined)) {
   const actions: StartWorkspaceTaskActions = {
@@ -73,5 +78,73 @@ describe("workspace task navigation", () => {
       "write-location:folder-target:replace",
       "error:runtime unavailable"
     ]);
+  });
+});
+
+describe("switchToExistingWorkspaceTask", () => {
+  function createActions(overrides: Partial<SwitchToExistingTaskActions> = {}) {
+    const calls: string[] = [];
+    const actions: SwitchToExistingTaskActions = {
+      isActive: false,
+      unmountThreadView: () => calls.push("unmount"),
+      switchToThread: async () => {
+        calls.push("switch");
+      },
+      remountThreadView: () => calls.push("remount"),
+      reportError: () => calls.push("error"),
+      ...overrides
+    };
+    return { actions, calls };
+  }
+
+  it("unmounts the current messages before switching the runtime, then remounts", async () => {
+    const { actions, calls } = createActions();
+
+    await expect(switchToExistingWorkspaceTask({ current: 0 }, actions)).resolves.toBe(true);
+
+    expect(calls).toEqual(["unmount", "switch", "remount"]);
+  });
+
+  it("does not unmount when the task is already open", async () => {
+    const { actions, calls } = createActions({ isActive: true });
+
+    await switchToExistingWorkspaceTask({ current: 0 }, actions);
+
+    expect(calls).toEqual(["switch"]);
+  });
+
+  it("remounts and reports when the switch fails", async () => {
+    const error = new Error("missing thread");
+    const reportError = vi.fn();
+    const { actions, calls } = createActions({
+      switchToThread: async () => {
+        throw error;
+      },
+      reportError
+    });
+
+    await expect(switchToExistingWorkspaceTask({ current: 0 }, actions)).resolves.toBe(false);
+
+    expect(calls).toEqual(["unmount", "remount"]);
+    expect(reportError).toHaveBeenCalledWith(error);
+  });
+
+  it("lets only the latest overlapping switch remount the view", async () => {
+    const gate = { current: 0 };
+    let finishFirst: () => void = () => undefined;
+    const first = createActions({
+      switchToThread: () => new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      })
+    });
+    const second = createActions();
+
+    const firstSwitch = switchToExistingWorkspaceTask(gate, first.actions);
+    await switchToExistingWorkspaceTask(gate, second.actions);
+    finishFirst();
+    await firstSwitch;
+
+    expect(second.calls).toEqual(["unmount", "switch", "remount"]);
+    expect(first.calls).toEqual(["unmount"]);
   });
 });
