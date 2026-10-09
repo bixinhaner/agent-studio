@@ -26,7 +26,9 @@
     file_server
   }
 
+  # Vite content-hashes every asset name, so a cached copy can never be stale.
   handle /assets/* {
+    header Cache-Control "public, max-age=31536000, immutable"
     file_server
   }
 
@@ -35,8 +37,12 @@
     file_server
   }
 
+  # Without a Cache-Control header browsers cache index.html heuristically (often for
+  # hours) and keep loading the previous release's bundle after a deploy. no-cache still
+  # lets them reuse it, but only after an ETag revalidation.
   handle {
     try_files {path} /index.html
+    header Cache-Control "no-cache"
     file_server
   }
 }
