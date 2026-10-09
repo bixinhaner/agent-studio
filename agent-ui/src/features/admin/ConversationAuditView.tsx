@@ -1,3 +1,4 @@
+import { SendFailureAuditView } from "./SendFailureAuditView";
 import { Alert, Button, Empty, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs, Segmented } from "antd";
 import { createPortal } from "react-dom";
 import {
@@ -118,7 +119,7 @@ import {
   type TranscriptTimelineRow
 } from "./conversation-transcript-layout";
 
-type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
+type AuditMode = "send_failures" | "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
 type RecoveryEmailTemplateLanguage = "zh" | "en";
 
@@ -199,7 +200,7 @@ function readConversationAuditHashState(): ConversationAuditHashState {
   const conversationId = params.get("conversation")?.trim() ?? "";
   const rawMode = params.get("mode")?.trim();
   const mode: AuditMode =
-    rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" || rawMode === "customer_recovery"
+    rawMode === "send_failures" || rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" || rawMode === "customer_recovery"
       ? rawMode
       : "conversations";
   return {
@@ -3522,15 +3523,21 @@ export function ProductFeedbackDetail(props: {
 
 export function ConversationAuditView() {
   const [mode, setMode] = useState<AuditMode>(() => readConversationAuditHashState().mode);
+  useEffect(() => {
+    const sync = () => setMode(readConversationAuditHashState().mode);
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="admin-page-container" style={{ paddingBottom: 0, paddingTop: 0, gap: 0, flex: 'none', marginBottom: 12 }}>
         <Tabs 
           activeKey={mode} 
-          onChange={k => setMode(k as AuditMode)} 
+          onChange={k => { setMode(k as AuditMode); window.history.replaceState(null, "", `#admin/conversations?mode=${k}`); }}
           items={[
             { key: "conversations", label: "用户交互会话" },
+            { key: "send_failures", label: "发送失败" },
             { key: "customer_recovery", label: "体验跟进" },
             { key: "ai_reviews", label: "Zendesk AI评分" },
             { key: "product_feedback", label: "系统反馈" },
@@ -3540,7 +3547,9 @@ export function ConversationAuditView() {
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {mode === "conversations" ? (
+        {mode === "send_failures" ? (
+          <SendFailureAuditView />
+        ) : mode === "conversations" ? (
           <ConversationWorkspace />
         ) : mode === "customer_recovery" ? (
           <ConversationRecoveryWorkspace />

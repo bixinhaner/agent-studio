@@ -7,7 +7,7 @@ import {
   type SwitchToExistingTaskActions
 } from "./workspace-task-navigation";
 
-function navigationActions(events: string[], switchToNewThread = vi.fn(async () => undefined)) {
+function navigationActions(events: string[], switchToNewThread: () => Promise<void> = vi.fn(async () => undefined)) {
   const actions: StartWorkspaceTaskActions = {
     prepareForSwitch: () => events.push("prepare-for-switch"),
     showTask: () => events.push("show-task"),
@@ -140,11 +140,49 @@ describe("switchToExistingWorkspaceTask", () => {
     const second = createActions();
 
     const firstSwitch = switchToExistingWorkspaceTask(gate, first.actions);
-    await switchToExistingWorkspaceTask(gate, second.actions);
+    const secondSwitch = switchToExistingWorkspaceTask(gate, second.actions);
     finishFirst();
     await firstSwitch;
+    await secondSwitch;
 
     expect(second.calls).toEqual(["unmount", "switch", "remount"]);
     expect(first.calls).toEqual(["unmount"]);
   });
 });
+
+  it("serializes runtime changes, skips obsolete queued targets and suppresses stale errors", async () => {
+    const gate = { current: 0 };
+    let release!: () => void;
+    let active = "original";
+    const selected: string[] = [];
+    const error = vi.fn();
+    const open = (id: string, wait?: Promise<void>) => switchToExistingWorkspaceTask(gate, {
+      isActive: id === active,
+      unmountThreadView: () => {},
+      switchToThread: async () => { if (wait) await wait; active = id; },
+      remountThreadView: () => selected.push(active), reportError: error
+    });
+    const first = open("slow", new Promise<void>(r => { release = r; }));
+    const skipped = open("intermediate");
+    const last = open("original");
+    release();
+    expect(await Promise.all([first, skipped, last])).toEqual([false, false, true]);
+    expect(active).toBe("original");
+    expect(selected).toEqual(["original"]);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("serializes new-task creation with an existing task and hides superseded completion", async () => {
+    const gate = { current: 0 };
+    const events: string[] = [];
+    let finish!: () => void;
+    const first = startWorkspaceTaskInFolder("folder", navigationActions(events, () => new Promise<void>(r => { finish = r; })), gate);
+    const last = switchToExistingWorkspaceTask(gate, {
+      isActive: false, unmountThreadView: () => {}, switchToThread: async () => { events.push("existing"); }, remountThreadView: () => {}, reportError: () => {}
+    });
+    finish();
+    expect(await first).toBe(false);
+    expect(await last).toBe(true);
+    expect(events).not.toContain("show-task");
+    expect(events.at(-1)).toBe("existing");
+  });

@@ -418,7 +418,11 @@ export function InlineAttachmentComposer(props: ComposerProps) {
       aui.composer().setText(detail.text);
       for (const attachment of detail.attachments) {
         const complete = completedAttachment(attachment);
-        if (complete) void aui.composer().addAttachment(complete);
+        if (complete) void aui.composer().addAttachment(complete).catch(() => setDraftError(true));
+        else if (attachment.file) {
+          reserveAttachmentId(attachment.file, attachment.id);
+          void aui.composer().addAttachment(attachment.file).catch(() => setDraftError(true));
+        } else setDraftError(true);
       }
     };
     window.addEventListener("bailey-restore-composer", restore);

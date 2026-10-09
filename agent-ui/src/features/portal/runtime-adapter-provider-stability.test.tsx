@@ -1,3 +1,5 @@
+import {switchToExistingWorkspaceTask} from "./workspace-task-navigation";
+let delaySlowFetch: Promise<void> = Promise.resolve();
 import {
   Component,
   createContext,
@@ -96,7 +98,7 @@ function baseAdapter(): Omit<RemoteThreadListAdapter, "unstable_Provider"> {
     async archive() {},
     async unarchive() {},
     async delete() {},
-    async fetch(threadId: string) { return { status: "regular", remoteId: threadId, title: "Thread" } as never; },
+    async fetch(threadId: string) { if(threadId === "slow-task") await delaySlowFetch; return { status: "regular", remoteId: threadId, title: "Thread" } as never; },
     async generateTitle() { return createAssistantStream((controller) => { controller.appendText("Thread"); controller.close(); }); }
   };
 }
@@ -182,4 +184,18 @@ describe("thread runtime adapter provider", () => {
     expect(String(onError.mock.calls[0]?.[0])).toMatch(/out of bounds/);
     consoleError.mockRestore();
   });
+});
+
+it("keeps the final selection when an earlier task loads slowly",async()=>{
+ render(<Harness stableProvider onError={vi.fn()}/>); await openThread();
+ let release=()=>{}; delaySlowFetch=new Promise<void>(r=>release=r);
+ const gate={current:0}; const seen:string[]=[];
+ const open=(id:string)=>switchToExistingWorkspaceTask(gate,{isActive:false,unmountThreadView:()=>{},switchToThread:()=>runtime.threads.switchToThread(id),remountThreadView:()=>seen.push(id),reportError:e=>{throw e;}});
+ let slow:Promise<boolean>; let latest:Promise<boolean>;
+ await act(async()=>{ slow=open("slow-task"); latest=open("latest-task"); });
+ await act(async()=>{release();});
+ await act(async()=>{await slow!;});
+ await act(async()=>{await latest!;});
+ expect(seen).toEqual(["latest-task"]);
+ expect(runtime.threads.getItemById(runtime.threads.getState().mainThreadId).getState().remoteId).toBe("latest-task");
 });

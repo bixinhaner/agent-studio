@@ -7789,6 +7789,9 @@ export function PortalShell(props: {
   const runtimeModeRef = useRef(runtimeMode);
   const showProcessTraceRef = useRef(showProcessTrace);
   const collapseFinalTraceOnDoneRef = useRef(collapseFinalTraceOnDone);
+  const threadSwitchGateRef = useRef<ExistingTaskSwitchGate>({ current: 0 });
+  const [threadSwitchPending, setThreadSwitchPending] = useState(false);
+  const navigationViewRef = useRef<"folder" | "task" | null>(null);
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
   const runtimeModeOverrideRef = useRef<{ threadId: string; modeId: string } | null>(null);
@@ -7939,7 +7942,7 @@ export function PortalShell(props: {
       lastMarkedReadThreadIdRef.current = normalizedRemoteId;
       void markPortalThreadRead(normalizedRemoteId);
     }
-    setWorkspaceMainView("task");
+    if (navigationViewRef.current !== "folder" && !threadSwitchGateRef.current.tail) setWorkspaceMainView("task");
     setSelectedWorkspaceFile(null);
     setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
   }, [markPortalThreadRead]);
@@ -8880,7 +8883,7 @@ export function PortalShell(props: {
     setSelectedKnowledgeSetIds(ids);
   }, []);
   useEffect(() => {
-    if (!activeRemoteThreadId || workspaceMainView !== "task") return;
+    if (!activeRemoteThreadId || workspaceMainView !== "task" || threadSwitchPending) return;
     const activeThread = workspaceThreads.find(
       (thread) => thread.id === activeRemoteThreadId || thread.external_id === activeRemoteThreadId
     );
@@ -8891,7 +8894,7 @@ export function PortalShell(props: {
         threadId: activeRemoteThreadId
       });
     }
-  }, [activeRemoteThreadId, selectedWorkspaceFolderId, workspaceMainView, workspaceThreads]);
+  }, [activeRemoteThreadId, selectedWorkspaceFolderId, workspaceMainView, workspaceThreads, threadSwitchPending]);
   const selectedWorkspaceFolder = useMemo(
     () => workspaceRootNodes.find((node) => node.id === selectedWorkspaceFolderId) ?? null,
     [selectedWorkspaceFolderId, workspaceRootNodes]
@@ -9044,6 +9047,9 @@ export function PortalShell(props: {
     [directUnreadWorkspaceFolderIds, workspaceFolderAncestorPaths]
   );
   const selectWorkspaceFolder = useCallback((folderId: string, folderName?: string) => {
+    navigationViewRef.current = "folder";
+    threadSwitchGateRef.current.current += 1;
+    setThreadSwitchPending(false);
     setSelectedWorkspaceFolderId(folderId);
     setSelectedWorkspaceFolderLabel(folderName || "");
     setSessionSearchValue("");
@@ -11118,12 +11124,11 @@ export function PortalShell(props: {
     return window.confirm(tRef.current("thread.leavePendingAttachments", { count: String(count) }));
   }, []);
 
-  const threadSwitchGateRef = useRef<ExistingTaskSwitchGate>({ current: 0 });
-  const [threadSwitchPending, setThreadSwitchPending] = useState(false);
   const switchToExistingThread = useCallback((
     threadId: string,
     options: { switchToThread?: () => Promise<void> | void; errorFallback: string }
   ) => {
+    navigationViewRef.current = "task";
     const normalizedThreadId = threadId.trim();
     return switchToExistingWorkspaceTask(threadSwitchGateRef.current, {
       isActive: Boolean(
@@ -11161,24 +11166,26 @@ export function PortalShell(props: {
 
   const startWorkspaceTask = useCallback(async () => {
     if (!confirmLeavingPendingAttachments()) return false;
+    navigationViewRef.current = "task";
     const folderId = selectedWorkspaceFolderIdRef.current;
     setWorkspaceErrorText("");
     return startWorkspaceTaskInFolder(folderId, {
       prepareForSwitch: () => {
         flushSync(() => {
+          setThreadSwitchPending(true);
           syncActiveThreadIdentity({});
           setSelectedWorkspaceFile(null);
           setWorkspaceMainView("folder");
         });
       },
-      showTask: () => setWorkspaceMainView("task"),
-      showFolder: () => setWorkspaceMainView("folder"),
+      showTask: () => { setThreadSwitchPending(false); setWorkspaceMainView("task"); },
+      showFolder: () => { setThreadSwitchPending(false); setWorkspaceMainView("folder"); },
       writeFolderLocation: (nextFolderId, mode) => {
         writePortalWorkspaceLocation({ folderId: nextFolderId }, mode);
       },
       switchToNewThread: () => runtime.threads.switchToNewThread(),
       reportError: () => setWorkspaceErrorText(t("workspace.createTaskFailed"))
-    });
+    }, threadSwitchGateRef.current);
   }, [confirmLeavingPendingAttachments, runtime, syncActiveThreadIdentity, t]);
 
   // The tour points at the composer, which only exists in a task view.
@@ -11229,13 +11236,14 @@ export function PortalShell(props: {
         if (fromHistory) {
           void switchToExistingThread(threadId, { errorFallback: "Failed to restore task" });
         } else {
-          void runtime.threads.switchToThread(threadId).catch((error) => {
-            setErrorText(error instanceof Error ? error.message : "Failed to restore task");
-          });
+          // Initial restore below uses the same serialized navigation queue.
         }
         restoreFile();
         return;
       }
+      navigationViewRef.current = "folder";
+      threadSwitchGateRef.current.current += 1;
+      setThreadSwitchPending(false);
       setWorkspaceMainView("folder");
       restoreFile();
     };
@@ -11361,8 +11369,7 @@ export function PortalShell(props: {
     }
 
     let cancelled = false;
-    void runtime.threads
-      .switchToThread(requestedThreadId)
+    void Promise.resolve().then(() => switchToExistingThread(requestedThreadId, { errorFallback: "Failed to restore current session" }))
       .catch((error) => {
         if (cancelled) return;
         setErrorText(error instanceof Error ? error.message : "Failed to restore current session");
@@ -11376,12 +11383,12 @@ export function PortalShell(props: {
     return () => {
       cancelled = true;
     };
-  }, [portalThreadRestoreSettled, runtime]);
+  }, [portalThreadRestoreSettled, switchToExistingThread]);
 
   useEffect(() => {
-    if (!portalThreadRestoreSettled) return;
+    if (!portalThreadRestoreSettled || threadSwitchPending || workspaceMainView !== "task") return;
     replacePortalThreadIdInLocation(activeRemoteThreadId);
-  }, [activeRemoteThreadId, portalThreadRestoreSettled]);
+  }, [activeRemoteThreadId, portalThreadRestoreSettled, threadSwitchPending, workspaceMainView]);
 
   const subscriptionAccessContextValue = useMemo(
     () => ({

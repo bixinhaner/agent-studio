@@ -8662,3 +8662,10 @@ button.admin-menu-item:focus-visible {
 .admin-local-online-dot.is-offline {
   background: #9ca3af;
 }
+
+.admin-send-failure-audit { overflow: auto; }
+.admin-send-failure-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.admin-send-failure-filters label { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+.admin-send-failure-filters input:not([type="checkbox"]), .admin-send-failure-filters select { min-width: 0; max-width: 100%; padding: 8px; color: var(--admin-color-text); background: var(--admin-color-surface-solid); border: 1px solid var(--admin-color-border); border-radius: var(--admin-radius-sm); }
+.admin-send-failure-filters input:focus-visible, .admin-send-failure-filters select:focus-visible { outline: 2px solid var(--admin-color-accent); outline-offset: 2px; }
+.admin-send-failure-summary { display: flex; flex-wrap: wrap; gap: 12px; overflow-wrap: anywhere; }

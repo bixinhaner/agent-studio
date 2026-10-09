@@ -1,3 +1,4 @@
+import { createSendFailureAuditRouter } from "./send-failure-audit-router.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -2453,6 +2454,8 @@ export function createConversationAuditRouter(options: {
       res.status(500).json({ detail });
     }
   });
+
+  router.use(createSendFailureAuditRouter(() => getDb() as never));
 
   router.get("/conversations", async (req: Request, res: Response) => {
     try {

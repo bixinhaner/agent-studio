@@ -2,10 +2,10 @@ import { useCallback } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { AssistantRuntimeProvider, ComposerPrimitive, ThreadPrimitive, ActionBarPrimitive, useAui, useAuiState, useLocalRuntime, type ChatModelAdapter, type CreateAttachment } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, ComposerPrimitive, ThreadPrimitive, ActionBarPrimitive, useAui, useAuiState, useLocalRuntime, type ChatModelAdapter, type CreateAttachment, type AttachmentAdapter } from "@assistant-ui/react";
 import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
 import { $getRoot, getNearestEditorFromDOMNode } from "lexical";
-import { attachmentReference, makeAttachmentDraft, writeAttachmentDraft, missingInlineAttachments } from "./inline-attachments";
+import { attachmentReference, makeAttachmentDraft, writeAttachmentDraft, missingInlineAttachments, takeAttachmentId } from "./inline-attachments";
 import { usePortalComposerDraftPersistence } from "./composer-workflow";
 import { PortalI18nProvider } from "./i18n";
 
@@ -45,8 +45,8 @@ function Body({ scope }: { scope: string }) {
     <output data-testid="state">{JSON.stringify({ text, attachments, messages })}</output>
   </>;
 }
-function Harness({ scope }: { scope: string }) {
-  const runtime = useLocalRuntime(model);
+function Harness({ scope, adapter }: { scope: string; adapter?: AttachmentAdapter }) {
+  const runtime = useLocalRuntime(model, { adapters: { attachments: adapter } });
   return <PortalI18nProvider defaultLocale="zh-CN"><AssistantRuntimeProvider runtime={runtime}><Body scope={scope} /></AssistantRuntimeProvider></PortalI18nProvider>;
 }
 const state = () => JSON.parse(screen.getByTestId("state").textContent!);
@@ -157,4 +157,23 @@ describe("inline attachment error translations", () => {
     expect(alert.textContent).toContain(locale === "en" ? "Check your connection and try again." : "上传过程中连接中断，请检查网络后重试。");
     expect(alert.textContent).not.toContain("Raw upload failure");
   });
+});
+
+it("restores failed raw files with their identity and keeps them retryable", async () => {
+  const received: File[] = [];
+  const adapter: AttachmentAdapter = {
+    accept: "*", async *add({file}) {
+      received.push(file);
+      yield { id: takeAttachmentId(file)!, name: file.name, type: "document", file, content: [], contentType: file.type, status: {type: "incomplete", reason: "error"} };
+    }, async send() { throw new Error("not uploaded"); }, async remove() {}
+  };
+  render(<Harness scope="restore-pending" adapter={adapter} />); await hydrated();
+  const original = new File(["keep this content"], "pending.txt", {type:"text/plain"});
+  act(() => window.dispatchEvent(new CustomEvent("bailey-restore-composer", {detail:{threadId:"restore-pending",text:"keep my text",attachments:[{id:"pending-id",name:original.name,type:"document",file:original,content:[],status:{type:"incomplete",reason:"error"}}]}})));
+  await waitFor(() => expect(state().attachments).toHaveLength(1));
+  expect(received).toEqual([original]);
+  expect(state().attachments[0].id).toBe("pending-id");
+  expect(state().attachments[0].status.type).toBe("incomplete");
+  expect(state().text).toContain("keep my text");
+  expect(state().text).toContain("attachment:pending-id");
 });
