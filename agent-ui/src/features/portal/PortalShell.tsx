@@ -151,7 +151,7 @@ import {
 } from "../artifacts/codex-file-changes";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { LocalToolCard } from "./workbench/LocalToolCard";
-import { isLocalToolPart, upsertLocalToolParts } from "./workbench/local-tool-parts";
+import { isLocalToolPart, localToolResultObject, upsertLocalToolParts } from "./workbench/local-tool-parts";
 import { useLocalBridgeEntryVisibility } from "./local-bridge-visibility";
 import { LocalWorkspaceContext, LocalWorkspaceControls, LocalWorkspaceDialogs, useLocalWorkspace, useLocalWorkspaceReadiness } from "./workbench/LocalWorkspace";
 import { PortalThread, PortalThreadSwitchingPlaceholder, usePortalThreadUserSendIntent } from "./PortalThread";
@@ -10701,7 +10701,10 @@ export function PortalShell(props: {
               >;
               const error = asRecord(item?.error);
               const errMsg = typeof error?.message === "string" ? error.message : "";
-              const result = item?.result;
+              const localDeviceName = server === "local_computer" ? localWorkspace.selectionRef.current?.device_name : undefined;
+              // Stamp the computer like the saved card does, so the live card keeps it after the user switches folders.
+              const parsedLocalResult = localDeviceName ? localToolResultObject(item?.result) : {};
+              const result = Object.keys(parsedLocalResult).length > 0 ? { ...parsedLocalResult, device_name: localDeviceName } : item?.result;
               const toolName = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
               const crestTrace = crestActionTrace(toolName, args, result, errMsg);
               const rawDetail = [

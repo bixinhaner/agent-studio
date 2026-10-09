@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { upsertLocalToolParts } from './local-tool-parts';
+import { localToolResultObject, upsertLocalToolParts } from './local-tool-parts';
 import { LocalToolCard } from './LocalToolCard';
 import { LocalWorkspaceContext } from './LocalWorkspace';
 import { localBridgeApi } from '../api';
@@ -57,4 +57,11 @@ it.each(['en', 'zh-CN'] as const)('localizes the status and pending open feedbac
 it('names the computer the step ran on, not the folder selected now', () => {
   render(<PortalI18nProvider defaultLocale="zh-CN" languageSwitcherEnabled={false}><LocalWorkspaceContext.Provider value={{selection:{thread_id:'task',device_name:'New PC'},offline:false} as any}><LocalToolCard toolName="local_computer.local_exec" status={{type:'complete'}} result={{ok:true,device_name:'Old Mac'}} /></LocalWorkspaceContext.Provider></PortalI18nProvider>);
   expect(screen.getByText('已在Old Mac上执行命令')).toBeTruthy();
+});
+
+it('unwraps live local tool results so the stream can stamp the computer name', () => {
+  expect(localToolResultObject({ content: [{ type: 'text', text: '{"ok":true,"path":"/x"}' }] })).toEqual({ ok: true, path: '/x' });
+  expect(localToolResultObject('{"ok":false,"error":"E"}')).toEqual({ ok: false, error: 'E' });
+  expect(localToolResultObject({ content: [{ type: 'text', text: 'not json' }] })).toEqual({});
+  expect(localToolResultObject(undefined)).toEqual({});
 });

@@ -18,3 +18,16 @@ export function upsertLocalToolParts(content: Part[], updates: Part[]): boolean 
   }
   return changed;
 }
+
+/** The local tool's JSON result, unwrapped from a string or MCP text content like the card reads it. */
+export function localToolResultObject(result: unknown): Record<string, unknown> {
+  let output: any = result;
+  try {
+    if (typeof output === 'string') output = JSON.parse(output);
+    if (Array.isArray(output?.content)) {
+      const item = output.content.find((c: any) => c.type === 'text');
+      if (item?.text) output = JSON.parse(item.text);
+    }
+  } catch { return {}; }
+  return output && typeof output === 'object' && !Array.isArray(output) ? output : {};
+}
