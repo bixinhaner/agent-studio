@@ -1879,8 +1879,43 @@ class CodexAppServerManager {
   ): Promise<{ process: CodexAppServerProcess; release: () => void }> {
     return await this.reserveProcess(async () => {
       await this.retireClosedThreadOwners(threadId);
-      return this.findThreadOwner(threadId) ?? await this.selectProcessLocked(fallbackScope);
+      const owner = this.findThreadOwner(threadId);
+      if (owner && !(await this.releaseThreadForMcpChangeLocked(owner, threadId, fallbackScope))) return owner;
+      return await this.selectProcessLocked(fallbackScope);
     });
+  }
+
+  // Codex fixes a thread's MCP servers when it loads the thread, so resuming in the
+  // owning process would ignore servers added or removed since (e.g. the task was
+  // switched to a folder on the user's computer and needs local_computer). Move such
+  // a thread to a process launched with the new servers, unless it is mid-turn.
+  private async releaseThreadForMcpChangeLocked(
+    owner: CodexAppServerProcess,
+    threadId: string,
+    scope: RuntimeScope
+  ): Promise<boolean> {
+    if (sha256(owner.scope.config?.mcp_servers ?? {}) === sha256(scope.config?.mcp_servers ?? {})) return false;
+    if (this.lockedThreads.has(threadId)) return false;
+    if ([...this.activeTurnsByThread.keys()].some((key) => key.endsWith(`\u0000${threadId}`))) return false;
+    if (!owner.busy) {
+      // Stopping releases the thread writer at once; its other idle threads resume on demand.
+      await owner.stopAndWait("thread MCP servers changed");
+      this.forgetProcess(owner);
+    } else {
+      // Codex releases an unsubscribed thread's writer after about a minute; callers
+      // that resume across chat slots already wait for that.
+      owner.loadedThreads.delete(threadId);
+      await owner.request("thread/unsubscribe", { threadId }).catch(() => undefined);
+    }
+    for (const [key, scopeKey] of this.threadProcessScopes) {
+      if (scopeKey === owner.scopeKey && key.endsWith(`\u0000${threadId}`)) this.threadProcessScopes.delete(key);
+    }
+    console.info("codex thread moved to a process with updated MCP servers", {
+      threadId,
+      previousServers: Object.keys(asRecord(owner.scope.config?.mcp_servers) ?? {}),
+      nextServers: Object.keys(asRecord(scope.config?.mcp_servers) ?? {})
+    });
+    return true;
   }
 
   // A stopped app-server keeps the persisted thread writer until it has really

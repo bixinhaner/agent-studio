@@ -1588,6 +1588,48 @@ describe("Codex app-server runtime", () => {
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
   });
 
+  it("moves a restored thread to a process with the new MCP servers when they changed", async () => {
+    const startLog = path.join(testTempDir, "mcp-change-starts.log");
+    await fs.rm(startLog, { force: true });
+    const env = {
+      CODEX_HOME: path.join(testTempDir, "codex-home-mcp-change"),
+      FAKE_APP_SERVER_START_LOG: startLog
+    };
+    const cloudRuntime = new CodexRuntime({ envOverrides: env });
+    const thread = await cloudRuntime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const localServers = {
+      mcp_servers: { local_computer: { command: process.execPath, args: ["local-bridge-mcp-proxy.mjs"] } }
+    };
+    const localRuntime = new CodexRuntime({ envOverrides: env, config: localServers });
+    const restored = await localRuntime.resumeThreadWithOptions({
+      threadId: thread.id,
+      model: thread.options.model,
+      reasoningEffort: thread.options.reasoningEffort,
+      workspace: thread.options.workspace
+    });
+
+    expect(restored.scopeKey).not.toBe(thread.scopeKey);
+    const events: CodexStreamEvent[] = [];
+    for await (const event of localRuntime.runStreamed(restored, "after-local-switch")) events.push(event);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean);
+    expect(starts).toHaveLength(2);
+
+    // Same servers again: the owner is reused, no new process.
+    const again = await localRuntime.resumeThreadWithOptions({
+      threadId: thread.id,
+      model: thread.options.model,
+      reasoningEffort: thread.options.reasoningEffort,
+      workspace: thread.options.workspace
+    });
+    expect(again.scopeKey).toBe(restored.scopeKey);
+    expect((await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean)).toHaveLength(2);
+  });
+
   it("keeps the real thread owner after a Skill-scoped resume", async () => {
     const startLog = path.join(testTempDir, "skill-resume-owner-starts.log");
     await fs.rm(startLog, { force: true });
