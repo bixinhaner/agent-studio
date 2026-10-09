@@ -229,6 +229,36 @@ describe("thread turn delivery", () => {
     expect(state.thread.headId).toBe("assistant-1");
   });
 
+  it("keeps the turn's execution location on the user message through finalize", async () => {
+    const state = createFakeDb();
+    const repository = new ThreadRepository(state.db);
+    const location = { mode: "local", deviceName: "Like MacBook", path: "/Users/like/proj", label: "proj" };
+    await repository.claimTurnDelivery({
+      threadId: "thread-1",
+      userMessageId: "user-1",
+      runId: "run-1",
+      channel: "portal",
+      acceptedAt: "2026-08-20T00:00:01.000Z",
+      executionLocation: location
+    });
+    await repository.finalizeTurnDelivery({
+      threadId: "thread-1",
+      userMessageId: "user-1",
+      runId: "run-1",
+      channel: "portal",
+      acceptedAt: "2026-08-20T00:00:01.000Z",
+      status: "completed",
+      assistant: assistant("assistant-1")
+    });
+
+    const user = state.messages.find((item) => item.externalId === "user-1");
+    expect(user?.runConfig).toMatchObject({
+      channel: "portal",
+      _agentStudioExecutionLocation: location,
+      _agentStudioTurnDelivery: { runId: "run-1", status: "completed" }
+    });
+  });
+
   it("rejects an older run after a newer run claims the same user message", async () => {
     const state = createFakeDb();
     const repository = new ThreadRepository(state.db);

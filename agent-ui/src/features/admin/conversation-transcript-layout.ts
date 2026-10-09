@@ -1,18 +1,46 @@
 import type {
+  AdminConversationLocalEvent,
+  AdminConversationLocalOperation,
   AdminConversationTranscriptMessage,
   AdminConversationTranscriptProcessRow
 } from "./types";
 
 export type TranscriptLayoutItem =
   | { kind: "message"; message: AdminConversationTranscriptMessage }
-  | { kind: "alternates"; anchorId: string | null; messages: AdminConversationTranscriptMessage[] };
+  | { kind: "alternates"; anchorId: string | null; messages: AdminConversationTranscriptMessage[] }
+  | { kind: "local-event"; event: AdminConversationLocalEvent };
 
 /**
  * Mirrors the portal: the main line is the branch the user currently sees; other
  * versions (edits, regenerations, sends rejected while a reply was running) are
  * grouped right after the active message they branch away from.
  */
-export function layoutTranscript(messages: AdminConversationTranscriptMessage[]): TranscriptLayoutItem[] {
+export function layoutTranscript(
+  messages: AdminConversationTranscriptMessage[],
+  localEvents: AdminConversationLocalEvent[] = []
+): TranscriptLayoutItem[] {
+  return interleaveLocalEvents(layoutBranches(messages), localEvents);
+}
+
+/** Folder switches and portal open/download actions go before the first message sent after them. */
+function interleaveLocalEvents(items: TranscriptLayoutItem[], events: AdminConversationLocalEvent[]): TranscriptLayoutItem[] {
+  if (events.length === 0) return items;
+  const pending = [...events].sort((left, right) => timeOf(left.at) - timeOf(right.at));
+  const result: TranscriptLayoutItem[] = [];
+  for (const item of items) {
+    if (item.kind === "message") {
+      const at = timeOf(item.message.createdAt);
+      while (pending.length > 0 && !Number.isNaN(at) && timeOf(pending[0]!.at) < at) {
+        result.push({ kind: "local-event", event: pending.shift()! });
+      }
+    }
+    result.push(item);
+  }
+  for (const event of pending) result.push({ kind: "local-event", event });
+  return result;
+}
+
+function layoutBranches(messages: AdminConversationTranscriptMessage[]): TranscriptLayoutItem[] {
   if (!messages.some((message) => message.branch)) {
     return messages.map((message) => ({ kind: "message", message }));
   }
@@ -41,8 +69,11 @@ export function layoutTranscript(messages: AdminConversationTranscriptMessage[])
 
 export type TranscriptTimelineRow = AdminConversationTranscriptProcessRow & {
   /** Interaction rows come from question cards / steers rather than the runtime trace. */
-  source: "process" | "question" | "answer" | "steer" | "outcome";
+  source: "process" | "question" | "answer" | "steer" | "outcome" | "local";
+  localOperation?: AdminConversationLocalOperation;
 };
+
+const LOCAL_TOOL_TRACE = /server:\s*local_computer/;
 
 function timeOf(value: string | null | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
@@ -55,7 +86,23 @@ function timeOf(value: string | null | undefined): number {
  * by time so administrators can see which step each interaction followed.
  */
 export function buildTranscriptProcessTimeline(message: AdminConversationTranscriptMessage): TranscriptTimelineRow[] {
-  const rows: TranscriptTimelineRow[] = (message.processRows ?? []).map((row) => ({ ...row, source: "process" }));
+  const localOperations = message.localOperations ?? [];
+  const loggedLocal = localOperations.filter((operation) => operation.createdAt);
+  // Logged local operations replace the generic "Tool step · server: local_computer" trace rows.
+  const rows: TranscriptTimelineRow[] = (message.processRows ?? [])
+    .filter((row) => loggedLocal.length === 0 || !LOCAL_TOOL_TRACE.test(row.detail ?? ""))
+    .map((row) => ({ ...row, source: "process" }));
+  for (const operation of loggedLocal) {
+    const failed = operation.status !== "pending" && !(operation.status === "completed" && operation.ok !== false);
+    rows.push({
+      id: `local-${operation.id}`,
+      kind: failed ? "error" : "tool",
+      source: "local",
+      title: operation.target ?? operation.op,
+      localOperation: operation,
+      at: operation.createdAt!
+    });
+  }
   for (const request of message.userInputRequests ?? []) {
     rows.push({
       id: `question-${request.id}`,

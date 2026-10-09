@@ -53,3 +53,8 @@ it.each(['en', 'zh-CN'] as const)('localizes the status and pending open feedbac
   fireEvent.click(screen.getByRole('button', { name: en ? 'Open on Computer' : '在电脑上打开' }));
   expect((await screen.findByRole('status')).textContent).toBe(en ? 'Your computer has not returned a result. Reconnect to check it.' : '电脑尚未返回结果，恢复连接后查看。');
 });
+
+it('names the computer the step ran on, not the folder selected now', () => {
+  render(<PortalI18nProvider defaultLocale="zh-CN" languageSwitcherEnabled={false}><LocalWorkspaceContext.Provider value={{selection:{thread_id:'task',device_name:'New PC'},offline:false} as any}><LocalToolCard toolName="local_computer.local_exec" status={{type:'complete'}} result={{ok:true,device_name:'Old Mac'}} /></LocalWorkspaceContext.Provider></PortalI18nProvider>);
+  expect(screen.getByText('已在Old Mac上执行命令')).toBeTruthy();
+});

@@ -28,7 +28,7 @@ export function LocalToolCard(props: { toolName?: string; result?: unknown; isEr
     catch { setError('localTool.openFailed'); } finally { setOpening(false); }
   };
   return <div className="local-tool-card">
-    <div className="local-tool-status"><Monitor size={17} /><span>{t(running ? 'localTool.running' : failed ? 'localTool.incomplete' : 'localTool.complete', { device: local?.selection?.device_name || t('localTool.computer'), action: label })}</span>{running ? <LoaderCircle size={15} className="local-spinner" /> : failed ? <AlertCircle size={15} /> : <Check size={15} />}</div>
+    <div className="local-tool-status"><Monitor size={17} /><span>{t(running ? 'localTool.running' : failed ? 'localTool.incomplete' : 'localTool.complete', { device: (typeof output?.device_name === 'string' && output.device_name) || local?.selection?.device_name || t('localTool.computer'), action: label })}</span>{running ? <LoaderCircle size={15} className="local-spinner" /> : failed ? <AlertCircle size={15} /> : <Check size={15} />}</div>
     {filePath ? <div className="local-tool-file"><File size={18} /><strong title={filePath}>{filePath.split(/[\\/]/).pop()}</strong><button type="button" onClick={() => void open()} disabled={opening || (!headless && (local?.offline || !local?.selection?.thread_id))}>{headless ? copied ? t('common.copied') : t('localTool.copyPath') : opening ? t('localTool.opening') : t('localTool.openOnComputer')}{headless ? <Copy size={13} /> : <SquareArrowOutUpRight size={13} />}</button></div> : null}
     {error || failed ? <p role="status">{error ? t(error) : output?.pending ? t('localTool.waiting') : output?.error || t('localTool.failed')}</p> : null}
   </div>;

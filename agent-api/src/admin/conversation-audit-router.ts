@@ -13,6 +13,16 @@ import {
 import { getDbClient } from "../db/client.js";
 import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
 import type { PortalSendFailureRecord } from "../persistence/portal-send-failure-repository.js";
+import { localWorkspaceSnapshot } from "../local-bridge-audit.js";
+import { bridgeOnline } from "../local-bridge-service.js";
+import {
+  attachLocalActivity,
+  summarizeLocalOperation,
+  type LocalBindingEventRow,
+  type LocalOperationLogRow,
+  type TranscriptExecutionLocation,
+  type TranscriptLocalOperation
+} from "./conversation-transcript-local.js";
 import {
   attachTranscriptInteractions,
   type TranscriptSteerEvent,
@@ -247,6 +257,10 @@ type ConversationTranscriptMessage = {
   memoryUsed?: boolean;
   /** Present when the thread head is known; mirrors the portal's visible branch. */
   branch?: TranscriptBranchInfo;
+  /** User turns: cloud or the local folder the turn ran in. */
+  executionLocation?: TranscriptExecutionLocation;
+  /** Assistant turns: what ran on the user's computer (portal local tool cards). */
+  localOperations?: TranscriptLocalOperation[];
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
@@ -2041,6 +2055,15 @@ function buildProductFeedbackAggregateSummary(records: ProductFeedbackRecord[]):
   };
 }
 
+type LocalActivityDb = {
+  localBridgeOperationLog?: {
+    findMany(args: unknown): Promise<LocalOperationLogRow[]>;
+    findFirst(args: unknown): Promise<LocalOperationLogRow | null>;
+  };
+  localBridgeBindingEvent?: { findMany(args: unknown): Promise<LocalBindingEventRow[]> };
+  localBridgeBinding?: { findUnique(args: unknown): Promise<any> };
+};
+
 export function createConversationAuditRouter(options: {
   db?: ConversationAuditDb;
   getDb?: () => ConversationAuditDb;
@@ -2736,6 +2759,69 @@ export function createConversationAuditRouter(options: {
     }
   });
 
+  function localActivityDb(): LocalActivityDb {
+    return getDb() as unknown as LocalActivityDb;
+  }
+
+  async function loadLocalActivity(threadId: string): Promise<{
+    operations: LocalOperationLogRow[];
+    bindingEvents: LocalBindingEventRow[];
+    current: (ReturnType<typeof localWorkspaceSnapshot> & { online: boolean }) | null;
+  }> {
+    const db = localActivityDb();
+    try {
+      const [operations, bindingEvents, binding] = await Promise.all([
+        db.localBridgeOperationLog?.findMany({
+          where: { threadId },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true, threadId: true, deviceName: true, platform: true, rootPath: true, source: true, op: true,
+            args: true, status: true, result: true, createdAt: true, completedAt: true
+          }
+        }) ?? [],
+        db.localBridgeBindingEvent?.findMany({ where: { threadId }, orderBy: { createdAt: "asc" } }) ?? [],
+        db.localBridgeBinding?.findUnique({ where: { threadId }, include: { root: { include: { device: true } } } }) ?? null
+      ]);
+      const snapshot = localWorkspaceSnapshot(binding);
+      return {
+        operations,
+        bindingEvents,
+        current: snapshot ? { ...snapshot, online: Boolean(bridgeOnline(binding?.root?.device)) } : null
+      };
+    } catch (error) {
+      console.warn("conversation audit failed to load local activity", {
+        threadId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      return { operations: [], bindingEvents: [], current: null };
+    }
+  }
+
+  // Full, untruncated args/result of one local-computer operation (file contents, command output).
+  router.get("/conversations/:threadId/local-operations/:operationId", async (req: Request, res: Response) => {
+    try {
+      const threadId = trimOrUndefined(req.params.threadId);
+      const operationId = trimOrUndefined(req.params.operationId);
+      if (!threadId || !operationId) {
+        res.status(400).json({ detail: "threadId 和 operationId 不能为空" });
+        return;
+      }
+      const thread = await conversationRecords().getThread(threadId);
+      if (!thread || thread.securityDomainId) {
+        res.status(404).json({ detail: "thread 不存在" });
+        return;
+      }
+      const row = await localActivityDb().localBridgeOperationLog?.findFirst({ where: { id: operationId, threadId } });
+      if (!row) {
+        res.status(404).json({ detail: "本地操作记录不存在" });
+        return;
+      }
+      res.json({ operation: { ...summarizeLocalOperation(row), args: row.args ?? null, result: row.result ?? null } });
+    } catch (error) {
+      res.status(500).json({ detail: error instanceof Error ? error.message : "加载本地操作详情失败" });
+    }
+  });
+
   router.get("/conversations/:threadId", async (req: Request, res: Response) => {
     try {
       const threadId = trimOrUndefined(req.params.threadId);
@@ -2789,17 +2875,24 @@ export function createConversationAuditRouter(options: {
           return undefined;
         })
       ]);
-      const transcript = buildTranscriptMessages(thread.id, thread.messages, {
+      const baseTranscript = buildTranscriptMessages(thread.id, thread.messages, {
         headId: thread.headId ?? null,
         activeTurn: activeTurn === true,
         steerEvents: steerEvents ?? []
       });
+      const localActivity = await loadLocalActivity(thread.id);
+      const local = attachLocalActivity(baseTranscript, thread.messages, localActivity);
+      const transcript = local.messages;
 
       res.json({
         conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap), agentModeMap),
         transcript: {
           messageCount: transcript.length,
           messages: transcript
+        },
+        localWorkspace: {
+          current: localActivity.current,
+          events: local.events
         },
         // Sends that never produced a saved user message, e.g. why a conversation is empty.
         sendFailures: (sendFailures ?? []).map((failure) => ({

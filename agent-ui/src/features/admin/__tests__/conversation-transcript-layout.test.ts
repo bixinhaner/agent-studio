@@ -27,7 +27,7 @@ describe("layoutTranscript", () => {
       message("u2", "user", { branch: active(2, 2) }),
       message("a2", "assistant", { branch: active() })
     ]);
-    expect(items.map((item) => (item.kind === "message" ? item.message.id : `alt:${item.messages.map((m) => m.id).join(",")}`)))
+    expect(items.map((item) => (item.kind === "message" ? item.message.id : item.kind === "alternates" ? `alt:${item.messages.map((m) => m.id).join(",")}` : item.kind)))
       .toEqual(["u1", "u2", "alt:u2-old,a2-old", "a2"]);
   });
 });
@@ -79,5 +79,55 @@ describe("conversationAuditMarkdownUrlTransform", () => {
     expect(transform("skill:weekly-report", "href")).toBe("skill:weekly-report");
     expect(transform("attachment:abc123", "href")).toBe("attachment:abc123");
     expect(transform("javascript:alert(1)", "href")).toBe("");
+  });
+});
+
+describe("local computer activity", () => {
+  const operation = (id: string, at: string | null, extra = {}) => ({
+    id, op: "exec", source: "agent" as const, status: "completed" as const, ok: true, target: "npm test", destination: null,
+    error: null, exitCode: 0, running: null, deviceName: "Like MacBook", platform: "darwin", rootPath: "/p",
+    createdAt: at, completedAt: at, hasDetail: Boolean(at), argsChars: 10, resultChars: 20, ...extra
+  });
+
+  it("places folder switches and portal actions before the next message sent after them", () => {
+    const items = layoutTranscript(
+      [
+        message("u1", "user", { createdAt: "2026-10-09T10:00:00.000Z" }),
+        message("a1", "assistant", { createdAt: "2026-10-09T10:01:00.000Z" }),
+        message("u2", "user", { createdAt: "2026-10-09T10:10:00.000Z" })
+      ],
+      [
+        { id: "late", kind: "operation", at: "2026-10-09T10:20:00.000Z", from: null, to: null },
+        { id: "switch", kind: "switched", at: "2026-10-09T10:05:00.000Z", from: null, to: null }
+      ]
+    );
+    expect(items.map((item) => (item.kind === "local-event" ? `event:${item.event.id}` : item.kind === "message" ? item.message.id : "alt")))
+      .toEqual(["u1", "a1", "event:switch", "u2", "event:late"]);
+  });
+
+  it("replaces generic local_computer trace rows with the logged operations", () => {
+    const rows = buildTranscriptProcessTimeline(message("a1", "assistant", {
+      processRows: [
+        { id: "p1", kind: "tool", title: "Tool step completed", detail: "server: local_computer\ntool: local_exec", at: "2026-10-09T10:00:02.000Z" },
+        { id: "p2", kind: "reasoning", title: "Thinking", at: "2026-10-09T10:00:00.000Z" }
+      ],
+      localOperations: [
+        operation("op-1", "2026-10-09T10:00:01.000Z"),
+        operation("op-2", "2026-10-09T10:00:03.000Z", { ok: false, error: "ENOENT", target: "/p/missing.txt", op: "read" })
+      ]
+    }));
+    expect(rows.map((row) => [row.id, row.source, row.kind])).toEqual([
+      ["p2", "process", "reasoning"],
+      ["local-op-1", "local", "tool"],
+      ["local-op-2", "local", "error"]
+    ]);
+  });
+
+  it("keeps trace rows when only chat cards survive (no logged times)", () => {
+    const rows = buildTranscriptProcessTimeline(message("a1", "assistant", {
+      processRows: [{ id: "p1", kind: "tool", title: "Tool step completed", detail: "server: local_computer\ntool: local_write" }],
+      localOperations: [operation("call-1", null, { source: "message" })]
+    }));
+    expect(rows.map((row) => row.id)).toEqual(["p1"]);
   });
 });

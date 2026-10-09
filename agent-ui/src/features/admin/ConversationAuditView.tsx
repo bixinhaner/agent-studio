@@ -4,6 +4,7 @@ import {
   Activity,
   Brain,
   Clock3,
+  Folder,
   GitBranch,
   Gift,
   HardDrive,
@@ -30,6 +31,14 @@ import { formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPre
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { useAuth } from "../auth/AuthProvider";
 import { ConversationSendFailures } from "./ConversationSendFailures";
+import {
+  currentWorkspaceSummary,
+  localOperationStatusLabel,
+  localOperationVerb,
+  TranscriptExecutionLocationChip,
+  TranscriptLocalEventRow,
+  TranscriptLocalOperations
+} from "./ConversationLocalActivity";
 import {
   extractMermaidCodeFromPreChildren,
   MARKDOWN_REHYPE_PLUGINS,
@@ -547,6 +556,7 @@ function timelineRowLabel(row: TranscriptTimelineRow): string {
   if (row.source === "question") return "助手提问";
   if (row.source === "answer") return "用户回答";
   if (row.source === "steer") return "用户引导";
+  if (row.source === "local") return "本机操作";
   return processKindLabel(row.kind);
 }
 
@@ -1227,10 +1237,18 @@ function TranscriptProcessModal(props: {
                       <span className={`trace-pill trace-pill-${row.kind} ${row.source !== "process" ? "is-interaction" : ""}`}>
                         {timelineRowLabel(row)}
                       </span>
-                      <span className="trace-item-title">{row.title}</span>
+                      <span className="trace-item-title">
+                        {row.localOperation
+                          ? `${localOperationVerb(row.localOperation.op)} · ${localOperationStatusLabel(row.localOperation)} · ${row.title}`
+                          : row.title}
+                      </span>
                       {row.at ? <span className="trace-item-time">{formatLocalDateTime(row.at)}</span> : null}
                     </summary>
-                    {row.detail ? (
+                    {row.localOperation ? (
+                      <div className="admin-conversation-trace-detail">
+                        <TranscriptLocalOperations threadId={props.threadId} operations={[row.localOperation]} />
+                      </div>
+                    ) : row.detail ? (
                       <div className="admin-conversation-trace-detail">
                         <ConversationAuditMarkdown text={row.detail} threadId={props.threadId} workspace={props.workspace} />
                       </div>
@@ -1522,6 +1540,9 @@ function TranscriptMessageBubble(props: {
               版本 {branch.siblingIndex}/{branch.siblingCount}
             </span>
           ) : null}
+          {isUser && props.message.executionLocation ? (
+            <TranscriptExecutionLocationChip location={props.message.executionLocation} />
+          ) : null}
           {statusLabel ? (
             <span
               className={`admin-chat-turn-status ${turnStatusClassName(props.message.turnStatus)}`}
@@ -1566,9 +1587,12 @@ function TranscriptMessageBubble(props: {
               ) : null}
             </div>
           ) : null}
+          {isAssistant && props.message.localOperations && props.message.localOperations.length > 0 ? (
+            <TranscriptLocalOperations threadId={props.threadId} operations={props.message.localOperations} />
+          ) : null}
           {bodyText ? (
             <ConversationAuditMarkdown text={bodyText} threadId={props.threadId} workspace={props.workspace} />
-          ) : hasInteractions ? null : (
+          ) : hasInteractions || (props.message.localOperations?.length ?? 0) > 0 ? null : (
             <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
               {attachmentCount > 0
                 ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述`
@@ -1655,7 +1679,8 @@ function ConversationDetail(props: {
   const latestFeedbackPreview = latestFeedbackText.length > 72 ? `${latestFeedbackText.slice(0, 71)}…` : latestFeedbackText;
   const agentModeLabel = conversationAgentModeLabel(conversation.agentMode);
 
-  const transcriptLayout = layoutTranscript(transcript.messages);
+  const transcriptLayout = layoutTranscript(transcript.messages, props.detail.localWorkspace?.events ?? []);
+  const workspaceSummary = currentWorkspaceSummary(conversation.workspace || null, props.detail.localWorkspace);
   const feedbackByMessageId = new Map<string, AdminConversationFeedback[]>();
   for (const item of conversation.feedback) {
     if (!item.messageId) continue;
@@ -1747,9 +1772,15 @@ function ConversationDetail(props: {
             <Activity size={14} />
             <span>{conversation.feedbackSummary.positive} 赞 / {conversation.feedbackSummary.negative} 踩</span>
           </div>
-          <div className="conversation-detail-metric conversation-detail-workspace" title={conversation.workspace || "无关联工作区"}>
-            <HardDrive size={14} />
-            <span>{conversation.workspace || "无关联工作区"}</span>
+          <div
+            className={`conversation-detail-metric conversation-detail-workspace ${workspaceSummary.local ? "is-local" : ""}`}
+            title={workspaceSummary.title}
+          >
+            {workspaceSummary.local ? <Folder size={14} /> : <HardDrive size={14} />}
+            <span>{workspaceSummary.label}</span>
+            {workspaceSummary.local ? (
+              <i className={`admin-local-online-dot ${workspaceSummary.online ? "is-online" : "is-offline"}`} aria-label={workspaceSummary.online ? "电脑在线" : "电脑离线"} />
+            ) : null}
           </div>
           {conversation.channel ? (
             <div className="conversation-detail-metric">
@@ -1952,7 +1983,9 @@ function ConversationDetail(props: {
         {transcript.messages.length === 0 ? (
            <Empty description={(props.detail.sendFailures ?? []).length > 0 ? "用户的消息没有成功发出，原因见上方发送失败记录" : "暂无消息内容"} />
         ) : (
-          transcriptLayout.map((item) => item.kind === "message" ? renderTranscriptMessage(item.message) : (
+          transcriptLayout.map((item) => item.kind === "message" ? renderTranscriptMessage(item.message) : item.kind === "local-event" ? (
+            <TranscriptLocalEventRow key={item.event.id} threadId={conversation.id} event={item.event} />
+          ) : (
             <TranscriptAlternateBranches
               key={`alternates-${item.anchorId ?? "unanchored"}`}
               messages={item.messages}

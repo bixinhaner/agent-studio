@@ -2946,6 +2946,58 @@ model LocalBridgeCommand {
   @@map("local_bridge_commands")
 }
 
+/// Permanent audit copy of every local-computer operation (agent tool calls and portal
+/// open/download actions). local_bridge_commands is delivery state that clears args on
+/// completion and is pruned after 24h; this keeps full args and results for the admin console.
+/// No foreign keys: records outlive device, folder and thread deletion.
+model LocalBridgeOperationLog {
+  id          String    @id
+  threadId    String?   @map("thread_id")
+  userId      String?   @map("user_id")
+  deviceId    String    @map("device_id")
+  deviceName  String?   @map("device_name")
+  platform    String?
+  bindingId   String?   @map("binding_id")
+  rootId      String?   @map("root_id")
+  rootPath    String?   @map("root_path")
+  rootLabel   String?   @map("root_label")
+  source      String
+  op          String
+  args        Json
+  status      String    @default("pending")
+  result      Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([threadId, createdAt])
+  @@map("local_bridge_operation_logs")
+}
+
+/// Where a portal task runs: every bind / switch / unbind of its local folder, with
+/// device and folder snapshots, because local_bridge_bindings only keeps the current one.
+model LocalBridgeBindingEvent {
+  id             String   @id @default(cuid())
+  threadId       String   @map("thread_id")
+  userId         String?  @map("user_id")
+  kind           String
+  fromRootId     String?  @map("from_root_id")
+  fromPath       String?  @map("from_path")
+  fromLabel      String?  @map("from_label")
+  fromDeviceId   String?  @map("from_device_id")
+  fromDeviceName String?  @map("from_device_name")
+  fromPlatform   String?  @map("from_platform")
+  toRootId       String?  @map("to_root_id")
+  toPath         String?  @map("to_path")
+  toLabel        String?  @map("to_label")
+  toDeviceId     String?  @map("to_device_id")
+  toDeviceName   String?  @map("to_device_name")
+  toPlatform     String?  @map("to_platform")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([threadId, createdAt])
+  @@map("local_bridge_binding_events")
+}
+
 model ScheduledTask {
   id                  String             @id @default(cuid())
   organizationId      String             @map("organization_id")

@@ -8,6 +8,7 @@ import type {
   AdminAiResponseReviewListResponse,
   AdminBillingOverviewResponse,
   AdminConversationDetailResponse,
+  AdminConversationLocalOperationDetail,
   AdminConversationRecoveryDetailResponse,
   AdminConversationRecoveryListInput,
   AdminConversationRecoveryListResponse,
@@ -368,6 +369,16 @@ export async function fetchAdminConversationAuditDetail(
   conversationId: string
 ): Promise<AdminConversationDetailResponse> {
   return api<AdminConversationDetailResponse>(`/api/admin/conversations/${encodeURIComponent(conversationId)}`);
+}
+
+export async function fetchAdminConversationLocalOperation(
+  conversationId: string,
+  operationId: string
+): Promise<AdminConversationLocalOperationDetail> {
+  const response = await api<{ operation: AdminConversationLocalOperationDetail }>(
+    `/api/admin/conversations/${encodeURIComponent(conversationId)}/local-operations/${encodeURIComponent(operationId)}`
+  );
+  return response.operation;
 }
 
 export async function fetchAdminAiResponseReviewList(

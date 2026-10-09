@@ -480,6 +480,7 @@ import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
 import { createLocalBridgeRouter } from "./local-bridge-router.js";
 import { bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace } from "./local-bridge-service.js";
+import { localWorkspaceSnapshot } from "./local-bridge-audit.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
 import { createTrainingCatalogRouter } from "./workspaces/training-catalog-router.js";
@@ -14425,13 +14426,19 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       })
     );
     portalUserMessageId = persistedPortalUserMessageId;
+    // Same lookup the runtime uses to inject local_computer, so the recorded location is
+    // where this turn actually runs (switching is blocked while a task is running).
+    const portalLocalWorkspace = localWorkspaceSnapshot(
+      await localBindingForWorkspace(db, currentUser.id, currentSession.workspace ?? undefined).catch(() => null)
+    );
     const deliveryClaim = await timing.time("chat_stream.claim_turn_delivery", () =>
       conversationRecords.claimTurnDelivery({
         threadId: currentSession.threadId!,
         userMessageId: persistedPortalUserMessageId,
         runId: portalRunId,
         channel: "portal",
-        acceptedAt: portalRunAcceptedAt
+        acceptedAt: portalRunAcceptedAt,
+        executionLocation: portalLocalWorkspace ?? { mode: "cloud" }
       })
     );
     if (deliveryClaim.outcome === "superseded") {
@@ -14476,7 +14483,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    const portalRunProjection = new CodexRunProjection({ captureUserInputRequests: true });
+    const portalRunProjection = new CodexRunProjection({ captureUserInputRequests: true, localWorkspace: portalLocalWorkspace });
     const portalPartialAnswer = new PortalPartialAnswerCollector();
     let firstCodexEventSeen = false;
     const portalThread = await timing.time("chat_stream.load_bound_thread", () =>

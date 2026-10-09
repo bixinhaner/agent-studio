@@ -106,6 +106,8 @@ export type CodexRunProjectionOptions = {
    * keep the question as plain text so the user can still reply in their next message.
    */
   captureUserInputRequests?: boolean;
+  /** Portal turns bound to a local folder: stamped on local tool cards (device at the time). */
+  localWorkspace?: { deviceName?: string | null } | null;
 };
 
 type RuntimeStreamSource<TThread> = {
@@ -651,8 +653,11 @@ export class CodexRunProjection {
         if (typeof text === "string") result = JSON.parse(text);
       } catch { result = undefined; }
       // Persist the conversation result card, not file contents or command output.
+      const device = this.options.localWorkspace;
       const summary = {
         ok: !tool.errorMessage && result?.ok !== false,
+        // The computer this ran on, so the card stays accurate after the user switches folders.
+        ...(device?.deviceName ? { device_name: device.deviceName } : {}),
         ...(typeof result?.path === "string" ? { path: result.path } : {}),
         ...(result?.pending ? { pending: true } : {}),
         ...(tool.errorMessage || typeof result?.error === "string" ? { error: tool.errorMessage || result.error } : {})

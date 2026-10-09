@@ -28,7 +28,7 @@ describe.skipIf(!testUrl)('Local computer durable integration (isolated PostgreS
     await db.user.createMany({ data: [{ id: userId }, { id: otherId }] });
     await db.thread.create({ data: { id: threadId, userId, organizationId: 'test-org', channel: 'portal', workspace: '/cloud/test/' + userId } });
   });
-  afterAll(async () => { await db.thread.deleteMany({ where: { id: threadId } }); await db.localBridgeConnection.deleteMany({ where: { userId: { in: [userId, otherId] } } }); await db.user.deleteMany({ where: { id: { in: [userId, otherId] } } }); await db.$disconnect(); await fs.rm(rootDir, { recursive: true, force: true }); });
+  afterAll(async () => { await db.thread.deleteMany({ where: { id: threadId } }); await db.localBridgeOperationLog.deleteMany({ where: { threadId } }); await db.localBridgeBindingEvent.deleteMany({ where: { threadId } }); await db.localBridgeConnection.deleteMany({ where: { userId: { in: [userId, otherId] } } }); await db.user.deleteMany({ where: { id: { in: [userId, otherId] } } }); await db.$disconnect(); await fs.rm(rootDir, { recursive: true, force: true }); });
   it('one-use pairing works between independent Portal and Relay instances; online alone injects no tools', async () => {
     const connection = await request(portal).post('/api/local-bridge/connections').set('x-test-user', userId).expect(201);
     const attempts = await Promise.all([1, 2].map(() => request(relay).post('/api/local-bridge/agent/pair').send({ code: connection.body.code, name: 'Test computer', platform: process.platform })));
@@ -58,6 +58,8 @@ describe.skipIf(!testUrl)('Local computer durable integration (isolated PostgreS
     const result = await executor.execute(command);
     await request(relay).post('/api/local-bridge/agent/result').auth(token, { type: 'bearer' }).send({ id, lease: command.lease, result }).expect(200);
     expect((await rpc).body.result.isError).toBe(false); expect(await fs.readFile(path.join(rootDir, 'proof.txt'), 'utf8')).toBe('local round trip');
+    expect((await db.localBridgeCommand.findUnique({ where: { id } }))!.args).toEqual({});
+    expect(await db.localBridgeOperationLog.findUnique({ where: { id } })).toMatchObject({ source: 'agent', op: 'write', status: 'completed', args: { path: 'proof.txt', content: 'local round trip' }, deviceName: 'Test computer', rootPath: rootDir });
     const recovered = await request(portal).post('/api/local-bridge/mcp/rpc').auth(auth, { type: 'bearer' }).send({ rpc: { id: 3, method: 'tools/call', params: { name: 'local_request_result', arguments: { request_id: id } } } }).expect(200);
     expect(recovered.body.result.isError).toBe(false);
   });
@@ -72,5 +74,6 @@ describe.skipIf(!testUrl)('Local computer durable integration (isolated PostgreS
     await request(portal).put(`/api/local-bridge/threads/${threadId}/binding`).set('x-test-user', userId).send({ root_id: null }).expect(200);
     await request(portal).post('/api/local-bridge/mcp/rpc').auth(auth, { type: 'bearer' }).send({ rpc: { id: 5, method: 'tools/list' } }).expect(401);
     expect(await buildLocalRuntime(db, 'http://localhost', userId, '/cloud/test/' + userId)).toBeUndefined();
+    expect((await db.localBridgeBindingEvent.findMany({ where: { threadId }, orderBy: { createdAt: 'asc' } })).map(event => event.kind)).toEqual(['bound', 'unbound']);
   });
 });

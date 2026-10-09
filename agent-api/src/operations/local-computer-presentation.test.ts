@@ -17,3 +17,12 @@ it('persists failed local calls as incomplete outcomes', () => {
   run.push({type:'item.completed',raw:{item:{id:'read-1',type:'mcp_tool_call',server:'local_computer',tool:'local_read',error:{message:'LOCAL_COMPUTER_OFFLINE'}}}});
   expect(run.finalize().contentParts.find(part=>part.type==='tool-call')).toMatchObject({isError:true,result:{ok:false,error:'LOCAL_COMPUTER_OFFLINE'}});
 });
+
+it('stamps the computer a turn ran on so old cards survive folder switches', () => {
+  const run=new CodexRunProjection({localWorkspace:{deviceName:'Like MacBook'}});
+  run.push({type:'item.completed',raw:{item:{id:'exec-1',type:'mcp_tool_call',server:'local_computer',tool:'local_exec',arguments:{command:'ls'},result:{content:[{type:'text',text:JSON.stringify({ok:true,output:'a'})}]}}}});
+  expect(run.finalize().contentParts.find(part=>part.type==='tool-call')).toMatchObject({result:{ok:true,device_name:'Like MacBook'}});
+  const cloud=new CodexRunProjection();
+  cloud.push({type:'item.completed',raw:{item:{id:'exec-2',type:'mcp_tool_call',server:'local_computer',tool:'local_exec',result:{content:[{type:'text',text:'{"ok":true}'}]}}}});
+  expect(JSON.stringify(cloud.finalize().contentParts)).not.toContain('device_name');
+});

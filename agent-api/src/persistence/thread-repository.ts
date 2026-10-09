@@ -23,6 +23,11 @@ export type ConversationTurnDeliveryClaim = {
   runId: string;
   channel: string;
   acceptedAt?: string;
+  /**
+   * Where this turn runs (local folder snapshot or cloud), kept on the user message so
+   * the admin transcript shows the location at send time even after the user switches.
+   */
+  executionLocation?: Record<string, unknown>;
 };
 
 export type ConversationTurnDeliveryFinalize = ConversationTurnDeliveryClaim & {
@@ -211,6 +216,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 const TURN_DELIVERY_RUN_CONFIG_KEY = "_agentStudioTurnDelivery";
+const EXECUTION_LOCATION_RUN_CONFIG_KEY = "_agentStudioExecutionLocation";
 
 type StoredTurnDelivery = {
   runId: string;
@@ -750,12 +756,17 @@ export class ThreadRepository {
       }
 
       const runConfig = sanitizeConversationJson(
-        withStoredTurnDelivery(userMessage.runConfig, {
-          runId: input.runId,
-          channel: input.channel,
-          acceptedAt,
-          status: "running"
-        }),
+        withStoredTurnDelivery(
+          input.executionLocation
+            ? { ...(asRecord(userMessage.runConfig) ?? {}), [EXECUTION_LOCATION_RUN_CONFIG_KEY]: input.executionLocation }
+            : userMessage.runConfig,
+          {
+            runId: input.runId,
+            channel: input.channel,
+            acceptedAt,
+            status: "running"
+          }
+        ),
         {
           threadId: input.threadId,
           operation: "claimTurnDelivery",

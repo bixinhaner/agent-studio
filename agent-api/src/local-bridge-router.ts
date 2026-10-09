@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, enqueueLocalCommand, localBridgeBinding, waitLocalCommand } from './local-bridge-service.js';
 import { localBridgeTools } from './local-bridge-tools.js';
+import { cancelLocalOperations, completeLocalOperation } from './local-bridge-audit.js';
 const rootInclude = { roots: true };
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, _next: NextFunction) => { void fn(req, res).catch(error => res.status(error.status || (error instanceof z.ZodError ? 400 : 400)).json({ detail: error.message || 'Local computer request failed' })); };
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
@@ -74,12 +75,12 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   router.post('/threads/:threadId/stop', wrap(async (req, res) => { const t = await ownedThread(req); const { cancelLocalTask } = await import('./local-bridge-service.js'); await cancelLocalTask(db, t.id); res.json({ stopped: true }); }));
   router.post('/threads/:threadId/open', wrap(async (req, res) => {
     const t = await ownedThread(req); const binding = await localBridgeBinding(db, t.id); if (!binding) return fail('No local folder', 404);
-    const command = await enqueueLocalCommand(db, binding, 'open', { path: z.string().min(1).max(4096).parse(req.body.path) });
+    const command = await enqueueLocalCommand(db, binding, 'open', { path: z.string().min(1).max(4096).parse(req.body.path) }, undefined, 'portal');
     res.json(await waitLocalCommand(db, command.id));
   }));
   router.get('/threads/:threadId/file', wrap(async (req, res) => {
     const t = await ownedThread(req); const binding = await localBridgeBinding(db, t.id); if (!binding) return fail('No local folder', 404);
-    const command = await enqueueLocalCommand(db, binding, 'read', { path: z.string().parse(req.query.path), encoding: 'base64' });
+    const command = await enqueueLocalCommand(db, binding, 'read', { path: z.string().parse(req.query.path), encoding: 'base64' }, undefined, 'portal');
     const result = await waitLocalCommand(db, command.id);
     if (!result?.ok) return res.status(409).json(result);
     res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('Content-Disposition', 'attachment'); res.setHeader('Cache-Control', 'no-store'); res.send(Buffer.from(result.content, 'base64'));
@@ -120,7 +121,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
       const command = await db.localBridgeCommand.findFirst({ where: eligible, orderBy: [{ op: 'asc' }, { createdAt: 'asc' }] });
       if (!command) break;
       // A cancelled/replaced binding can never authorize queued work on a different folder.
-      if (command.bindingId && !await db.localBridgeBinding.findUnique({ where: { id: command.bindingId } })) { await db.localBridgeCommand.update({ where: { id: command.id }, data: { status: 'cancelled' } }); continue; }
+      if (command.bindingId && !await db.localBridgeBinding.findUnique({ where: { id: command.bindingId } })) { await db.localBridgeCommand.update({ where: { id: command.id }, data: { status: 'cancelled' } }); await cancelLocalOperations(db, { id: command.id }); continue; }
       const lease = randomUUID();
       const claimed = await db.localBridgeCommand.updateMany({ where: { id: command.id, ...eligible }, data: { status: 'leased', lease, leaseUntil: new Date(Date.now() + 30000) } });
       if (claimed.count) return res.json({ command: { id: command.id, op: command.op, args: command.args, rootId: command.rootId, threadId: command.threadId, lease } });
@@ -129,7 +130,8 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }));
   router.post('/agent/result', wrap(async (req, res) => {
     const d = await agent(req); const input = z.object({ id: z.string(), lease: z.string(), result: z.record(z.unknown()) }).parse(req.body);
-    await db.localBridgeCommand.updateMany({ where: { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease }, data: { status: 'completed', result: input.result, args: {} } });
+    const completed = await db.localBridgeCommand.updateMany({ where: { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease }, data: { status: 'completed', result: input.result, args: {} } });
+    if (completed.count) await completeLocalOperation(db, input.id, input.result);
     res.json({ acknowledged: true });
   }));
   router.post('/mcp/rpc', wrap(async (req, res) => {

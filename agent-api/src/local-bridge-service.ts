@@ -1,6 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cancelLocalOperations, recordBindingEvent, recordLocalOperation } from './local-bridge-audit.js';
 export const bridgeHash = (value: string) => createHash('sha256').update(value).digest('hex');
 export const bridgeOnline = (device: any) => device?.status === 'active' && device.lastSeenAt && Date.now() - new Date(device.lastSeenAt).getTime() < 15000;
 const include = { root: { include: { device: true } }, thread: true };
@@ -28,19 +29,24 @@ export async function bindLocalRoot(db: any, userId: string, threadId: string, r
   if (rootId) {
     const root = await db.localBridgeRoot.findFirst({ where: { id: rootId, device: { userId, status: 'active' } } });
     if (!root) throw new Error('Folder not found');
-    const old = await localBridgeBinding(db, threadId);
-    if (old?.rootId === rootId) return old;
   }
+  const old = await localBridgeBinding(db, threadId);
+  if (rootId && old?.rootId === rootId) return old;
   await cancelLocalTask(db, threadId);
   await db.$transaction(async (tx: any) => {
     await tx.localBridgeBinding.deleteMany({ where: { threadId } });
     if (rootId) await tx.localBridgeBinding.create({ data: { threadId, rootId } });
   });
-  return localBridgeBinding(db, threadId);
+  const next = await localBridgeBinding(db, threadId);
+  await recordBindingEvent(db, { threadId, userId, from: old, to: next });
+  return next;
 }
-export async function enqueueLocalCommand(db: any, binding: any, op: string, args: any, requestId: string = randomUUID()) {
+export async function enqueueLocalCommand(db: any, binding: any, op: string, args: any, requestId: string = randomUUID(), source: 'agent' | 'portal' = 'agent') {
   if (!bridgeOnline(binding.root.device)) throw new Error('LOCAL_COMPUTER_OFFLINE: Open the desktop client, then continue on the same computer. Do not substitute cloud files or repeat an uncertain command.');
-  return db.localBridgeCommand.upsert({ where: { id: requestId }, update: {}, create: { id: requestId, deviceId: binding.root.deviceId, threadId: binding.threadId, bindingId: binding.id, rootId: binding.rootId, op, args, deadline: new Date(Date.now() + 10 * 60000) } });
+  const command = await db.localBridgeCommand.upsert({ where: { id: requestId }, update: {}, create: { id: requestId, deviceId: binding.root.deviceId, threadId: binding.threadId, bindingId: binding.id, rootId: binding.rootId, op, args, deadline: new Date(Date.now() + 10 * 60000) } });
+  // Full args are kept in the audit log; the delivery row clears them once completed.
+  await recordLocalOperation(db, { ...command, args }, binding, source);
+  return command;
 }
 export async function waitLocalCommand(db: any, id: string, waitMs = 20000) {
   const until = Date.now() + waitMs;
@@ -58,6 +64,7 @@ export async function cancelLocalTask(db: any, threadId: string) {
   const binding = await localBridgeBinding(db, threadId);
   if (!binding) return;
   await db.localBridgeCommand.updateMany({ where: { threadId, status: { in: ['pending', 'leased'] } }, data: { status: 'cancelled' } });
+  await cancelLocalOperations(db, { threadId });
   await db.localBridgeCommand.create({ data: { id: randomUUID(), deviceId: binding.root.deviceId, threadId, rootId: binding.rootId, op: 'cancel_task', args: {}, deadline: new Date(Date.now() + 86400000) } });
 }
 export async function buildLocalRuntime(db: any, baseUrl: string, userId?: string, workspace?: string) {

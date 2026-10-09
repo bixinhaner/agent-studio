@@ -500,9 +500,72 @@ export type AdminConversationTranscriptMessage = {
   memoryUsed?: boolean;
   /** Mirrors the portal's visible branch; absent for legacy/unresolvable graphs. */
   branch?: AdminConversationTranscriptBranch;
+  /** User turns: cloud or the local folder the turn ran in. */
+  executionLocation?: AdminConversationExecutionLocation;
+  /** Assistant turns: what ran on the user's computer. */
+  localOperations?: AdminConversationLocalOperation[];
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
+};
+
+export type AdminConversationExecutionLocation = {
+  mode: "local" | "cloud";
+  deviceName: string | null;
+  platform: string | null;
+  path: string | null;
+  label: string | null;
+  /** recorded: saved with the turn; derived: inferred from the folder switch history. */
+  source: "recorded" | "derived";
+};
+
+export type AdminConversationLocalOperation = {
+  id: string;
+  op: string;
+  source: "agent" | "portal" | "backfill" | "message";
+  status: "completed" | "pending" | "cancelled" | "expired" | "unknown";
+  ok: boolean | null;
+  target: string | null;
+  destination: string | null;
+  error: string | null;
+  exitCode: number | null;
+  running: boolean | null;
+  deviceName: string | null;
+  platform: string | null;
+  rootPath: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+  hasDetail: boolean;
+  argsChars: number;
+  resultChars: number;
+};
+
+export type AdminConversationLocalOperationDetail = AdminConversationLocalOperation & {
+  args: unknown;
+  result: unknown;
+};
+
+export type AdminConversationLocalEvent = {
+  id: string;
+  kind: "bound" | "switched" | "unbound" | "operation";
+  at: string;
+  from: AdminConversationExecutionLocation | null;
+  to: AdminConversationExecutionLocation | null;
+  operation?: AdminConversationLocalOperation;
+  backfilled?: boolean;
+};
+
+export type AdminConversationLocalWorkspace = {
+  current: {
+    mode: "local";
+    deviceId: string;
+    deviceName: string | null;
+    platform: string | null;
+    path: string;
+    label: string;
+    online: boolean;
+  } | null;
+  events: AdminConversationLocalEvent[];
 };
 
 export type AdminConversationTranscriptBranch = {
@@ -551,6 +614,8 @@ export type AdminConversationDetailResponse = {
     messageCount: number;
     messages: AdminConversationTranscriptMessage[];
   };
+  /** Local folder the task is bound to now, plus folder switches and portal open/download actions. */
+  localWorkspace?: AdminConversationLocalWorkspace;
   /** Sends that never produced a saved user message; older servers omit it. */
   sendFailures?: AdminConversationSendFailure[];
 };
