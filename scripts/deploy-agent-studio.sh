@@ -1928,6 +1928,12 @@ main() {
     log_step "Plan only; nothing was changed"
     return 0
   fi
+  # Resource-only changes must reach the live cgroup even when no application
+  # target needs rebuilding. The installer reconciles limits without restarting.
+  if ! deploy_restarts_admin && ! deploy_restarts_chat && [[ -f /etc/systemd/system/agent-studio-workloads.service ]]; then
+    log_step "Reconciling workload limits without restarting services"
+    bash "$script_dir/ensure-workload-isolation.sh"
+  fi
   if [[ "$PLAN_FRONTEND$PLAN_ADMIN$PLAN_CHAT$PLAN_CADDY" == "0000" && "$REFRESH_CADDY" != "1" ]]; then
     record_deployed_commits
     log_step "Nothing to deploy for $TARGET_COMMIT"

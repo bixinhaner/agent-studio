@@ -21,7 +21,7 @@ Type=simple
 ExecStart=/usr/local/libexec/agent-studio-workload-guard serve
 Delegate=yes
 MemoryAccounting=yes
-MemoryMax=16G
+MemoryMax=20G
 MemorySwapMax=0
 CPUQuota=300%
 TasksMax=4096
@@ -43,11 +43,13 @@ run_as_root visudo -cf "$workload_temp/sudoers"
 run_as_root install -o root -g root -m 440 "$workload_temp/sudoers" /etc/sudoers.d/agent-studio-workloads
 run_as_root systemctl daemon-reload
 run_as_root systemctl enable --now agent-studio-workloads.service
+# Update the live cgroup as well as the unit file, without restarting workloads.
+run_as_root systemctl set-property --runtime agent-studio-workloads.service MemoryMax=20G MemorySwapMax=0
 for i in {1..30}; do
   [[ -e /run/agent-studio-workloads/ready ]] && break
   sleep 1
 done
 [[ -e /run/agent-studio-workloads/ready ]] || die "Workload isolation failed to initialize"
-[[ "$(cat /sys/fs/cgroup/system.slice/agent-studio-workloads.service/memory.max)" == 17179869184 ]] || die "Incorrect workload aggregate limit"
+[[ "$(cat /sys/fs/cgroup/system.slice/agent-studio-workloads.service/memory.max)" == 21474836480 ]] || die "Incorrect workload aggregate limit"
 run_as_root /usr/local/libexec/agent-studio-workload-guard adopt
-log_info "Workload isolation ready: 8 GiB per job, 16 GiB total, no swap; existing Codex processes adopted"
+log_info "Workload isolation ready: 8 GiB per job, 20 GiB total, no swap; existing Codex processes adopted"

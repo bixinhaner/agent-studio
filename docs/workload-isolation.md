@@ -5,8 +5,8 @@
 
 - 每个新 Codex 会话独立 app-server，8 GiB `memory.max`，`memory.high=max`，不使用 swap。
 - `memory.oom.group=1`：超过内存上限终止整个任务运行环境，包括 setsid/双重 fork 的子进程。
-- 每任务最多 2 核、512 个进程/线程；所有任务合计最多 16 GiB、3 核、4096 个进程/线程。
-- 16 GiB 总上限也是硬保护：多个任务合计超限时可能有任务被终止，但不会把 API 放入同一个回收组。
+- 每任务最多 2 核、512 个进程/线程；所有任务合计最多 20 GiB、3 核、4096 个进程/线程。
+- 20 GiB 总上限也是硬保护：多个任务合计超限时可能有任务被终止，但不会把 API 放入同一个回收组。
 - 文件和会话数据不删除，后续消息可恢复持久化 Codex thread。
 - 生产 `AGENT_STUDIO_WORKLOAD_ISOLATION=required`，缺失 launcher/broker/控制组时拒绝启动。
   生产固定 app-server 驱动；SDK 路径不能悄悄绕过隔离。
@@ -46,3 +46,5 @@ sudo -u agentstudio python3 scripts/verify-workload-isolation.py
 不要在有任务运行时重启 workload supervisor；systemd 的组清理会终止其中的所有任务。
 部署重复执行安装时不会重启它。升级 supervisor 自身实现需要安排任务清空后的服务重启。
 回滚 API 时保留隔离服务，避免杀死仍在排空的会话。现有 PM2 主机保护仍保留，作为额外保险。
+
+资源额度调整通过标准部署脚本热更新，即使没有后端代码变更也会同步正在运行的控制组；不重启任务或 API。任务准入排队尚未实现，20 GiB 总上限当前仍为硬保护。
