@@ -40,6 +40,10 @@ def wait_line(process):
     return json.loads(line)
 
 
+def oom_events():
+    return dict(line.split() for line in (ROOT / "memory.events").read_text().splitlines())
+
+
 def main():
     assert os.geteuid() != 0, "run this probe as agentstudio"
     assert int((ROOT / "memory.current").read_text()) < 6 * 1024 ** 3, "existing workloads too large for safe OOM verification"
@@ -50,6 +54,7 @@ def main():
     urls = ["http://127.0.0.1:8787/healthz", "https://aiagent.indonesiacentral.cloudapp.azure.com/healthz"]
     slot = Path("/usr/local/agent-studio/releases/state/chat.slot").read_text().strip()
     urls.append(f"http://127.0.0.1:{8791 if slot == 'a' else 8792}/internal/ready")
+    oom_before = int(oom_events().get("oom_group_kill", 0))
     try:
         good = subprocess.Popen([LAUNCH, good_id, "/usr/bin/python3", "-c", "import json,os,time; print(json.dumps({'pid':os.getpid()}),flush=True); time.sleep(120)"], stdout=subprocess.PIPE, text=True)
         processes.append(good)
@@ -77,11 +82,20 @@ def main():
                 pass
             time.sleep(0.1)
         assert bad.poll() == -9, f"expected isolated OOM kill, exit={bad.poll()}"
+        # The supervisor may remove the finished leaf before the observer reads
+        # its counters. Ancestor counters retain the group-OOM evidence.
+        oom_delta = int(oom_events().get("oom_group_kill", 0)) - oom_before
+        assert oom_delta > 0, "no kernel group-OOM event observed"
+        # SIGKILL delivery to all members is atomic at group selection, but
+        # each process completes its kernel exit asynchronously.
+        exit_deadline = time.monotonic() + 5
+        while not dead(bad_info["child"]) and time.monotonic() < exit_deadline:
+            time.sleep(0.05)
         assert dead(bad_info["child"]), "detached child survived group OOM"
         assert good.poll() is None and not dead(good_info["pid"])
         timings.append([probe(url) for url in urls])
         print(json.dumps({"passed": True, "limit_GiB": 8, "bad_exit": bad.returncode,
-                          "oom_counter_observed": oom_seen, "detached_child_dead": True,
+                          "leaf_oom_counter_observed": oom_seen, "kernel_group_oom_delta": oom_delta, "detached_child_dead": True,
                           "sibling_alive": True, "probe_rounds": len(timings),
                           "max_api_seconds": max(max(row) for row in timings)}))
     finally:
