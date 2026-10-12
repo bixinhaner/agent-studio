@@ -1,3 +1,4 @@
+import { isolatedWorkloadCommand, releaseWorkload } from "../workload-isolation.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -69,7 +70,8 @@ function creditsFrom(payload: unknown): { available?: boolean; balance?: string 
 }
 
 async function requestRateLimits(binaryPath: string, codexHome: string): Promise<JsonRecord> {
-  const child = spawn(binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"], {
+  const launch = isolatedWorkloadCommand(binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"]);
+  const child = spawn(launch.command, launch.args, {
     detached: process.platform !== "win32",
     env: { ...process.env, CODEX_HOME: codexHome },
     stdio: ["pipe", "pipe", "pipe"]
@@ -136,6 +138,7 @@ async function requestRateLimits(binaryPath: string, codexHome: string): Promise
   } finally {
     rl.close();
     child.kill();
+    await releaseWorkload(launch.id);
   }
 }
 

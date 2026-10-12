@@ -1942,6 +1942,7 @@ main() {
   fi
   if deploy_restarts_admin || deploy_restarts_chat; then
     bash "$script_dir/ensure-host-memory-guard.sh" --allow-missing-service
+    bash "$script_dir/ensure-workload-isolation.sh"
   fi
   if deploy_restarts_chat; then
     bash "$script_dir/ensure-dws-runtime.sh"

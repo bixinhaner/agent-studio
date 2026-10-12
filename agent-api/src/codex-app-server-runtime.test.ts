@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import * as isolation from "./workload-isolation.js";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ const testTempDir = path.resolve(process.cwd(), "..", "temp", "codex-app-server-
 const fakeBinaryPath = path.join(testTempDir, "fake-codex-app-server.mjs");
 
 const originalEnv = {
+  AGENT_STUDIO_WORKLOAD_ISOLATION: process.env.AGENT_STUDIO_WORKLOAD_ISOLATION,
   CODEX_RUNTIME_DRIVER: process.env.CODEX_RUNTIME_DRIVER,
   CODEX_APP_SERVER_BINARY: process.env.CODEX_APP_SERVER_BINARY,
   CODEX_APP_SERVER_MAX_PROCESSES: process.env.CODEX_APP_SERVER_MAX_PROCESSES,
@@ -677,6 +679,26 @@ describe("Codex app-server runtime", () => {
 
     const starts = (await fs.readFile(startLog, "utf8")).trim().split("\n").filter(Boolean);
     expect(starts).toHaveLength(1);
+  });
+
+  it("starts a separate process for each task under mandatory isolation", async () => {
+    process.env.AGENT_STUDIO_WORKLOAD_ISOLATION = "required";
+    const launch = vi.spyOn(isolation, "isolatedWorkloadCommand").mockImplementation((command, args) => ({ command, args, id: undefined }));
+    const startLog = path.join(testTempDir, "isolated-task-starts.log");
+    await fs.rm(startLog, { force: true });
+    const runtime = new CodexRuntime({ envOverrides: {
+      CODEX_HOME: path.join(testTempDir, "isolated-home"),
+      FAKE_APP_SERVER_START_LOG: startLog
+    } });
+    try {
+      await Promise.all(Array.from({ length: 3 }, () => runtime.startThreadWithOptions({
+        model: "gpt-5.5", reasoningEffort: "high", workspace: testTempDir
+      })));
+      const pids = (await fs.readFile(startLog, "utf8")).trim().split("\n");
+      expect(new Set(pids).size).toBe(3);
+    } finally {
+      launch.mockRestore();
+    }
   });
 
   it("stops idle app-servers so a retiring chat slot hands their thread writers over", async () => {

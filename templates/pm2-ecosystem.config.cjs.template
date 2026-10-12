@@ -19,6 +19,8 @@ module.exports = {
       max_restarts: 10,
       env: {
         NODE_ENV: "production",
+        AGENT_STUDIO_WORKLOAD_ISOLATION: "required",
+        CODEX_RUNTIME_DRIVER: "app_server",
         HOST: "__API_HOST__",
         PORT: "__ADMIN_API_PORT__",
         // Code runs from releases/<id>, so pin the session root to the checkout.
@@ -50,6 +52,8 @@ module.exports = {
       kill_timeout: 30000,
       env: {
         NODE_ENV: "production",
+        AGENT_STUDIO_WORKLOAD_ISOLATION: "required",
+        CODEX_RUNTIME_DRIVER: "app_server",
         HOST: "__API_HOST__",
         PORT: "__CHAT_API_PORT__",
         SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",
@@ -79,6 +83,8 @@ module.exports = {
       kill_timeout: 30000,
       env: {
         NODE_ENV: "production",
+        AGENT_STUDIO_WORKLOAD_ISOLATION: "required",
+        CODEX_RUNTIME_DRIVER: "app_server",
         HOST: "__API_HOST__",
         PORT: "__CHAT_B_API_PORT__",
         SESSION_WORKSPACE_ROOT: "__APP_REPO_DIR__/sessions",

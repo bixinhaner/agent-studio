@@ -1,3 +1,4 @@
+import { workloadIsolationRequired } from "./workload-isolation.js";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Codex } from "./patched-codex-sdk.js";
 import type { CodexModelCapability, ReasoningEffort } from "./model-config.js";
@@ -116,6 +117,9 @@ export class CodexRuntime {
       this.codex = undefined;
       this.appServerRuntime = new CodexAppServerRuntime(options);
       return;
+    }
+    if (workloadIsolationRequired()) {
+      throw new Error("Mandatory workload isolation requires the app-server runtime");
     }
     const env =
       options.envOverrides && Object.keys(options.envOverrides).length > 0

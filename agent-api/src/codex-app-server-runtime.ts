@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { findThreadRollout, readRolloutUsage, sumInvocations } from "./operations/codex-usage-ledger.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isolatedWorkloadCommand, releaseWorkload, workloadOutOfMemory, workloadScopeIdentity } from "./workload-isolation.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -418,11 +419,12 @@ function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown
   return mergeConfig(fromOptions, { openai_base_url: baseUrl });
 }
 
-function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
+function runtimeScope(options: CodexRuntimeOptions, workloadIdentity?: string): RuntimeScope {
   const env = effectiveEnv(options);
   const binaryPath = resolveCodexAppServerBinaryPath();
   const config = runtimeBaseConfig(options);
   const scopeIdentity = {
+    workloadIdentity: workloadIdentity ? workloadScopeIdentity(workloadIdentity) : undefined,
     binaryPath,
     codexHome: trimOrUndefined(env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"),
     config,
@@ -937,6 +939,15 @@ class CodexAppServerProcess {
   private readonly exitPromise: Promise<void>;
   private resolveExitPromise!: () => void;
   private stopPromise: Promise<void> | undefined;
+  private workloadId: string | undefined;
+  private workloadRelease: Promise<void> | undefined;
+
+  private async releaseIsolatedWorkload(): Promise<void> {
+    this.workloadRelease ??= releaseWorkload(this.workloadId).catch((error) => {
+      console.error("workload cleanup failed", { workloadId: this.workloadId, message: String(error) });
+    });
+    await this.workloadRelease;
+  }
 
   constructor(readonly scope: RuntimeScope) {
     this.scopeKey = scope.key;
@@ -1073,6 +1084,7 @@ class CodexAppServerProcess {
       return;
     }
 
+    await this.releaseIsolatedWorkload();
     this.signalProcessTree(proc, "SIGTERM");
     const graceful = await this.waitForProcessTreeExit(proc, pid, 2_000);
     if (!graceful) {
@@ -1132,7 +1144,9 @@ class CodexAppServerProcess {
   }
 
   private async startInner(): Promise<void> {
-    this.proc = spawn(this.scope.binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"], {
+    const launch = isolatedWorkloadCommand(this.scope.binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"]);
+    this.workloadId = launch.id;
+    this.proc = spawn(launch.command, launch.args, {
       detached: process.platform !== "win32",
       env: this.scope.env,
       stdio: ["pipe", "pipe", "pipe"]
@@ -1145,7 +1159,11 @@ class CodexAppServerProcess {
     this.proc.once("error", (error) => this.handleExit(error));
     this.proc.once("exit", (code, signal) => {
       const stderr = this.getStderrTail();
-      this.handleExit(new Error(`Codex app-server exited code=${code} signal=${signal}${stderr ? ` stderr=${stderr}` : ""}`));
+      const resourceLimit = workloadOutOfMemory(this.workloadId);
+      this.handleExit(new Error(resourceLimit
+        ? "任务已达到运行环境内存上限，请缩小处理范围后重试。"
+        : `Codex app-server exited code=${code} signal=${signal}${stderr ? ` stderr=${stderr}` : ""}`));
+      void this.releaseIsolatedWorkload();
     });
 
     if (!this.proc.stdout || !this.proc.stdin) {
@@ -1317,7 +1335,7 @@ class CodexAppServerManager {
   }
 
   async startThread(options: CodexRuntimeOptions, threadOptions: AppServerThreadOptions): Promise<CodexAppServerThread> {
-    const baseScope = runtimeScope(options);
+    const baseScope = runtimeScope(options, randomUUID());
     const turnSkillScope = runtimeScopeForTurnSkills(baseScope, threadOptions.skills ?? []);
     const { process, release } = await this.getReservedProcess(turnSkillScope.scope);
     try {
@@ -1356,7 +1374,7 @@ class CodexAppServerManager {
     threadId: string,
     threadOptions: AppServerThreadOptions
   ): Promise<CodexAppServerThread> {
-    const baseScope = runtimeScope(options);
+    const baseScope = runtimeScope(options, threadId);
     // A persisted thread may be restored with a newly computed capability scope.
     // Reuse the process that already owns the thread; starting another process and
     // calling thread/resume would create a Codex active-writer conflict.
