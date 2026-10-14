@@ -388,30 +388,46 @@ export class PortalWorkspaceService {
     return mapWorkspaceNode(await this.requireNode(workspace.id, input.nodeId));
   }
 
+  /**
+   * `fallbackToHistory` is for starting a new task: a stale or foreign folder id
+   * (e.g. a `?folder=` link copied from a colleague, or a folder trashed in another
+   * tab) must not block sending, so the task quietly lands in the user's History.
+   */
   async resolveTaskScope(input: {
     actor: WorkspaceActor;
     folderId?: string;
-  }): Promise<{ workspaceId: string; folderId: string }> {
+    fallbackToHistory?: boolean;
+  }): Promise<{ workspaceId: string; folderId: string; fellBackFromFolderId?: string }> {
     const workspace = await this.getWorkspaceRecord(input.actor);
-    const folderId =
-      input.folderId ??
-      (
-        await this.db.workspaceNode.findFirst({
-          where: {
-            workspaceId: workspace.id,
-            systemKey: HISTORY_SYSTEM_KEY,
-            kind: "folder",
-            state: "active"
-          },
-          select: { id: true }
-        })
-      )?.id;
-    if (!folderId) throw new Error("Workspace history folder does not exist");
+    if (input.folderId && input.fallbackToHistory && !(await this.isActiveFolder(workspace.id, input.folderId))) {
+      return {
+        workspaceId: workspace.id,
+        folderId: await this.requireHistoryFolderId(workspace.id),
+        fellBackFromFolderId: input.folderId
+      };
+    }
+    const folderId = input.folderId ?? (await this.requireHistoryFolderId(workspace.id));
     await this.assertFolder(workspace.id, folderId);
     return {
       workspaceId: workspace.id,
       folderId
     };
+  }
+
+  private async requireHistoryFolderId(workspaceId: string): Promise<string> {
+    const folderId = (
+      await this.db.workspaceNode.findFirst({
+        where: {
+          workspaceId,
+          systemKey: HISTORY_SYSTEM_KEY,
+          kind: "folder",
+          state: "active"
+        },
+        select: { id: true }
+      })
+    )?.id;
+    if (!folderId) throw new Error("Workspace history folder does not exist");
+    return folderId;
   }
 
   async listFolderTasks(input: {
@@ -1795,6 +1811,10 @@ export class PortalWorkspaceService {
 
   private async assertFolder(workspaceId: string, folderId?: string): Promise<void> {
     if (!folderId) return;
+    if (!(await this.isActiveFolder(workspaceId, folderId))) throw new Error("Workspace folder does not exist");
+  }
+
+  private async isActiveFolder(workspaceId: string, folderId: string): Promise<boolean> {
     const folder = await this.db.workspaceNode.findFirst({
       where: {
         id: folderId,
@@ -1804,7 +1824,7 @@ export class PortalWorkspaceService {
       },
       select: { id: true }
     });
-    if (!folder) throw new Error("Workspace folder does not exist");
+    return Boolean(folder);
   }
 
   private async collectNodeTreeIds(workspaceId: string, rootNodeId: string): Promise<string[]> {

@@ -13186,9 +13186,20 @@ app.post("/api/threads", async (req: Request, res: Response) => {
           organizationId: currentUser.organizationId,
           securityDomainId
         },
-        folderId: input.folder_id ?? undefined
+        folderId: input.folder_id ?? undefined,
+        fallbackToHistory: true
       })
     );
+    if (workspaceScope.fellBackFromFolderId) {
+      console.warn(
+        `[portal-thread-folder-fallback] ${JSON.stringify({
+          user_id: currentUser.id,
+          organization_id: currentUser.organizationId,
+          requested_folder_id: workspaceScope.fellBackFromFolderId,
+          history_folder_id: workspaceScope.folderId
+        })}`
+      );
+    }
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
     const allocated = await timing.time("create_thread.allocate_workspace", () =>
       allocateUserAgentWorkspacePath({

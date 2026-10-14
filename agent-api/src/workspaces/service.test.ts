@@ -145,6 +145,53 @@ describe("PortalWorkspaceService history compatibility", () => {
   });
 });
 
+describe("PortalWorkspaceService.resolveTaskScope", () => {
+  function createDb(activeFolderIds: string[]) {
+    return {
+      userWorkspace: {
+        findUnique: vi.fn().mockResolvedValue({ id: "workspace-1", status: "active" })
+      },
+      workspaceNode: {
+        findFirst: vi.fn().mockImplementation(async ({ where }: { where: { id?: string; systemKey?: string } }) => {
+          if (where.systemKey === "history_unfiled") return { id: "history-1" };
+          return where.id && [...activeFolderIds, "history-1"].includes(where.id) ? { id: where.id } : null;
+        })
+      }
+    };
+  }
+
+  it("falls back to History for a foreign or stale folder when starting a task", async () => {
+    const service = new PortalWorkspaceService(createDb(["folder-1"]) as never, {} as never);
+
+    await expect(service.resolveTaskScope({
+      actor,
+      folderId: "someone-elses-folder",
+      fallbackToHistory: true
+    })).resolves.toEqual({
+      workspaceId: "workspace-1",
+      folderId: "history-1",
+      fellBackFromFolderId: "someone-elses-folder"
+    });
+    await expect(service.resolveTaskScope({
+      actor,
+      folderId: "folder-1",
+      fallbackToHistory: true
+    })).resolves.toEqual({ workspaceId: "workspace-1", folderId: "folder-1" });
+  });
+
+  it("still rejects an unknown folder without the fallback", async () => {
+    const service = new PortalWorkspaceService(createDb([]) as never, {} as never);
+
+    await expect(service.resolveTaskScope({ actor, folderId: "missing" })).rejects.toThrow(
+      "Workspace folder does not exist"
+    );
+    await expect(service.resolveTaskScope({ actor })).resolves.toEqual({
+      workspaceId: "workspace-1",
+      folderId: "history-1"
+    });
+  });
+});
+
 describe("PortalWorkspaceService trash retention", () => {
   it("previews recursive folders, conversations, files, and running conversations", async () => {
     const now = new Date("2026-08-09T00:00:00.000Z");

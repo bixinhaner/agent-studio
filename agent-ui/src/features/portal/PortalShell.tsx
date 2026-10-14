@@ -8007,6 +8007,27 @@ export function PortalShell(props: {
             setSelectedWorkspaceFolderId(initialFolderId);
             writePortalWorkspaceLocation({ folderId: initialFolderId }, "replace");
           }
+        } else if (!trainingReadOnly && typeof window !== "undefined") {
+          // A `?folder=` copied from someone else's link (or a folder trashed elsewhere)
+          // is not in this user's workspace; quietly fall back to History.
+          const urlFolderId = new URLSearchParams(window.location.search).get(PORTAL_WORKSPACE_FOLDER_SEARCH_PARAM)?.trim() || "";
+          const historyFolderId = out.workspace.history_folder_id;
+          if (urlFolderId && !urlFolderId.startsWith("__") && historyFolderId && urlFolderId !== historyFolderId) {
+            void workspaceDataSource.fetchFolderAncestorPaths([urlFolderId])
+              .then((paths) => {
+                if (cancelled || (paths[urlFolderId]?.length ?? 0) > 0) return;
+                if (selectedWorkspaceFolderIdRef.current !== urlFolderId) return;
+                setSelectedWorkspaceFolderId(historyFolderId);
+                const location = readPortalWorkspaceLocation(window.location.search);
+                writePortalWorkspaceLocation({
+                  folderId: historyFolderId,
+                  threadId: readPortalThreadIdFromLocation(window.location.search) || undefined,
+                  fileId: location.fileId,
+                  query: location.query
+                }, "replace");
+              })
+              .catch(() => undefined);
+          }
         }
       })
       .catch((error) => {
