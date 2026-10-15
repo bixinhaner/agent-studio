@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseModelJSON, planningResponseSchema, validatePlan } from "./contracts.js";
+import { acceptedWatch, parseModelJSON, planningResponseSchema, resultSchema, validatePlan } from "./contracts.js";
 import { buildActionConnectorRuntimePrompt } from "../prompt.js";
 import { actionConnectorConfigSchema } from "../../center/action-connector-adapter.js";
 
@@ -49,5 +49,37 @@ describe("assistant plan contract", () => {
   it("accepts one JSON fence without eval or repair", () => expect(parseModelJSON("```json\n{\"name\":\"real\"}\n```")).toEqual({ name: "real" }));
   it("builder bypasses the interactive tool-use prompt", () => {
     expect(buildActionConnectorRuntimePrompt({ config: actionConnectorConfigSchema.parse({ displayName: "Test", runtimePrompt: "Run tools: {{message}}" }), request: { message: "Plan, do not execute", locale: "en", timezone: "UTC", mode: "preview", context: { assistantBuilder: true } }, runId: "r", conversationId: "c", cliPath: "/unused" })).toBe("Plan, do not execute");
+  });
+});
+
+describe("assistant check rule", () => {
+  const called = new Set(["get.observability.metrics"]);
+  const watch = {
+    operationId: "get.observability.metrics",
+    path: "/api/v1/observability/metrics",
+    query: { query: "100 * container_memory_working_set_bytes / container_spec_memory_limit_bytes > 80" },
+    items: "data.result.data.result",
+    key: "metric.name",
+    conditions: [{ field: "value.1", op: "gt", value: 80 }],
+    matchedKeys: ["omcgo-watchdog-1"],
+  };
+  it("keeps a rule that agrees with the outcome and reads a called operation", () => {
+    expect(acceptedWatch(watch, "finding", called)).toEqual(watch);
+    expect(acceptedWatch({ ...watch, matchedKeys: [] }, "no_change", called)).toBeDefined();
+  });
+  it.each([
+    ["an operation this run did not call", { ...watch, operationId: "get.devices" }, "finding"],
+    ["a finding without a matched item", { ...watch, matchedKeys: [] }, "finding"],
+    ["no change while items match", watch, "no_change"],
+    ["insufficient data", watch, "insufficient_data"],
+    ["duplicate identities", { ...watch, matchedKeys: ["a", "a"] }, "finding"],
+    ["an unknown operator", { ...watch, conditions: [{ field: "value.1", op: "regex", value: "8" }] }, "finding"],
+    ["an expression instead of a path", { ...watch, key: "metric['name']" }, "finding"],
+    ["a path outside the API", { ...watch, path: "/internal/x" }, "finding"],
+    ["no conditions", { ...watch, conditions: [] }, "finding"],
+  ] as const)("drops a rule with %s", (_name, rule, outcome) => expect(acceptedWatch(rule, outcome, called)).toBeUndefined());
+  it("never fails the report because of an unusable rule", () => {
+    const result = resultSchema.parse({ outcome: "finding", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [], watch: { nonsense: true } });
+    expect(acceptedWatch(result.watch, result.outcome, called)).toBeUndefined();
   });
 });

@@ -84,7 +84,28 @@ export const executionRequestSchema = z.object({
     maxOutputBytes: z.number().int().min(1024).max(65536).default(32768),
   }).default({}),
 });
+// A check rule the model may attach to a result. The source system re-runs it
+// with the owner's permissions to repeat a routine check without the model, so
+// it only describes data: one read, where the items are, how each is
+// identified and which conditions make it match. It never carries code.
+const watchPathSchema = z.string().max(200).regex(/^$|^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$/);
+export const watchSchema = z.object({
+  operationId: z.string().min(1).max(160),
+  path: z.string().startsWith("/api/v1/").max(500),
+  query: z.record(z.union([z.string().max(2048), z.number(), z.boolean()])).refine((q) => Object.keys(q).length <= 20).optional(),
+  items: watchPathSchema,
+  key: watchPathSchema.min(1),
+  conditions: z.array(z.object({
+    field: watchPathSchema.min(1),
+    op: z.enum(["eq", "ne", "gt", "gte", "lt", "lte", "in"]),
+    value: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(500)).max(50)]),
+  })).min(1).max(10),
+  matchedKeys: z.array(z.string().max(500)).max(200),
+});
+export type AssistantWatch = z.infer<typeof watchSchema>;
 export const resultSchema = z.object({
+  // Validated separately: an unusable rule is dropped, never fails the report.
+  watch: z.unknown().optional(),
   continuation: z.object({ status: z.enum(["ready", "retryable", "blocked"]), reason: z.string().min(1).max(1000), evidenceRefs: z.array(z.string().max(180)).max(20).optional() }).optional(),
   outcome: z.enum(["finding", "no_change", "insufficient_data"]),
   title: z.string().min(1).max(240),
@@ -97,6 +118,17 @@ export type AssistantDefinition = z.infer<typeof definitionSchema>;
 export type PlanningRequest = z.infer<typeof planningRequestSchema>;
 export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
 export type AssistantResult = z.infer<typeof resultSchema>;
+
+// Keeps a rule only when it is well formed, reads an operation this run
+// actually called successfully, and agrees with the outcome it summarizes.
+export function acceptedWatch(watch: unknown, outcome: AssistantResult["outcome"], calledOperations: ReadonlySet<string>): AssistantWatch | undefined {
+  const parsed = watchSchema.safeParse(watch);
+  if (!parsed.success || !calledOperations.has(parsed.data.operationId)) return undefined;
+  const keys = parsed.data.matchedKeys;
+  if (new Set(keys).size !== keys.length) return undefined;
+  if (outcome === "insufficient_data" || (outcome === "finding") !== (keys.length > 0)) return undefined;
+  return parsed.data;
+}
 
 export function parseModelJSON(text: string): unknown {
   // A JSON fence is harmless presentation, but no prose or multiple objects is
