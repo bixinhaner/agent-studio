@@ -285,7 +285,12 @@ export async function offloadThreadWorkspace(input: {
       const current = await fs.lstat(item.absolute).catch(() => undefined);
       // Keep files that changed after hashing; drop their manifest entry below.
       if (!current?.isFile() || current.size !== item.entry.size || current.mtimeMs !== item.entry.mtimeMs) continue;
-      await fs.rm(item.absolute, { force: true });
+      // Agents sometimes leave read-only folders behind; keep such files like changed ones.
+      const removed = await fs.rm(item.absolute, { force: true }).then(
+        () => true,
+        () => false
+      );
+      if (!removed) continue;
       removedPaths.add(item.entry.path);
       result.files += 1;
       result.bytes += item.entry.size;

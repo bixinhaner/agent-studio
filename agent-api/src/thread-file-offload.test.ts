@@ -129,6 +129,23 @@ describe("thread file offload", () => {
     expect(await fs.readFile(nested, "utf8")).toBe("nested-upload");
   });
 
+  it("keeps files it cannot remove and drops them from the manifest", async () => {
+    await storeObject("removable");
+    await storeObject("protected");
+    const removable = await writeFile("a.txt", "removable");
+    const protectedFile = await writeFile("locked/b.txt", "protected");
+    await fs.chmod(path.dirname(protectedFile), 0o555);
+    try {
+      const result = await offloadThreadWorkspace({ workspace, offloadRoot, lookup, minBytes: 1, dryRun: false });
+      expect(result.files).toBe(1);
+      await expect(fs.stat(removable)).rejects.toThrow();
+      expect(await fs.readFile(protectedFile, "utf8")).toBe("protected");
+      expect(await listOffloadedChecksums(workspace)).toEqual([sha256("removable")]);
+    } finally {
+      await fs.chmod(path.dirname(protectedFile), 0o755);
+    }
+  });
+
   it("keeps a file recreated after offload and reports missing objects without failing", async () => {
     await storeObject("first");
     await storeObject("second");
