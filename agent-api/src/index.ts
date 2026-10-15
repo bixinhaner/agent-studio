@@ -15210,10 +15210,11 @@ async function bootstrap() {
           console.info("retiring chat slot released codex thread writers", released);
         }
       },
-      onRetireCancel: async () => {
-        // Serving again (the new slot went away): the handover drain must not
-        // turn into a lone drain that rejects every new conversation.
-        await clearOwnChatSlotDrainFile();
+      onRetireCancel: async ({ handoverPaused }) => {
+        // Serving again. A deploy abort clears the drain; when only the new slot went
+        // away the drain stays (the controller does not reject work meanwhile) so this
+        // slot retires again, releasing its thread writers, once that slot is back.
+        if (!handoverPaused) await clearOwnChatSlotDrainFile();
         dingtalkBotStream.start();
         proactiveActionConnectors.resumeClaims();
         scheduledTasks.start();

@@ -118,6 +118,18 @@ describe("chat cluster peers", () => {
     const cluster = new ChatClusterView({ peerUrls: [], selfPort: 1 });
     vi.spyOn(cluster, "statuses").mockResolvedValue(statuses);
     expect((await cluster.readyPeer(0))?.url).toBe("http://ready");
+    expect(cluster.peerUnreachable()).toBe(false);
+  });
+
+  it("tells a peer that does not answer apart from one that is down or not ready", async () => {
+    const cluster = new ChatClusterView({ peerUrls: [], selfPort: 1 });
+    const statuses = vi.spyOn(cluster, "statuses");
+    statuses.mockResolvedValue([{ ...peerStatus({ url: "http://slow", ready: false }), state: "unknown" }]);
+    expect(await cluster.readyPeer(0)).toBeUndefined();
+    expect(cluster.peerUnreachable()).toBe(true);
+    statuses.mockResolvedValue([peerStatus({ url: "http://starting", ready: false })]);
+    expect(await cluster.readyPeer(0)).toBeUndefined();
+    expect(cluster.peerUnreachable()).toBe(false);
   });
 });
 
@@ -297,11 +309,12 @@ describe("chat retirement", () => {
     maxMs?: number;
     onRetiringPoll?: () => void | Promise<void>;
   }) {
-    const state = { drain: input.drain, peerReady: input.peerReady ?? true, busy: input.busy ?? 0, now: 0 };
+    const state = { drain: input.drain, peerReady: input.peerReady ?? true, peerUnreachable: false, busy: input.busy ?? 0, now: 0 };
     const cluster = new ChatClusterView({ peerUrls: [], selfPort: 1 });
     vi.spyOn(cluster, "readyPeer").mockImplementation(async () =>
       state.peerReady ? peerStatus({ url: "http://peer" }) : undefined
     );
+    vi.spyOn(cluster, "peerUnreachable").mockImplementation(() => !state.peerReady && state.peerUnreachable);
     const events: string[] = [];
     const retirement = new ChatRetirementController({
       cluster,
@@ -311,8 +324,8 @@ describe("chat retirement", () => {
       onRetireStart: () => {
         events.push("start");
       },
-      onRetireCancel: () => {
-        events.push("cancel");
+      onRetireCancel: ({ handoverPaused }) => {
+        events.push(handoverPaused ? "cancel:paused" : "cancel");
       },
       onRetiringPoll: input.onRetiringPoll,
       exit: async ({ interruptRemaining }) => {
@@ -388,7 +401,14 @@ describe("chat retirement", () => {
     expect(lost.retirement.isRetiring()).toBe(true);
     await lost.retirement.poll();
     expect(lost.retirement.isRetiring()).toBe(false);
-    expect(lost.events).toEqual(["start", "cancel"]);
+    expect(lost.events).toEqual(["start", "cancel:paused"]);
+    // Serving again without rejecting work, and retiring again once the new slot is back.
+    expect(lost.retirement.userFacingDrainReason()).toBeUndefined();
+    expect(lost.retirement.claimBlockReason()).toBeUndefined();
+    lost.state.peerReady = true;
+    await lost.retirement.poll();
+    expect(lost.retirement.isRetiring()).toBe(true);
+    expect(lost.events).toEqual(["start", "cancel:paused", "start"]);
 
     const aborted = controller({ drain: "updating", busy: 1 });
     await aborted.retirement.poll();
@@ -396,5 +416,38 @@ describe("chat retirement", () => {
     await aborted.retirement.poll();
     expect(aborted.retirement.isReady()).toBe(true);
     expect(aborted.events).toEqual(["start", "cancel"]);
+  });
+
+  it("keeps retiring while a busy new slot only answers slowly", async () => {
+    const slow = controller({ drain: "updating", busy: 1 });
+    await slow.retirement.poll();
+    slow.state.peerReady = false;
+    slow.state.peerUnreachable = true;
+    for (let poll = 0; poll < 29; poll += 1) await slow.retirement.poll();
+    expect(slow.retirement.isRetiring()).toBe(true);
+    // Answering again resets the count.
+    slow.state.peerReady = true;
+    await slow.retirement.poll();
+    slow.state.peerReady = false;
+    for (let poll = 0; poll < 29; poll += 1) await slow.retirement.poll();
+    expect(slow.retirement.isRetiring()).toBe(true);
+    await slow.retirement.poll();
+    expect(slow.retirement.isRetiring()).toBe(false);
+    expect(slow.events).toEqual(["start", "cancel:paused"]);
+  });
+
+  it("drops a paused handover when the deploy removes the drain", async () => {
+    const paused = controller({ drain: "updating", busy: 1 });
+    await paused.retirement.poll();
+    paused.state.peerReady = false;
+    for (let poll = 0; poll < 3; poll += 1) await paused.retirement.poll();
+    expect(paused.events).toEqual(["start", "cancel:paused"]);
+    paused.state.drain = undefined;
+    await paused.retirement.poll();
+    paused.state.drain = "updating";
+    paused.state.peerReady = false;
+    await paused.retirement.poll();
+    // A fresh lone drain rejects work again instead of staying silently paused.
+    expect(paused.retirement.userFacingDrainReason()).toBe("updating");
   });
 });

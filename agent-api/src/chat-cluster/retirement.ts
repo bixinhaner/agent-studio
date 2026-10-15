@@ -3,6 +3,11 @@ import { inFlightForwardCount } from "./forwarding.js";
 
 export type ChatRetirementPhase = "active" | "retiring" | "exiting";
 
+/** Polls a down or not-ready peer must stay that way before retirement is cancelled. */
+const PEER_LOST_POLLS = 3;
+/** Polls an unanswering peer is tolerated (about a minute at the 2s poll). */
+const PEER_UNREACHABLE_POLLS = 30;
+
 /**
  * A blue-green chat slot retires when the deploy writes its slot drain file
  * while a peer is ready to take over. Retiring keeps every in-flight run on
@@ -20,6 +25,8 @@ export class ChatRetirementController {
   private peerReady = false;
   private idleChecks = 0;
   private peerLostChecks = 0;
+  /** Retirement was cancelled because the peer went away; the drain file stays so it resumes once the peer is back. */
+  private handoverPaused = false;
   private timer?: NodeJS.Timeout;
   private polling?: Promise<void>;
 
@@ -30,7 +37,8 @@ export class ChatRetirementController {
       busyCount(): number;
       retireMaxMs: number;
       onRetireStart(): void | Promise<void>;
-      onRetireCancel(): void | Promise<void>;
+      /** handoverPaused: the deploy still wants this slot retired, so keep its drain file. */
+      onRetireCancel(input: { handoverPaused: boolean }): void | Promise<void>;
       /** Runs on every poll while retiring, e.g. to hand idle thread state to the peer. */
       onRetiringPoll?(): void | Promise<void>;
       exit(input: { interruptRemaining: boolean; reason: string }): Promise<void>;
@@ -64,12 +72,12 @@ export class ChatRetirementController {
 
   /** Drain reason shown to users: only when no peer can take the work. */
   userFacingDrainReason(): string | undefined {
-    return this.drainReason && !this.peerReady ? this.drainReason : undefined;
+    return this.drainReason && !this.peerReady && !this.handoverPaused ? this.drainReason : undefined;
   }
 
   /** Any drain, including handover; background workers stop claiming new work. */
   claimBlockReason(): string | undefined {
-    return this.drainReason;
+    return this.handoverPaused ? undefined : this.drainReason;
   }
 
   snapshot() {
@@ -104,11 +112,14 @@ export class ChatRetirementController {
 
     if (!this.drainReason) {
       // The deploy aborted the switch; resume serving.
+      this.handoverPaused = false;
       if (this.phase === "retiring") await this.cancelRetirement("drain file removed");
       return;
     }
     if (this.phase === "active") {
       if (!this.peerReady) return;
+      if (this.handoverPaused) this.options.logger?.info("chat retirement resumed; peer is ready again");
+      this.handoverPaused = false;
       this.phase = "retiring";
       this.retiringSince = now;
       this.idleChecks = 0;
@@ -119,10 +130,11 @@ export class ChatRetirementController {
 
     if (!this.peerReady) {
       // The new slot went away after the switch: take traffic back instead of
-      // leaving Caddy without a healthy upstream. Require a few polls so a
-      // slow status response does not flap the handover.
-      this.peerLostChecks += 1;
-      if (this.peerLostChecks >= 3) await this.cancelRetirement("peer is no longer ready");
+      // leaving Caddy without a healthy upstream. A peer that is down or not
+      // ready counts after a few polls; one that only answers slowly (a busy,
+      // just-started slot) must stay unanswered for about a minute.
+      this.peerLostChecks += this.options.cluster.peerUnreachable() ? 1 : PEER_UNREACHABLE_POLLS / PEER_LOST_POLLS;
+      if (this.peerLostChecks >= PEER_UNREACHABLE_POLLS) await this.cancelRetirement("peer is no longer ready", { pauseHandover: true });
       return;
     }
     this.peerLostChecks = 0;
@@ -148,12 +160,13 @@ export class ChatRetirementController {
     }
   }
 
-  private async cancelRetirement(reason: string): Promise<void> {
+  private async cancelRetirement(reason: string, options: { pauseHandover?: boolean } = {}): Promise<void> {
     this.phase = "active";
     this.retiringSince = undefined;
     this.idleChecks = 0;
     this.peerLostChecks = 0;
-    this.options.logger?.warn("chat retirement cancelled", { reason });
-    await this.options.onRetireCancel();
+    this.handoverPaused = Boolean(options.pauseHandover);
+    this.options.logger?.warn("chat retirement cancelled", { reason, handoverPaused: this.handoverPaused });
+    await this.options.onRetireCancel({ handoverPaused: this.handoverPaused });
   }
 }

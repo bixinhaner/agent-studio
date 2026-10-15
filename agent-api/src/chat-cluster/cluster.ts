@@ -137,7 +137,7 @@ export function peerRunsPortalThread(status: ChatPeerStatus, threadId: string, u
 
 export class ChatClusterView {
   private readonly peers: string[];
-  private readyCache?: { at: number; peer?: ChatPeerStatus };
+  private readyCache?: { at: number; peer?: ChatPeerStatus; unreachable: boolean };
 
   constructor(
     private readonly options: {
@@ -183,8 +183,14 @@ export class ChatClusterView {
   async readyPeer(maxAgeMs = 1000): Promise<ChatPeerStatus | undefined> {
     const now = (this.options.now ?? Date.now)();
     if (this.readyCache && now - this.readyCache.at < maxAgeMs) return this.readyCache.peer;
-    const peer = (await this.statuses()).find((status) => status.state === "up" && status.ready && !status.draining);
-    this.readyCache = { at: now, peer };
+    const statuses = await this.statuses();
+    const peer = statuses.find((status) => status.state === "up" && status.ready && !status.draining);
+    this.readyCache = { at: now, peer, unreachable: !peer && statuses.some((status) => status.state === "unknown") };
     return peer;
+  }
+
+  /** Whether the last readyPeer() found no ready peer only because one did not answer (e.g. a busy, just-started slot). */
+  peerUnreachable(): boolean {
+    return this.readyCache?.unreachable ?? false;
   }
 }
