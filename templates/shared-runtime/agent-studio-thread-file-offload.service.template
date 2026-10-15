@@ -1,0 +1,15 @@
+[Unit]
+Description=Offload uploads and deliverables of idle agent-studio threads that already exist in workspace storage
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__APP_REPO_DIR__/agent-api
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/env node __APP_REPO_DIR__/agent-api/dist/ops/offload-thread-files.js --apply --idle-days 30
+Nice=19
+IOSchedulingClass=idle
+# Hashing many files fills page cache; keep it reclaimable instead of crowding the chat service.
+MemoryHigh=768M
+MemoryMax=2G

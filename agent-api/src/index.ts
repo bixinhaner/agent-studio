@@ -159,8 +159,10 @@ import {
 import {
   buildToolRuntimeEnv,
   ensureToolRuntimeEnvDirs,
+  SCRATCH_SPACE_HINT,
   TOOL_RUNTIME_FRESHNESS_HINT
 } from "./tool-runtime-env.js";
+import { markThreadWorkspaceActive, restoreOffloadedThreadFiles } from "./thread-file-offload.js";
 import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
@@ -658,6 +660,7 @@ const codexExecution = new CodexExecutionService({
   },
   runtimeWorkspace: {
     async prepare(workspace) {
+      await prepareThreadWorkspaceForTurn(workspace);
       await ensureToolRuntimeEnvDirs(workspace, appConfig.sharedCodexRuntime.runtimeRoot);
     }
   },
@@ -3645,6 +3648,7 @@ async function resolveRuntimeLaunchConfig(input: {
     await ensureRuntimeWorkspaceTmp(input.workspace);
   }
   if (input.workspace) {
+    await prepareThreadWorkspaceForTurn(input.workspace);
     await ensureToolRuntimeEnvDirs(input.workspace, appConfig.sharedCodexRuntime.runtimeRoot);
     await fs.mkdir(inlineVisualizationDirectory(input.workspace), { recursive: true });
   }
@@ -3661,6 +3665,9 @@ async function resolveRuntimeLaunchConfig(input: {
     ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
     ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : []),
+    ...(input.workspace && pythonRuntimeSettings.enabled && pythonRuntimeSettings.sessionTmpEnabled
+      ? [SCRATCH_SPACE_HINT]
+      : []),
     // Fallback only: the managed visualize skill already names this directory.
     ...(input.workspace && !(await installedVisualizeSkillUsesDurableDirectory(appConfig.codex.baseHome))
       ? [inlineVisualizationRuntimeHint(input.workspace)]
@@ -6924,6 +6931,35 @@ async function materializeUserAgentCodexHomeForRunConfig(input: {
     modeId: input.modeId,
     codexRunConfig: input.codexRunConfig
   });
+}
+
+// Called when a conversation turn is about to use the thread workspace.
+async function prepareThreadWorkspaceForTurn(workspace: string): Promise<void> {
+  await restoreThreadOffloadedFiles(workspace);
+  await markThreadWorkspaceActive(workspace).catch((error) => {
+    console.warn("failed to mark thread workspace active", {
+      workspace,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  });
+}
+
+// Idle threads may have had uploads and deliverables offloaded (see thread-file-offload.ts);
+// put them back before anything reads the thread workspace. Never blocks the caller on failure.
+async function restoreThreadOffloadedFiles(workspacePath: string | undefined): Promise<void> {
+  const workspace = trimOrUndefined(workspacePath);
+  if (!workspace) return;
+  try {
+    const result = await restoreOffloadedThreadFiles(workspace, appConfig.threadOffloadRoot);
+    if (result.restored || result.missingObjects) {
+      console.info("restored offloaded thread files", { workspace, ...result });
+    }
+  } catch (error) {
+    console.warn("failed to restore offloaded thread files", {
+      workspace,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 function getThreadUploadTempDir(threadId: string): string {
@@ -10482,6 +10518,7 @@ async function resolveExistingThreadFileAbsolutePath(input: {
   relativePath?: string;
   filePath?: string;
 }): Promise<string> {
+  await restoreThreadOffloadedFiles(input.workspacePath);
   if (!trimOrUndefined(input.relativePath)) {
     return resolveThreadFileAbsolutePath({
       workspacePath: input.workspacePath,
@@ -11287,6 +11324,7 @@ async function sendThreadArtifactContent(input: {
     input.res.status(404).json({ detail: "Thread workspace does not exist" });
     return;
   }
+  await restoreThreadOffloadedFiles(workspacePath);
   const resolved = resolveWorkspaceFilePath({ workspacePath, filePath: artifact.relativePath });
   if (resolved.relativePath !== artifact.relativePath) {
     await recordAccess(artifact.id, "denied", { reason: "artifact_path_mismatch" });
@@ -11779,6 +11817,7 @@ app.locals.resolveCodexSkillThreadPath = async (input: {
   if (!workspacePath) {
     throw new Error("Thread workspace does not exist");
   }
+  await restoreThreadOffloadedFiles(workspacePath);
   return resolveThreadFileAbsolutePath({
     workspacePath,
     uploadDir: getThreadWorkspaceUploadDir(workspacePath, input.threadId),
@@ -12729,6 +12768,7 @@ app.get("/api/threads/:threadId/visualizations/content", async (req: Request, re
       res.status(404).json({ detail: "Thread workspace does not exist" });
       return;
     }
+    await restoreThreadOffloadedFiles(workspacePath);
     const visualization = await loadInlineVisualization({
       workspacePath,
       fileName: query.file,

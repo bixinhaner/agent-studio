@@ -1756,7 +1756,7 @@ export function CodexMemoryManagementView() {
               value={lastRun ? formatLocalDateTime(lastRun.finishedAt) : "尚未运行"}
               hint={
                 lastRun
-                  ? `释放 ${formatBytes(lastRun.freedBytes)} · 临时目录 ${formatCount(lastRun.removedThreadTmp)} 个 · 工作区副本 ${formatCount(lastRun.removedWorkspaceCopies)} 个`
+                  ? `释放 ${formatBytes(lastRun.freedBytes)} · 临时目录 ${formatCount(lastRun.removedThreadTmp + lastRun.removedScratchDirs)} 个 · 依赖缓存 ${formatCount(lastRun.removedDependencyCaches)} 个 · 工作区副本 ${formatCount(lastRun.removedWorkspaceCopies)} 个`
                   : "每天自动运行一次"
               }
             />

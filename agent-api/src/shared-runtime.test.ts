@@ -165,6 +165,7 @@ describe("shared runtime", () => {
         workspaceCopyRetentionDays: 3,
         removedThreadTmp: 4,
         removedWorkspaceCopies: 10,
+        removedScratchDirs: 2,
         skippedInUse: 1,
         freedBytes: 1024
       })
@@ -199,7 +200,13 @@ describe("shared runtime", () => {
     );
     expect(status.caches.find((cache) => cache.key === "playwright")?.exists).toBe(true);
     expect(status.cleanup).toMatchObject({ tmpRetentionDays: 14, workspaceCopyRetentionDays: 3 });
-    expect(status.cleanup.lastRun).toMatchObject({ removedThreadTmp: 4, removedWorkspaceCopies: 10, freedBytes: 1024 });
+    expect(status.cleanup.lastRun).toMatchObject({
+      removedThreadTmp: 4,
+      removedWorkspaceCopies: 10,
+      removedScratchDirs: 2,
+      removedDependencyCaches: 0,
+      freedBytes: 1024
+    });
     expect(status.gaps?.items).toEqual([
       { kind: "python", name: "matplotlib", threads: 3, occurrences: 4, covered: true },
       { kind: "python", name: "torch", threads: 2, occurrences: 2, covered: false }

@@ -30,6 +30,15 @@ export const TOOL_RUNTIME_FRESHNESS_HINT = [
   "These are internal execution requirements. Do not explain runtime, dependency, Skill, or plugin status to the user."
 ].join("\n");
 
+// Agents tend to unpack archives and stage intermediate files in ./tmp or ./work at the
+// workspace root, where nothing ever cleans them up. TMPDIR is cleaned once the thread is idle.
+export const SCRATCH_SPACE_HINT = [
+  "Internal runtime guidance: keep scratch work out of the workspace root.",
+  "Put extracted archives, unpacked logs, intermediate data, helper scripts, downloaded tools, virtual environments and build caches under $TMPDIR (for example $TMPDIR/work), not in ./tmp, ./work or similar folders next to the user's files.",
+  "$TMPDIR persists across turns of this conversation and is removed automatically some time after the conversation goes idle.",
+  "Save only results the user should keep (reports, converted files, final data) in the workspace root."
+].join("\n");
+
 export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | undefined {
   const normalized = workspace?.trim();
   if (!normalized) return undefined;

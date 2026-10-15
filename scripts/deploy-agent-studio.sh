@@ -1422,7 +1422,7 @@ install_shared_runtime_maintenance() {
 
   local unit rendered
   local timers=(agent-studio-thread-tmp-cleanup agent-studio-runtime-gap-scan agent-studio-codex-home-dedupe
-    agent-studio-disk-usage-snapshot)
+    agent-studio-disk-usage-snapshot agent-studio-thread-file-offload)
   for unit in "${timers[@]/%/.service}" "${timers[@]/%/.timer}"; do
     rendered="$(mktemp)"
     sed \

@@ -36,6 +36,7 @@ const schema = z.object({
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_WORKSPACE_ROOT: z.string().optional(),
   USER_WORKSPACE_STORAGE_ROOT: z.string().optional(),
+  THREAD_OFFLOAD_ROOT: z.string().optional(),
   PORTAL_TRAINING_SOURCE_EMAIL: z.string().default("like@baicells.com"),
   PORTAL_TRAINING_ROOT_FOLDER: z.string().default("员工AI培训"),
   SESSION_TTL_MINUTES: z.string().default("0"),
@@ -115,6 +116,14 @@ const userWorkspaceStorageRoot = userWorkspaceStorageRootInput
   : env.NODE_ENV === "production"
     ? "/var/lib/agent-studio/workspaces"
     : path.resolve(process.cwd(), "./temp/user-workspaces");
+// Content-addressed store for thread files offloaded from idle threads; must share a filesystem
+// with the user workspace storage so objects can be hard-linked instead of copied.
+const threadOffloadRootInput = (env.THREAD_OFFLOAD_ROOT || "").trim();
+const threadOffloadRoot = threadOffloadRootInput
+  ? path.resolve(process.cwd(), threadOffloadRootInput)
+  : env.NODE_ENV === "production"
+    ? "/var/lib/agent-studio/offload"
+    : path.resolve(process.cwd(), "./temp/thread-offload");
 const whitelist = env.WORKSPACE_WHITELIST.split(",")
   .map((item) => item.trim())
   .filter(Boolean)
@@ -273,6 +282,7 @@ export const appConfig = {
   defaultWorkspace,
   sessionWorkspaceRoot,
   userWorkspaceStorageRoot,
+  threadOffloadRoot,
   portalTraining: {
     sourceEmail: env.PORTAL_TRAINING_SOURCE_EMAIL.trim(),
     rootFolderName: env.PORTAL_TRAINING_ROOT_FOLDER.trim()

@@ -11,7 +11,9 @@ import {
   InlineVisualizationArtifactError,
   loadInlineVisualization
 } from "../artifacts/inline-visualization-artifact.js";
+import { appConfig } from "../config.js";
 import { getDbClient } from "../db/client.js";
+import { restoreOffloadedThreadFiles } from "../thread-file-offload.js";
 import type { PortalSteerEventRecord } from "../persistence/portal-steer-event-repository.js";
 import type { PortalSendFailureRecord } from "../persistence/portal-send-failure-repository.js";
 import { localWorkspaceSnapshot } from "../local-bridge-audit.js";
@@ -642,6 +644,13 @@ async function resolveExistingThreadFileAbsolutePath(input: {
   relativePath?: string;
   filePath?: string;
 }): Promise<string> {
+  // Files of idle threads may have been offloaded; put them back before reading.
+  await restoreOffloadedThreadFiles(input.workspacePath, appConfig.threadOffloadRoot).catch((error) => {
+    console.warn("failed to restore offloaded thread files", {
+      workspace: input.workspacePath,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  });
   if (!trimOrUndefined(input.relativePath)) {
     return resolveThreadFileAbsolutePath({
       workspacePath: input.workspacePath,

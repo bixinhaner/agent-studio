@@ -209,6 +209,8 @@ export type SharedRuntimeCleanupRun = {
   workspaceCopyRetentionDays: number;
   removedThreadTmp: number;
   removedWorkspaceCopies: number;
+  removedScratchDirs: number;
+  removedDependencyCaches: number;
   skippedInUse: number;
   freedBytes: number;
 };
@@ -555,6 +557,8 @@ async function readCleanupRun(paths: SharedRuntimePaths): Promise<SharedRuntimeC
     workspaceCopyRetentionDays: toNumber(raw.workspaceCopyRetentionDays),
     removedThreadTmp: toNumber(raw.removedThreadTmp),
     removedWorkspaceCopies: toNumber(raw.removedWorkspaceCopies),
+    removedScratchDirs: toNumber(raw.removedScratchDirs),
+    removedDependencyCaches: toNumber(raw.removedDependencyCaches),
     skippedInUse: toNumber(raw.skippedInUse),
     freedBytes: toNumber(raw.freedBytes)
   };

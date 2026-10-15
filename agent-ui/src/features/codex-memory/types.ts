@@ -92,6 +92,8 @@ export type SharedRuntimeCleanupRun = {
   workspaceCopyRetentionDays: number;
   removedThreadTmp: number;
   removedWorkspaceCopies: number;
+  removedScratchDirs: number;
+  removedDependencyCaches: number;
   skippedInUse: number;
   freedBytes: number;
 };
