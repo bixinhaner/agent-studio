@@ -39,6 +39,13 @@ describe("assistant plan contract", () => {
   it("rejects invented event fields", () => { const r = ready(); r.definition!.trigger = { kind: "event", eventType: "device.event", conditions: [{ field: "invented", op: "eq", value: 1 }] }; expect(() => validatePlan(planningInput, r)).toThrow("UNKNOWN_EVENT"); });
   it("validates IANA schedule timezone", () => { const r = ready(); r.definition!.trigger = { kind: "schedule", time: "09:00", weekdays: [1], timezone: "not/a-zone", conditions: [] }; expect(() => validatePlan(planningInput, r)).toThrow(); });
   it.each(["some prose {}", "{}\n{}", "```js\nalert(1)\n```", "[1,2]"])("rejects non-JSON output: %s", (text) => expect(() => parseModelJSON(text)).toThrow());
+  it("keeps raw newlines and tabs written inside strings", () => {
+    const text = '{"title":"内存占用超过80%","summary":"第一行\n第二行\t87.2%","facts":["a \\"quoted\\"\r\nnext"]}';
+    expect(parseModelJSON(text)).toEqual({ title: "内存占用超过80%", summary: "第一行\n第二行\t87.2%", facts: ['a "quoted"\r\nnext'] });
+  });
+  it("leaves already escaped text and whitespace between fields unchanged", () => {
+    expect(parseModelJSON('{\n\t"path": "C:\\\\tmp\\n",\n\t"n": 1\n}')).toEqual({ path: "C:\\tmp\n", n: 1 });
+  });
   it("accepts one JSON fence without eval or repair", () => expect(parseModelJSON("```json\n{\"name\":\"real\"}\n```")).toEqual({ name: "real" }));
   it("builder bypasses the interactive tool-use prompt", () => {
     expect(buildActionConnectorRuntimePrompt({ config: actionConnectorConfigSchema.parse({ displayName: "Test", runtimePrompt: "Run tools: {{message}}" }), request: { message: "Plan, do not execute", locale: "en", timezone: "UTC", mode: "preview", context: { assistantBuilder: true } }, runId: "r", conversationId: "c", cliPath: "/unused" })).toBe("Plan, do not execute");

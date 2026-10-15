@@ -103,7 +103,28 @@ export function parseModelJSON(text: string): unknown {
   // accepted. Never eval, execute, or silently repair a model-generated plan.
   const raw = text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1").trim();
   if (!raw.startsWith("{") || !raw.endsWith("}")) throw new Error("ASSISTANT_INVALID_MODEL_OUTPUT");
-  return JSON.parse(raw);
+  return JSON.parse(escapeControlCharsInStrings(raw));
+}
+
+// Models sometimes break a long summary with a real newline or tab inside a
+// string, which JSON forbids. Escaping them there keeps the text exactly as
+// written and changes nothing about the structure; outside strings they are
+// ordinary whitespace and are left alone.
+function escapeControlCharsInStrings(raw: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of raw) {
+    if (inString && !escaped && ch < " ") {
+      out += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : ch === "\t" ? "\\t" : `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+    out += ch;
+    if (escaped) escaped = false;
+    else if (inString && ch === "\\") escaped = true;
+    else if (ch === '"') inString = !inString;
+  }
+  return out;
 }
 
 export function validatePlan(input: PlanningRequest, output: z.infer<typeof planningResponseSchema>): void {
