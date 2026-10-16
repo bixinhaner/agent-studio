@@ -10,7 +10,8 @@
       (function () {
         try {
           var path = location.pathname.replace(/\/+$/, "");
-          if (path !== "" && path !== "/training") return;
+          // The portal also renders on the sign-in entry paths once the session is known.
+          if (path !== "" && path !== "/login" && path !== "/login/internal" && path !== "/training") return;
           if (location.hash.indexOf("#admin/") === 0) return;
           var preference = window.localStorage.getItem("agent-studio.portal.theme.v1");
           var dark =

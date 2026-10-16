@@ -33,7 +33,15 @@ export function usePortalTheme(serverPreference?: PortalThemePreference) {
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
 
   useEffect(() => {
-    if (serverPreference) setPreferenceState(serverPreference);
+    if (!serverPreference) return;
+    setPreferenceState(serverPreference);
+    // index.html paints the first frame from local storage; keep it in step with
+    // the account so the next load does not flash the other theme first.
+    try {
+      window.localStorage.setItem(STORAGE_KEY, serverPreference);
+    } catch {
+      // Storage blocked: the boot paint just stays light.
+    }
   }, [serverPreference]);
 
   useEffect(() => {
