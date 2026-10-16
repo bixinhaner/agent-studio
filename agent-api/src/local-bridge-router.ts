@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, enqueueLocalCommand, localBridgeBinding, waitLocalCommand } from './local-bridge-service.js';
 import { localBridgeTools } from './local-bridge-tools.js';
 import { cancelLocalOperations, completeLocalOperation } from './local-bridge-audit.js';
+import { storableLocalResult } from './local-bridge-result.js';
 const rootInclude = { roots: true };
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, _next: NextFunction) => { void fn(req, res).catch(error => res.status(error.status || (error instanceof z.ZodError ? 400 : 400)).json({ detail: error.message || 'Local computer request failed' })); };
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
@@ -130,8 +131,19 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }));
   router.post('/agent/result', wrap(async (req, res) => {
     const d = await agent(req); const input = z.object({ id: z.string(), lease: z.string(), result: z.record(z.unknown()) }).parse(req.body);
-    const completed = await db.localBridgeCommand.updateMany({ where: { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease }, data: { status: 'completed', result: input.result, args: {} } });
-    if (completed.count) await completeLocalOperation(db, input.id, input.result);
+    const where = { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease };
+    let result = storableLocalResult(input.result);
+    let completed;
+    try {
+      completed = await db.localBridgeCommand.updateMany({ where, data: { status: 'completed', result, args: {} } });
+    } catch (error) {
+      // Never leave the client retrying a result that cannot be stored: it takes no new work meanwhile.
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn('local bridge result could not be stored', { id: input.id, deviceId: d.id, detail: detail.slice(0, 500) });
+      result = { ok: false, error: 'RESULT_NOT_STORABLE', message: 'The computer finished this step but its result could not be saved. Retry it with a smaller or base64-encoded result.' };
+      completed = await db.localBridgeCommand.updateMany({ where, data: { status: 'completed', result, args: {} } });
+    }
+    if (completed.count) await completeLocalOperation(db, input.id, result);
     res.json({ acknowledged: true });
   }));
   router.post('/mcp/rpc', wrap(async (req, res) => {
