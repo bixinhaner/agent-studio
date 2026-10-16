@@ -4,6 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { cancelLocalOperations, completeLocalOperation, recordBindingEvent, recordLocalOperation } from './local-bridge-audit.js';
 import { LOCAL_META_KEY, decodeStoredJson, encodeStoredJson, planLocalEdit, prepareLocalCommand } from './local-bridge-result.js';
 export const bridgeHash = (value: string) => createHash('sha256').update(value).digest('hex');
+/** Clients below this version are refused work until they update; empty disables the gate. */
+export const MIN_LOCAL_CLIENT_VERSION = process.env.LOCAL_BRIDGE_MIN_CLIENT_VERSION ?? '0.3.0';
+export function compareClientVersions(a: string, b: string) {
+  const pa = a.split(/[.-]/).map(n => parseInt(n, 10) || 0); const pb = b.split(/[.-]/).map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return Math.sign(d); }
+  return 0;
+}
+/** Clients before 0.3.0 never report a version, so a missing version also means "too old". */
+export const clientVersionOutdated = (version?: string | null) => Boolean(MIN_LOCAL_CLIENT_VERSION) && (!version || compareClientVersions(version, MIN_LOCAL_CLIENT_VERSION) < 0);
+export const clientUpdateRequired = (device: any) => clientVersionOutdated(device?.clientVersion);
+export function clientUpdateMessage(platform?: string | null) {
+  return platform === 'linux-cli'
+    ? `Bailey 命令行连接版本过旧，已停止接收任务。请按 Ctrl+C 结束，然后在 Bailey 网页「使用电脑文件夹 → Linux 命令行」重新复制连接命令运行，即可更新到 ${MIN_LOCAL_CLIENT_VERSION}。`
+    : `Bailey 客户端版本过旧，已停止接收任务。请在 Bailey 网页「使用电脑文件夹」中下载 ${MIN_LOCAL_CLIENT_VERSION} 新版并安装，之后会自动更新。`;
+}
 export const bridgeOnline = (device: any) => device?.status === 'active' && device.lastSeenAt && Date.now() - new Date(device.lastSeenAt).getTime() < 15000;
 const include = { root: { include: { device: true } }, thread: true };
 export const localBridgeBinding = (db: any, threadId: string) => db.localBridgeBinding.findUnique({ where: { threadId }, include });
@@ -14,7 +29,7 @@ export async function localBindingForWorkspace(db: any, userId?: string, workspa
 export function bindingOut(binding: any) {
   if (!binding) return null;
   const d = binding.root.device;
-  return { id: binding.id, thread_id: binding.threadId, root_id: binding.rootId, path: binding.root.path, label: binding.root.label || path.basename(binding.root.path), device_id: d.id, device_name: d.name, status: bridgeOnline(d) ? 'online' : 'offline' };
+  return { id: binding.id, thread_id: binding.threadId, root_id: binding.rootId, path: binding.root.path, label: binding.root.label || path.basename(binding.root.path), device_id: d.id, device_name: d.name, status: bridgeOnline(d) ? 'online' : 'offline', update_required: clientUpdateRequired(d) };
 }
 export function bindingToken(binding: any) { return `${binding.id}.${bridgeHash(`local-workspace-v1:${binding.root.device.tokenHash}:${binding.id}`)}`; }
 export async function authenticateBinding(db: any, token: string) {
@@ -43,6 +58,7 @@ export async function bindLocalRoot(db: any, userId: string, threadId: string, r
   return next;
 }
 export async function enqueueLocalCommand(db: any, binding: any, op: string, args: any, requestId: string = randomUUID(), source: 'agent' | 'portal' = 'agent', options: { auditArgs?: any; audit?: boolean } = {}) {
+  if (clientUpdateRequired(binding.root.device)) throw new Error(`LOCAL_CLIENT_UPDATE_REQUIRED: The Bailey client on the user's computer is outdated and no longer accepts work. Tell the user, in their language: ${clientUpdateMessage(binding.root.device.platform)} Do not substitute cloud files or retry until the user has updated.`);
   if (!bridgeOnline(binding.root.device)) throw new Error('LOCAL_COMPUTER_OFFLINE: Open the desktop client, then continue on the same computer. Do not substitute cloud files or repeat an uncertain command.');
   const command = await db.localBridgeCommand.upsert({ where: { id: requestId }, update: {}, create: { id: requestId, deviceId: binding.root.deviceId, threadId: binding.threadId, bindingId: binding.id, rootId: binding.rootId, op, args: encodeStoredJson(args), deadline: new Date(Date.now() + 10 * 60000) } });
   // Full args are kept in the audit log; the delivery row clears them once completed.

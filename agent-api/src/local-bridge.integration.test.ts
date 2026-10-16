@@ -31,12 +31,12 @@ describe.skipIf(!testUrl)('Local computer durable integration (isolated PostgreS
   afterAll(async () => { await db.thread.deleteMany({ where: { id: threadId } }); await db.localBridgeOperationLog.deleteMany({ where: { threadId } }); await db.localBridgeBindingEvent.deleteMany({ where: { threadId } }); await db.localBridgeConnection.deleteMany({ where: { userId: { in: [userId, otherId] } } }); await db.user.deleteMany({ where: { id: { in: [userId, otherId] } } }); await db.$disconnect(); await fs.rm(rootDir, { recursive: true, force: true }); });
   it('one-use pairing works between independent Portal and Relay instances; online alone injects no tools', async () => {
     const connection = await request(portal).post('/api/local-bridge/connections').set('x-test-user', userId).expect(201);
-    const attempts = await Promise.all([1, 2].map(() => request(relay).post('/api/local-bridge/agent/pair').send({ code: connection.body.code, name: 'Test computer', platform: process.platform })));
+    const attempts = await Promise.all([1, 2].map(() => request(relay).post('/api/local-bridge/agent/pair').set('x-local-bridge-version', '0.3.0').send({ code: connection.body.code, name: 'Test computer', platform: process.platform })));
     expect(attempts.map(r => r.status).sort()).toEqual([201, 400]);
     const paired = attempts.find(r => r.status === 201)!.body; token = paired.token; deviceId = paired.device_id;
     expect(await buildLocalRuntime(db, 'http://localhost', userId, '/cloud/test/' + userId)).toBeUndefined();
-    const root = await request(relay).post('/api/local-bridge/agent/roots').auth(token, { type: 'bearer' }).send({ path: rootDir, label: 'Test folder' }).expect(201); rootId = root.body.root.id;
-    await request(relay).post('/api/local-bridge/agent/complete').auth(token, { type: 'bearer' }).send({ connection_id: paired.connection_id, root_id: rootId }).expect(200);
+    const root = await request(relay).post('/api/local-bridge/agent/roots').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' }).send({ path: rootDir, label: 'Test folder' }).expect(201); rootId = root.body.root.id;
+    await request(relay).post('/api/local-bridge/agent/complete').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' }).send({ connection_id: paired.connection_id, root_id: rootId }).expect(200);
     expect((await request(portal).get('/api/local-bridge/connections/' + connection.body.id).set('x-test-user', userId)).body.selection.root_id).toBe(rootId);
     await request(portal).put(`/api/local-bridge/threads/${threadId}/binding`).set('x-test-user', otherId).send({ root_id: rootId }).expect(404);
     await request(portal).put(`/api/local-bridge/threads/${threadId}/binding`).set('x-test-user', userId).send({ root_id: rootId }).expect(200);
@@ -49,14 +49,14 @@ describe.skipIf(!testUrl)('Local computer durable integration (isolated PostgreS
     const id = randomUUID();
     const rpc = request(portal).post('/api/local-bridge/mcp/rpc').auth(auth, { type: 'bearer' }).send({ request_id: id, rpc: { id: 2, method: 'tools/call', params: { name: 'local_write', arguments: { path: 'proof.txt', content: 'local round trip' } } } }).then(r => r);
     let command: any;
-    for (let i = 0; i < 30 && !command; i++) { const polled = await request(relay).post('/api/local-bridge/agent/poll').auth(token, { type: 'bearer' }); command = polled.body.command; if (!command) await new Promise(r => setTimeout(r, 100)); }
+    for (let i = 0; i < 30 && !command; i++) { const polled = await request(relay).post('/api/local-bridge/agent/poll').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' }); command = polled.body.command; if (!command) await new Promise(r => setTimeout(r, 100)); }
     expect(command.id).toBe(id);
-    expect((await request(relay).post('/api/local-bridge/agent/poll').auth(token, { type: 'bearer' })).body.command).toBeNull();
-    await request(relay).post('/api/local-bridge/agent/result').auth(token, { type: 'bearer' }).send({ id, lease: 'stale', result: { ok: true } }).expect(200);
+    expect((await request(relay).post('/api/local-bridge/agent/poll').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' })).body.command).toBeNull();
+    await request(relay).post('/api/local-bridge/agent/result').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' }).send({ id, lease: 'stale', result: { ok: true } }).expect(200);
     expect((await db.localBridgeCommand.findUnique({ where: { id } }))!.status).toBe('leased');
     const executor = createExecutor({ getRoots: () => [{ id: rootId, path: rootDir }], journalDir: path.join(rootDir, 'receipts') });
     const result = await executor.execute(command);
-    await request(relay).post('/api/local-bridge/agent/result').auth(token, { type: 'bearer' }).send({ id, lease: command.lease, result }).expect(200);
+    await request(relay).post('/api/local-bridge/agent/result').set('x-local-bridge-version', '0.3.0').auth(token, { type: 'bearer' }).send({ id, lease: command.lease, result }).expect(200);
     expect((await rpc).body.result.isError).toBe(false); expect(await fs.readFile(path.join(rootDir, 'proof.txt'), 'utf8')).toBe('local round trip');
     expect((await db.localBridgeCommand.findUnique({ where: { id } }))!.args).toEqual({});
     expect(await db.localBridgeOperationLog.findUnique({ where: { id } })).toMatchObject({ source: 'agent', op: 'write', status: 'completed', args: { path: 'proof.txt', content: 'local round trip' }, deviceName: 'Test computer', rootPath: rootDir });

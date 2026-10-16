@@ -202,7 +202,7 @@ export async function fetchPortalSubscriptionStatus(locale?: string): Promise<Po
   return normalizePortalSubscriptionStatus(response.status);
 }
 
-export type LocalBridgeDevice = { id: string; name: string; platform?: string | null; status: "online" | "offline"; last_seen_at?: string | null; roots: Array<{ id: string; path: string; label?: string | null }> };
+export type LocalBridgeDevice = { id: string; name: string; platform?: string | null; status: "online" | "offline"; last_seen_at?: string | null; client_version?: string | null; update_required?: boolean; roots: Array<{ id: string; path: string; label?: string | null }> };
 export async function localBridgeApi<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.json !== undefined) headers.set("Content-Type", "application/json");

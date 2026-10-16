@@ -15,9 +15,9 @@ describe("registerCommonApiRoutes Local Bridge authentication", () => {
     const testDb: any = {
       localBridgeDevice: { create: createDevice },
       localBridgeConnection: {
-        create: async ({ data }: any) => { const c = { id: "connection-1", status: "pending", ...data }; connections.set(c.tokenHash, c); return c; },
+        create: async ({ data }: any) => { const c = { id: `connection-${connections.size + 1}`, status: "pending", ...data }; connections.set(c.tokenHash, c); return c; },
         findUnique: async ({ where }: any) => connections.get(where.tokenHash),
-        updateMany: async ({ where, data }: any) => { const c = [...connections.values()].find(v => v.id === where.id && v.status === where.status); if (!c) return { count: 0 }; Object.assign(c, data); return { count: 1 }; },
+        updateMany: async ({ where, data }: any) => { const c = [...connections.values()].find(v => (where.id ? v.id === where.id : v.tokenHash === where.tokenHash) && v.status === where.status); if (!c) return { count: 0 }; Object.assign(c, data); return { count: 1 }; },
         update: async () => ({})
       },
       $transaction: (fn: any) => fn(testDb)
@@ -51,8 +51,21 @@ describe("registerCommonApiRoutes Local Bridge authentication", () => {
       .set("x-test-user", "portal-user")
       .expect(201);
 
+    const outdated = await request(app)
+      .post("/api/local-bridge/devices/pairing")
+      .set("x-test-user", "portal-user")
+      .expect(201);
+    const refused = await request(app)
+      .post("/api/local-bridge/agent/pair")
+      .send({ code: outdated.body.code, name: "Old Mac", platform: "darwin" })
+      .expect(426);
+    expect(refused.body.detail).toContain("新版");
+    expect([...connections.values()].find(c => c.status === "update_required")).toBeTruthy();
+    expect(createDevice).not.toHaveBeenCalled();
+
     const paired = await request(app)
       .post("/api/local-bridge/agent/pair")
+      .set("x-local-bridge-version", "0.3.0")
       .send({ code: pairing.body.code, name: "Test Mac", platform: "darwin" })
       .expect(201);
 

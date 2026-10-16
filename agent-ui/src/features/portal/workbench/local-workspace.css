@@ -55,3 +55,7 @@
   .local-device-more, .local-menu-close { width: 44px; height: 44px; }
   .local-folder-device-heading { gap: 8px; }
 }
+.local-folder-device-status.is-update { color: var(--workbench-warning, #b45309); font-weight: 500; }
+.local-device-update { display: flex; align-items: center; gap: 8px; width: calc(100% - 34px); min-height: 40px; margin: 2px 0 6px 34px; padding: 0 12px; border: 1px solid var(--workbench-accent, #ff4614); border-radius: 8px; background: transparent; color: var(--workbench-accent, #ff4614); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.local-device-update:hover { background: rgba(255, 70, 20, 0.08); }
+.local-device-update:focus-visible { outline: 2px solid var(--workbench-accent, #ff4614); outline-offset: 2px; }

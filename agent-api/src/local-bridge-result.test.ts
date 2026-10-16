@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { bridgeHash, recoverLocalRequest, runLocalTool } from './local-bridge-service.js';
+import { bindingOut, bridgeHash, clientVersionOutdated, recoverLocalRequest, runLocalTool } from './local-bridge-service.js';
 import { createLocalBridgeRouter, localBridgeBodyErrorHandler } from './local-bridge-router.js';
 import { summarizeLocalOperation } from './admin/conversation-transcript-local.js';
 import {
@@ -133,7 +133,7 @@ function fakeDb() {
     upsert: async ({ where, create }: any) => rows.find(r => matches(r, where)) ?? (rows.push({ status: 'pending', createdAt: new Date(), lease: null, leaseUntil: null, result: null, ...create }), rows[rows.length - 1]),
     deleteMany: async () => ({ count: 0 })
   });
-  const device = { id: 'device-1', status: 'active', platform: process.platform, tokenHash: bridgeHash('device-token'), lastSeenAt: new Date(), roots: [] };
+  const device = { id: 'device-1', status: 'active', platform: process.platform, tokenHash: bridgeHash('device-token'), lastSeenAt: new Date(), clientVersion: '0.3.0', roots: [] };
   const db: any = {
     localBridgeDevice: table([device]),
     localBridgeCommand: table([]),
@@ -163,7 +163,7 @@ describe('local computer round trip with the real desktop client', { timeout: 20
     const counted = { execute: (command: any) => { executions++; return executor.execute(command); } };
     stop = new AbortController();
     const api = async (url: string, init: any) => {
-      const res = await request(app).post(url).auth('device-token', { type: 'bearer' }).set('content-type', 'application/json').send(init.body);
+      const res = await request(app).post(url).auth('device-token', { type: 'bearer' }).set('content-type', 'application/json').set('x-local-bridge-version', '0.3.0').send(init.body);
       if (res.status >= 300) throw new Error(`HTTP ${res.status}`);
       return res.body;
     };
@@ -286,5 +286,47 @@ describe('results the body parser rejects', () => {
     expect(decodeStoredJson(command.result)).toMatchObject({ ok: false, error: RESULT_DELIVERY_FAILED, reason: expect.stringContaining('RESULT_TOO_LARGE') });
     expect(decodeStoredJson(db.localBridgeOperationLog.rows[0].result)).toEqual(decodeStoredJson(command.result));
     expect(Date.now() - device.lastSeenAt.getTime()).toBeLessThan(15000);
+  });
+});
+
+describe('outdated clients are refused work until they update', () => {
+  const app = (db: any) => { const a = express(); a.use('/api/local-bridge', express.json(), createLocalBridgeRouter(db)); return a; };
+
+  it('keeps an old client visible but gives it the update message instead of work', async () => {
+    const { db, device } = fakeDb();
+    device.lastSeenAt = new Date(Date.now() - 60000);
+    db.localBridgeCommand.rows.push({ id: 'cmd-1', deviceId: device.id, status: 'pending', op: 'list', args: {}, deadline: new Date(Date.now() + 60000), createdAt: new Date() });
+    const old = await request(app(db)).post('/api/local-bridge/agent/poll').auth('device-token', { type: 'bearer' }).send({}).expect(426);
+    expect(old.body.detail).toContain('下载 0.3.0 新版');
+    expect(device.clientVersion).toBeNull();
+    expect(Date.now() - device.lastSeenAt.getTime()).toBeLessThan(5000);
+    expect(db.localBridgeCommand.rows[0].status).toBe('pending');
+
+    const current = await request(app(db)).post('/api/local-bridge/agent/poll').auth('device-token', { type: 'bearer' }).set('x-local-bridge-version', '0.3.0').send({}).expect(200);
+    expect(current.body.command).toMatchObject({ id: 'cmd-1' });
+    expect(device.clientVersion).toBe('0.3.0');
+  });
+
+  it('tells Linux command-line users to re-run the connection command', async () => {
+    const { db, device } = fakeDb();
+    (device as any).platform = 'linux-cli';
+    const old = await request(app(db)).post('/api/local-bridge/agent/poll').auth('device-token', { type: 'bearer' }).set('x-local-bridge-version', '0.2.3').send({}).expect(426);
+    expect(old.body.detail).toContain('重新复制连接命令');
+  });
+
+  it('refuses agent tool calls on a computer whose client must update, with a message for the user', async () => {
+    const { db, device } = fakeDb();
+    (device as any).clientVersion = null;
+    const binding = { id: 'binding-1', threadId: 'thread-1', rootId: 'root-1', root: { id: 'root-1', path: '/tmp', deviceId: device.id, device } };
+    await expect(runLocalTool(db, binding, 'list', { path: '.' }, crypto.randomUUID())).rejects.toThrow(/LOCAL_CLIENT_UPDATE_REQUIRED.*下载 0\.3\.0 新版/);
+    expect(db.localBridgeCommand.rows).toHaveLength(0);
+    expect(bindingOut(binding)).toMatchObject({ update_required: true });
+  });
+
+  it('compares versions numerically', () => {
+    expect(clientVersionOutdated('0.3.0')).toBe(false);
+    expect(clientVersionOutdated('0.10.0')).toBe(false);
+    expect(clientVersionOutdated('0.2.9')).toBe(true);
+    expect(clientVersionOutdated(null)).toBe(true);
   });
 });

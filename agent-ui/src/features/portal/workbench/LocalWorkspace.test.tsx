@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@t
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchLocalBridgeDevices, localBridgeApi, revokeLocalBridgeDevice } from '../api';
 import { PortalI18nProvider } from '../i18n';
-import { LocalWorkspaceContext, LocalWorkspaceDialogs, useLocalWorkspace, type LocalSelection } from './LocalWorkspace';
+import { CLI_UPDATE_COMMAND, LocalWorkspaceContext, LocalWorkspaceDialogs, clientInstallerUrl, useLocalWorkspace, useLocalWorkspaceReadiness, type LocalSelection } from './LocalWorkspace';
 vi.mock('../api', () => ({ fetchLocalBridgeDevices: vi.fn(), localBridgeApi: vi.fn(), revokeLocalBridgeDevice: vi.fn() }));
 const folder: LocalSelection = { id:'binding',root_id:'root',path:'/local/folder',label:'目录',device_id:'device',device_name:'电脑',status:'online' };
 afterEach(cleanup);
@@ -77,5 +77,47 @@ describe('local task directory state', () => {
     await act(async () => { await result.current.select(null); });
     expect(result.current.removedSelection).toBe(false);
     expect(result.current.selection).toBeNull();
+  });
+  describe('outdated client', () => {
+    function Probe() {
+      const local = useLocalWorkspace('task', true);
+      return <LocalWorkspaceContext.Provider value={{ ...local, showEntry: true, running: false }}><Readiness /></LocalWorkspaceContext.Provider>;
+    }
+    function Readiness() {
+      const readiness = useLocalWorkspaceReadiness();
+      return readiness ? <div><p>{readiness.notice}</p>{readiness.actionLabel ? <button onClick={() => void readiness.retry()}>{readiness.actionLabel}</button> : null}</div> : <p>ready</p>;
+    }
+    const renderProbe = () => render(<PortalI18nProvider defaultLocale="zh-CN" languageSwitcherEnabled={false}><Probe /></PortalI18nProvider>);
+    it('blocks sending and downloads the Windows installer in one click', async () => {
+      vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{ id: 'device', name: '电脑', platform: 'win32', status: 'online', update_required: true, roots: [] }]);
+      vi.mocked(localBridgeApi).mockResolvedValue({ binding: { ...folder, thread_id: 'task' } });
+      const clicked: string[] = [];
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.getAttribute('href') || ''); });
+      renderProbe();
+      fireEvent.click(await screen.findByRole('button', { name: '一键下载新版' }));
+      expect(clicked).toEqual(['/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-Windows-x64.exe']);
+      expect(await screen.findByText(/已开始下载/)).toBeTruthy();
+      click.mockRestore();
+    });
+    it('copies the update command for the Linux command line', async () => {
+      vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{ id: 'device', name: 'server', platform: 'linux-cli', status: 'online', update_required: true, roots: [] }]);
+      vi.mocked(localBridgeApi).mockResolvedValue({ binding: { ...folder, thread_id: 'task' } });
+      const writeText = vi.fn(async () => {});
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      renderProbe();
+      fireEvent.click(await screen.findByRole('button', { name: '复制更新命令' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(CLI_UPDATE_COMMAND));
+      expect(await screen.findByText(/Ctrl\+C/)).toBeTruthy();
+    });
+    it('an updated client unblocks the task', async () => {
+      vi.mocked(fetchLocalBridgeDevices).mockResolvedValue([{ id: 'device', name: '电脑', platform: 'darwin', status: 'online', update_required: false, roots: [] }]);
+      vi.mocked(localBridgeApi).mockResolvedValue({ binding: { ...folder, thread_id: 'task', update_required: true } });
+      renderProbe();
+      expect(await screen.findByText('ready')).toBeTruthy();
+    });
+    it('picks the installer from the computer platform', () => {
+      expect(clientInstallerUrl('darwin', 'x64')).toMatch(/mac-x64\.dmg$/);
+      expect(clientInstallerUrl('linux')).toMatch(/Linux-x86_64\.AppImage$/);
+    });
   });
 });

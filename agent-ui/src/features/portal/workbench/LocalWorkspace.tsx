@@ -4,7 +4,34 @@ import { Check, ChevronDown, Cloud, Computer, Download, Ellipsis, Folder, Folder
 import { fetchLocalBridgeDevices, localBridgeApi, revokeLocalBridgeDevice, type LocalBridgeDevice } from '../api';
 import { usePortalI18n } from '../i18n';
 import './local-workspace.css';
-export type LocalSelection = { id: string; thread_id?: string; root_id: string; path: string; label: string; device_id: string; device_name: string; status: 'online' | 'offline' };
+export type LocalSelection = { id: string; thread_id?: string; root_id: string; path: string; label: string; device_id: string; device_name: string; status: 'online' | 'offline'; update_required?: boolean };
+const DOWNLOAD_PREFIX = '/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-';
+/** Without --code, connect.sh installs the newest command-line package and reuses the saved connection. */
+export const CLI_UPDATE_COMMAND = 'curl -fsSL https://bailey.baicells.com/downloads/local-bridge/connect.sh | bash';
+type MacArch = 'arm64' | 'x64';
+let reportedMacArch: MacArch | null = null;
+// Chromium reports the real CPU; other browsers fall back to the GPU name (Intel/AMD GPUs mean an Intel Mac).
+if (typeof navigator !== 'undefined') void (navigator as any).userAgentData?.getHighEntropyValues?.(['architecture'])
+  .then((values: any) => { reportedMacArch = values?.architecture === 'arm' ? 'arm64' : values?.architecture === 'x86' ? 'x64' : null; }).catch(() => {});
+export function guessMacArch(): MacArch {
+  if (reportedMacArch) return reportedMacArch;
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const info = gl?.getExtension('WEBGL_debug_renderer_info');
+    if (gl && info && /Intel|AMD|Radeon|NVIDIA/i.test(String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)))) return 'x64';
+  } catch {}
+  return 'arm64';
+}
+/** The installer for the computer that needs it: its recorded platform, else the browser's OS. */
+export function clientInstallerUrl(platform?: string | null, arch?: MacArch): string | null {
+  const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  const os = platform && platform !== 'linux-cli' ? platform : /Windows/i.test(agent) ? 'win32' : /Mac/i.test(agent) ? 'darwin' : /Linux/i.test(agent) ? 'linux' : '';
+  if (os === 'win32') return `${DOWNLOAD_PREFIX}Windows-x64.exe`;
+  if (os === 'darwin') return `${DOWNLOAD_PREFIX}mac-${arch ?? guessMacArch()}.dmg`;
+  if (os === 'linux') return `${DOWNLOAD_PREFIX}Linux-x86_64.AppImage`;
+  return null;
+}
+function startDownload(href: string) { const link = document.createElement('a'); link.href = href; link.download = ''; document.body.appendChild(link); link.click(); link.remove(); }
 type Connection = { id: string; code: string; launch_url: string; expires_at: string };
 export function useLocalWorkspace(threadId: string, enabled: boolean) {
   const { t } = usePortalI18n();
@@ -26,10 +53,12 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
   const removedDevices = useRef(new Set<string>());
   const removing = useRef(false);
   const [removingDeviceId, setRemovingDeviceId] = useState<string | null>(null);
+  const [updateStep, setUpdateStep] = useState<'idle' | 'downloaded' | 'copied'>('idle');
+  const [pairUpdateRequired, setPairUpdateRequired] = useState(false);
   const applyDevices = useCallback((next: LocalBridgeDevice[]) => {
     const visible = next.filter(device => !removedDevices.current.has(device.id));
     setDevices(visible);
-    setSelection(old => old ? { ...old, status: visible.find(device => device.id === old.device_id)?.status || 'offline' } : old);
+    setSelection(old => { if (!old) return old; const device = visible.find(item => item.id === old.device_id); return { ...old, status: device?.status || 'offline', update_required: device ? !!device.update_required : old.update_required }; });
   }, []);
   const refresh = useCallback(async () => { applyDevices(await fetchLocalBridgeDevices()); }, [applyDevices]);
   const removeDevice = useCallback(async (deviceId: string) => {
@@ -88,9 +117,22 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
     return () => { alive = false; };
   }, [threadId, enabled, select]);
   const close = useCallback(() => { connectionAttempt.current++; setDialog(false); const c = connectionRef.current; setConnection(null); if (c) void localBridgeApi(`/api/local-bridge/connections/${c.id}`, { method: 'DELETE' }).catch(() => {}); }, []);
-  const begin = useCallback(() => { setError(''); setDialog(true); }, []);
+  const begin = useCallback(() => { setError(''); setPairUpdateRequired(false); setDialog(true); }, []);
+  const updateDevice = selection ? devices.find(device => device.id === selection.device_id) : undefined;
+  const updateRequired = !!(updateDevice ? updateDevice.update_required : selection?.update_required);
+  useEffect(() => { if (!updateRequired) setUpdateStep('idle'); }, [updateRequired]);
+  /** One click: download the right installer, or copy the command-line update command. */
+  const updateClient = useCallback(async (device: { platform?: string | null }, arch?: MacArch) => {
+    if (device.platform === 'linux-cli') {
+      try { await navigator.clipboard.writeText(CLI_UPDATE_COMMAND); setUpdateStep('copied'); } catch { setError(CLI_UPDATE_COMMAND); }
+      return;
+    }
+    const url = clientInstallerUrl(device.platform, arch);
+    if (!url) { begin(); return; }
+    startDownload(url); setUpdateStep('downloaded');
+  }, [begin]);
   const launch = useCallback(async (withCode = false) => {
-    setBusy(true); setError(''); const ticket = generation.current; const attempt = ++connectionAttempt.current;
+    setBusy(true); setError(''); setPairUpdateRequired(false); const ticket = generation.current; const attempt = ++connectionAttempt.current;
     try {
       if (connectionRef.current) await localBridgeApi(`/api/local-bridge/connections/${connectionRef.current.id}`, { method: 'DELETE' });
       const next = await localBridgeApi<Connection>('/api/local-bridge/connections', { method: 'POST', json: { return_url: window.location.hostname === '127.0.0.1' ? undefined : window.location.href, thread_id: threadRef.current || undefined } });
@@ -109,6 +151,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
         const out = await localBridgeApi<{ status: string; selection: LocalSelection | null }>(`/api/local-bridge/connections/${connection.id}`);
         if (!alive) return;
         if (out.status === 'completed' && out.selection) { alive = false; await select(out.selection); setConnection(null); setDialog(false); await refresh(); }
+        else if (out.status === 'update_required') { setConnection(null); setPairUpdateRequired(true); setError(translate.current('localWorkspace.pairUpdateRequired')); }
         else if (out.status === 'expired' || out.status === 'cancelled') { setConnection(null); setError(out.status === 'expired' ? translate.current("localWorkspace.expired") : translate.current("localWorkspace.cancelled")); }
       } catch (e) { if (alive) setError(translate.current("localWorkspace.retrying")); }
       finally { pending = false; }
@@ -116,7 +159,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
     void update(); const timer = window.setInterval(() => void update(), 1200);
     return () => { alive = false; window.clearInterval(timer); };
   }, [connection, dialog, refresh, select]);
-  return { bindingLoadFailed, reloadBinding: () => setLoadRevision(v => v + 1), selection, selectionRef, devices, busy: busy || removingDeviceId !== null, removingDeviceId, removeDevice, removedSelection: !!selection && removedDevices.current.has(selection.device_id), error, dialog, connection, select, refresh, begin, launch, close, enabled, offline: selection?.status === 'offline' };
+  return { bindingLoadFailed, reloadBinding: () => setLoadRevision(v => v + 1), selection, selectionRef, devices, busy: busy || removingDeviceId !== null, removingDeviceId, removeDevice, removedSelection: !!selection && removedDevices.current.has(selection.device_id), error, dialog, connection, select, refresh, begin, launch, close, enabled, offline: selection?.status === 'offline', updateRequired, updatePlatform: updateDevice?.platform ?? null, updateStep, updateClient, pairUpdateRequired };
 }
 type WorkspaceContext = ReturnType<typeof useLocalWorkspace> & { showEntry: boolean; running: boolean };
 export const LocalWorkspaceContext = createContext<WorkspaceContext | null>(null);
@@ -127,6 +170,13 @@ export function useLocalWorkspaceReadiness(): { status: 'loading' | 'error'; not
   if (local.bindingLoadFailed) return { status: 'error' as const, notice: t("localWorkspace.bindingFailed"), retry: async () => local.reloadBinding() };
   if (local.busy) return { status: 'loading' as const, notice: t("localWorkspace.updating"), retry: async () => {} };
   if (local.removedSelection) return { status: 'error' as const, notice: t('localWorkspace.removedSelection'), actionLabel: t('localWorkspace.addFolder'), retry: async () => local.begin() };
+  if (local.updateRequired) {
+    const platform = local.updatePlatform;
+    if (platform === 'linux-cli') return { status: 'error' as const, notice: t(local.updateStep === 'copied' ? 'localWorkspace.cliUpdateCopied' : 'localWorkspace.cliUpdateRequired'), actionLabel: t(local.updateStep === 'copied' ? 'localWorkspace.copyAgain' : 'localWorkspace.copyUpdateCommand'), retry: () => local.updateClient({ platform }) };
+    // After the download starts, a Mac whose chip was guessed as Apple silicon gets the Intel build one click away.
+    if (local.updateStep === 'downloaded' && platform === 'darwin' && guessMacArch() === 'arm64') return { status: 'error' as const, notice: t('localWorkspace.updateDownloading'), actionLabel: t('localWorkspace.downloadIntel'), retry: () => local.updateClient({ platform }, 'x64') };
+    return { status: 'error' as const, notice: t(local.updateStep === 'downloaded' ? 'localWorkspace.updateDownloading' : 'localWorkspace.updateRequired'), actionLabel: t('localWorkspace.downloadUpdate'), retry: () => local.updateClient({ platform }) };
+  }
   if (local.offline && local.devices.find(device => device.id === local.selection?.device_id)?.platform === 'linux-cli') return { status: 'error' as const, notice: t("localWorkspace.linuxOffline"), actionLabel: t("localWorkspace.connectionHelp"), retry: async () => local.begin() };
   if (local.offline) return { status: 'error' as const, notice: t("localWorkspace.desktopOffline"), actionLabel: t("localWorkspace.openApp"), retry: async () => { window.location.href = 'agent-studio://connect'; } };
   return null;
@@ -157,7 +207,7 @@ export function LocalWorkspaceControls() {
         <div className="local-folder-device-heading">
           {device.platform === 'linux-cli' ? <Terminal size={21} /> : <Computer size={21} />}
           <strong title={device.name}>{device.name}</strong>
-          <span className="local-folder-device-status"><i className={`local-status-dot ${device.status}`} />{device.status === 'online' ? t('localWorkspace.connected') : t('localWorkspace.offline')}</span>
+          {device.update_required ? <span className="local-folder-device-status is-update">{t('localWorkspace.updateBadge')}</span> : <span className="local-folder-device-status"><i className={`local-status-dot ${device.status}`} />{device.status === 'online' ? t('localWorkspace.connected') : t('localWorkspace.offline')}</span>}
           <Popover trigger="click" destroyOnHidden placement={mobile ? 'topRight' : 'rightTop'} open={open && moreDeviceId === device.id} onOpenChange={next => setMoreDeviceId(next && open ? device.id : null)} overlayClassName="local-device-action-popover" content={
             <div className="local-device-action-menu" role="menu" aria-label={t('localWorkspace.deviceActions', { name: device.name })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMoreDeviceId(null); deviceTriggers.current[device.id]?.focus(); } }}>
               <button type="button" role="menuitem" autoFocus disabled={disabled} onClick={async () => { try { await local.removeDevice(device.id); setMoreDeviceId(null); triggerRef.current?.focus(); } catch {} }}>
@@ -167,7 +217,8 @@ export function LocalWorkspaceControls() {
             </div>
           }><button ref={node => { deviceTriggers.current[device.id] = node; }} type="button" className="local-device-more" aria-label={t('localWorkspace.deviceActions', { name: device.name })} aria-haspopup="menu" aria-expanded={moreDeviceId === device.id} disabled={disabled} title={local.running ? t('localWorkspace.runningHint') : undefined} onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setMoreDeviceId(device.id); } }}><Ellipsis size={20} /></button></Popover>
         </div>
-        <div className="local-folder-device-roots">{device.roots.map(root => <button type="button" className={`local-folder-row${local.selection?.root_id === root.id ? ' selected' : ''}`} key={root.id} disabled={disabled} title={root.path} aria-pressed={local.selection?.root_id === root.id} onClick={() => void choose({ id: `selection-${root.id}`, root_id: root.id, path: root.path, label: root.label || root.path.split(/[\\/]/).pop() || root.path, device_id: device.id, device_name: device.name, status: device.status })}><Folder size={21} /><span>{root.label || root.path.split(/[\\/]/).pop() || root.path}</span>{local.selection?.root_id === root.id ? <Check size={17} /> : null}</button>)}{!device.roots.length ? <p className="local-no-device-folders">{t('localWorkspace.noDeviceFolders')}</p> : null}</div>
+        {device.update_required ? <button type="button" className="local-device-update" onClick={() => void local.updateClient(device)}><Download size={17} /><span>{device.platform === 'linux-cli' ? t('localWorkspace.copyUpdateCommand') : t('localWorkspace.downloadUpdate')}</span></button> : null}
+        <div className="local-folder-device-roots">{device.roots.map(root => <button type="button" className={`local-folder-row${local.selection?.root_id === root.id ? ' selected' : ''}`} key={root.id} disabled={disabled || !!device.update_required} title={root.path} aria-pressed={local.selection?.root_id === root.id} onClick={() => void choose({ id: `selection-${root.id}`, root_id: root.id, path: root.path, label: root.label || root.path.split(/[\\/]/).pop() || root.path, device_id: device.id, device_name: device.name, status: device.status })}><Folder size={21} /><span>{root.label || root.path.split(/[\\/]/).pop() || root.path}</span>{local.selection?.root_id === root.id ? <Check size={17} /> : null}</button>)}{!device.roots.length ? <p className="local-no-device-folders">{t('localWorkspace.noDeviceFolders')}</p> : null}</div>
       </section>)}
       {!devices.length ? <p className="local-no-folders">{t('localWorkspace.emptyFolders')}</p> : null}
     </div>
@@ -199,6 +250,7 @@ export function LocalWorkspaceDialogs() {
       <h3>{linux ? t("localWorkspace.linuxTitle") : local.connection ? t("localWorkspace.waitingTitle") : t("localWorkspace.connectTitle")}</h3>
       <p>{linux ? t("localWorkspace.linuxHelp") : local.connection ? t("localWorkspace.waitingHelp") : t("localWorkspace.connectHelp")}</p>
       {local.error ? <Alert type="warning" message={local.error} showIcon /> : null}
+      {local.pairUpdateRequired && !linux ? <Button block type="primary" size="large" icon={<Download size={16} />} onClick={() => void local.updateClient({ platform: null })}>{t('localWorkspace.downloadUpdate')}</Button> : null}
       {linux ? <>
         {command ? <><pre className="local-linux-command" tabIndex={0} aria-label={t("localWorkspace.linuxCommand")}>{command}</pre><Button block type="primary" size="large" onClick={() => void copy()}>{copied ? t("localWorkspace.copiedCommand") : t("localWorkspace.copyCommand")}</Button><small className="local-linux-help">{t("localWorkspace.commandLifetime")}<br />{t("localWorkspace.keepTerminal")}</small>{copyError ? <Alert type="info" message={copyError} /> : null}</> : null}
         <Button block type={command ? 'text' : 'primary'} loading={local.busy} onClick={() => void local.launch(true)}>{command ? t("localWorkspace.regenerate") : t("localWorkspace.generate")}</Button>

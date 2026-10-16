@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, enqueueLocalCommand, localBridgeBinding, recoverLocalRequest, runLocalTool, waitLocalCommand } from './local-bridge-service.js';
+import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, clientUpdateMessage, clientUpdateRequired, clientVersionOutdated, enqueueLocalCommand, localBridgeBinding, recoverLocalRequest, runLocalTool, waitLocalCommand } from './local-bridge-service.js';
 import { localBridgeTools } from './local-bridge-tools.js';
 import { cancelLocalOperations, completeLocalOperation } from './local-bridge-audit.js';
 import { decodeStoredJson, deliveryFailedResult, encodeStoredJson, isDeterministicStorageError, presentLocalResult } from './local-bridge-result.js';
@@ -37,12 +37,23 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     if (completed.count) await completeLocalOperation(db, where.id, stored);
   }
   // Any authenticated request proves the client is running, including result retries.
+  const clientVersion = (req: Request) => req.header('x-local-bridge-version')?.slice(0, 40) || null;
   async function markSeen(d: any, req?: Request) {
-    const version = req?.header('x-local-bridge-version')?.slice(0, 40);
     const data: Record<string, unknown> = {};
     if (!d.lastSeenAt || Date.now() - new Date(d.lastSeenAt).getTime() > 4000) data.lastSeenAt = new Date();
-    if (version && version !== d.clientVersion) data.clientVersion = version;
+    // Every client from 0.3.0 sends its version; a request without one is an older client.
+    if (req && clientVersion(req) !== (d.clientVersion ?? null)) data.clientVersion = clientVersion(req);
     if (Object.keys(data).length) await db.localBridgeDevice.update({ where: { id: d.id }, data });
+  }
+  /**
+   * Outdated clients stay visible as "online, needs update" but receive no work. Their window or
+   * terminal shows `detail` as the connection error, which is how existing users learn to update.
+   */
+  async function currentClient(req: Request) {
+    const d = await agent(req);
+    await markSeen(d, req);
+    if (clientVersionOutdated(clientVersion(req))) return fail(clientUpdateMessage(d.platform), 426);
+    return d;
   }
   async function ownedThread(req: Request) {
     const u = user(req);
@@ -52,7 +63,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }
   router.get('/devices', wrap(async (req, res) => {
     const devices = await db.localBridgeDevice.findMany({ where: { userId: user(req).id }, include: rootInclude, orderBy: { createdAt: 'desc' } });
-    res.json({ devices: devices.map((d: any) => ({ id: d.id, name: d.name, platform: d.platform, status: bridgeOnline(d) ? 'online' : 'offline', last_seen_at: d.lastSeenAt, client_version: d.clientVersion ?? null, roots: d.roots.map((r: any) => ({ id: r.id, path: r.path, label: r.label })) })) });
+    res.json({ devices: devices.map((d: any) => ({ id: d.id, name: d.name, platform: d.platform, status: bridgeOnline(d) ? 'online' : 'offline', last_seen_at: d.lastSeenAt, client_version: d.clientVersion ?? null, update_required: clientUpdateRequired(d), roots: d.roots.map((r: any) => ({ id: r.id, path: r.path, label: r.label })) })) });
   }));
   router.post(['/connections', '/devices/pairing'], wrap(async (req, res) => {
     const input = z.object({ return_url: z.string().url().optional(), thread_id: z.string().optional() }).parse(req.body || {});
@@ -101,6 +112,11 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }));
   router.post('/agent/pair', wrap(async (req, res) => {
     const input = z.object({ code: z.string(), name: z.string().min(1).max(120), platform: z.string().max(80).optional() }).parse(req.body);
+    if (clientVersionOutdated(clientVersion(req))) {
+      // Let the waiting Portal dialog explain the update instead of spinning until the code expires.
+      await db.localBridgeConnection.updateMany({ where: { tokenHash: bridgeHash(input.code.trim().toUpperCase()), status: 'pending' }, data: { status: 'update_required' } });
+      return fail(clientUpdateMessage(input.platform), 426);
+    }
     const token = `asb_${randomBytes(32).toString('base64url')}`;
     const result = await db.$transaction(async (tx: any) => {
       const c = await tx.localBridgeConnection.findUnique({ where: { tokenHash: bridgeHash(input.code.trim().toUpperCase()) } });
@@ -116,25 +132,23 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     res.status(201).json(result);
   }));
   router.post('/agent/roots', wrap(async (req, res) => {
-    const d = await agent(req); const input = z.object({ path: z.string().min(1).max(4096), label: z.string().max(120).optional() }).parse(req.body);
+    const d = await currentClient(req); const input = z.object({ path: z.string().min(1).max(4096), label: z.string().max(120).optional() }).parse(req.body);
     const root = await db.localBridgeRoot.upsert({ where: { deviceId_path: { deviceId: d.id, path: input.path } }, update: { label: input.label }, create: { deviceId: d.id, ...input } });
     res.status(201).json({ root: { id: root.id, path: root.path, label: root.label } });
   }));
   router.post('/agent/complete', wrap(async (req, res) => {
-    const d = await agent(req); const input = z.object({ connection_id: z.string(), root_id: z.string().nullable() }).parse(req.body);
+    const d = await currentClient(req); const input = z.object({ connection_id: z.string(), root_id: z.string().nullable() }).parse(req.body);
     if (input.root_id && !d.roots.some((r: any) => r.id === input.root_id)) return fail('Folder not found');
     const updated = await db.localBridgeConnection.updateMany({ where: { id: input.connection_id, deviceId: d.id, status: 'claimed', expiresAt: { gt: new Date() } }, data: { status: input.root_id ? 'completed' : 'cancelled', rootId: input.root_id } });
     if (!updated.count) return fail('选择已过期，请回到 Portal 重新选择。', 409); res.json({ ok: true });
   }));
   // Desktop clients 0.3+ prove they are running independently of claiming work or delivering results.
   router.post('/agent/heartbeat', wrap(async (req, res) => {
-    const d = await agent(req);
-    await markSeen(d, req);
+    await currentClient(req);
     res.json({ ok: true });
   }));
   router.post('/agent/poll', wrap(async (req, res) => {
-    const d = await agent(req);
-    await markSeen(d, req);
+    const d = await currentClient(req);
     const now = new Date();
     const eligible = { deviceId: d.id, deadline: { gt: now }, OR: [{ status: 'pending' }, { status: 'leased', leaseUntil: { lt: now } }] };
     for (let i = 0; i < 3; i++) {
