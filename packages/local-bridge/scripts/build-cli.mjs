@@ -25,7 +25,7 @@ for (const [arch, expected] of Object.entries(hashes)) {
   await fs.copyFile(path.join(staging, basename, 'LICENSE'), path.join(bundle, 'NODE-LICENSE'));
   await fs.cp(path.join(source, 'runtime'), path.join(bundle, 'runtime'), { recursive: true });
   await fs.mkdir(path.join(bundle, 'cli'), { recursive: true });
-  await fs.copyFile(path.join(source, 'cli/bailey-connect.cjs'), path.join(bundle, 'cli/bailey-connect.cjs'));
+  for (const file of ['bailey-connect.cjs', 'self-update.cjs']) await fs.copyFile(path.join(source, 'cli', file), path.join(bundle, 'cli', file));
   await fs.copyFile(path.join(source, 'cli/bailey-connect'), path.join(bundle, 'bin/bailey-connect'));
   await fs.chmod(path.join(bundle, 'bin/node'), 0o755); await fs.chmod(path.join(bundle, 'bin/bailey-connect'), 0o755);
   const name = `bailey-connect-linux-${arch}.tar.gz`;
@@ -34,4 +34,4 @@ for (const [arch, expected] of Object.entries(hashes)) {
 }
 await fs.copyFile(path.join(source, 'cli/connect.sh'), path.join(dist, 'connect.sh'));
 await fs.writeFile(path.join(dist, 'cli-SHA256SUMS'), files.map(f => `${f.sha256}  ${f.name}`).join('\n') + '\n');
-console.log(JSON.stringify({ version: '0.3.0', nodeVersion, files }, null, 2));
+console.log(JSON.stringify({ version: '0.3.1', nodeVersion, files }, null, 2));

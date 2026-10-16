@@ -20,6 +20,8 @@ Cloud Agent 通过任务绑定的 MCP 工具访问桌面执行端。桌面端主
 
 之后在目标目录运行 `~/.local/bin/bailey-connect` 复用账号连接，在 Portal 选择该目录；从 Portal 复制的新配对命令会自动选中当前目录。保持终端打开，Ctrl+C 停止连接及其启动的 Shell 进程。一个账号站点同时只运行一个连接进程，避免重复领取任务；最近选过的目录仍可在 Portal 复用。
 
+自动更新（0.3.1 起）：命令行启动 30 秒后及每 6 小时读取 `cli-SHA256SUMS`，服务端返回 426（版本过低）时立即检查。新包下载后按 SHA256 校验，安装到 XDG data 目录下以摘要命名的新目录（不覆盖正在运行的版本），写入 `current` 并更新 `~/.local/bin/bailey-connect`（仅当它指向本安装目录）；本机空闲（无运行中的命令、结果已全部回传、5 分钟内无任务）时以退出码 75 结束，启动器在同一终端用相同参数接着运行新版本，无需重新配对。只保留正在运行和最新的两个版本。设置 `BAILEY_AUTO_UPDATE=0` 可关闭。0.3.0 及更早版本没有此功能，需要重新运行一次 Portal 中的命令。
+
 可用 `--code` 重新配对、`--server` 指定 HTTPS 站点。凭证保存在当前用户的 XDG state 目录（目录 0700、文件 0600）；运行包在 XDG data 目录，启动器在 `~/.local/bin/bailey-connect`。原有桌面客户端无需更改。
 
 构建 `npm run build:cli`：校验固定 Node.js 官方归档摘要，打包 x64/ARM64 执行器与启动器。发布 `dist-cli/` 中的两个 tar.gz、`connect.sh` 与 `cli-SHA256SUMS` 到独立下载目录。安装脚本对下载包做 SHA256 校验并保留原工作目录。

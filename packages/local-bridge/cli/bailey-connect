@@ -2,4 +2,21 @@
 set -euo pipefail
 bridge_executable=$(readlink -f -- "${BASH_SOURCE[0]}")
 bridge_package=$(dirname "$(dirname "$bridge_executable")")
-exec "$bridge_package/bin/node" "$bridge_package/cli/bailey-connect.cjs" "$@"
+bridge_code=0
+"$bridge_package/bin/node" "$bridge_package/cli/bailey-connect.cjs" "$@" || bridge_code=$?
+# Exit code 75: a newer package was installed next to this one; continue with it in this terminal.
+if [ "$bridge_code" -eq 75 ]; then
+  bridge_next=$(head -n 1 "$(dirname "$bridge_package")/current" 2>/dev/null || true)
+  # The one-time pairing code was already used; the new version reuses the saved connection.
+  bridge_args=(); bridge_skip=0
+  for bridge_arg in "$@"; do
+    if [ "$bridge_skip" = 1 ]; then bridge_skip=0; continue; fi
+    if [ "$bridge_arg" = --code ]; then bridge_skip=1; continue; fi
+    bridge_args+=("$bridge_arg")
+  done
+  if [ -n "$bridge_next" ] && [ -x "$bridge_next" ] && [ "$(readlink -f -- "$bridge_next")" != "$bridge_executable" ]; then
+    BAILEY_UPDATED=1 exec "$bridge_next" ${bridge_args[@]+"${bridge_args[@]}"}
+  fi
+  exit 0
+fi
+exit "$bridge_code"
