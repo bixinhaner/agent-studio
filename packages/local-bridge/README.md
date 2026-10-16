@@ -1,4 +1,4 @@
-# Agent Studio Local Bridge 0.2
+# Agent Studio Local Bridge 0.3
 
 Cloud Agent 通过任务绑定的 MCP 工具访问桌面执行端。桌面端主动连接 Relay，不监听入站端口。
 
@@ -6,7 +6,11 @@ Cloud Agent 通过任务绑定的 MCP 工具访问桌面执行端。桌面端主
 
 支持文件读取、新建、覆盖、精确编辑、目录、重命名、删除，以及 Shell、进程输出/输入/取消。命令以本机账号执行，所选目录是默认 cwd，**不是 OS 沙箱**。浏览器和云端业务工具仍在云端。
 
-调用使用稳定 request id；Relay 保存短期投递状态，执行端保存短期请求回执，断线重投不会自动重复执行。崩溃后的未知结果会明确返回 unknown，禁止盲目重试。无审批、文件版本历史、自动 worktree。
+调用使用稳定 request id；Relay 保存短期投递状态，执行端保存短期请求回执，断线重投不会自动重复执行。崩溃后的未知结果会明确返回 unknown，禁止盲目重试。
+
+传输层（0.3）：心跳、领取任务、结果回传三条循环互不阻塞；心跳每 5 秒调用 `/api/local-bridge/agent/heartbeat`（旧服务端 404 时自动停用）。结果先写入本机 outbox 再回传，失败按 1s·2ⁿ（上限 30s、±25% 抖动）重试，重启后继续投递；同一任务被重新租用时直接回传已有结果，不重复执行。确定性 4xx（401/408/429 除外）会被替换为 `RESULT_DELIVERY_FAILED` 结果再投递一次。同一会话线程的步骤串行，不同线程并行（默认 4）。请求头 `x-local-bridge-version` 上报客户端版本。
+
+输出与编码：命令输出按原始字节返回 `output_base64`（上限 256KB，游标按字节计），由服务端识别 UTF-8/GB18030/UTF-16；Windows 用 `cmd /d /s /c "<command>"` 原样传参，修复 `python -c "..."` 等引号被改写的问题。`read` 支持 `offset`/`length` 分段读取大文件；`write` 支持 `expected_sha256`，文件在读取后被改动时返回 `FILE_CHANGED_SINCE_READ`。无审批、文件版本历史、自动 worktree。
 
 验证：`npm ci --ignore-scripts && npm run build && npm test`。集成验证使用隔离 PostgreSQL 的 `LOCAL_BRIDGE_TEST_DATABASE_URL` 运行 API `local-bridge.integration.test.ts`。
 

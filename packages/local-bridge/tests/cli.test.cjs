@@ -45,7 +45,7 @@ test('CLI pairs the current directory, executes locally, reuses credentials, rej
     const first = start(['--code', 'ABCDEF1234']); await until(() => results.length === 1);
     assert.equal(completed, true); assert.equal(roots[0], await fs.realpath(cwd)); assert.equal(results[0].ok, true);
     assert.equal((await fs.readFile(path.join(cwd, 'result.txt'), 'utf8')).trim(), 'local-linux');
-    assert.equal(results[0].output.trim(), await fs.realpath(cwd)); assert.ok(!first.output.includes('test-device-token'));
+    assert.equal(Buffer.from(results[0].output_base64, 'base64').toString().trim(), await fs.realpath(cwd)); assert.ok(!first.output.includes('test-device-token'));
     const duplicate = start(); await until(() => duplicate.exitCode !== null); assert.equal(duplicate.exitCode, 1); assert.match(duplicate.output, /已有连接/);
     first.kill('SIGINT'); await until(() => first.exitCode !== null); assert.equal(first.exitCode, 0);
     const stateDir = path.join(temp, 'state/bailey-local-bridge', (await fs.readdir(path.join(temp, 'state/bailey-local-bridge')))[0]);

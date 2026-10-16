@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * How local-computer results cross the server without losing or distorting data.
  *
@@ -98,6 +100,32 @@ export function decodeLocalFile(bytes: Buffer): DecodedLocalFile {
   return { binary: true, encoding: 'binary', size, message: `Binary file (${size} bytes): it is not reliable UTF-8, UTF-16 or GB18030 text, so no text is shown. Read it with encoding "base64" for the exact bytes.` };
 }
 
+/**
+ * Command output from clients that send raw bytes (0.3+). One command can mix encodings (git
+ * prints UTF-8 while cmd prints GBK messages), so lines are decoded individually; whole-output
+ * UTF-16 (wmic, some PowerShell redirects) is detected first.
+ */
+export function decodeCommandOutput(bytes: Buffer): { text: string; note?: string } {
+  if (!bytes.length) return { text: '' };
+  const whole = decodeLocalFile(bytes);
+  if (!whole.binary && whole.encoding.startsWith('utf-16')) return { text: whole.content, note: `Output decoded as ${whole.encoding.toUpperCase()}.` };
+  if (strict('utf-8', bytes) !== null) return { text: bytes.toString('utf8') };
+  let legacy = false; let lossy = false; const parts: string[] = [];
+  let start = 0;
+  while (start < bytes.length) {
+    const end = bytes.indexOf(0x0a, start);
+    const line = bytes.subarray(start, end < 0 ? bytes.length : end + 1);
+    start = end < 0 ? bytes.length : end + 1;
+    const utf8 = strict('utf-8', line);
+    if (utf8 !== null) { parts.push(utf8); continue; }
+    const gb = strict('gb18030', line);
+    if (gb !== null && looksLikeChinese(gb)) { parts.push(gb); legacy = true; continue; }
+    parts.push(line.toString('utf8')); lossy = true;
+  }
+  const notes = [legacy ? 'Some lines were printed in GBK and were decoded as GB18030.' : '', lossy ? LOSSY_OUTPUT_NOTE : ''].filter(Boolean);
+  return { text: parts.join(''), ...(notes.length ? { note: notes.join(' ') } : {}) };
+}
+
 /** Encode edited text back into the file's own encoding; null when the encoding cannot be written exactly. */
 export function encodeLocalText(content: string, encoding: LocalTextEncoding, bom: boolean): Buffer | null {
   if (encoding === 'utf-8') return Buffer.concat([Buffer.from(bom ? [0xef, 0xbb, 0xbf] : []), Buffer.from(content, 'utf8')]);
@@ -106,13 +134,14 @@ export function encodeLocalText(content: string, encoding: LocalTextEncoding, bo
   return null;
 }
 
-export type LocalEditPlan = { ok: true; content: string; replacements: number; encoding: LocalTextEncoding } | { ok: false; error: string; message?: string };
+export type LocalEditPlan = { ok: true; content: string; replacements: number; encoding: LocalTextEncoding; expectedSha256: string } | { ok: false; error: string; message?: string };
 
 /** The edit the desktop executor would make, applied to decoded text and written back as base64. */
 export function planLocalEdit(readResult: any, args: any): LocalEditPlan {
   if (typeof args?.old_text !== 'string' || !args.old_text || typeof args?.new_text !== 'string') return { ok: false, error: 'EXACT_EDIT_TEXT_REQUIRED' };
   if (!readResult?.ok) return { ok: false, error: readResult?.error || 'READ_FAILED', ...(readResult?.message ? { message: readResult.message } : {}) };
-  const decoded = decodeLocalFile(Buffer.from(String(readResult.content ?? ''), 'base64'));
+  const original = Buffer.from(String(readResult.content ?? ''), 'base64');
+  const decoded = decodeLocalFile(original);
   if (decoded.binary) return { ok: false, error: 'EDIT_BINARY_FILE', message: decoded.message };
   const source = decoded.content;
   const first = source.indexOf(args.old_text);
@@ -122,7 +151,7 @@ export function planLocalEdit(readResult: any, args: any): LocalEditPlan {
   const bytes = encodeLocalText(next, decoded.encoding, decoded.bom);
   if (!bytes) return { ok: false, error: 'EDIT_ENCODING_UNSUPPORTED', message: `The file is ${decoded.encoding.toUpperCase()}, which local_edit cannot write back exactly. Edit it with local_exec (for example Python with encoding="${decoded.encoding}") so the encoding is preserved.` };
   if (bytes.length > LOCAL_FILE_LIMIT) return { ok: false, error: 'CONTENT_TOO_LARGE' };
-  return { ok: true, content: bytes.toString('base64'), replacements: args.replace_all ? parts.length - 1 : 1, encoding: decoded.encoding };
+  return { ok: true, content: bytes.toString('base64'), replacements: args.replace_all ? parts.length - 1 : 1, encoding: decoded.encoding, expectedSha256: createHash('sha256').update(original).digest('hex') };
 }
 
 /**
@@ -147,7 +176,19 @@ export function presentLocalResult(op: string, args: any, result: Record<string,
   if (op === 'read' && meta.decode && result.ok !== false && typeof result.content === 'string') {
     const decoded = decodeLocalFile(Buffer.from(result.content, 'base64'));
     const { binary, ...rest } = decoded;
-    return binary ? { ok: true, path: result.path, binary: true, ...rest } : { ok: true, path: result.path, ...rest };
+    // Ranged reads (0.3+ clients) report the whole file's size and where this part sits.
+    const range = typeof result.offset === 'number' ? { size: result.size, offset: result.offset, length: result.length, eof: result.eof } : typeof result.size === 'number' ? { size: result.size } : {};
+    return binary ? { ok: true, path: result.path, binary: true, ...rest, ...range } : { ok: true, path: result.path, ...rest, ...range };
+  }
+  if (op === 'workspace_info' && typeof result.instructions_base64 === 'string') {
+    const { instructions_base64: raw, ...rest } = result;
+    const decoded = decodeLocalFile(Buffer.from(raw, 'base64'));
+    return { ...rest, instructions: decoded.binary ? '' : decoded.content.slice(0, 24000), ...(decoded.binary ? { instructions_note: 'AGENTS.md is not readable text.' } : decoded.encoding !== 'utf-8' ? { instructions_encoding: decoded.encoding } : {}) };
+  }
+  if ((op === 'exec' || op === 'process') && typeof result.output_base64 === 'string') {
+    const { output_base64: raw, ...rest } = result;
+    const decoded = decodeCommandOutput(Buffer.from(raw, 'base64'));
+    return { ...rest, output: decoded.text, ...(decoded.note ? { output_note: decoded.note } : {}) };
   }
   if (op === 'write' && meta.edit && result.ok !== false) {
     return { ok: true, path: result.path, edited: true, replacements: meta.edit.replacements, encoding: meta.edit.encoding };

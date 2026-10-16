@@ -344,6 +344,7 @@ model LocalBridgeDevice {
   tokenHash    String?  @unique @map("token_hash")
   status       String   @default("pending")
   lastSeenAt   DateTime? @map("last_seen_at")
+  clientVersion String? @map("client_version")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)

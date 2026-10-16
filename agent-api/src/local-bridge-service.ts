@@ -74,7 +74,7 @@ async function editLocalFile(db: any, binding: any, args: any, requestId: string
   if (source?.pending) return { ...source, request_id: requestId };
   const plan = planLocalEdit(source, args);
   if (!plan.ok) { await completeLocalOperation(db, requestId, encodeStoredJson(plan)); return plan; }
-  await enqueueLocalCommand(db, binding, 'write', { path: args.path, content: plan.content, encoding: 'base64', [LOCAL_META_KEY]: { edit: { replacements: plan.replacements, encoding: plan.encoding } } }, requestId, 'agent', { audit: false });
+  await enqueueLocalCommand(db, binding, 'write', { path: args.path, content: plan.content, encoding: 'base64', expected_sha256: plan.expectedSha256, [LOCAL_META_KEY]: { edit: { replacements: plan.replacements, encoding: plan.encoding } } }, requestId, 'agent', { audit: false });
   return waitLocalCommand(db, requestId);
 }
 /** local_request_result for an edit whose write was never queued reports why instead of REQUEST_NOT_FOUND. */

@@ -37,8 +37,12 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     if (completed.count) await completeLocalOperation(db, where.id, stored);
   }
   // Any authenticated request proves the client is running, including result retries.
-  async function markSeen(d: any) {
-    if (!d.lastSeenAt || Date.now() - new Date(d.lastSeenAt).getTime() > 4000) await db.localBridgeDevice.update({ where: { id: d.id }, data: { lastSeenAt: new Date() } });
+  async function markSeen(d: any, req?: Request) {
+    const version = req?.header('x-local-bridge-version')?.slice(0, 40);
+    const data: Record<string, unknown> = {};
+    if (!d.lastSeenAt || Date.now() - new Date(d.lastSeenAt).getTime() > 4000) data.lastSeenAt = new Date();
+    if (version && version !== d.clientVersion) data.clientVersion = version;
+    if (Object.keys(data).length) await db.localBridgeDevice.update({ where: { id: d.id }, data });
   }
   async function ownedThread(req: Request) {
     const u = user(req);
@@ -48,7 +52,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }
   router.get('/devices', wrap(async (req, res) => {
     const devices = await db.localBridgeDevice.findMany({ where: { userId: user(req).id }, include: rootInclude, orderBy: { createdAt: 'desc' } });
-    res.json({ devices: devices.map((d: any) => ({ id: d.id, name: d.name, platform: d.platform, status: bridgeOnline(d) ? 'online' : 'offline', last_seen_at: d.lastSeenAt, roots: d.roots.map((r: any) => ({ id: r.id, path: r.path, label: r.label })) })) });
+    res.json({ devices: devices.map((d: any) => ({ id: d.id, name: d.name, platform: d.platform, status: bridgeOnline(d) ? 'online' : 'offline', last_seen_at: d.lastSeenAt, client_version: d.clientVersion ?? null, roots: d.roots.map((r: any) => ({ id: r.id, path: r.path, label: r.label })) })) });
   }));
   router.post(['/connections', '/devices/pairing'], wrap(async (req, res) => {
     const input = z.object({ return_url: z.string().url().optional(), thread_id: z.string().optional() }).parse(req.body || {});
@@ -122,9 +126,15 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     const updated = await db.localBridgeConnection.updateMany({ where: { id: input.connection_id, deviceId: d.id, status: 'claimed', expiresAt: { gt: new Date() } }, data: { status: input.root_id ? 'completed' : 'cancelled', rootId: input.root_id } });
     if (!updated.count) return fail('选择已过期，请回到 Portal 重新选择。', 409); res.json({ ok: true });
   }));
+  // Desktop clients 0.3+ prove they are running independently of claiming work or delivering results.
+  router.post('/agent/heartbeat', wrap(async (req, res) => {
+    const d = await agent(req);
+    await markSeen(d, req);
+    res.json({ ok: true });
+  }));
   router.post('/agent/poll', wrap(async (req, res) => {
     const d = await agent(req);
-    await markSeen(d);
+    await markSeen(d, req);
     const now = new Date();
     const eligible = { deviceId: d.id, deadline: { gt: now }, OR: [{ status: 'pending' }, { status: 'leased', leaseUntil: { lt: now } }] };
     for (let i = 0; i < 3; i++) {
@@ -140,7 +150,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }));
   router.post('/agent/result', wrap(async (req, res) => {
     const d = await agent(req); const input = z.object({ id: z.string(), lease: z.string(), result: z.record(z.unknown()) }).parse(req.body);
-    await markSeen(d).catch(() => {});
+    await markSeen(d, req).catch(() => {});
     const where = { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease };
     let command;
     try { command = await db.localBridgeCommand.findFirst({ where }); }

@@ -3,10 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { createExecutor } = require('../runtime/executor.cjs');
+const { createExecutor, shellInvocation, completeUtf8Length } = require('../runtime/executor.cjs');
 const { runTransport } = require('../runtime/transport.cjs');
 const work = path.resolve(__dirname, '../../../temp/local-bridge-tests', randomUUID());
 let serial = 0;
+const out = result => Buffer.from(result.output_base64 || '', 'base64').toString('utf8');
 async function fixture() {
   const dir = path.join(work, String(++serial)); await fs.mkdir(dir, { recursive: true });
   const root = path.join(dir, 'files'); await fs.mkdir(root);
@@ -47,11 +48,11 @@ test('unfinished receipt after crash reports unknown outcome instead of re-runni
 });
 test('trusted Shell can access outside cwd, output streams and cancellation kills the process group', async () => {
   const f = await fixture(); await fs.writeFile(path.join(f.dir, 'outside'), 'available');
-  assert.match((await f.call('exec', { command: 'cat ../outside' })).output, /available/);
+  assert.match(out(await f.call('exec', { command: 'cat ../outside' })), /available/);
   const p = await f.call('exec', { command: 'printf ready; sleep 30; echo wrong > late.txt', yield_ms: 100 });
   assert.equal(p.running, true);
-  const ready = p.output.includes('ready') ? p : await f.call('process', { process_id: p.process_id, wait_ms: 2000 });
-  assert.match(ready.output, /ready/);
+  const ready = out(p).includes('ready') ? p : await f.call('process', { process_id: p.process_id, wait_ms: 2000 });
+  assert.match(out(ready), /ready/);
   assert.equal((await f.call('process', { process_id: p.process_id }, { threadId: 'other' })).ok, false);
   await f.call('cancel_task', {});
   const end = await f.call('process', { process_id: p.process_id, wait_ms: 2000, cursor: p.cursor });
@@ -59,7 +60,7 @@ test('trusted Shell can access outside cwd, output streams and cancellation kill
 });
 test('lost result acknowledgement retries delivery without executing again', async () => {
   const signal = new AbortController(); let calls = 0, attempts = 0;
-  const api = async endpoint => { if (endpoint.endsWith('/poll')) return { command: { id: 'request', lease: 'lease' } }; attempts++; if (attempts === 1) throw new Error('network'); signal.abort(); return {}; };
+  const api = async endpoint => { if (endpoint.endsWith('/poll')) return { command: { id: 'request', lease: 'lease' } }; if (endpoint.endsWith('/heartbeat')) return {}; attempts++; if (attempts === 1) throw new Error('network'); signal.abort(); return {}; };
   await runTransport({ api, executor: { execute: async () => { calls++; return { ok: true }; } }, signal: signal.signal });
   assert.equal(calls, 1); assert.equal(attempts, 2);
 });

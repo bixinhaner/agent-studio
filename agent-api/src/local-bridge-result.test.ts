@@ -12,6 +12,7 @@ import { summarizeLocalOperation } from './admin/conversation-transcript-local.j
 import {
   LOSSY_OUTPUT_NOTE,
   RESULT_DELIVERY_FAILED,
+  decodeCommandOutput,
   decodeLocalFile,
   decodeStoredJson,
   encodeStoredJson,
@@ -73,6 +74,25 @@ describe('decodeLocalFile (acceptance 1: accurate text or an explicit explanatio
 
   it('decodes an empty file as empty UTF-8 text', () => {
     expect(decodeLocalFile(Buffer.alloc(0))).toMatchObject({ binary: false, content: '', encoding: 'utf-8' });
+  });
+});
+
+describe('command output from byte-level clients', () => {
+  it('decodes mixed UTF-8 and GBK lines individually and says so', () => {
+    const bytes = Buffer.concat([Buffer.from('git: 中文提交\n'), Buffer.from([0xd5, 0xd2, 0xb2, 0xbb, 0xb5, 0xbd, 0xce, 0xc4, 0xbc, 0xfe, 0x0d, 0x0a])]);
+    expect(decodeCommandOutput(bytes)).toEqual({ text: 'git: 中文提交\n找不到文件\r\n', note: expect.stringContaining('GBK') });
+  });
+
+  it('decodes whole UTF-16 output and leaves plain UTF-8 untouched', () => {
+    expect(decodeCommandOutput(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Name\r\n', 'utf16le')]))).toMatchObject({ text: 'Name\r\n' });
+    expect(decodeCommandOutput(Buffer.from('ok ✓\n'))).toEqual({ text: 'ok ✓\n' });
+  });
+
+  it('presents exec, process and workspace_info results as text', () => {
+    const exec = presentLocalResult('exec', {}, { ok: true, output_base64: Buffer.from([0xd6, 0xd0, 0xce, 0xc4]).toString('base64'), cursor: 4 });
+    expect(exec).toEqual({ ok: true, output: '中文', cursor: 4, output_note: expect.stringContaining('GBK') });
+    const info = presentLocalResult('workspace_info', {}, { ok: true, directory: 'D', instructions_base64: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('规则', 'utf16le')]).toString('base64') });
+    expect(info).toEqual({ ok: true, directory: 'D', instructions: '规则', instructions_encoding: 'utf-16le' });
   });
 });
 
@@ -179,6 +199,8 @@ describe('local computer round trip with the real desktop client', { timeout: 20
     expect(await call('read', { path: 'blob.bin' })).toMatchObject({ ok: true, binary: true, size: 16 });
     // An explicit base64 read still returns the raw bytes.
     expect(await call('read', { path: 'nul.py', encoding: 'base64' })).toMatchObject({ content: Buffer.from('x = 1\u0000\n').toString('base64') });
+    // Larger files are read in parts; each part is decoded and placed within the file.
+    expect(await call('read', { path: 'utf8.py', offset: 0, length: 14 })).toMatchObject({ ok: true, content: 'def version():', size: Buffer.byteLength(text), offset: 0, eof: false });
 
     // Delivery and audit records hold the same exact result, in a form jsonb accepts.
     const log = db.localBridgeOperationLog.rows.find((r: any) => r.args?.path === 'nul.py' && !r.args.encoding);
@@ -197,6 +219,8 @@ describe('local computer round trip with the real desktop client', { timeout: 20
     expect(await call('edit', { path: 'gbk.py', old_text: '中文', new_text: 'x' })).toMatchObject({ ok: false, error: 'EDIT_ENCODING_UNSUPPORTED' });
     expect(await readFile(path.join(dir, 'gbk.py'))).toEqual(gbk);
     expect(await call('edit', { path: 'utf16.py', old_text: 'missing', new_text: 'x' })).toMatchObject({ ok: false, error: 'EDIT_MATCH_MUST_BE_UNIQUE' });
+    // Command output arrives as bytes from the desktop client and is decoded on the server.
+    expect(await call('exec', { command: "printf 'caf\\303\\251 \\326\\320\\n'", yield_ms: 2000 })).toMatchObject({ ok: true, output: expect.stringMatching(/^caf/) });
     expect(db.localBridgeOperationLog.rows.filter((r: any) => r.op === 'edit').map((r: any) => decodeStoredJson(r.result)?.ok)).toEqual([true, false, false]);
   });
 

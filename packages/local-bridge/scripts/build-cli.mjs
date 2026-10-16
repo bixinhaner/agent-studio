@@ -34,4 +34,4 @@ for (const [arch, expected] of Object.entries(hashes)) {
 }
 await fs.copyFile(path.join(source, 'cli/connect.sh'), path.join(dist, 'connect.sh'));
 await fs.writeFile(path.join(dist, 'cli-SHA256SUMS'), files.map(f => `${f.sha256}  ${f.name}`).join('\n') + '\n');
-console.log(JSON.stringify({ version: '0.2.3', nodeVersion, files }, null, 2));
+console.log(JSON.stringify({ version: '0.3.0', nodeVersion, files }, null, 2));

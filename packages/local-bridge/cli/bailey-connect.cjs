@@ -6,7 +6,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { createExecutor } = require('../runtime/executor.cjs');
 const { runTransport } = require('../runtime/transport.cjs');
-const VERSION = '0.2.3';
+const VERSION = '0.3.0';
 const DEFAULT_SERVER = 'https://bailey.baicells.com';
 
 function parseArgs(args) {
@@ -53,10 +53,10 @@ async function connect(options) {
     try { config = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw new Error('无法读取本机连接配置，请检查文件权限。'); }
     const save = async () => { const temp = configPath + '.tmp'; await fs.writeFile(temp, JSON.stringify(config), { mode: 0o600 }); await fs.chmod(temp, 0o600); await fs.rename(temp, configPath); };
     const api = async (endpoint, init = {}) => {
-      const response = await fetch(options.server + endpoint, { ...init, headers: { 'content-type': 'application/json', ...(config.token ? { authorization: `Bearer ${config.token}` } : {}) }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+      const response = await fetch(options.server + endpoint, { ...init, headers: { 'content-type': 'application/json', 'x-local-bridge-version': VERSION, ...(config.token ? { authorization: `Bearer ${config.token}` } : {}) }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
       const body = await response.json().catch(() => ({}));
-      if (response.status === 401) { process.exitCode = 1; stop(); throw new Error('连接已失效，请在 Portal 的「Linux 命令行」重新复制连接命令。'); }
-      if (!response.ok) throw new Error(body.detail || `连接失败（${response.status}）`);
+      if (response.status === 401) { process.exitCode = 1; stop(); throw Object.assign(new Error('连接已失效，请在 Portal 的「Linux 命令行」重新复制连接命令。'), { status: 401 }); }
+      if (!response.ok) throw Object.assign(new Error(body.detail || `连接失败（${response.status}）`), { status: response.status });
       return body;
     };
     let paired;
@@ -72,12 +72,12 @@ async function connect(options) {
     if (paired) await api('/api/local-bridge/agent/complete', { method: 'POST', body: JSON.stringify({ connection_id: paired.connection_id, root_id: root.id }) });
     const receipts = path.join(stateDir, 'requests');
     for (const entry of await fs.readdir(receipts).catch(() => [])) { const file = path.join(receipts, entry); const stat = await fs.stat(file).catch(() => null); if (stat && Date.now() - stat.mtimeMs > 7 * 86400000) await fs.rm(file, { force: true }); }
-    executor = createExecutor({ getRoots: () => config.roots, journalDir: receipts });
+    executor = createExecutor({ getRoots: () => config.roots, journalDir: receipts, version: VERSION });
     console.log(`Bailey 本机连接 ${VERSION}\n工作目录：${directory}\n命令以当前电脑账号运行。保持此终端打开，按 Ctrl+C 断开。`);
     console.log(paired ? '目录已提交，Portal 将自动选中此目录。' : '在 Portal 的「使用电脑文件夹」中选择此目录即可继续。');
     console.log(`Portal：${paired?.return_url || options.server + '/?view=workspace'}`);
     let previous;
-    await runTransport({ api, executor, signal: controller.signal, onStatus: status => {
+    await runTransport({ api, executor, signal: controller.signal, outboxDir: path.join(stateDir, 'outbox'), onStatus: status => {
       const text = status.connected ? '已连接，等待任务。' : status.error;
       if (text !== previous && (!controller.signal.aborted || !status.connected && !String(status.error).includes('aborted'))) { console.log(status.connected ? text : `${text}${controller.signal.aborted ? '' : '；正在重试…'}`); previous = text; }
     } });
