@@ -169,6 +169,33 @@ describe("PortalSkillPicker", () => {
     expect(fillPrompt).not.toHaveBeenCalled();
   });
 
+  it("moves through Skill cards with the keyboard from the search field", async () => {
+    render(
+      <PortalSkillPicker
+        availableSkills={[outageSkill, privateSkill]}
+        automaticSkills={[]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={vi.fn()}
+        onFillPrompt={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    const search = await screen.findByRole("textbox", { name: /搜索|Search/ });
+    const cards = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".portal-skill-card"));
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    // Only the previewed card sits in the Tab order.
+    expect(cards().map((card) => card.tabIndex)).toEqual([0, -1]);
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(cards()[0]);
+
+    fireEvent.keyDown(cards()[0], { key: "End" });
+    await waitFor(() => expect(document.activeElement).toBe(cards()[1]));
+    expect(cards().map((card) => card.tabIndex)).toEqual([-1, 0]);
+  });
+
   it("enables the Skill before filling its example into the composer", async () => {
     const setSkills = vi.fn().mockResolvedValue(undefined);
     const fillPrompt = vi.fn();

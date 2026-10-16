@@ -24,6 +24,108 @@ body,
   box-sizing: border-box;
 }
 
+/* Touch: components draw their own pressed state, so drop the grey system flash
+   and the double-tap zoom delay on interactive elements. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(button, a[href], [role="button"], [role="tab"], [role="option"], [role="menuitem"], summary, label[for]) {
+  touch-action: manipulation;
+}
+
+/* Press feedback: a small physical "give" on press. Uses the standalone `scale`
+   property so it composes with any positioning `transform` a component already has. */
+:where(button, [role="button"], .ant-btn):not(:disabled, [aria-disabled="true"], .ant-btn-disabled, [data-press="none"]):active {
+  scale: 0.98;
+}
+
+:where(.ant-btn-icon-only, .ant-btn-sm.ant-btn-icon-only, [data-press="icon"]):not(:disabled, [aria-disabled="true"]):active {
+  scale: 0.94;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(button, [role="button"], .ant-btn, [data-press]):active {
+    scale: none;
+  }
+}
+
+/* Scroll edge fade: a scrollable list softens the edge that still has hidden
+   content, and turns crisp again once scrolled to that end. Driven by a scroll
+   timeline on the compositor; browsers without scroll timelines show no fade.
+   Keep it off reading surfaces such as the thread viewport. */
+@property --scroll-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes scroll-fade-top-in {
+  from { --scroll-fade-top: 0px; }
+  to { --scroll-fade-top: var(--scroll-fade-size); }
+}
+
+@keyframes scroll-fade-bottom-out {
+  from { --scroll-fade-bottom: var(--scroll-fade-size); }
+  to { --scroll-fade-bottom: 0px; }
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade-y,
+  .workspace-folder-nav,
+  .session-rail-list,
+  .workspace-task-file-list,
+  .portal-queue-list,
+  .portal-skill-member-list,
+  .preview-version-list,
+  .account-menu,
+  .local-folder-list,
+  .thread-question-nav-panel,
+  .trace-timeline {
+    --scroll-fade-size: 24px;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0) 0,
+      rgb(0 0 0 / 0.35) calc(var(--scroll-fade-top) * 0.35),
+      rgb(0 0 0 / 0.75) calc(var(--scroll-fade-top) * 0.7),
+      #000 var(--scroll-fade-top),
+      #000 calc(100% - var(--scroll-fade-bottom)),
+      rgb(0 0 0 / 0.75) calc(100% - var(--scroll-fade-bottom) * 0.7),
+      rgb(0 0 0 / 0.35) calc(100% - var(--scroll-fade-bottom) * 0.35),
+      rgb(0 0 0 / 0) 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0) 0,
+      rgb(0 0 0 / 0.35) calc(var(--scroll-fade-top) * 0.35),
+      rgb(0 0 0 / 0.75) calc(var(--scroll-fade-top) * 0.7),
+      #000 var(--scroll-fade-top),
+      #000 calc(100% - var(--scroll-fade-bottom)),
+      rgb(0 0 0 / 0.75) calc(100% - var(--scroll-fade-bottom) * 0.7),
+      rgb(0 0 0 / 0.35) calc(100% - var(--scroll-fade-bottom) * 0.35),
+      rgb(0 0 0 / 0) 100%
+    );
+    animation: scroll-fade-top-in linear both, scroll-fade-bottom-out linear both;
+    animation-timeline: scroll(self block), scroll(self block);
+    animation-range: 0 var(--scroll-fade-size), calc(100% - var(--scroll-fade-size)) 100%;
+  }
+}
+
+/* Titles split evenly instead of leaving a single orphaned character. */
+:where(h1, h2, h3, h4, .ant-modal-title, .ant-drawer-title, .ant-empty-description, .ant-result-title) {
+  text-wrap: balance;
+}
+
+:where(.ant-modal-body, .ant-drawer-body, .ant-empty, .ant-result-subtitle) p {
+  text-wrap: pretty;
+}
+
 body {
   margin: 0;
   font-family: "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
@@ -529,9 +631,6 @@ body.access-request-route #root {
   background: #fff0f0;
 }
 
-.user-identity-action-btn:active {
-  transform: scale(0.98);
-}
 
 .user-identity-action-btn:focus-visible {
   outline: 2px solid #2563eb;
@@ -2325,9 +2424,6 @@ body.access-request-route #root {
   background: #ffffff;
 }
 
-.assistant-error-retry:active {
-  transform: scale(0.98);
-}
 
 .assistant-error-retry:focus-visible {
   outline: 2px solid var(--workbench-accent, #ff4614);
@@ -9470,10 +9566,6 @@ body.public-share-mode #root {
 .aui-composer-send-btn:hover:not(:disabled) {
   filter: brightness(1.1) !important;
 }
-.aui-composer-send:active:not(:disabled),
-.aui-composer-send-btn:active:not(:disabled) {
-  transform: scale(0.98) !important;
-}
 
 .aui-thread-welcome-suggestion {
   border-radius: 20px !important;
@@ -9490,9 +9582,6 @@ body.public-share-mode #root {
   border-color: var(--brand-primary, #FF4614) !important;
   background: color-mix(in srgb, var(--brand-primary, #FF4614) 5%, #ffffff) !important;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--brand-primary, #FF4614) 8%, transparent) !important;
-}
-.aui-thread-welcome-suggestion:active {
-  transform: scale(0.98) !important;
 }
 
 /* Global Tabular Numerics for Metrics */

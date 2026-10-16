@@ -9,6 +9,7 @@ import App from "./App";
 import { isSafariBrowser } from "./lib/browser-compat";
 import { installBuildVersionRefreshMonitor } from "./lib/build-version-refresh";
 import { installStaleDynamicImportReloadHandler } from "./lib/stale-chunk-reload";
+import "./features/portal/portal-tokens.css";
 import "./styles.css";
 
 document.documentElement.classList.toggle("browser-safari", isSafariBrowser());

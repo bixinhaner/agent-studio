@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Studio</title>
     <script>
+      // Dark-mode portal users would otherwise see a white loading screen until React
+      // applies the theme. Mirrors features/portal/roadmap/portal-theme-boot.ts.
+      (function () {
+        try {
+          var path = location.pathname.replace(/\/+$/, "");
+          if (path !== "" && path !== "/training") return;
+          if (location.hash.indexOf("#admin/") === 0) return;
+          var preference = window.localStorage.getItem("agent-studio.portal.theme.v1");
+          var dark =
+            preference === "dark" ||
+            (preference === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (!dark) return;
+          document.documentElement.setAttribute("data-portal-theme-boot", "dark");
+          document.documentElement.style.backgroundColor = "#141518";
+          document.documentElement.style.colorScheme = "dark";
+        } catch (_error) {}
+      })();
+    </script>
+    <script>
       (function () {
         var storageKey = "agent-studio-public-branding";
 

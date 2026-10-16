@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { flushSync } from "react-dom";
+
+import { clearPortalThemeBoot } from "./portal-theme-boot";
 
 export type PortalThemePreference = "light" | "dark" | "system";
 export type PortalResolvedTheme = "light" | "dark";
@@ -44,8 +46,11 @@ export function usePortalTheme(serverPreference?: PortalThemePreference) {
 
   const resolved: PortalResolvedTheme = preference === "system" ? (systemDark ? "dark" : "light") : preference;
 
-  useEffect(() => {
+  // Layout effect: apply the theme before the first portal paint so a dark-mode
+  // user never sees one light frame between the boot mark and the real theme.
+  useLayoutEffect(() => {
     const root = document.documentElement;
+    clearPortalThemeBoot();
     root.dataset.portalTheme = resolved;
     root.style.colorScheme = resolved;
     return () => {

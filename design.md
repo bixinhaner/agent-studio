@@ -177,6 +177,26 @@ Usage、cost、latency、tokens、runs 等可比较数字使用 `font-variant-nu
 
 玻璃拟态和渐变只适合登录页、公开分享页、控制台首页这类高层级入口。不要把每个操作面板都做成玻璃卡片，尤其不要牺牲文字对比度。
 
+### Portal 语义表面 token
+
+Portal（工作台、聊天、右侧预览）统一使用 `agent-ui/src/features/portal/portal-tokens.css` 中的语义 token，浅色和深色各定义一次，暗色值手工调校而不是靠反色脚本推算：
+
+| Token | 用途 |
+|---|---|
+| `--portal-surface-0` | 页面底色、聊天画布 |
+| `--portal-surface-1` | 侧栏、卡片、右侧面板、输入框 |
+| `--portal-surface-2` | 嵌套区块、次级填充、popover 内分组 |
+| `--portal-surface-3` | hover / pressed / selected 填充 |
+| `--portal-text-1` / `-2` / `-3` | 主文本 / 次文本 / 占位与禁用 |
+| `--portal-line-subtle` / `--portal-line` | 分隔线 / 卡片与控件边框 |
+
+规则：
+
+- 相邻层级只差一级 surface，靠微弱明度差表达层次，不靠加粗边框和重阴影。
+- 新增 portal 样式不要再写 `#fff`、`#111827` 这类字面颜色；`--workbench-*`、`--roadmap-*` 已是语义 token 的别名，可以继续用。
+- `portal-dark.generated.css` 仍由 `scripts/generate-portal-dark-css.mjs` 生成，用来兜底历史字面颜色；修改源 CSS 后要重新生成。
+- 深色用户首屏不能闪白：`index.html` 在 React 挂载前按 `agent-studio.portal.theme.v1` 预设背景色。
+
 ## 组件
 
 优先使用现有系统：
@@ -279,6 +299,20 @@ Agent 工作流比普通 CRUD 更需要解释和反馈。
 - `300ms` 是 Modal、Drawer、route reveal 上限。
 - 优先动画 `opacity` 和 `transform`。
 
+### 交互手感
+
+这些规则借鉴自 Claude 客户端的交互细节（只借思路，不搬品牌色和数值）：
+
+- 按下反馈：可点击的按钮、chip、列表项在 `:active` 时轻微缩小（`scale(0.98)`，小图标按钮 `0.94`），`100ms` 内完成；禁用态不缩放；`prefers-reduced-motion` 下取消缩放。
+- 移动端点击：全局关闭 `-webkit-tap-highlight-color`，由组件自己的 hover/active 状态提供反馈；可点击元素加 `touch-action: manipulation` 去掉双击缩放延迟。
+- 滚动边缘渐隐：会话栏、技能列表、过程记录这类可滚动列表使用共享的 `.scroll-fade-y`，内容未滚到头的一侧边缘渐隐，滚到顶或滚到底时该侧恢复清晰。不要给整页正文滚动区加渐隐，以免遮住正在阅读的文字。
+- 单闭合边框：已有边框的容器（composer、卡片、popover）内部的次级按钮和 chip 不再画边框，用 `--portal-surface-2/3` 底色区分；只有输入焦点和主操作允许出现内层描边。
+- 按区域宽度响应：聊天列宽度随会话栏、右侧面板变化，composer 工具栏、消息操作条、空状态使用 `@container` 而不是 viewport media query 收缩：先隐藏按钮文字只留图标，再收起次要操作。
+- 键盘可达：弹出菜单（`/` 指令、`@` 引用、技能选择）支持 ↑/↓ 移动、Enter 选择、Esc 关闭，使用 `role="listbox"` / `role="option"` 与 `aria-activedescendant` 让读屏软件知道当前项。
+- 中文输入法：Enter 发送前必须排除 `isComposing`、`keyCode === 229`、`key === "Process"`，统一走 `composer-keyboard.ts`。
+- 流式输出跟随：用户主动上滑后不再自动拉回底部，统一走 `thread-scroll-follow-controller.ts`。
+- 标题断行：标题、卡片标题、空状态标题使用 `text-wrap: balance`，长段说明使用 `text-wrap: pretty`，避免最后一行只剩一个字。
+
 禁止：
 
 - `transition: all`
@@ -347,3 +381,15 @@ Runtime branding 是产品能力，不是装饰。
 - AI/集成失败状态包含下一步。
 - 公开界面不泄露 secret 或实现细节。
 - 已运行相关前端检查/测试，或说明未运行原因。
+
+Portal 交互手感自检（涉及 portal/聊天界面时逐项确认）：
+
+- [ ] 按钮、chip、列表项按下有缩放反馈，禁用态没有。
+- [ ] 手机上点击没有系统灰色高亮块。
+- [ ] 可滚动列表边缘按滚动位置渐隐。
+- [ ] 带边框的容器内部没有再套一层边框。
+- [ ] 打开右侧面板、拖窄会话栏后，composer 工具栏不挤压、不断字。
+- [ ] 弹出菜单可以只用键盘完成选择。
+- [ ] 中文输入法选字回车不会误发送。
+- [ ] 深色模式下没有白块，刷新页面首屏不闪白。
+- [ ] 新增颜色使用 `--portal-*` 语义 token，并已重新生成 `portal-dark.generated.css`。

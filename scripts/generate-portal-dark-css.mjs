@@ -114,6 +114,34 @@ function format([r, g, b], a) {
 
 const lerp = (from, to, t) => from + (to - from) * t;
 
+// Neutral light colours resolve to the hand-tuned semantic tokens in
+// features/portal/portal-tokens.css, so every dark surface, text and line comes
+// from one ladder instead of a per-colour guess.
+function tokenRef(name, alpha) {
+  if (alpha >= 0.999) return `var(${name})`;
+  return `color-mix(in srgb, var(${name}) ${Number((alpha * 100).toFixed(1))}%, transparent)`;
+}
+
+function semanticToken(color, hsl, role) {
+  const pastel = hsl.s > 0.3 && hsl.l < 0.985;
+  if (role === "surface") {
+    if (pastel) return null;
+    if (hsl.l >= 0.99) return "--portal-surface-1";
+    if (hsl.l >= 0.965) return "--portal-surface-2";
+    if (hsl.l >= 0.93) return "--portal-surface-3";
+    return null;
+  }
+  if (role === "text") {
+    if (hsl.s > 0.35 || hsl.l >= 0.55) return null;
+    return hsl.l < 0.3 ? "--portal-text-1" : "--portal-text-2";
+  }
+  if (role === "line") {
+    if (hsl.l < 0.6 || hsl.s > 0.6) return null;
+    return hsl.l >= 0.93 ? "--portal-line-subtle" : "--portal-line";
+  }
+  return null;
+}
+
 /** role: "surface" | "text" | "line" */
 function mapColor(token, role) {
   const color = parseColor(token);
@@ -124,6 +152,8 @@ function mapColor(token, role) {
   if (role !== "text" && color.a < 0.5 && hsl.l < 0.35 && !vivid) {
     return format([255, 255, 255], Math.min(0.24, color.a * 1.4 + 0.02));
   }
+  const semantic = vivid ? null : semanticToken(color, hsl, role);
+  if (semantic) return tokenRef(semantic, color.a);
   if (role === "text") {
     if (hsl.l >= 0.55) return token; // already light (text on coloured fills)
     if (vivid) return format(fromHsl({ ...hsl, l: Math.max(hsl.l, 0.62) }), color.a);

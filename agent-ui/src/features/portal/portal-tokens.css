@@ -1,0 +1,66 @@
+/*
+ * Portal semantic surface tokens.
+ *
+ * One ladder of four surfaces, three text levels and two line weights, defined
+ * once for light and once (hand-tuned) for dark. Neighbouring layers differ by a
+ * single step so depth reads from a quiet luminance change instead of heavy
+ * borders. Feature tokens (--workbench-*, --roadmap-*) alias these.
+ *
+ * Not a source of scripts/generate-portal-dark-css.mjs on purpose: the dark
+ * values below are chosen by hand rather than derived from the light ones.
+ */
+:root {
+  --portal-surface-0: #f7f9fa;
+  --portal-surface-1: #ffffff;
+  --portal-surface-2: #f7f7f8;
+  --portal-surface-3: #eff0f2;
+  --portal-text-1: #111827;
+  --portal-text-2: #6b7280;
+  --portal-text-3: #9ca3af;
+  --portal-line-subtle: #f0f0f0;
+  --portal-line: #e5e7eb;
+}
+
+:root[data-portal-theme="dark"] {
+  --portal-surface-0: #141518;
+  --portal-surface-1: #1c1d21;
+  --portal-surface-2: #232429;
+  --portal-surface-3: #2c2e33;
+  --portal-text-1: #e7e8eb;
+  --portal-text-2: #9a9ea8;
+  --portal-text-3: #6f737c;
+  --portal-line-subtle: #26282d;
+  --portal-line: #2f3137;
+}
+
+/*
+ * First paint for dark-mode users. index.html sets data-portal-theme-boot before
+ * React mounts so the loading screens do not flash white; it is cleared as soon
+ * as the portal applies the real theme or a non-portal screen renders.
+ */
+:root[data-portal-theme-boot="dark"] {
+  color-scheme: dark;
+  background: #141518;
+}
+
+:root[data-portal-theme-boot="dark"] body,
+:root[data-portal-theme-boot="dark"] .auth-modern-screen {
+  background: #141518;
+  background-image: none;
+}
+
+:root[data-portal-theme-boot="dark"] .auth-modern-card {
+  border-color: #2f3137;
+  background: #1c1d21;
+  box-shadow: none;
+  color: #e7e8eb;
+}
+
+:root[data-portal-theme-boot="dark"] .auth-modern-subtitle,
+:root[data-portal-theme-boot="dark"] .auth-eyebrow {
+  color: #9a9ea8;
+}
+
+:root[data-portal-theme-boot="dark"] .auth-modern-logo {
+  color: #e7e8eb;
+}

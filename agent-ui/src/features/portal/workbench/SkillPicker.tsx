@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Avatar, Button, Drawer, Input, Modal, Popover, Spin, Tooltip } from "antd";
+import { Avatar, Button, Drawer, Input, Modal, Popover, Spin, Tooltip, type InputRef } from "antd";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -34,6 +34,7 @@ import {
 import type { RuntimeModeSnapshot } from "../../modes/types";
 import { useIsNarrowScreen } from "../../../lib/use-is-narrow-screen";
 import { usePortalI18n, type PortalLocale } from "../i18n";
+import { isRovingGridKey, measureGridColumns, nextRovingGridIndex } from "./roving-focus";
 import {
   fetchPortalManagedSkillSharing,
   updatePortalManagedSkillSharing,
@@ -369,6 +370,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   const [sharingAnnouncementOpen, setSharingAnnouncementOpen] = useState(false);
   const [sharingAnnouncementTarget, setSharingAnnouncementTarget] = useState<SharingAnnouncementTarget>("create");
   const panelRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<InputRef>(null);
+  const cardGridRef = useRef<HTMLDivElement>(null);
 
   const allSkills = useMemo(() => [...availableSkills, ...automaticSkills], [automaticSkills, availableSkills]);
   const skillById = useMemo(() => new Map(allSkills.map((skill) => [skill.id, skill] as const)), [allSkills]);
@@ -503,6 +506,44 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     if (isMobile) setMobileStep("detail");
   };
 
+  const skillCardElements = () =>
+    Array.from(cardGridRef.current?.querySelectorAll<HTMLButtonElement>(".portal-skill-card") ?? []);
+
+  /** Moves keyboard focus to a card and previews it, without the mobile detail jump. */
+  const moveCardFocus = (index: number) => {
+    const skill = filteredSkills[index];
+    if (!skill) return;
+    setFocusedSkillId(skill.id);
+    skillCardElements()[index]?.focus();
+  };
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if ((event.key === "ArrowDown" || event.key === "Enter") && filteredSkills.length > 0) {
+      event.preventDefault();
+      const focusedIndex = filteredSkills.findIndex((skill) => skill.id === focusedSkill?.id);
+      moveCardFocus(event.key === "Enter" || focusedIndex < 0 ? 0 : focusedIndex);
+    }
+  };
+
+  const handleCardGridKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!isRovingGridKey(event.key)) return;
+    const cards = skillCardElements();
+    const current = cards.indexOf(event.target as HTMLButtonElement);
+    if (current < 0) return;
+    const next = nextRovingGridIndex({
+      current,
+      count: cards.length,
+      columns: measureGridColumns(cards),
+      key: event.key,
+      rtl: getComputedStyle(event.currentTarget).direction === "rtl"
+    });
+    if (next === null) return;
+    event.preventDefault();
+    if (next === "before") searchInputRef.current?.focus();
+    else moveCardFocus(next);
+  };
+
   const focusCreateSkill = () => {
     const createSkill = availableSkills.find((skill) => skill.presentation.shortcutKey === "create_skill");
     if (!createSkill) return;
@@ -596,8 +637,10 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
           ) : <Button icon={<Plus size={16} />} onClick={focusCreateSkill}>{copy.create}</Button>}
         </div>
         <Input
+          ref={searchInputRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={handleSearchKeyDown}
           prefix={<Search size={17} aria-hidden="true" />}
           placeholder={copy.search}
           aria-label={copy.search}
@@ -629,7 +672,13 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
             </button>
           ))}
         </div>
-        <div className="portal-skill-card-grid">
+        <div
+          ref={cardGridRef}
+          className="portal-skill-card-grid"
+          role="group"
+          aria-label={copy.title}
+          onKeyDown={handleCardGridKeyDown}
+        >
           {filteredSkills.length > 0 ? filteredSkills.map((skill) => {
             const selected = enabledSkillIds.includes(skill.id);
             const focused = focusedSkill?.id === skill.id;
@@ -638,6 +687,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
                 key={skill.id}
                 type="button"
                 className={`portal-skill-card${focused ? " is-focused" : ""}${selected ? " is-enabled" : ""}`}
+                tabIndex={focused ? 0 : -1}
+                aria-current={focused ? "true" : undefined}
                 onClick={() => focusSkill(skill)}
               >
                 <SkillGlyph skill={skill} size={24} />

@@ -60,7 +60,7 @@
 .portal-composer-tools-left .local-workspace-error { position: absolute; bottom: 100%; background: var(--workbench-surface, white); border: 1px solid var(--workbench-border, #eee); border-radius: 8px; max-width: min(400px, 90vw); }
 .aui-edit-composer-root .portal-inline-input-wrap { min-width: 0; }
 .portal-workbench-root .thread-wrap .aui-composer-root { border-radius: 24px; padding: 12px; }
-.portal-workbench-root .portal-composer-tools-row { border-top: 1px solid var(--workbench-border, #e7e9ef); padding-top: 8px; }
+.portal-workbench-root .portal-composer-tools-row { padding-top: 4px; }
 .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger { border-radius: 10px; font-family: inherit; font-weight: 500; font-size: 14px; }
 .portal-workbench-root .portal-composer-skill-trigger-text { font: inherit; }
 .portal-workbench-root .thread-wrap .portal-composer-tools-row .aui-composer-attach,

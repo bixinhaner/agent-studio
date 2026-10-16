@@ -15,11 +15,11 @@
   --portal-motion-slow: var(--motion-slow);
   --portal-ease-standard: var(--ease-standard);
   --portal-ease-enter: var(--ease-emphasized);
-  --roadmap-surface: #ffffff;
-  --roadmap-surface-soft: #f7f7f8;
-  --roadmap-line: #ecebe8;
-  --roadmap-text: #1f2328;
-  --roadmap-muted: #6b7280;
+  --roadmap-surface: var(--portal-surface-1);
+  --roadmap-surface-soft: var(--portal-surface-2);
+  --roadmap-line: var(--portal-line);
+  --roadmap-text: var(--portal-text-1);
+  --roadmap-muted: var(--portal-text-2);
   --roadmap-accent: rgb(var(--brand-primary-rgb, 255 70 20));
   --roadmap-accent-soft: rgb(var(--brand-primary-rgb, 255 70 20) / 0.1);
   --roadmap-success: #16a34a;

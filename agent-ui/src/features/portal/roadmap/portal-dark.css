@@ -1,11 +1,6 @@
 /* C1 portal dark mode: hand-tuned tokens layered on top of the generated overrides. */
 :root[data-portal-theme="dark"] {
   color-scheme: dark;
-  --roadmap-surface: #1c1d21;
-  --roadmap-surface-soft: #232429;
-  --roadmap-line: #2f3137;
-  --roadmap-text: #e7e8eb;
-  --roadmap-muted: #9a9ea8;
   --roadmap-accent-soft: rgb(var(--brand-primary-rgb, 255 70 20) / 0.16);
   --roadmap-success: #3fbf74;
   /* assistant-ui primitives */
@@ -27,8 +22,8 @@
 
 :root[data-portal-theme="dark"] body,
 :root[data-portal-theme="dark"] .portal-workbench-root {
-  background: #141518;
-  color: #e7e8eb;
+  background: var(--portal-surface-0);
+  color: var(--portal-text-1);
 }
 
 :root[data-portal-theme="dark"] ::selection { background: rgb(var(--brand-primary-rgb, 255 70 20) / 0.35); }

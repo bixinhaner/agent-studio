@@ -13,6 +13,7 @@ import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
 import { canAccessPortalTraining } from "./features/portal/training-access";
+import { clearPortalThemeBoot } from "./features/portal/roadmap/portal-theme-boot";
 import { resolvePortalLocaleForBrand } from "./features/portal/i18n";
 import { localizeBrandingLoginCopy, loginCopy, type LoginCopyKey } from "./features/auth/login-copy";
 import { fetchPublicExternalWebAccessState } from "./features/external-web-access/api";
@@ -583,6 +584,20 @@ function AppContent(props: {
     if (!isNeutralAuthEntryPath(props.pathname) || isInternalLoginPath(props.pathname)) return;
     replaceLocationPath("/login/internal");
   }, [auth.loading, auth.user, effectiveAuthMode, props.pathname]);
+
+  // The dark first-paint mark only belongs to the portal; drop it as soon as this
+  // render settles on any other screen.
+  const rendersPortalOrLoading =
+    props.externalWebAccessLoading ||
+    auth.loading ||
+    (Boolean(auth.user) &&
+      !(props.externalWebMaintenanceEnabled && isExternalWebActor) &&
+      !props.reviewRequestId &&
+      !props.aiResponseReviewId &&
+      !(adminEligible && view === "admin"));
+  useEffect(() => {
+    if (!rendersPortalOrLoading) clearPortalThemeBoot();
+  }, [rendersPortalOrLoading]);
 
   if (props.externalWebAccessLoading && !isInternalLoginPath(props.pathname)) {
     return <AccessStateLoadingFallback />;
