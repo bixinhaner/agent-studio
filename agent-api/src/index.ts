@@ -480,7 +480,7 @@ import {
 import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
-import { createLocalBridgeRouter } from "./local-bridge-router.js";
+import { createLocalBridgeRouter, localBridgeBodyErrorHandler } from "./local-bridge-router.js";
 import { bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace } from "./local-bridge-service.js";
 import { localWorkspaceSnapshot } from "./local-bridge-audit.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
@@ -11600,7 +11600,8 @@ app.post(
     }
   }
 );
-app.use("/api/local-bridge", express.json({ limit: "4mb" }));
+// File reads travel as base64 (2 MB files become ~2.7 MB); oversized results are failed explicitly.
+app.use("/api/local-bridge", express.json({ limit: "16mb" }), localBridgeBodyErrorHandler(db));
 app.use(express.json({ limit: "1mb" }));
 
 // Mutating requests still being handled here; a retiring chat slot exits only

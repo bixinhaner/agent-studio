@@ -7,9 +7,9 @@ function tool(name: string, description: string, properties: Record<string, unkn
 export const localBridgeTools = [
   tool('workspace_info', 'Inspect the bound computer environment and root AGENTS.md. Call first before local work.'),
   tool('list', 'List files on the user computer.', { path: str }),
-  tool('read', 'Read a local text or base64 file, up to 2 MB.', { path: str, encoding: { enum: ['utf8', 'base64'] } }, ['path']),
+  tool('read', 'Read a local file, up to 2 MB. Text is decoded with its detected encoding (UTF-8, UTF-16, GB18030), reported as `encoding`; binary files return `binary: true` and a note instead of text. Use encoding base64 for the exact bytes.', { path: str, encoding: { enum: ['utf8', 'base64'] } }, ['path']),
   tool('write', 'Create or overwrite a local file. Parent must exist.', { path: str, content: str, encoding: { enum: ['utf8', 'base64'] } }, ['path', 'content']),
-  tool('edit', 'Replace exact text in a local file. The match must be unique unless replace_all.', { path: str, old_text: str, new_text: str, replace_all: bool }, ['path', 'old_text', 'new_text']),
+  tool('edit', 'Replace exact text in a local file, keeping its encoding and BOM. The match must be unique unless replace_all.', { path: str, old_text: str, new_text: str, replace_all: bool }, ['path', 'old_text', 'new_text']),
   tool('mkdir', 'Create a local directory.', { path: str }, ['path']),
   tool('move', 'Move or rename a local file/directory.', { path: str, destination: str }, ['path', 'destination']),
   tool('delete', 'Delete a local file/directory.', { path: str, recursive: bool }, ['path']),

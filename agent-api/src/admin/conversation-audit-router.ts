@@ -67,6 +67,7 @@ import {
 import { UsageEventRepository, type UsageEventRecord, type UsageEventRepositoryDb } from "../persistence/usage-event-repository.js";
 import { isBrandEmployeeMembership } from "../auth/portal-audience.js";
 import { ConversationRecordService } from "../operations/conversation-record-service.js";
+import { decodeStoredJson } from "../local-bridge-result.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
 import { ConversationSummaryIndex, type SummaryIndexRawDb } from "./conversation-summary-index.js";
@@ -2828,7 +2829,7 @@ export function createConversationAuditRouter(options: {
         res.status(404).json({ detail: "本地操作记录不存在" });
         return;
       }
-      res.json({ operation: { ...summarizeLocalOperation(row), args: row.args ?? null, result: row.result ?? null } });
+      res.json({ operation: { ...summarizeLocalOperation(row), args: decodeStoredJson(row.args) ?? null, result: decodeStoredJson(row.result) ?? null } });
     } catch (error) {
       res.status(500).json({ detail: error instanceof Error ? error.message : "加载本地操作详情失败" });
     }

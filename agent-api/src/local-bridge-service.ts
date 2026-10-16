@@ -1,7 +1,8 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cancelLocalOperations, recordBindingEvent, recordLocalOperation } from './local-bridge-audit.js';
+import { cancelLocalOperations, completeLocalOperation, recordBindingEvent, recordLocalOperation } from './local-bridge-audit.js';
+import { LOCAL_META_KEY, decodeStoredJson, encodeStoredJson, planLocalEdit, prepareLocalCommand } from './local-bridge-result.js';
 export const bridgeHash = (value: string) => createHash('sha256').update(value).digest('hex');
 export const bridgeOnline = (device: any) => device?.status === 'active' && device.lastSeenAt && Date.now() - new Date(device.lastSeenAt).getTime() < 15000;
 const include = { root: { include: { device: true } }, thread: true };
@@ -41,19 +42,57 @@ export async function bindLocalRoot(db: any, userId: string, threadId: string, r
   await recordBindingEvent(db, { threadId, userId, from: old, to: next });
   return next;
 }
-export async function enqueueLocalCommand(db: any, binding: any, op: string, args: any, requestId: string = randomUUID(), source: 'agent' | 'portal' = 'agent') {
+export async function enqueueLocalCommand(db: any, binding: any, op: string, args: any, requestId: string = randomUUID(), source: 'agent' | 'portal' = 'agent', options: { auditArgs?: any; audit?: boolean } = {}) {
   if (!bridgeOnline(binding.root.device)) throw new Error('LOCAL_COMPUTER_OFFLINE: Open the desktop client, then continue on the same computer. Do not substitute cloud files or repeat an uncertain command.');
-  const command = await db.localBridgeCommand.upsert({ where: { id: requestId }, update: {}, create: { id: requestId, deviceId: binding.root.deviceId, threadId: binding.threadId, bindingId: binding.id, rootId: binding.rootId, op, args, deadline: new Date(Date.now() + 10 * 60000) } });
+  const command = await db.localBridgeCommand.upsert({ where: { id: requestId }, update: {}, create: { id: requestId, deviceId: binding.root.deviceId, threadId: binding.threadId, bindingId: binding.id, rootId: binding.rootId, op, args: encodeStoredJson(args), deadline: new Date(Date.now() + 10 * 60000) } });
   // Full args are kept in the audit log; the delivery row clears them once completed.
-  await recordLocalOperation(db, { ...command, args }, binding, source);
+  if (options.audit !== false) await recordLocalOperation(db, { ...command, args: encodeStoredJson(options.auditArgs ?? args) }, binding, source);
   return command;
+}
+/**
+ * Agent tool calls: reads travel as bytes and are decoded on the server, Windows commands
+ * print UTF-8, and edits keep the file's encoding (read bytes, replace, write bytes).
+ */
+export async function runLocalTool(db: any, binding: any, op: string, args: any, requestId: string) {
+  if (op === 'edit') return editLocalFile(db, binding, args, requestId);
+  const prepared = prepareLocalCommand(op, args, binding.root?.device?.platform);
+  const command = await enqueueLocalCommand(db, binding, op, prepared.args, requestId, 'agent', { auditArgs: prepared.auditArgs });
+  if (command.bindingId !== binding.id) throw Object.assign(new Error('Request does not belong to this task'), { status: 403 });
+  return waitLocalCommand(db, command.id);
+}
+const editReadId = (requestId: string) => `${requestId}-read`;
+async function editLocalFile(db: any, binding: any, args: any, requestId: string) {
+  const existing = await db.localBridgeCommand.findUnique({ where: { id: requestId } });
+  if (existing) {
+    if (existing.bindingId !== binding.id) throw Object.assign(new Error('Request does not belong to this task'), { status: 403 });
+    return waitLocalCommand(db, requestId);
+  }
+  const read = await enqueueLocalCommand(db, binding, 'read', { path: args?.path, encoding: 'base64' }, editReadId(requestId), 'agent', { audit: false });
+  if (read.bindingId !== binding.id) throw Object.assign(new Error('Request does not belong to this task'), { status: 403 });
+  await recordLocalOperation(db, { ...read, id: requestId, op: 'edit', args: encodeStoredJson(args) }, binding, 'agent');
+  const source = await waitLocalCommand(db, read.id);
+  if (source?.pending) return { ...source, request_id: requestId };
+  const plan = planLocalEdit(source, args);
+  if (!plan.ok) { await completeLocalOperation(db, requestId, encodeStoredJson(plan)); return plan; }
+  await enqueueLocalCommand(db, binding, 'write', { path: args.path, content: plan.content, encoding: 'base64', [LOCAL_META_KEY]: { edit: { replacements: plan.replacements, encoding: plan.encoding } } }, requestId, 'agent', { audit: false });
+  return waitLocalCommand(db, requestId);
+}
+/** local_request_result for an edit whose write was never queued reports why instead of REQUEST_NOT_FOUND. */
+export async function recoverLocalRequest(db: any, binding: any, requestId: string) {
+  const command = await db.localBridgeCommand.findFirst({ where: { id: requestId, bindingId: binding.id } });
+  if (command) return waitLocalCommand(db, command.id);
+  const read = await db.localBridgeCommand.findFirst({ where: { id: editReadId(requestId), bindingId: binding.id } });
+  if (!read) return { ok: false, error: 'REQUEST_NOT_FOUND' };
+  const source = await waitLocalCommand(db, read.id);
+  if (source?.pending || source?.ok === false) return { ...source, request_id: requestId };
+  return { ok: false, error: 'EDIT_NOT_APPLIED', request_id: requestId, message: 'This edit did not write the file. It is safe to retry it.' };
 }
 export async function waitLocalCommand(db: any, id: string, waitMs = 20000) {
   const until = Date.now() + waitMs;
   do {
     const command = await db.localBridgeCommand.findUnique({ where: { id } });
     if (!command) return { ok: false, error: 'REQUEST_NOT_FOUND' };
-    if (command.status === 'completed') return command.result;
+    if (command.status === 'completed') return decodeStoredJson(command.result);
     if (command.status === 'cancelled') return { ok: false, error: 'TASK_CANCELLED' };
     if (new Date(command.deadline).getTime() < Date.now()) return { ok: false, error: 'REQUEST_EXPIRED_OUTCOME_UNKNOWN', request_id: id };
     await new Promise(resolve => setTimeout(resolve, 250));

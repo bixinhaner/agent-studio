@@ -1,10 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, enqueueLocalCommand, localBridgeBinding, waitLocalCommand } from './local-bridge-service.js';
+import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, enqueueLocalCommand, localBridgeBinding, recoverLocalRequest, runLocalTool, waitLocalCommand } from './local-bridge-service.js';
 import { localBridgeTools } from './local-bridge-tools.js';
 import { cancelLocalOperations, completeLocalOperation } from './local-bridge-audit.js';
-import { storableLocalResult } from './local-bridge-result.js';
+import { decodeStoredJson, deliveryFailedResult, encodeStoredJson, isDeterministicStorageError, presentLocalResult } from './local-bridge-result.js';
 const rootInclude = { roots: true };
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, _next: NextFunction) => { void fn(req, res).catch(error => res.status(error.status || (error instanceof z.ZodError ? 400 : 400)).json({ detail: error.message || 'Local computer request failed' })); };
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
@@ -30,6 +30,15 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     const d = await db.localBridgeDevice.findFirst({ where: { tokenHash: bridgeHash(bearer(req)), status: 'active' }, include: rootInclude });
     if (!d) return fail('Invalid device token', 401);
     return d;
+  }
+  async function completeLocalCommand(where: any, result: Record<string, unknown>) {
+    const stored = encodeStoredJson(result);
+    const completed = await db.localBridgeCommand.updateMany({ where, data: { status: 'completed', result: stored, args: {} } });
+    if (completed.count) await completeLocalOperation(db, where.id, stored);
+  }
+  // Any authenticated request proves the client is running, including result retries.
+  async function markSeen(d: any) {
+    if (!d.lastSeenAt || Date.now() - new Date(d.lastSeenAt).getTime() > 4000) await db.localBridgeDevice.update({ where: { id: d.id }, data: { lastSeenAt: new Date() } });
   }
   async function ownedThread(req: Request) {
     const u = user(req);
@@ -115,7 +124,7 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
   }));
   router.post('/agent/poll', wrap(async (req, res) => {
     const d = await agent(req);
-    if (!d.lastSeenAt || Date.now() - d.lastSeenAt.getTime() > 4000) await db.localBridgeDevice.update({ where: { id: d.id }, data: { lastSeenAt: new Date() } });
+    await markSeen(d);
     const now = new Date();
     const eligible = { deviceId: d.id, deadline: { gt: now }, OR: [{ status: 'pending' }, { status: 'leased', leaseUntil: { lt: now } }] };
     for (let i = 0; i < 3; i++) {
@@ -125,25 +134,32 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
       if (command.bindingId && !await db.localBridgeBinding.findUnique({ where: { id: command.bindingId } })) { await db.localBridgeCommand.update({ where: { id: command.id }, data: { status: 'cancelled' } }); await cancelLocalOperations(db, { id: command.id }); continue; }
       const lease = randomUUID();
       const claimed = await db.localBridgeCommand.updateMany({ where: { id: command.id, ...eligible }, data: { status: 'leased', lease, leaseUntil: new Date(Date.now() + 30000) } });
-      if (claimed.count) return res.json({ command: { id: command.id, op: command.op, args: command.args, rootId: command.rootId, threadId: command.threadId, lease } });
+      if (claimed.count) return res.json({ command: { id: command.id, op: command.op, args: decodeStoredJson(command.args), rootId: command.rootId, threadId: command.threadId, lease } });
     }
     res.json({ command: null });
   }));
   router.post('/agent/result', wrap(async (req, res) => {
     const d = await agent(req); const input = z.object({ id: z.string(), lease: z.string(), result: z.record(z.unknown()) }).parse(req.body);
+    await markSeen(d).catch(() => {});
     const where = { id: input.id, deviceId: d.id, status: 'leased', lease: input.lease };
-    let result = storableLocalResult(input.result);
-    let completed;
+    let command;
+    try { command = await db.localBridgeCommand.findFirst({ where }); }
+    catch { return res.status(503).json({ detail: 'Result not stored yet; retry.' }); }
+    // A stale lease (already delivered, cancelled or expired) is acknowledged so the client moves on.
+    if (!command) return res.json({ acknowledged: true });
+    let result: Record<string, unknown>;
+    try { result = presentLocalResult(command.op, decodeStoredJson(command.args), input.result); }
+    catch (error) { result = deliveryFailedResult(input.id, `RESULT_UNREADABLE: ${error instanceof Error ? error.message : String(error)}`); }
     try {
-      completed = await db.localBridgeCommand.updateMany({ where, data: { status: 'completed', result, args: {} } });
+      await completeLocalCommand(where, result);
     } catch (error) {
-      // Never leave the client retrying a result that cannot be stored: it takes no new work meanwhile.
       const detail = error instanceof Error ? error.message : String(error);
-      console.warn('local bridge result could not be stored', { id: input.id, deviceId: d.id, detail: detail.slice(0, 500) });
-      result = { ok: false, error: 'RESULT_NOT_STORABLE', message: 'The computer finished this step but its result could not be saved. Retry it with a smaller or base64-encoded result.' };
-      completed = await db.localBridgeCommand.updateMany({ where, data: { status: 'completed', result, args: {} } });
+      console.warn('local bridge result could not be stored', { id: input.id, deviceId: d.id, op: command.op, detail: detail.slice(0, 500) });
+      // Transient (database outage): ask the client to retry the same result; it never re-executes.
+      if (!isDeterministicStorageError(error)) return res.status(503).json({ detail: 'Result not stored yet; retry.' });
+      try { await completeLocalCommand(where, deliveryFailedResult(input.id, `RESULT_NOT_STORABLE: ${detail.split('\n').pop()}`)); }
+      catch { return res.status(503).json({ detail: 'Result not stored yet; retry.' }); }
     }
-    if (completed.count) await completeLocalOperation(db, input.id, result);
     res.json({ acknowledged: true });
   }));
   router.post('/mcp/rpc', wrap(async (req, res) => {
@@ -155,19 +171,38 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     else if (rpc.method === 'tools/call') {
       const name = rpc.params?.name; const args = rpc.params?.arguments || {};
       if (!localBridgeTools.some(t => t.name === name)) return fail('Unknown local tool');
-      let output;
-      if (name === 'local_request_result') {
-        const command = await db.localBridgeCommand.findFirst({ where: { id: String(args.request_id), bindingId: binding.id } });
-        output = command ? await waitLocalCommand(db, command.id) : { ok: false, error: 'REQUEST_NOT_FOUND' };
-      } else {
-        const requestId = z.string().uuid().parse(req.body.request_id);
-        const command = await enqueueLocalCommand(db, binding, name.slice(6), args, requestId);
-        if (command.bindingId !== binding.id) return fail('Request does not belong to this task', 403);
-        output = await waitLocalCommand(db, command.id);
-      }
+      const output = name === 'local_request_result'
+        ? await recoverLocalRequest(db, binding, String(args.request_id))
+        : await runLocalTool(db, binding, name.slice(6), args, z.string().uuid().parse(req.body.request_id));
       result = { content: [{ type: 'text', text: JSON.stringify(output) }], isError: output?.ok === false };
     } else return res.json({ jsonrpc: '2.0', id: rpc.id, error: { code: -32601, message: 'Method not found' } });
     res.json({ jsonrpc: '2.0', id: rpc.id, result });
   }));
   return router;
+}
+
+/**
+ * A result the body parser rejects (too large, malformed) can never be accepted, and the
+ * client would resend it forever while taking no new work. The client runs one command at a
+ * time, so its most recently leased command is the one being delivered: fail that command
+ * explicitly and acknowledge, keeping the computer usable. Mount right after express.json().
+ */
+export function localBridgeBodyErrorHandler(db: any) {
+  return (error: any, req: Request, res: Response, next: NextFunction) => {
+    if (req.path !== '/agent/result' || !['entity.too.large', 'entity.parse.failed'].includes(error?.type) || !bearer(req)) return next(error);
+    void (async () => {
+      const d = await db.localBridgeDevice.findFirst({ where: { tokenHash: bridgeHash(bearer(req)), status: 'active' } });
+      if (!d) return next(error);
+      await db.localBridgeDevice.update({ where: { id: d.id }, data: { lastSeenAt: new Date() } });
+      const command = await db.localBridgeCommand.findFirst({ where: { deviceId: d.id, status: 'leased' }, orderBy: { leaseUntil: 'desc' } });
+      if (command) {
+        const reason = error.type === 'entity.too.large' ? `RESULT_TOO_LARGE: ${error.length ?? 'unknown'} bytes exceeds ${error.limit} bytes` : 'RESULT_MALFORMED: the result was not valid JSON';
+        console.warn('local bridge result rejected by body parser', { id: command.id, deviceId: d.id, reason });
+        const stored = encodeStoredJson(deliveryFailedResult(command.id, reason));
+        const completed = await db.localBridgeCommand.updateMany({ where: { id: command.id, status: 'leased' }, data: { status: 'completed', result: stored, args: {} } });
+        if (completed.count) await completeLocalOperation(db, command.id, stored);
+      }
+      res.json({ acknowledged: true });
+    })().catch(() => res.status(503).json({ detail: 'Result not stored yet; retry.' }));
+  };
 }

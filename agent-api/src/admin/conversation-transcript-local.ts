@@ -1,3 +1,5 @@
+import { decodeStoredJson } from "../local-bridge-result.js";
+
 /**
  * Local-computer activity in the admin transcript: where each turn ran (cloud or a
  * folder on the user's computer), what the agent did there, and when the user switched
@@ -138,7 +140,9 @@ function normalizeStatus(status: string, createdAt: string | null, now: number):
   return "unknown";
 }
 
-export function summarizeLocalOperation(row: LocalOperationLogRow, now = Date.now()): TranscriptLocalOperation {
+export function summarizeLocalOperation(stored: LocalOperationLogRow, now = Date.now()): TranscriptLocalOperation {
+  // Values jsonb cannot hold are stored wrapped; see local-bridge-result.ts.
+  const row = { ...stored, args: decodeStoredJson(stored.args), result: decodeStoredJson(stored.result) };
   const args = asRecord(row.args);
   const result = asRecord(row.result);
   const createdAt = iso(row.createdAt);
