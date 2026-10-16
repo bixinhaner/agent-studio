@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldHydratePortalThreadSkills } from "./PortalShell";
+import { shouldHydratePortalThreadSkills } from "./thread-message-persistence";
 
 describe("training read-only thread isolation", () => {
   it("does not load ordinary workspace thread details for a training conversation", () => {
