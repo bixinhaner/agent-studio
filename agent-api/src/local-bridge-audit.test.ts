@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { bindLocalRoot, cancelLocalTask, enqueueLocalCommand } from './local-bridge-service.js';
+import { MIN_LOCAL_CLIENT_VERSION, bindLocalRoot, cancelLocalTask, enqueueLocalCommand } from './local-bridge-service.js';
 import { completeLocalOperation } from './local-bridge-audit.js';
 
 function fakeDb() {
-  const device = { id: 'dev-1', userId: 'user-1', name: 'Like MacBook', platform: 'darwin', status: 'active', lastSeenAt: new Date() };
+  const device = { id: 'dev-1', userId: 'user-1', name: 'Like MacBook', platform: 'darwin', status: 'active', lastSeenAt: new Date(), clientVersion: MIN_LOCAL_CLIENT_VERSION };
   const roots = [
     { id: 'root-a', deviceId: 'dev-1', path: '/Users/like/a', label: null, device },
     { id: 'root-b', deviceId: 'dev-1', path: '/Users/like/b', label: 'Project B', device }

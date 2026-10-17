@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import * as isolation from "./workload-isolation.js";
 import path from "node:path";
@@ -648,10 +649,14 @@ describe("Codex app-server runtime", () => {
 
   it("prefers the project-pinned Codex binary when no override is configured", () => {
     delete process.env.CODEX_APP_SERVER_BINARY;
+    const projectBinary = path.resolve(process.cwd(), "node_modules/.bin/codex");
 
-    expect(resolveCodexAppServerBinaryPath()).toBe(
-      path.resolve(process.cwd(), "node_modules/.bin/codex")
-    );
+    // Developer checkouts may not install the pinned Codex package; the resolver then falls back.
+    if (existsSync(projectBinary)) {
+      expect(resolveCodexAppServerBinaryPath()).toBe(projectBinary);
+    } else {
+      expect(resolveCodexAppServerBinaryPath()).not.toBe(projectBinary);
+    }
   });
 
   it("creates only one app-server when the same scope is requested concurrently", async () => {
