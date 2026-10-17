@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { assistantConversationId } from "./conversation.js";
 import { executionRequestSchema } from "./contracts.js";
-import { definition } from "./fixtures.js";
+import { connectorDb, definition } from "./fixtures.js";
 import { executeAssistant } from "./engine.js";
 
 function request() {
@@ -62,7 +62,7 @@ describe("assistant conversation continuity", () => {
     const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
     const findMany = vi.fn(async () => [{ operationId: "get.devices" }]);
     for (let i = 0; i < 2; i++) {
-      await executeAssistant({ db: { connectorToolInvocation: { findMany } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
+      await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
         run: { ...run(), connectorId: "c" }, request: r, signal: new AbortController().signal } as never);
     }
     const first = (streamChat.mock.calls[0][0] as unknown as {request: {conversationId: string; clientRunId: string; message: string; context: unknown}}).request;
@@ -76,7 +76,7 @@ describe("assistant conversation continuity", () => {
     expect(findMany.mock.calls).toHaveLength(2);
     // A remembered result cannot pass the current-run evidence gate by itself.
     findMany.mockResolvedValue([]);
-    await expect(executeAssistant({ db: { connectorToolInvocation: { findMany } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
+    await expect(executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
       run: { ...run(), connectorId: "c" }, request: r, signal: new AbortController().signal } as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
   });
 });

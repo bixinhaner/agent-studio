@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOSS Operations"
+  short_description: "Help customer-service and operations users investigate customers, balances, recharges, charges, and orders"
+  default_prompt: "Use $boss-operations to complete the investigation. Load the BOSS API handbook first, reuse proven operations, and stop when evidence is sufficient. Answer in the user's language with the conclusion, supporting evidence, and useful next action; hide APIs, tools, handbook internals, and execution details unless the user explicitly asks for diagnostics."

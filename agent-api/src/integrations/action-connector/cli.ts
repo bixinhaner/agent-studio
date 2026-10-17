@@ -1,3 +1,5 @@
+import { OMC_API_PROFILE } from "./api-profile.js";
+
 export function actionConnectorCliSource(): string {
   return `#!/usr/bin/env node
 import { randomUUID } from "node:crypto";
@@ -14,6 +16,19 @@ function required(value, name) {
 function runtimeConfig() {
   const filePath = required(process.env.ACTION_CONNECTOR_RUNTIME_CONFIG, "ACTION_CONNECTOR_RUNTIME_CONFIG");
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+// The connector's admin-managed API profile; older runtime files fall back to OMC.
+const OMC_API_PROFILE = ${JSON.stringify(OMC_API_PROFILE)};
+
+function apiProfile(config) {
+  const profile = config && config.apiProfile && typeof config.apiProfile === "object" ? config.apiProfile : {};
+  return {
+    ...OMC_API_PROFILE,
+    ...profile,
+    catalog: { ...OMC_API_PROFILE.catalog, ...(profile.catalog || {}) },
+    handbook: { ...OMC_API_PROFILE.handbook, ...(profile.handbook || {}) }
+  };
 }
 
 function parseJsonArg(value, fallback) {
@@ -87,19 +102,31 @@ try {
   const config = runtimeConfig();
   if (command === "identity") {
     console.log(JSON.stringify(config.identity || {}, null, 2));
+  } else if (command === "profile") {
+    console.log(JSON.stringify(apiProfile(config), null, 2));
   } else if (command === "catalog" || command === "list" || command === "search") {
     const query = command === "catalog" || command === "search" ? args.join(" ").trim() : "";
+    const catalog = apiProfile(config).catalog;
     await submitToolRequest({
-      operationId: "get.agent.catalog",
+      operationId: catalog.searchOperationId,
       method: "GET",
-      path: "/api/v1/agent/catalog",
+      path: catalog.searchPath,
       query: query ? { q: query } : {}
     });
-  } else if (command === "describe") {
+  } else if (command === "categories") {
+    const catalog = apiProfile(config).catalog;
     await submitToolRequest({
-      operationId: "get.agent.catalog.describe",
+      operationId: catalog.categoriesOperationId,
       method: "GET",
-      path: "/api/v1/agent/catalog/describe",
+      path: catalog.categoriesPath,
+      query: {}
+    });
+  } else if (command === "describe") {
+    const catalog = apiProfile(config).catalog;
+    await submitToolRequest({
+      operationId: catalog.describeOperationId,
+      method: "GET",
+      path: catalog.describePath,
       query: { operationId: required(args[0], "operationId") }
     });
   } else if (command === "request") {
@@ -115,7 +142,7 @@ try {
       reason: typeof input.reason === "string" ? input.reason : undefined
     });
   } else {
-    throw new Error("Unknown command. Use identity, catalog, search, describe, or request.");
+    throw new Error("Unknown command. Use identity, profile, catalog, search, categories, describe, or request.");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

@@ -881,6 +881,10 @@ body.access-request-route #root {
   color: #b91c1c;
 }
 
+.admin-mono-input {
+  font-family: ui-monospace, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
 .field-input {
   width: 100%;
   min-height: 34px;

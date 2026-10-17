@@ -2,11 +2,14 @@ import { z } from "zod";
 
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "../action-connector/default-prompt.js";
+import { apiProfileSchema } from "../action-connector/api-profile.js";
 
 export const actionConnectorConfigSchema = z.object({
   displayName: z.string().trim().min(1),
   agentModeId: z.string().trim().min(1).default("default"),
   runtimePrompt: z.string().trim().max(24000).default(DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT),
+  // Admin-managed per connector; absent means the original OMC contract (resolveApiProfile).
+  apiProfile: apiProfileSchema.optional(),
   policy: z
     .object({
       allowReadActions: z.boolean().default(true),
@@ -55,8 +58,21 @@ export class ActionConnectorIntegrationAdapter {
         displayName: config.displayName,
         executionMode: "outbound_tool_bridge",
         agentModeId: config.agentModeId,
+        ...(config.apiProfile ? { apiProfile: config.apiProfile } : {}),
         policy: config.policy
       }
     };
   }
+}
+
+// Admin saves keep the stored apiProfile normalized and reject an invalid one
+// with a readable reason instead of failing later inside a run.
+export function normalizeActionConnectorApiProfile(config: Record<string, unknown>): Record<string, unknown> {
+  if (!Object.prototype.hasOwnProperty.call(config, "apiProfile")) return config;
+  const parsed = apiProfileSchema.safeParse(config.apiProfile ?? {});
+  if (!parsed.success) {
+    const reasons = parsed.error.issues.map((issue) => `${["apiProfile", ...issue.path].join(".")}: ${issue.message}`);
+    throw new Error(`API 配置无效：${reasons.join("；")}`);
+  }
+  return { ...config, apiProfile: parsed.data };
 }

@@ -3,6 +3,17 @@ import { Alert, Button, Card, Descriptions, Input, Segmented, Select, Space, Tag
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "./actionConnectorRuntimePrompt";
+import {
+  API_PROFILE_SECTIONS,
+  DEFAULT_ACTION_CONNECTOR_API_PROFILE,
+  parseApiProfile,
+  readApiProfileField,
+  sameApiProfile,
+  trimApiProfile,
+  validateApiProfile,
+  writeApiProfileField,
+  type ApiProfileFieldKey
+} from "./actionConnectorApiProfile";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
@@ -33,7 +44,8 @@ function asString(value: unknown): string {
 function buildDraft(detail: IntegrationDetail): ActionConnectorConfigDraft {
   return {
     displayName: asString(detail.config.displayName) || detail.instance.name,
-    runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT
+    runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
+    apiProfile: parseApiProfile(detail.config.apiProfile)
   };
 }
 
@@ -65,6 +77,8 @@ export function ActionConnectorIntegrationView(props: {
   const [validating, setValidating] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
+  const [profileErrors, setProfileErrors] = useState<Partial<Record<ApiProfileFieldKey, string>>>({});
+  const hasSavedProfile = Boolean(props.detail.config.apiProfile);
 
   useEffect(() => {
     setActiveTab("basic");
@@ -74,6 +88,7 @@ export function ActionConnectorIntegrationView(props: {
     setDraft(buildDraft(props.detail));
     setErrorText("");
     setSuccessText("");
+    setProfileErrors({});
   }, [props.detail]);
 
   async function handleSave() {
@@ -85,6 +100,20 @@ export function ActionConnectorIntegrationView(props: {
       setErrorText("请填写连接器显示名称");
       return;
     }
+    const apiProfile = trimApiProfile(draft.apiProfile);
+    const nextProfileErrors = validateApiProfile(apiProfile);
+    setProfileErrors(nextProfileErrors);
+    const firstInvalid = Object.keys(nextProfileErrors)[0];
+    if (firstInvalid) {
+      setErrorText("API 配置有误，请按字段提示修改");
+      document.getElementById(`api-profile-${firstInvalid}`)?.focus();
+      return;
+    }
+    // A connector that never had a profile stays on the defaults unless edited,
+    // so a later source-system provision can still seed its own profile.
+    const keepUnset = !hasSavedProfile && sameApiProfile(apiProfile, DEFAULT_ACTION_CONNECTOR_API_PROFILE);
+    const baseConfig = activeActionConnectorConfig(props.detail.config);
+    delete baseConfig.apiProfile;
 
     setSaving(true);
     setErrorText("");
@@ -95,9 +124,10 @@ export function ActionConnectorIntegrationView(props: {
         description: description.trim() || null,
         status,
         config: {
-          ...activeActionConnectorConfig(props.detail.config),
+          ...baseConfig,
           displayName: draft.displayName.trim(),
-          runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT
+          runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
+          ...(keepUnset ? {} : { apiProfile })
         }
       });
       props.onUpdated(detail);
@@ -183,6 +213,76 @@ export function ActionConnectorIntegrationView(props: {
               </Descriptions>
             </Card>
 
+            <Card
+              size="small"
+              title="API 配置"
+              className="antd-admin-card"
+              extra={<Tag>{hasSavedProfile ? "已保存自定义配置" : "未保存，使用默认（xOMC）"}</Tag>}
+            >
+              <Space direction="vertical" size={12} className="admin-full-width">
+                <Alert
+                  type="info"
+                  showIcon
+                  className="admin-alert-inline"
+                  message="后台助手按这里的路径发现接口、加载 API 手册和 Skill。来源系统首次接入时可写入初始值；保存后以这里为准，重新接入不会覆盖。"
+                />
+                {API_PROFILE_SECTIONS.map((section) => (
+                  <Space key={section.title} direction="vertical" size={6} className="admin-full-width">
+                    <Typography.Text strong>{section.title}</Typography.Text>
+                    <div className="resource-center-form-grid">
+                      {section.fields.map((field) => {
+                        const error = profileErrors[field.key];
+                        const inputId = `api-profile-${field.key}`;
+                        return (
+                          <label key={field.key} className="field" htmlFor={inputId}>
+                            <span className="field-label">{field.label}</span>
+                            <Input
+                              id={inputId}
+                              name={inputId}
+                              value={readApiProfileField(draft.apiProfile, field.key)}
+                              disabled={saving}
+                              spellCheck={false}
+                              autoComplete="off"
+                              status={error ? "error" : undefined}
+                              aria-invalid={error ? true : undefined}
+                              className={field.kind === "text" ? undefined : "admin-mono-input"}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setDraft((current) => ({ ...current, apiProfile: writeApiProfileField(current.apiProfile, field.key, value) }));
+                                setProfileErrors((current) => {
+                                  if (!current[field.key]) return current;
+                                  const next = { ...current };
+                                  delete next[field.key];
+                                  return next;
+                                });
+                              }}
+                            />
+                            {error ? (
+                              <span className="field-error" role="alert">{error}</span>
+                            ) : field.help ? (
+                              <span className="field-help">{field.help}</span>
+                            ) : null}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </Space>
+                ))}
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <Button
+                    type="default"
+                    disabled={saving}
+                    onClick={() => {
+                      setDraft((current) => ({ ...current, apiProfile: DEFAULT_ACTION_CONNECTOR_API_PROFILE }));
+                      setProfileErrors({});
+                    }}
+                  >
+                    恢复默认
+                  </Button>
+                </div>
+              </Space>
+            </Card>
+
             <Card size="small" title="Runtime Prompt" className="antd-admin-card">
               <Space direction="vertical" size={12} className="admin-full-width">
                 <Alert
@@ -203,7 +303,7 @@ export function ActionConnectorIntegrationView(props: {
                 </label>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                   <span className="field-help">
-                    可用占位符：{"{{displayName}}"}, {"{{conversationId}}"}, {"{{runId}}"}, {"{{locale}}"}, {"{{timezone}}"}, {"{{mode}}"}, {"{{policyJson}}"}, {"{{approvedActionBlock}}"}, {"{{contextJson}}"}, {"{{cliPathJson}}"}, {"{{message}}"}
+                    可用占位符：{"{{displayName}}"}, {"{{conversationId}}"}, {"{{runId}}"}, {"{{locale}}"}, {"{{timezone}}"}, {"{{mode}}"}, {"{{policyJson}}"}, {"{{approvedActionBlock}}"}, {"{{contextJson}}"}, {"{{cliPathJson}}"}, {"{{apiPathPrefix}}"}, {"{{message}}"}
                   </span>
                   <Button
                     type="default"

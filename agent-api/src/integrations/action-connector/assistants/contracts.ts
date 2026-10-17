@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OMC_API_PROFILE } from "../api-profile.js";
 
 // Business vocabulary and available operations come from the connector, never
 // from a scenario-name switch in Agent Studio.
@@ -7,7 +8,8 @@ export const capabilitySchema = z.object({
   method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]).optional(),
   title: z.string().max(240),
   description: z.string().max(4000),
-  path: z.string().startsWith("/api/v1/"),
+  // The connector's apiProfile.pathPrefix is enforced where the connector is known.
+  path: z.string().startsWith("/"),
   deviceScoped: z.boolean().default(false),
 });
 export const conditionSchema = z.object({
@@ -91,7 +93,7 @@ export const executionRequestSchema = z.object({
 const watchPathSchema = z.string().max(200).regex(/^$|^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$/);
 export const watchSchema = z.object({
   operationId: z.string().min(1).max(160),
-  path: z.string().startsWith("/api/v1/").max(500),
+  path: z.string().startsWith("/").max(500),
   query: z.record(z.union([z.string().max(2048), z.number(), z.boolean()])).refine((q) => Object.keys(q).length <= 20).optional(),
   items: watchPathSchema,
   key: watchPathSchema.min(1),
@@ -121,9 +123,9 @@ export type AssistantResult = z.infer<typeof resultSchema>;
 
 // Keeps a rule only when it is well formed, reads an operation this run
 // actually called successfully, and agrees with the outcome it summarizes.
-export function acceptedWatch(watch: unknown, outcome: AssistantResult["outcome"], calledOperations: ReadonlySet<string>): AssistantWatch | undefined {
+export function acceptedWatch(watch: unknown, outcome: AssistantResult["outcome"], calledOperations: ReadonlySet<string>, pathPrefix: string = OMC_API_PROFILE.pathPrefix): AssistantWatch | undefined {
   const parsed = watchSchema.safeParse(watch);
-  if (!parsed.success || !calledOperations.has(parsed.data.operationId)) return undefined;
+  if (!parsed.success || !calledOperations.has(parsed.data.operationId) || !parsed.data.path.startsWith(pathPrefix)) return undefined;
   const keys = parsed.data.matchedKeys;
   if (new Set(keys).size !== keys.length) return undefined;
   if (outcome === "insufficient_data" || (outcome === "finding") !== (keys.length > 0)) return undefined;
@@ -157,6 +159,12 @@ function escapeControlCharsInStrings(raw: string): string {
     else if (ch === '"') inString = !inString;
   }
   return out;
+}
+
+// Capabilities are supplied by the connected system and must stay inside its
+// configured API namespace (OMC: /api/v1/).
+export function assertCapabilityPaths(input: PlanningRequest, pathPrefix: string = OMC_API_PROFILE.pathPrefix): void {
+  if (input.capabilities.some((item) => !item.path.startsWith(pathPrefix))) throw new Error("ASSISTANT_CAPABILITY_OUTSIDE_API_PROFILE");
 }
 
 export function validatePlan(input: PlanningRequest, output: z.infer<typeof planningResponseSchema>): void {

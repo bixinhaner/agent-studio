@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createServiceTokenMiddleware } from "../../service-token.js";
 import { createActionConnectorProvisionRouter } from "./provision-router.js";
+import { BOSS_API_PROFILE } from "./api-profile.fixtures.js";
 
 type InstanceRow = {
   id: string;
@@ -338,5 +339,22 @@ describe("Action connector provision router", () => {
     expect(response.body.status).toBe("connected");
     expect(db.instances[0].status).toBe("active");
     expect(db.validations).toHaveLength(1);
+  });
+
+  it("seeds a source system's API profile once and keeps the administrator's saved profile", async () => {
+    const db = createDbMock();
+    const app = buildApp({ token: "expected-token", db: db.db });
+    const seeded = payload({ config: { ...payload().config, apiProfile: BOSS_API_PROFILE } });
+    await request(app).post("/api/integrations/action-connectors/provision").set("Authorization", "Bearer expected-token").send(seeded).expect(200);
+    expect(db.configs[0].config.apiProfile).toEqual(BOSS_API_PROFILE);
+
+    const adminEdited = { ...BOSS_API_PROFILE, sourceName: "BOSS 运营" };
+    db.configs[0].config = { ...db.configs[0].config, apiProfile: adminEdited };
+    await request(app).post("/api/integrations/action-connectors/provision").set("Authorization", "Bearer expected-token").send(seeded).expect(200);
+    expect(db.configs[0].config.apiProfile).toEqual(adminEdited);
+
+    await request(app).post("/api/integrations/action-connectors/provision").set("Authorization", "Bearer expected-token")
+      .send(payload({ slug: "plain-ops" })).expect(200);
+    expect(db.configs[1].config).not.toHaveProperty("apiProfile");
   });
 });

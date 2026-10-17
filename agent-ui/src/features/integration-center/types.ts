@@ -1,4 +1,5 @@
 import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types";
+import type { ActionConnectorApiProfile } from "./actionConnectorApiProfile";
 
 export type IntegrationType =
   | 'dingtalk'
@@ -374,6 +375,7 @@ export type CrestCrmConfigDraft = {
 export type ActionConnectorConfigDraft = {
   displayName: string;
   runtimePrompt: string;
+  apiProfile: ActionConnectorApiProfile;
 };
 
 export type ExternalApiUsageSummary = {

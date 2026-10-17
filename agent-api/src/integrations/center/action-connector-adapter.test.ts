@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ActionConnectorIntegrationAdapter } from "./action-connector-adapter.js";
+import { ActionConnectorIntegrationAdapter, normalizeActionConnectorApiProfile } from "./action-connector-adapter.js";
+import { BOSS_API_PROFILE } from "../action-connector/api-profile.fixtures.js";
 
 const forbiddenTerms = [String.fromCharCode(103, 111, 111, 109, 99), String.fromCharCode(79, 77, 67)];
 
@@ -52,5 +53,13 @@ describe("ActionConnectorIntegrationAdapter", () => {
     });
 
     expect(result.status).toBe("success");
+  });
+
+  it("normalizes an admin-edited API profile and rejects inconsistent paths before saving", () => {
+    expect(normalizeActionConnectorApiProfile({ displayName: "BOSS" })).toEqual({ displayName: "BOSS" });
+    expect(normalizeActionConnectorApiProfile({ displayName: "BOSS", apiProfile: { ...BOSS_API_PROFILE, sourceName: " BOSS " } }))
+      .toEqual({ displayName: "BOSS", apiProfile: BOSS_API_PROFILE });
+    expect(() => normalizeActionConnectorApiProfile({ apiProfile: { ...BOSS_API_PROFILE, handbook: { ...BOSS_API_PROFILE.handbook, manifestPath: "/api/v1/agent/handbook/manifest" } } }))
+      .toThrow("API 配置无效：apiProfile.handbook.manifestPath: must start with pathPrefix /api/agent/");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptedWatch, parseModelJSON, planningResponseSchema, resultSchema, validatePlan } from "./contracts.js";
+import { acceptedWatch, assertCapabilityPaths, parseModelJSON, planningResponseSchema, resultSchema, validatePlan } from "./contracts.js";
 import { buildActionConnectorRuntimePrompt } from "../prompt.js";
 import { actionConnectorConfigSchema } from "../../center/action-connector-adapter.js";
 
@@ -81,5 +81,16 @@ describe("assistant check rule", () => {
   it("never fails the report because of an unusable rule", () => {
     const result = resultSchema.parse({ outcome: "finding", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [], watch: { nonsense: true } });
     expect(acceptedWatch(result.watch, result.outcome, called)).toBeUndefined();
+  });
+
+  it("keeps capabilities and watch rules inside the connector's API namespace", () => {
+    const boss = { ...planningInput, capabilities: [{ ...planningInput.capabilities[0], path: "/api/agent/customers/c-1/recharges" }] };
+    expect(() => assertCapabilityPaths(planningInput)).not.toThrow();
+    expect(() => assertCapabilityPaths(boss)).toThrow("ASSISTANT_CAPABILITY_OUTSIDE_API_PROFILE");
+    expect(() => assertCapabilityPaths(boss, "/api/agent/")).not.toThrow();
+    const watch = { operationId: "payment.list_recharges", path: "/api/agent/customers/c-1/recharges", items: "items", key: "id", conditions: [{ field: "status", op: "eq", value: "failed" }], matchedKeys: ["p1"] };
+    const called = new Set(["payment.list_recharges"]);
+    expect(acceptedWatch(watch, "finding", called)).toBeUndefined();
+    expect(acceptedWatch(watch, "finding", called, "/api/agent/")).toEqual(watch);
   });
 });

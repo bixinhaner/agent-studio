@@ -25,7 +25,7 @@ import {
   sanitizeIntegrationConfigForRead
 } from "./types.js";
 import type { PolicyService } from "../../resources/policy-service.js";
-import { ActionConnectorIntegrationAdapter } from "./action-connector-adapter.js";
+import { ActionConnectorIntegrationAdapter, normalizeActionConnectorApiProfile } from "./action-connector-adapter.js";
 import { CrestCrmIntegrationAdapter } from "./crest-crm-adapter.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
@@ -836,6 +836,9 @@ export function createIntegrationCenterService(options: {
       if ("slug" in input.payload && input.payload.slug && input.payload.slug !== existing.slug) {
         throw new Error("integration slug cannot be changed");
       }
+      if (existing.type === "action_connector" && input.payload.config) {
+        input = { ...input, payload: { ...input.payload, config: normalizeActionConnectorApiProfile(assertConfigIsSafe(input.payload.config)) } };
+      }
 
       await options.db.$transaction(async (tx) => {
         await tx.integrationInstance.update({
@@ -853,7 +856,11 @@ export function createIntegrationCenterService(options: {
     }
 
     const payload = input.payload as IntegrationInstanceBaseInput;
-    const safeConfig = payload.config ? assertConfigIsSafe(payload.config) : undefined;
+    const safeConfig = payload.config
+      ? payload.type === "action_connector"
+        ? normalizeActionConnectorApiProfile(assertConfigIsSafe(payload.config))
+        : assertConfigIsSafe(payload.config)
+      : undefined;
     const createdId = await options.db.$transaction(async (tx) => {
       const created = await tx.integrationInstance.create({
         data: {

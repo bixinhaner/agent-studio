@@ -141,8 +141,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-async function loadConnector(
-  db: IntegrationInstanceRepositoryDb,
+// Only the two reads below are needed, so background runs can pass their PrismaClient.
+export type ActionConnectorConfigReader = {
+  integrationInstance: { findUnique(args: { where: { id: string } }): Promise<unknown> };
+  integrationInstanceConfig: { findUnique(args: { where: { integrationInstanceId: string } }): Promise<unknown> };
+};
+
+export async function loadConnector(
+  db: ActionConnectorConfigReader,
   connectorId: string
 ): Promise<{ instance: ActionConnectorRuntimeInstance; config: ActionConnectorConfig }> {
   const instance = (await db.integrationInstance.findUnique({ where: { id: connectorId } })) as IntegrationInstanceRow | null;

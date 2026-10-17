@@ -7,6 +7,7 @@ import {
   actionConnectorConfigSchema,
   type ActionConnectorConfig
 } from "../center/action-connector-adapter.js";
+import { apiProfileSchema } from "./api-profile.js";
 import {
   ACTION_CONNECTOR_MAX_ATTACHMENT_BYTES,
   type ActionConnectorAttachmentStore
@@ -71,6 +72,12 @@ function preserveAgentRuntimeConfig(input: {
   }
   if (!hasOwn(rawConfig, "runtimePrompt")) {
     config.runtimePrompt = asString(input.existingConfig?.runtimePrompt) ?? config.runtimePrompt;
+  }
+  // The API profile is managed in the admin console. A source system may seed
+  // it when the connector has none yet, but re-provisioning never overwrites
+  // an administrator's saved profile.
+  if (input.existingConfig && hasOwn(input.existingConfig, "apiProfile")) {
+    config.apiProfile = apiProfileSchema.parse(input.existingConfig.apiProfile);
   }
   return config;
 }

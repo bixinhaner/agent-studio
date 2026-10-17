@@ -1,6 +1,7 @@
 import type { ActionConnectorConfig } from "../center/action-connector-adapter.js";
 import type { ActionConnectorChatRequest } from "./runtime.js";
 import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "./default-prompt.js";
+import { resolveApiProfile } from "./api-profile.js";
 
 export type ActionConnectorRuntimePromptInput = {
   config: ActionConnectorConfig;
@@ -51,6 +52,7 @@ export function buildActionConnectorRuntimePrompt(input: ActionConnectorRuntimeP
     contextJson: context,
     cliPath: input.cliPath,
     cliPathJson: JSON.stringify(input.cliPath),
+    apiPathPrefix: resolveApiProfile(input.config.apiProfile).pathPrefix,
     message: input.request.message
   });
 }

@@ -349,6 +349,7 @@ import { ProactiveActionConnectorService } from "./integrations/action-connector
 import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
 import { actionConnectorCliSource } from "./integrations/action-connector/cli.js";
+import { resolveApiProfile } from "./integrations/action-connector/api-profile.js";
 import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import { actionConnectorTurnMessageKey } from "./integrations/action-connector/turn-identity.js";
@@ -5206,7 +5207,8 @@ async function materializeActionConnectorRuntimeFiles(input: {
       bridgeToken: input.bridgeToken,
       identity: input.identity,
       displayName: input.runner.config.displayName,
-      policy: input.runner.config.policy
+      policy: input.runner.config.policy,
+      apiProfile: resolveApiProfile(input.runner.config.apiProfile)
     }, null, 2),
     { encoding: "utf8", mode: 0o600 }
   );

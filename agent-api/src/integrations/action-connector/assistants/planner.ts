@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ActionConnectorToolBridgeLike } from "../tool-bridge.js";
 import type { ActionConnectorCodexRunner } from "../runtime.js";
-import { ActionConnectorRuntimeService } from "../runtime.js";
+import { ActionConnectorRuntimeService, loadConnector } from "../runtime.js";
+import { resolveApiProfile } from "../api-profile.js";
 import type { IntegrationInstanceRepositoryDb } from "../../../persistence/integration-instance-repository.js";
-import { parseModelJSON, planningRequestSchema, planningResponseSchema, validatePlan } from "./contracts.js";
+import { assertCapabilityPaths, parseModelJSON, planningRequestSchema, planningResponseSchema, validatePlan } from "./contracts.js";
 
 // Planning has no business-data permissions. Requests for tools fail immediately
 // rather than hanging on an interactive browser bridge. The regular runtime
@@ -17,11 +18,13 @@ const planningBridge: ActionConnectorToolBridgeLike = {
 
 export class AssistantPlanner {
   private readonly runtime: ActionConnectorRuntimeService;
-  constructor(db: IntegrationInstanceRepositoryDb, runner: ActionConnectorCodexRunner) {
+  constructor(private readonly db: IntegrationInstanceRepositoryDb, runner: ActionConnectorCodexRunner) {
     this.runtime = new ActionConnectorRuntimeService(db, fetch, runner, planningBridge);
   }
   async plan(connectorId: string, raw: unknown, signal?: AbortSignal) {
     const input = planningRequestSchema.parse(raw);
+    const { config } = await loadConnector(this.db, connectorId);
+    assertCapabilityPaths(input, resolveApiProfile(config.apiProfile).pathPrefix);
     const outputLimit = new AbortController();
     const deadline = AbortSignal.any([AbortSignal.timeout(120_000), outputLimit.signal]);
     const abort = signal ? AbortSignal.any([signal, deadline]) : deadline;

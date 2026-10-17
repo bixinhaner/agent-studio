@@ -10,20 +10,21 @@ import {
   type ExternalToolResultInput
 } from "../tool-bridge.js";
 import type { ResourceRef } from "./contracts.js";
+import { OMC_API_PROFILE, discoveryOperationIds, handbookOperationIds } from "../api-profile.js";
 
 // Background agents may bootstrap the immutable API handbook before using a
 // scenario's business operations. These two GET-only operations are transport
 // infrastructure, not an expansion of the scenario's data-access allowlist.
-export const BACKGROUND_HANDBOOK_OPERATIONS = new Set([
-  "get.agent.handbook.manifest",
-  "get.agent.handbook.chunks.by_index"
-]);
+// The defaults are the OMC contract; a run registers its connector's own IDs.
+export const BACKGROUND_HANDBOOK_OPERATIONS = new Set(handbookOperationIds(OMC_API_PROFILE));
 
-export const BACKGROUND_DISCOVERY_OPERATIONS = new Set([
-  "get.agent.catalog", "get.agent.catalog.categories", "get.agent.catalog.describe"
-]);
+export const BACKGROUND_DISCOVERY_OPERATIONS = new Set(discoveryOperationIds(OMC_API_PROFILE));
 
 type BackgroundRegistration = {
+  /** Connector-specific handbook bootstrap operations (default: OMC). */
+  handbookOperations?: ReadonlySet<string>;
+  /** Connector-specific catalog discovery operations (default: OMC). */
+  discoveryOperations?: ReadonlySet<string>;
   operationGrants?: Array<{ operationId: string; method: string }>;
   allowDiscovery?: boolean;
   connectorId: string;
@@ -96,15 +97,17 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
     }
     const operationId = input.request.operationId?.trim() ?? "";
     const method = input.request.method.toUpperCase();
-    const discovery = registration.allowDiscovery && BACKGROUND_DISCOVERY_OPERATIONS.has(operationId);
-    const infrastructure = BACKGROUND_HANDBOOK_OPERATIONS.has(operationId) || discovery;
+    const handbookOperations = registration.handbookOperations ?? BACKGROUND_HANDBOOK_OPERATIONS;
+    const discoveryOperations = registration.discoveryOperations ?? BACKGROUND_DISCOVERY_OPERATIONS;
+    const discovery = registration.allowDiscovery && discoveryOperations.has(operationId);
+    const infrastructure = handbookOperations.has(operationId) || discovery;
     const allowedOperation = infrastructure ? method === "GET" : registration.operationGrants
       ? registration.operationGrants.some((g) => g.operationId === operationId && g.method === method)
       : method === "GET" && registration.allowedOperations.includes(operationId);
     if (!allowedOperation || (infrastructure && input.request.body != null)) {
       throw new Error("Background tool operation is outside the installed scenario policy.");
     }
-    if (!BACKGROUND_HANDBOOK_OPERATIONS.has(operationId)) {
+    if (!handbookOperations.has(operationId)) {
       registration.toolCalls = (registration.toolCalls ?? 0) + 1;
       if (registration.toolCalls > (registration.maxToolCalls ?? 18)) throw new Error("BACKGROUND_TOOL_BUDGET_EXCEEDED");
     }

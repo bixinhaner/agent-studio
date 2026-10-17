@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { DurableActionConnectorToolBridge } from "../proactive/durable-tool-bridge.js";
 import { executeAssistant } from "./engine.js";
 import { executionRequestSchema, planningResponseSchema, validatePlan } from "./contracts.js";
-import { definition, planningInput } from "./fixtures.js";
+import { connectorDb, definition, planningInput } from "./fixtures.js";
+import { BOSS_API_PROFILE } from "../api-profile.fixtures.js";
 
 function bridgeFixture(explore = true) {
   const runId = randomUUID();
@@ -28,14 +29,14 @@ describe("assistant API exploration", () => {
   ])("requires actual business references for useful but incomplete ongoing work: $refs", async ({ refs, accepted }) => {
     const request = executionRequestSchema.parse({ contractVersion: "1.0", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
     const result = { outcome: "finding", title: "Observed resources", summary: "Some resources have stale samples; full coverage is unknown", facts: [{ text: "One visible resource has a current sample", evidenceRefs: ["tool:get.devices"] }], hypotheses: [], nextSteps: [], continuation: { status: "ready", reason: "Current samples support the authorized recurring check; coverage limits remain in each report", evidenceRefs: refs } };
-    const args = { db: { connectorToolInvocation: { findMany: async () => [{ operationId: "get.devices" }, { operationId: "get.agent.catalog" }] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
+    const args = { db: { ...connectorDb(), connectorToolInvocation: { findMany: async () => [{ operationId: "get.devices" }, { operationId: "get.agent.catalog" }] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
     if (accepted) await expect(executeAssistant(args as never)).resolves.toMatchObject(result);
     else await expect(executeAssistant(args as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
   });
   it.each([true, false])("requires business evidence before continuing an empty check: %s", async (withEvidence) => {
     const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition: { ...definition, apiAccess: "discover" }, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u", toolGrants: [{ operationId: "get.devices", method: "GET" }], toolPolicy: { allowedMethods: ["GET"], blockedPathPrefixes: [], toolTimeoutSeconds: 30, maxResponseBytes: 262144 } });
     const result = { outcome: "insufficient_data", title: "Waiting for samples", summary: "No samples in the selected interval", facts: [], hypotheses: [], nextSteps: [], continuation: { status: "retryable", reason: "Correct source is temporarily empty", evidenceRefs: ["tool:get.devices"] } };
-    const args = { db: { connectorToolInvocation: { findMany: async () => withEvidence ? [{ operationId: "get.devices" }] : [] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
+    const args = { db: { ...connectorDb(), connectorToolInvocation: { findMany: async () => withEvidence ? [{ operationId: "get.devices" }] : [] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
     if (withEvidence) await expect(executeAssistant(args as never)).resolves.toMatchObject(result);
     else await expect(executeAssistant(args as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
   });
@@ -65,7 +66,7 @@ describe("assistant API exploration", () => {
     const bridge = { prepareBackgroundRun: vi.fn() };
     const result = { outcome: "insufficient_data", title: "No data", summary: "No business query", facts: [], hypotheses: [], nextSteps: [] };
     const runtime = { streamChat: vi.fn(async (input: {emit: (e: unknown) => void}) => input.emit({type:"delta", text:JSON.stringify(result)})) };
-    await executeAssistant({ db: { connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
+    await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
     expect(bridge.prepareBackgroundRun).toHaveBeenCalledWith(expect.objectContaining({ allowDiscovery: true, allowedOperations: definition.operations, operationGrants: undefined }));
     expect(runtime.streamChat).toHaveBeenCalledWith(expect.objectContaining({ authorizedToolPolicy: { allowedMethods: ["GET"] } }));
   });
@@ -78,7 +79,7 @@ describe("assistant API exploration", () => {
     const runtime = { streamChat: vi.fn(async (input: {emit: (e: unknown) => void}) => input.emit({type: "delta", text: JSON.stringify({
       outcome: "insufficient_data", title: "No data", summary: "No query", facts: [], hypotheses: [], nextSteps: [] })})) };
     const bridge = { prepareBackgroundRun: vi.fn() };
-    await executeAssistant({ db: { connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge,
+    await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany: async () => [] } }, runtime, bridge,
       run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
     expect(runtime.streamChat).toHaveBeenCalledWith(expect.objectContaining({ authorizedToolPolicy: {
       ...request.toolPolicy, allowedMethods: ["GET", "PUT"] } }));
@@ -97,7 +98,7 @@ describe("assistant API exploration", () => {
   it("fails closed on missing new-protocol grants and stops blind write recovery", async () => {
     const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition: { ...definition, apiAccess: "discover" }, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
     const runtime = { streamChat: vi.fn() }; const bridge = { prepareBackgroundRun: vi.fn() };
-    const args = { db: { connectorToolInvocation: { findFirst: vi.fn(async () => ({ id: "previous-write" })) } }, runtime, bridge, run: { runAttempt: 2 }, request, signal: new AbortController().signal };
+    const args = { db: { ...connectorDb(), connectorToolInvocation: { findFirst: vi.fn(async () => ({ id: "previous-write" })) } }, runtime, bridge, run: { runAttempt: 2 }, request, signal: new AbortController().signal };
     await expect(executeAssistant(args as never)).rejects.toThrow("RUN_GRANT_REQUIRED");
     request.toolGrants = [{ operationId: "get.devices", method: "GET" }];
     request.toolPolicy = { allowedMethods: ["GET"], blockedPathPrefixes: [], toolTimeoutSeconds: 30, maxResponseBytes: 262144 };
@@ -106,7 +107,24 @@ describe("assistant API exploration", () => {
   });
   it("does not treat catalog lookup as business evidence", async () => {
     const request = executionRequestSchema.parse({ contractVersion: "1.1", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition: { ...definition, apiAccess: "discover" }, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u", toolGrants: [{ operationId: "get.devices", method: "GET" }], toolPolicy: { allowedMethods: ["GET"], blockedPathPrefixes: [], toolTimeoutSeconds: 30, maxResponseBytes: 262144 } });
-    const args = { db: { connectorToolInvocation: { findMany: async () => [{ operationId: "get.agent.catalog" }] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify({ outcome: "no_change", title: "Normal", summary: "Normal", facts: [], hypotheses: [], nextSteps: [] }) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
+    const args = { db: { ...connectorDb(), connectorToolInvocation: { findMany: async () => [{ operationId: "get.agent.catalog" }] } }, runtime: { streamChat: async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify({ outcome: "no_change", title: "Normal", summary: "Normal", facts: [], hypotheses: [], nextSteps: [] }) }) }, bridge: { prepareBackgroundRun: () => undefined }, run: { runAttempt: 1 }, request, signal: new AbortController().signal };
     await expect(executeAssistant(args as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
+  });
+  it("uses the connector's API profile for discovery, handbook, Skill and evidence", async () => {
+    const request = executionRequestSchema.parse({ contractVersion: "1.0", runId: randomUUID(), assistantId: randomUUID(), revision: 1, definition, definitionDigest: `sha256:${"1".repeat(64)}`, handbookDigest: "test", apiHandbook: {}, externalUserId: "u" });
+    const bridge = { prepareBackgroundRun: vi.fn() };
+    const result = { outcome: "finding", title: "Found", summary: "Found", facts: [], hypotheses: [], nextSteps: [] };
+    const runtime = { streamChat: vi.fn(async (input: {emit: (e: unknown) => void}) => input.emit({type:"delta", text:JSON.stringify(result)})) };
+    const db = (operationIds: string[]) => ({ ...connectorDb({ apiProfile: BOSS_API_PROFILE }), connectorToolInvocation: { findMany: async () => operationIds.map((operationId) => ({ operationId })) } });
+    await executeAssistant({ db: db(["boss.catalog.search", "get.devices"]), runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never);
+    const prompt = JSON.stringify(runtime.streamChat.mock.calls[0][0]);
+    expect(prompt).toContain("boss.handbook.manifest (GET /api/agent/ai-assistant/handbook/manifest)");
+    expect(prompt).toContain("$CODEX_HOME/skills/boss-operations/scripts/ensure-handbook.mjs");
+    expect(prompt).toContain("so BOSS can repeat the routine check");
+    expect(prompt).not.toMatch(/xOMC|omc-operations|\/api\/v1\/agent/);
+    const registration = bridge.prepareBackgroundRun.mock.calls[0][0];
+    expect([...registration.handbookOperations]).toEqual(["boss.handbook.manifest", "boss.handbook.chunk"]);
+    expect([...registration.discoveryOperations]).toEqual(["boss.catalog.search", "boss.catalog.categories", "boss.catalog.describe"]);
+    await expect(executeAssistant({ db: db(["boss.catalog.search", "boss.handbook.chunk"]), runtime, bridge, run: { runAttempt: 1 }, request, signal: new AbortController().signal } as never)).rejects.toThrow("NO_BUSINESS_EVIDENCE");
   });
 });
