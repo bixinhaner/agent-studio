@@ -25,7 +25,7 @@ class WorkloadGuardTests(unittest.TestCase):
                 self.assertEqual((group / "memory.max").read_text(), str(8 * 1024 ** 3))
                 self.assertEqual((group / "memory.high").read_text(), "max")
                 self.assertEqual((group / "memory.swap.max").read_text(), "0")
-                self.assertEqual((group / "memory.oom.group").read_text(), "1")
+                self.assertEqual((group / "memory.oom.group").read_text(), "0")
                 self.assertEqual((group / "cpu.max").read_text(), "200000 100000")
                 with self.assertRaises(FileExistsError):
                     guard.prepare("a" * 32)

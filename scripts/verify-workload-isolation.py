@@ -1,6 +1,10 @@
 #!/usr/bin/python3
 """Run as agentstudio: bounded real 8 GiB OOM with a healthy sibling and API probes.
 
+The OOM must kill only the oversized tool process; the job leader (stand-in for
+the Codex app-server) has to survive and observe the SIGKILL so the agent can
+react. Releasing the job still removes every member.
+
 This deliberately kills ONLY two verification processes in their own cgroup.
 It never sends chat messages or modifies user conversations.
 """
@@ -54,13 +58,13 @@ def main():
     urls = ["http://127.0.0.1:8787/healthz", "https://aiagent.indonesiacentral.cloudapp.azure.com/healthz"]
     slot = Path("/usr/local/agent-studio/releases/state/chat.slot").read_text().strip()
     urls.append(f"http://127.0.0.1:{8791 if slot == 'a' else 8792}/internal/ready")
-    oom_before = int(oom_events().get("oom_group_kill", 0))
+    oom_before = int(oom_events().get("oom_kill", 0))
     try:
         good = subprocess.Popen([LAUNCH, good_id, "/usr/bin/python3", "-c", "import json,os,time; print(json.dumps({'pid':os.getpid()}),flush=True); time.sleep(120)"], stdout=subprocess.PIPE, text=True)
         processes.append(good)
         good_info = wait_line(good)
         allocator = "import time; time.sleep(2); chunks=[]\nfor i in range(140): chunks.append(bytearray(64*1024*1024))\ntime.sleep(30)"
-        parent = "import subprocess,json,os,time; p=subprocess.Popen(['/usr/bin/python3','-c'," + repr(allocator) + "],start_new_session=True); print(json.dumps({'pid':os.getpid(),'child':p.pid}),flush=True); time.sleep(120)"
+        parent = "import subprocess,json,os,time; p=subprocess.Popen(['/usr/bin/python3','-c'," + repr(allocator) + "],start_new_session=True); print(json.dumps({'pid':os.getpid(),'child':p.pid}),flush=True); print(json.dumps({'child_exit':p.wait()}),flush=True); time.sleep(120)"
         bad = subprocess.Popen([LAUNCH, bad_id, "/usr/bin/python3", "-c", parent], stdout=subprocess.PIPE, text=True)
         processes.append(bad)
         bad_info = wait_line(bad)
@@ -72,30 +76,28 @@ def main():
         timings = []
         deadline = time.monotonic() + 90
         oom_seen = False
-        while bad.poll() is None and time.monotonic() < deadline:
+        while not dead(bad_info["child"]) and bad.poll() is None and time.monotonic() < deadline:
             timings.append([probe(url) for url in urls])
             assert good.poll() is None, "healthy sibling was terminated"
-            try:
-                events = dict(line.split() for line in (group / "memory.events").read_text().splitlines())
-                oom_seen |= int(events.get("oom_kill", 0)) > 0
-            except FileNotFoundError:
-                pass
+            events = dict(line.split() for line in (group / "memory.events").read_text().splitlines())
+            oom_seen |= int(events.get("oom_kill", 0)) > 0
             time.sleep(0.1)
-        assert bad.poll() == -9, f"expected isolated OOM kill, exit={bad.poll()}"
-        # The supervisor may remove the finished leaf before the observer reads
-        # its counters. Ancestor counters retain the group-OOM evidence.
-        oom_delta = int(oom_events().get("oom_group_kill", 0)) - oom_before
-        assert oom_delta > 0, "no kernel group-OOM event observed"
-        # SIGKILL delivery to all members is atomic at group selection, but
-        # each process completes its kernel exit asynchronously.
-        exit_deadline = time.monotonic() + 5
-        while not dead(bad_info["child"]) and time.monotonic() < exit_deadline:
-            time.sleep(0.05)
-        assert dead(bad_info["child"]), "detached child survived group OOM"
+        assert bad.poll() is None, f"job leader was killed by the OOM, exit={bad.poll()}"
+        child_exit = json.loads(bad.stdout.readline())["child_exit"]
+        assert child_exit == -9, f"expected the oversized child to be OOM-killed, exit={child_exit}"
+        events = dict(line.split() for line in (group / "memory.events").read_text().splitlines())
+        assert int(events.get("oom_kill", 0)) > 0, "no kernel OOM kill recorded for the job"
+        assert int(events.get("oom_group_kill", 0)) == 0, "job still uses group OOM kills"
+        oom_delta = int(oom_events().get("oom_kill", 0)) - oom_before
         assert good.poll() is None and not dead(good_info["pid"])
         timings.append([probe(url) for url in urls])
-        print(json.dumps({"passed": True, "limit_GiB": 8, "bad_exit": bad.returncode,
-                          "leaf_oom_counter_observed": oom_seen, "kernel_group_oom_delta": oom_delta, "detached_child_dead": True,
+        # Releasing the job must still remove the surviving leader.
+        subprocess.run(["/usr/bin/sudo", "-n", BROKER, "release", bad_id], check=True)
+        bad.wait(timeout=10)
+        assert dead(bad_info["pid"]), "job leader survived release"
+        print(json.dumps({"passed": True, "limit_GiB": 8, "child_exit": child_exit,
+                          "leader_survived_oom": True, "leader_removed_on_release": True,
+                          "leaf_oom_counter_observed": oom_seen, "kernel_oom_kill_delta": oom_delta,
                           "sibling_alive": True, "probe_rounds": len(timings),
                           "max_api_seconds": max(max(row) for row in timings)}))
     finally:

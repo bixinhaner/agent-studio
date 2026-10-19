@@ -48,7 +48,11 @@ def prepare(token):
         write(group / "memory.max", 8 * GIB)
         write(group / "memory.high", "max")
         write(group / "memory.swap.max", 0)
-        write(group / "memory.oom.group", 1)
+        # Kill only the largest task on OOM, not the whole job: the Codex
+        # app-server must survive a runaway tool command so the agent sees
+        # the SIGKILL and can retry with a smaller footprint. release() still
+        # kills every member (including detached descendants) via cgroup.kill.
+        write(group / "memory.oom.group", 0)
         write(group / "pids.max", 512)
         write(group / "cpu.max", "200000 100000")
     except Exception:

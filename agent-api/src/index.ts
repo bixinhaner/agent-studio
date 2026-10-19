@@ -162,6 +162,7 @@ import {
   SCRATCH_SPACE_HINT,
   TOOL_RUNTIME_FRESHNESS_HINT
 } from "./tool-runtime-env.js";
+import { WORKLOAD_MEMORY_HINT, workloadIsolationRequired, workloadNodeOptions } from "./workload-isolation.js";
 import { markThreadWorkspaceActive, restoreOffloadedThreadFiles } from "./thread-file-offload.js";
 import { getDbClient } from "./db/client.js";
 import {
@@ -3666,6 +3667,7 @@ async function resolveRuntimeLaunchConfig(input: {
     ...(localRuntime ? [localRuntime.hint] : []),
     ...(runtimeHint ? [runtimeHint] : []),
     ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : []),
+    ...(workloadIsolationRequired() ? [WORKLOAD_MEMORY_HINT] : []),
     ...(input.workspace && pythonRuntimeSettings.enabled && pythonRuntimeSettings.sessionTmpEnabled
       ? [SCRATCH_SPACE_HINT]
       : []),
@@ -3688,6 +3690,7 @@ async function resolveRuntimeLaunchConfig(input: {
   const envOverrides = {
     ...toolEnv,
     ...sharedEnv,
+    ...(workloadIsolationRequired() ? { NODE_OPTIONS: workloadNodeOptions(process.env.NODE_OPTIONS) } : {}),
     ...(dwsRuntime?.envOverrides ?? {}),
     ...(dwsRuntime
       ? {
