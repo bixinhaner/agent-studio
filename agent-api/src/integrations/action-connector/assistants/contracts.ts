@@ -103,6 +103,9 @@ export const watchSchema = z.object({
     value: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(500)).max(50)]),
   })).min(1).max(10),
   matchedKeys: z.array(z.string().max(500)).max(200),
+  // "state" (default): the conclusion is which items match now. "new": the
+  // conclusion is whether items appeared that matchedKeys has not seen.
+  mode: z.enum(["state", "new"]).optional(),
 });
 export type AssistantWatch = z.infer<typeof watchSchema>;
 export const resultSchema = z.object({
@@ -128,7 +131,12 @@ export function acceptedWatch(watch: unknown, outcome: AssistantResult["outcome"
   if (!parsed.success || !calledOperations.has(parsed.data.operationId) || !parsed.data.path.startsWith(pathPrefix)) return undefined;
   const keys = parsed.data.matchedKeys;
   if (new Set(keys).size !== keys.length) return undefined;
-  if (outcome === "insufficient_data" || (outcome === "finding") !== (keys.length > 0)) return undefined;
+  if (outcome === "insufficient_data") return undefined;
+  // A "new" rule records what has been seen once nothing new is left to
+  // report; after a finding the next run sets that baseline. A source that
+  // predates "new" reads it as a state rule, which is then still correct.
+  if (parsed.data.mode === "new") return outcome === "no_change" ? parsed.data : undefined;
+  if ((outcome === "finding") !== (keys.length > 0)) return undefined;
   return parsed.data;
 }
 

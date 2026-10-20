@@ -78,6 +78,13 @@ describe("assistant check rule", () => {
     ["a path outside the API", { ...watch, path: "/internal/x" }, "finding"],
     ["no conditions", { ...watch, conditions: [] }, "finding"],
   ] as const)("drops a rule with %s", (_name, rule, outcome) => expect(acceptedWatch(rule, outcome, called)).toBeUndefined());
+  it("lets a rule for new records keep what it has already seen", () => {
+    const fresh = { ...watch, mode: "new" as const };
+    expect(acceptedWatch(fresh, "no_change", called)).toEqual(fresh);
+    expect(acceptedWatch(fresh, "finding", called)).toBeUndefined();
+    expect(acceptedWatch(fresh, "insufficient_data", called)).toBeUndefined();
+    expect(acceptedWatch({ ...watch, mode: "latest" }, "finding", called)).toBeUndefined();
+  });
   it("never fails the report because of an unusable rule", () => {
     const result = resultSchema.parse({ outcome: "finding", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [], watch: { nonsense: true } });
     expect(acceptedWatch(result.watch, result.outcome, called)).toBeUndefined();
