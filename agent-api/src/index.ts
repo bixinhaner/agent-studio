@@ -13174,8 +13174,9 @@ app.get("/api/threads/running", async (req: Request, res: Response) => {
     return;
   }
   res.setHeader("Cache-Control", "no-store");
-  // Browsers switch to single-request sends once the serving release reports protocol 2.
-  res.json({ thread_ids: Array.from(result.threadIds) });
+  // send_protocol keeps tabs still running a pre-53a0a882 bundle on the single-request send;
+  // without it they fall back to the removed 3-step endpoints until they auto-reload.
+  res.json({ thread_ids: Array.from(result.threadIds), send_protocol: 2 });
 });
 
 /** A thread the caller already created with this client-chosen id; another owner's id is a conflict. */
