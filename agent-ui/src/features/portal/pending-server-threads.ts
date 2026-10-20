@@ -99,20 +99,3 @@ export class PendingServerThreads {
 }
 
 export const pendingServerThreads = new PendingServerThreads();
-
-/**
- * Whether the chat service accepts single-request sends. Learned from the running-status poll
- * (`send_protocol`), so a browser that loaded during a deploy, or after a rollback, keeps using
- * the separate create/save/session requests the serving release understands.
- */
-let singleRequestSend = false;
-
-export const PORTAL_SINGLE_REQUEST_SEND_PROTOCOL = 2;
-
-export function setPortalSendProtocol(protocol: unknown): void {
-  singleRequestSend = typeof protocol === "number" && protocol >= PORTAL_SINGLE_REQUEST_SEND_PROTOCOL;
-}
-
-export function singleRequestSendSupported(): boolean {
-  return singleRequestSend;
-}

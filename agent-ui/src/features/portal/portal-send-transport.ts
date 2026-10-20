@@ -74,7 +74,7 @@ export async function* streamPortalSendWithRetry(options: {
     let failure: unknown;
     try {
       for await (const item of options.open()) {
-        // Older servers never send `accepted`; their first event proves the request arrived.
+        // The first event (normally `accepted`) proves the request arrived.
         if (!delivered && item.event !== "ping") {
           delivered = true;
           options.onDelivered?.({ attempts: attempt, lastError });

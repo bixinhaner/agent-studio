@@ -1,13 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createPortalServerThreadId,
-  PendingServerThreads,
-  setPortalSendProtocol,
-  singleRequestSendSupported
+  PendingServerThreads
 } from "./pending-server-threads";
-
-afterEach(() => setPortalSendProtocol(undefined));
 
 describe("pending server threads", () => {
   it("creates ids in the server's thread id format", () => {
@@ -60,13 +56,5 @@ describe("pending server threads", () => {
     pending.add({ remoteId: "c".repeat(32), localId: "__LOCALID_3" });
     await expect(pending.ensureCreated("c".repeat(32))).rejects.toThrow("offline");
     expect(pending.has("c".repeat(32))).toBe(true);
-  });
-
-  it("uses single-request sends only when the serving release reports protocol 2", () => {
-    expect(singleRequestSendSupported()).toBe(false);
-    setPortalSendProtocol(2);
-    expect(singleRequestSendSupported()).toBe(true);
-    setPortalSendProtocol(undefined);
-    expect(singleRequestSendSupported()).toBe(false);
   });
 });

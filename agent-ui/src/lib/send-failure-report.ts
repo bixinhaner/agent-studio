@@ -49,16 +49,6 @@ function currentBuildId(): string | undefined {
   return typeof __AGENT_STUDIO_BUILD_ID__ === "string" ? __AGENT_STUDIO_BUILD_ID__ : undefined;
 }
 
-/**
- * The API handlers record their own failures (thread create, message save) and 409 is the
- * queued "still running" flow. The browser only reports what never reached a handler:
- * network errors, expired sessions, and proxy timeouts or gateway errors during deploys.
- */
-export function shouldBrowserReportSendFailure(error: unknown): boolean {
-  if (!(error instanceof ApiError)) return true;
-  return error.status === 0 || error.status === 401 || error.status === 408 || error.status >= 502;
-}
-
 export function buildSendFailureReportBody(report: SendFailureReport): Record<string, unknown> {
   const error = report.error;
   const apiError = error instanceof ApiError ? error : undefined;

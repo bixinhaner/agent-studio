@@ -1,17 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  mergePortalClientRepositoryReplacement,
-  resolvePortalUserMessageParent,
-  shouldIgnorePortalClientMessageAppend
-} from "./message-server-authority.js";
+import { mergePortalClientRepositoryReplacement } from "./message-server-authority.js";
 
 describe("portal assistant message server authority", () => {
-  it("ignores assistant snapshots posted by current or legacy browsers", () => {
-    expect(shouldIgnorePortalClientMessageAppend({ role: "assistant", status: { type: "complete" } })).toBe(true);
-    expect(shouldIgnorePortalClientMessageAppend({ role: "user", content: [] })).toBe(false);
-  });
-
   it("keeps the server assistant when a legacy client replaces history with a stale failure", () => {
     const serverAssistant = {
       parentId: "user-1",
@@ -68,34 +59,5 @@ describe("portal assistant message server authority", () => {
 
     expect(merged.messages.map((item) => (item.message as { id: string }).id)).toEqual(["user-1", "assistant-1"]);
     expect(merged.headId).toBe("user-1");
-  });
-
-  it("maps a missing client assistant id to the authoritative server head", () => {
-    expect(resolvePortalUserMessageParent({
-      current: {
-        headId: "server-assistant-1",
-        messages: [
-          { parentId: null, message: { id: "user-1", role: "user" } },
-          { parentId: "user-1", message: { id: "server-assistant-1", role: "assistant" } }
-        ]
-      },
-      incomingMessage: { id: "user-2", role: "user" },
-      requestedParentId: "temporary-client-assistant"
-    })).toBe("server-assistant-1");
-  });
-
-  it("preserves the parent of an idempotently re-saved user message", () => {
-    expect(resolvePortalUserMessageParent({
-      current: {
-        headId: "user-2",
-        messages: [
-          { parentId: null, message: { id: "user-1", role: "user" } },
-          { parentId: "user-1", message: { id: "assistant-1", role: "assistant" } },
-          { parentId: "assistant-1", message: { id: "user-2", role: "user" } }
-        ]
-      },
-      incomingMessage: { id: "user-2", role: "user" },
-      requestedParentId: "stale-client-id"
-    })).toBe("assistant-1");
   });
 });

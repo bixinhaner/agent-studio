@@ -1,6 +1,5 @@
 import { portalAssistantErrorMessageKey } from "./assistant-error-notice";
 import { type PortalMessageKey } from "./i18n";
-import { detailFromError, errorCodeFromUnknown } from "./portal-value-utils";
 
 export const DIRECT_MESSAGE_TEXT_MAX_CHARS = 20_000;
 export const GENERIC_PROCESS_ERROR_DETAIL =
@@ -12,10 +11,6 @@ export type PortalTranslate = (key: PortalMessageKey, values?: Record<string, st
 
 export function formatAssistantErrorNotice(detail: string, code: string | undefined, t: PortalTranslate): string {
   return t(portalAssistantErrorMessageKey(detail, code));
-}
-
-export function formatAssistantErrorNoticeFromError(error: unknown, fallback: string, t: PortalTranslate): string {
-  return formatAssistantErrorNotice(detailFromError(error, fallback), errorCodeFromUnknown(error), t);
 }
 
 export function formatUserLocalDateTime(value?: string | null): string {

@@ -140,8 +140,8 @@ export async function* readSseEvents(
 }
 
 /**
- * Executes a scheduled task by replaying the same HTTP sequence the portal
- * uses (create thread → persist user message → ensure session → stream).
+ * Executes a scheduled task with the same single send request the portal
+ * uses (`/api/chat/stream` creates the thread, saves the message, starts the session).
  * Going through the real routes keeps quota, security review, skills,
  * workspace sync and message persistence identical to an interactive turn.
  */
@@ -176,21 +176,8 @@ export function createLoopbackScheduledTurnExecutor(options: LoopbackExecutorOpt
         ...(input.runConfig ?? {}),
         ...(input.modeId ? { mode: input.modeId } : {})
       };
-      const created = await call("/api/threads", {
-        method: "POST",
-        body: {
-          title: input.title,
-          folder_id: input.folderId ?? undefined,
-          model: input.model ?? undefined,
-          reasoning_effort: input.reasoningEffort ?? undefined,
-          codex_run_config: codexRunConfig,
-          start_session: false
-        }
-      });
-      threadId = String(asRecord(created.thread)?.id ?? "");
-      if (!threadId) throw new Error("Thread creation returned no id");
-      const encodedThreadId = encodeURIComponent(threadId);
-
+      // One request creates the task, saves the message and starts the session, like a portal send.
+      const newThreadId = randomUUID().replace(/-/g, "");
       const userMessageId = `sched-${randomUUID()}`;
       const clientRunId = randomUUID();
       const userMessage = {
@@ -201,30 +188,7 @@ export function createLoopbackScheduledTurnExecutor(options: LoopbackExecutorOpt
         createdAt: new Date().toISOString(),
         metadata: { custom: { scheduledTask: true } }
       };
-      await call(`/api/threads/${encodedThreadId}/messages`, {
-        method: "POST",
-        body: {
-          parent_id: null,
-          message: userMessage,
-          run_config: { channel: "portal", pendingUserMessage: true }
-        }
-      });
-
       const selectedSkillIds = input.skillIds?.length ? input.skillIds.slice(0, 20) : undefined;
-      const ensured = await call(`/api/threads/${encodedThreadId}/session`, {
-        method: "POST",
-        body: {
-          model: input.model ?? undefined,
-          reasoning_effort: input.reasoningEffort ?? undefined,
-          selected_skill_ids: selectedSkillIds,
-          codex_run_config: codexRunConfig,
-          client_run_id: clientRunId,
-          client_user_message_id: userMessageId,
-          portal_locale: input.locale
-        }
-      });
-      const sessionId = String(asRecord(ensured.session)?.session_id ?? "");
-      if (!sessionId) throw new Error("Session initialization returned no id");
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 45 * 60_000);
@@ -235,9 +199,16 @@ export function createLoopbackScheduledTurnExecutor(options: LoopbackExecutorOpt
           method: "POST",
           headers: { ...headers, accept: "text/event-stream" },
           body: JSON.stringify({
-            session_id: sessionId,
+            new_thread: {
+              id: newThreadId,
+              title: input.title,
+              folder_id: input.folderId ?? undefined,
+              codex_run_config: codexRunConfig
+            },
+            model: input.model ?? undefined,
+            reasoning_effort: input.reasoningEffort ?? undefined,
+            codex_run_config: codexRunConfig,
             client_run_id: clientRunId,
-            thread_id: threadId,
             user_message_id: userMessageId,
             client_user_message_id: userMessageId,
             parent_id: null,
@@ -254,12 +225,16 @@ export function createLoopbackScheduledTurnExecutor(options: LoopbackExecutorOpt
           throw new Error(detailFromPayload(payload, `Chat stream failed (${response.status})`));
         }
         for await (const { event, data } of readSseEvents(response.body)) {
+          // The task exists on the server once the send is accepted.
+          if (event === "accepted") threadId = String(asRecord(data)?.thread_id ?? "") || newThreadId;
           if (event === "error") streamError = detailFromPayload(data, "Run failed");
           if (event === "done") sawDone = true;
         }
       } finally {
         clearTimeout(timer);
       }
+      if (!threadId) throw new Error(streamError ?? "The task was not created");
+      const encodedThreadId = encodeURIComponent(threadId);
 
       const history = await call(`/api/threads/${encodedThreadId}/messages`, { method: "GET" });
       const messages = Array.isArray(history.messages) ? history.messages : [];

@@ -270,7 +270,7 @@ export const AgentRuntimeAdapterProvider: FC<
             });
           }
         }
-        // User messages are persisted before the runtime starts. Assistant
+        // User messages are persisted by the send request itself. Assistant
         // messages are live browser projections; the API persists the final
         // authoritative snapshot so a late history callback cannot overwrite it.
         return;

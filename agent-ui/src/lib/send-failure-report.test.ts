@@ -1,20 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
-import { buildSendFailureReportBody, reportSendFailure, shouldBrowserReportSendFailure } from "./send-failure-report";
+import { buildSendFailureReportBody, reportSendFailure } from "./send-failure-report";
 
 describe("send failure report", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-  });
-
-  it("reports only failures the API handlers could not record themselves", () => {
-    expect(shouldBrowserReportSendFailure(new TypeError("Failed to fetch"))).toBe(true);
-    expect(shouldBrowserReportSendFailure(new ApiError({ message: "x", status: 502, detail: "Bad gateway" }))).toBe(true);
-    expect(shouldBrowserReportSendFailure(new ApiError({ message: "x", status: 401, detail: "Login required" }))).toBe(true);
-    expect(shouldBrowserReportSendFailure(new ApiError({ message: "x", status: 400, detail: "Failed to append" }))).toBe(false);
-    expect(shouldBrowserReportSendFailure(new ApiError({ message: "x", status: 404, detail: "Thread does not exist" }))).toBe(false);
-    expect(shouldBrowserReportSendFailure(new ApiError({ message: "x", status: 409, detail: "Still running", code: "PORTAL_RUN_ACTIVE" }))).toBe(false);
   });
 
   it("carries the HTTP status, error code, text and attachments", () => {
