@@ -218,7 +218,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 const TURN_DELIVERY_RUN_CONFIG_KEY = "_agentStudioTurnDelivery";
 const EXECUTION_LOCATION_RUN_CONFIG_KEY = "_agentStudioExecutionLocation";
 
-type StoredTurnDelivery = {
+export type StoredTurnDelivery = {
   runId: string;
   channel: string;
   acceptedAt: string;
@@ -227,7 +227,7 @@ type StoredTurnDelivery = {
   completedAt?: string;
 };
 
-function storedTurnDelivery(value: unknown): StoredTurnDelivery | undefined {
+export function storedTurnDelivery(value: unknown): StoredTurnDelivery | undefined {
   const runConfig = asRecord(value);
   const delivery = asRecord(runConfig?.[TURN_DELIVERY_RUN_CONFIG_KEY]);
   const runId = trimOrUndefined(typeof delivery?.runId === "string" ? delivery.runId : undefined);

@@ -33,6 +33,14 @@ const STAGE_COPY: Record<string, { label: string; reason: string }> = {
   session_start: {
     label: "启动会话失败",
     reason: "用户消息已保存，但会话没有启动成功。"
+  },
+  chat_stream: {
+    label: "发送请求未送达",
+    reason: "浏览器多次自动重试后仍没连上服务器，消息没有发出；portal 提示网络中断并提供重试。"
+  },
+  chat_stream_recovered: {
+    label: "发送重试后成功",
+    reason: "第一次发送因网络问题没送达，浏览器自动重试后成功，用户无感知；仅用于观察网络质量。"
   }
 };
 

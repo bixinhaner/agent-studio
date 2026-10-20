@@ -74,10 +74,12 @@ export const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
     const detail = detailFromUnknown(props.status.error);
     const notice = formatAssistantErrorNotice(detail, undefined, t);
     const autoRecoveryAttempted = /portal_auto_recovery_exhausted/i.test(detail);
-    if (autoRecoveryAttempted) {
+    const sendNotDelivered = /portal_send_not_delivered/i.test(detail);
+    if (autoRecoveryAttempted || sendNotDelivered) {
       return (
         <PortalChatRecoveryNotice
           state="failed"
+          reason={sendNotDelivered ? "send_not_delivered" : undefined}
           canRerun={!mutationReadOnly}
           onRerun={() => {
             notifyUserSendIntent();

@@ -87,6 +87,12 @@ describe("chat cluster peers", () => {
     expect(peerOwnsRun(current, { kind: "crest_run", id: "c-1" })).toBe(true);
     expect(peerOwnsRun(current, { kind: "action_connector_run", id: "r-1" })).toBe(true);
     expect(peerOwnsRun(current, { kind: "portal_session", id: "s-2" })).toBe(false);
+    // Peers from before single-request sends report no run ids.
+    expect(current.ownedRuns?.portal_run).toEqual([]);
+    const withRuns = parseChatPeerStatus("http://127.0.0.1:8792", {
+      owned_runs: { portal_session: [], portal_run: ["run-1"], crest_run: [], action_connector_run: [] }
+    });
+    expect(peerOwnsRun(withRuns, { kind: "portal_run", id: "run-1" })).toBe(true);
 
     // The release before blue-green only reports runtime turns.
     const legacy = parseChatPeerStatus("http://127.0.0.1:8791", {
@@ -98,6 +104,7 @@ describe("chat cluster peers", () => {
     expect(legacy).toMatchObject({ instanceId: undefined, ready: false, busyCount: 2 });
     expect(peerOwnsRun(legacy, { kind: "portal_session", id: "legacy-session" })).toBe(true);
     expect(peerOwnsRun(legacy, { kind: "crest_run", id: "legacy-session" })).toBe(false);
+    expect(peerOwnsRun(legacy, { kind: "portal_run", id: "legacy-session" })).toBe(false);
   });
 
   it("treats a stopped slot as owning nothing and a failing one as unknown", async () => {
@@ -198,7 +205,7 @@ describe("chat cluster forwarding", () => {
       url: peer.url,
       ready: false,
       draining: true,
-      ownedRuns: { portal_session: ["s-1"], crest_run: [], action_connector_run: [] }
+      ownedRuns: { portal_session: ["s-1"], portal_run: [], crest_run: [], action_connector_run: [] }
     })]);
     const local = await startLocal({ cluster });
 
@@ -221,7 +228,7 @@ describe("chat cluster forwarding", () => {
 
   it("handles run requests locally when it owns the run or nobody does", async () => {
     const peer = await startPeer();
-    const cluster = clusterFor(peer.url, [peerStatus({ url: peer.url, ownedRuns: { portal_session: [], crest_run: [], action_connector_run: [] } })]);
+    const cluster = clusterFor(peer.url, [peerStatus({ url: peer.url, ownedRuns: { portal_session: [], portal_run: [], crest_run: [], action_connector_run: [] } })]);
     const ownsLocal = await startLocal({ cluster, ownsLocally: true });
     const nobody = await startLocal({ cluster });
     for (const base of [ownsLocal, nobody]) {
@@ -289,6 +296,16 @@ describe("chat cluster forwarding", () => {
     });
     expect(resolveChatRunKey(req("POST", "/api/chat/stream", { session_id: "s" }))).toEqual({ kind: "portal_session", id: "s" });
     expect(resolveChatRunKey(req("POST", "/api/chat/stream", {}))).toBeUndefined();
+    // Single-request sends have no session yet; a retry must reach the instance that accepted it.
+    expect(resolveChatRunKey(req("POST", "/api/chat/stream", { client_run_id: "run-1", thread_id: "t" }))).toEqual({
+      kind: "portal_run",
+      id: "run-1"
+    });
+    expect(resolveChatRunKey(req("POST", "/api/chat/cancel", { client_run_id: "run-1" }))).toEqual({ kind: "portal_run", id: "run-1" });
+    expect(resolveChatRunKey(req("POST", "/api/chat/stream", { session_id: "s", client_run_id: "run-1" }))).toEqual({
+      kind: "portal_session",
+      id: "s"
+    });
     expect(resolveChatRunKey(req("POST", "/api/action-connectors/conn/assistant-runs/a1/cancel"))).toEqual({
       kind: "action_connector_run",
       id: "a1"

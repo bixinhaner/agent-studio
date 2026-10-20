@@ -7,7 +7,7 @@ import type { AdminConversationSendFailure } from "./types";
 
 type Failure = AdminConversationSendFailure & { threadId: string | null; userId: string | null; userName: string | null; userEmail: string | null };
 type Result = { items: Failure[]; total: number; page: number; pageSize: number };
-const stages = ["attachment_upload", "attachment_not_ready", "composer_send", "run_blocked", "thread_resolve", "thread_create", "message_save", "session_start"];
+const stages = ["attachment_upload", "attachment_not_ready", "composer_send", "run_blocked", "thread_resolve", "thread_create", "message_save", "session_start", "chat_stream", "chat_stream_recovered"];
 function readFilters() {
   const q = new URLSearchParams(window.location.hash.split("?")[1]);
   return { user: q.get("failure_user") ?? "", stage: q.get("failure_stage") ?? "", from: q.get("failure_from") ?? "", to: q.get("failure_to") ?? "", unlinked: q.get("failure_unlinked") !== "false", page: Math.max(1, Number(q.get("failure_page")) || 1) };

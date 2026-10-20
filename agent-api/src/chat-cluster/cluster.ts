@@ -3,7 +3,11 @@
 // learns what its peers own from their local-only status endpoint, which the
 // pre-blue-green release already serves, so the first switch works too.
 
-export type RunOwnershipKind = "portal_session" | "crest_run" | "action_connector_run";
+/**
+ * portal_run is the client's run id: single-request sends have no session id until the
+ * server starts one, and a retried send must reach the instance that accepted the first.
+ */
+export type RunOwnershipKind = "portal_session" | "portal_run" | "crest_run" | "action_connector_run";
 
 export type RunKey = { kind: RunOwnershipKind; id: string };
 
@@ -94,6 +98,8 @@ export function parseChatPeerStatus(url: string, payload: unknown): ChatPeerStat
     ownedRuns: owned
       ? {
           portal_session: strings(owned.portal_session),
+          // Releases before single-request sends do not report run ids.
+          portal_run: strings(owned.portal_run),
           crest_run: strings(owned.crest_run),
           action_connector_run: strings(owned.action_connector_run)
         }

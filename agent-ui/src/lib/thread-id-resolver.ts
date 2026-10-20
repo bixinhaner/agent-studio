@@ -9,6 +9,8 @@ export type ResolveRunThreadIdInput = {
   getActiveRemoteThreadId: () => string;
   getActiveLocalThreadId: () => string;
   listThreads: () => Promise<ThreadListEntry[]>;
+  /** Server id of a new thread that only exists in the browser until its first send. */
+  findPendingRemoteThreadId?: (localThreadId: string) => string | undefined;
   attempts?: number;
   waitMs?: number;
 };
@@ -32,6 +34,10 @@ export async function resolveRunThreadId(input: ResolveRunThreadIdInput): Promis
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const activeLocalThreadId = trim(input.getActiveLocalThreadId());
     if (activeLocalThreadId) {
+      const pendingRemoteThreadId = trim(input.findPendingRemoteThreadId?.(activeLocalThreadId));
+      if (pendingRemoteThreadId) {
+        return pendingRemoteThreadId;
+      }
       const threads = await input.listThreads();
       const byExternal =
         (threads || []).find((thread) => trim(thread.external_id) === activeLocalThreadId && thread.status !== "archived") ||

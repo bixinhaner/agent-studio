@@ -95,7 +95,10 @@ const CLIENT_STAGES = [
   "thread_resolve",
   "thread_create",
   "message_save",
-  "session_start"
+  "session_start",
+  // Single-request sends: never accepted after the silent retries, or accepted only after a retry.
+  "chat_stream",
+  "chat_stream_recovered"
 ] as const;
 
 const clientSendFailureSchema = z.object({

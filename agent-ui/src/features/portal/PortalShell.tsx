@@ -58,6 +58,18 @@ import { reportSendFailure, shouldBrowserReportSendFailure } from "../../lib/sen
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { resolvePortalChatRecoveryActive } from "./chat-recovery";
 import { completedAssistantContentForParent, isPortalTransportDisconnect } from "./background-run-recovery";
+import {
+  createPortalServerThreadId,
+  pendingServerThreads,
+  setPortalSendProtocol,
+  singleRequestSendSupported,
+  type PendingServerThread
+} from "./pending-server-threads";
+import {
+  PortalSendNotDeliveredError,
+  streamPortalSendWithRetry,
+  type PortalSendAttemptResult
+} from "./portal-send-transport";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { usePortalI18n } from "./i18n";
@@ -502,6 +514,7 @@ export function PortalShell(props: {
     }
     try {
       const out = await api<RunningThreadsOut>("/api/threads/running");
+      setPortalSendProtocol(out.send_protocol);
       const next: RunningThreadIdsContextValue = {};
       for (const threadId of Array.isArray(out.thread_ids) ? out.thread_ids : []) {
         const normalized = String(threadId || "").trim();
@@ -629,6 +642,8 @@ export function PortalShell(props: {
   const activeLocalThreadIdRef = useRef("");
   const runtimeModeOverrideRef = useRef<{ threadId: string; modeId: string } | null>(null);
   const activePortalRunRef = useRef<PortalActiveRun | null>(null);
+  // Bumped when a new task reaches the server, so per-task data loads that skipped it run again.
+  const [serverThreadRevision, setServerThreadRevision] = useState(0);
   const reloadThreadHistoryRef = useRef<((threadId: string) => Promise<void>) | null>(null);
   const getSteerSourceUserMessageId = useCallback(
     () => activePortalRunRef.current?.userMessageId,
@@ -655,6 +670,7 @@ export function PortalShell(props: {
     return portalSteerEventFromOut(out.steer_event);
   }, []);
   const loadPortalSteerEvents = useCallback(async (threadId: string) => {
+    if (pendingServerThreads.has(threadId)) return [];
     const out = await api<PortalSteerEventListOut>(
       `/api/threads/${encodeURIComponent(threadId)}/steer-events`
     );
@@ -742,7 +758,7 @@ export function PortalShell(props: {
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) return;
     clearPortalThreadUnreadState(normalizedThreadId);
-    if (trainingReadOnly) return;
+    if (trainingReadOnly || pendingServerThreads.has(normalizedThreadId)) return;
     try {
       await api(`/api/threads/${encodeURIComponent(normalizedThreadId)}/read`, { method: "POST" });
     } catch {
@@ -1003,7 +1019,8 @@ export function PortalShell(props: {
 
   useEffect(() => {
     const remoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
-    if (!remoteThreadId) {
+    // A new task that is not on the server yet is the user's own: nothing to load.
+    if (!remoteThreadId || pendingServerThreads.has(remoteThreadId)) {
       threadCollaborationRef.current = null;
       threadCollaborationLoadingRef.current = false;
       threadCollaborationPendingRef.current = { threadId: "", promise: null };
@@ -1045,7 +1062,7 @@ export function PortalShell(props: {
     return () => {
       cancelled = true;
     };
-  }, [activeThreadIdentity.remoteId]);
+  }, [activeThreadIdentity.remoteId, serverThreadRevision]);
 
   const [billingPanelOpen, setBillingPanelOpen] = useState(false);
   const [billingReturnNotice, setBillingReturnNotice] = useState<PortalBillingReturnNotice | null>(null);
@@ -1173,6 +1190,12 @@ export function PortalShell(props: {
       return;
     }
 
+    if (pendingServerThreads.has(threadId)) {
+      // The first send creates this task with the skills chosen now.
+      hydratedSkillThreadIdRef.current = threadId;
+      skillHydrationRef.current = null;
+      return;
+    }
     let active = true;
     hydratedSkillThreadIdRef.current = "";
     const hydrationPromise = api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`)
@@ -1459,6 +1482,68 @@ export function PortalShell(props: {
     });
   };
 
+  const rememberNewThreadGroupHeader = (thread: Pick<ThreadOut, "id" | "external_id">, localThreadId: string, at?: string) => {
+    const groupLabel = formatThreadGroupLabel(at || new Date().toISOString(), localeRef.current);
+    setSessionGroupLabelContext((prev) => {
+      const nextGroupHeaders = { ...prev.groupHeaderByRemoteId };
+      clearThreadGroupHeaderLabel(nextGroupHeaders, groupLabel);
+      rememberThreadGroupHeader(nextGroupHeaders, thread, groupLabel, localThreadId);
+      return { groupHeaderByRemoteId: nextGroupHeaders };
+    });
+  };
+  const rememberNewThreadGroupHeaderRef = useRef(rememberNewThreadGroupHeader);
+  rememberNewThreadGroupHeaderRef.current = rememberNewThreadGroupHeader;
+  const handleServerThreadCreated = (thread: ThreadOut, localThreadId: string) => {
+    const wasPending = pendingServerThreads.has(thread.id);
+    pendingServerThreads.confirm(thread.id);
+    setWorkspaceThreads((current) => [thread, ...current.filter((item) => item.id !== thread.id)]);
+    rememberNewThreadGroupHeader(thread, localThreadId, thread.updated_at || thread.created_at);
+    if (wasPending) setServerThreadRevision((value) => value + 1);
+  };
+  const handleServerThreadCreatedRef = useRef(handleServerThreadCreated);
+  handleServerThreadCreatedRef.current = handleServerThreadCreated;
+  /** Run settings a new task is created with; the first send repeats them for its session. */
+  const newThreadRunSettings = () => {
+    const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
+    const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
+    const selectedSkillIds = new Set(enabledSkillIdsRef.current);
+    const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
+    return {
+      model: cfg.model,
+      reasoning_effort: cfg.reasoningEffort,
+      knowledge_set_ids: normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current),
+      codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
+    };
+  };
+  const newThreadRunSettingsRef = useRef(newThreadRunSettings);
+  newThreadRunSettingsRef.current = newThreadRunSettings;
+  const createServerThread = async (thread: PendingServerThread): Promise<ThreadCreateOut> => {
+    const created = await api<ThreadCreateOut>("/api/threads", {
+      method: "POST",
+      json: {
+        // Older releases ignore the id and choose their own; callers use the returned thread.
+        id: thread.remoteId,
+        external_id: thread.localId,
+        title: thread.title,
+        ...newThreadRunSettingsRef.current(),
+        folder_id: thread.folderId,
+        local_root_id: thread.localRootId,
+        start_session: false
+      }
+    });
+    return created;
+  };
+  const createServerThreadRef = useRef(createServerThread);
+  createServerThreadRef.current = createServerThread;
+  useEffect(() => {
+    // Uploads need the task on the server before the first send.
+    pendingServerThreads.setCreator(async (thread) => {
+      const created = await createServerThreadRef.current(thread);
+      handleServerThreadCreatedRef.current(created.thread, thread.localId);
+    });
+    return () => pendingServerThreads.setCreator(undefined);
+  }, []);
+
   const threadListAdapter = useMemo<RemoteThreadListAdapter>(
     () => ({
       async list() {
@@ -1508,31 +1593,30 @@ export function PortalShell(props: {
         if (!selectedMode) {
           throw new Error(tRef.current("runtime.sendBlocked"));
         }
-        const selectedSkillIds = new Set(enabledSkillIdsRef.current);
-        const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
+        const selectedFolderId = selectedWorkspaceFolderIdRef.current;
+        const folderId =
+          selectedFolderId &&
+          selectedFolderId !== RECENT_WORKSPACE_VIEW &&
+          selectedFolderId !== AGENT_OUTPUTS_WORKSPACE_VIEW &&
+          selectedFolderId !== TRASH_WORKSPACE_VIEW
+            ? selectedFolderId
+            : portalWorkspaceRef.current?.history_folder_id;
+        const pending: PendingServerThread = {
+          remoteId: createPortalServerThreadId(),
+          localId: threadId,
+          folderId: folderId || undefined,
+          localRootId: localWorkspace.selectionRef.current?.root_id
+        };
+        if (singleRequestSendSupported()) {
+          // The first send creates the task together with the message (one request).
+          pendingServerThreads.add(pending);
+          syncActiveThreadIdentityRef.current({ remoteId: pending.remoteId, localId: threadId || undefined });
+          rememberNewThreadGroupHeaderRef.current({ id: pending.remoteId, external_id: threadId }, threadId);
+          return { remoteId: pending.remoteId, externalId: threadId };
+        }
         let created: ThreadCreateOut;
         try {
-          const selectedFolderId = selectedWorkspaceFolderIdRef.current;
-          const folderId =
-            selectedFolderId &&
-            selectedFolderId !== RECENT_WORKSPACE_VIEW &&
-            selectedFolderId !== AGENT_OUTPUTS_WORKSPACE_VIEW &&
-            selectedFolderId !== TRASH_WORKSPACE_VIEW
-              ? selectedFolderId
-              : portalWorkspaceRef.current?.history_folder_id;
-          created = await api<ThreadCreateOut>("/api/threads", {
-            method: "POST",
-            json: {
-              external_id: threadId,
-              model: cfg.model,
-              reasoning_effort: cfg.reasoningEffort,
-              knowledge_set_ids: knowledgeSetIds,
-              folder_id: folderId || undefined,
-              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills),
-              local_root_id: localWorkspace.selectionRef.current?.root_id,
-              start_session: false
-            }
-          });
+          created = await createServerThreadRef.current(pending);
         } catch (error) {
           if (shouldBrowserReportSendFailure(error)) {
             reportSendFailure({ stage: "thread_create", threadId, error });
@@ -1546,20 +1630,7 @@ export function PortalShell(props: {
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
-        setWorkspaceThreads((current) => [
-          created.thread,
-          ...current.filter((thread) => thread.id !== created.thread.id)
-        ]);
-        const groupLabel = formatThreadGroupLabel(
-          created.thread.updated_at || created.thread.created_at || new Date().toISOString(),
-          localeRef.current
-        );
-        setSessionGroupLabelContext((prev) => {
-          const nextGroupHeaders = { ...prev.groupHeaderByRemoteId };
-          clearThreadGroupHeaderLabel(nextGroupHeaders, groupLabel);
-          rememberThreadGroupHeader(nextGroupHeaders, created.thread, groupLabel, threadId);
-          return { groupHeaderByRemoteId: nextGroupHeaders };
-        });
+        handleServerThreadCreatedRef.current(created.thread, threadId);
         return {
           remoteId: created.thread.id,
           externalId: created.thread.external_id
@@ -1567,6 +1638,8 @@ export function PortalShell(props: {
       },
       async rename(remoteId: string, newTitle: string) {
         if (trainingReadOnly) throw new Error("Training catalog is read-only.");
+        // Not on the server yet: the first send creates the task with this title.
+        if (pendingServerThreads.setTitle(remoteId, newTitle)) return;
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { title: newTitle }
@@ -1577,6 +1650,10 @@ export function PortalShell(props: {
       },
       async archive(remoteId: string) {
         if (trainingReadOnly) throw new Error("Training catalog is read-only.");
+        if (pendingServerThreads.has(remoteId)) {
+          pendingServerThreads.confirm(remoteId);
+          return;
+        }
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "archived" }
@@ -1597,6 +1674,10 @@ export function PortalShell(props: {
       },
       async delete(remoteId: string) {
         if (trainingReadOnly) throw new Error("Training catalog is read-only.");
+        if (pendingServerThreads.has(remoteId)) {
+          pendingServerThreads.confirm(remoteId);
+          return;
+        }
         await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
           method: "PATCH",
           json: { status: "archived" }
@@ -1625,6 +1706,15 @@ export function PortalShell(props: {
           const existing = guessThreadTitle(messages);
           return createAssistantStream((controller) => {
             controller.appendText(existing || "New conversation");
+            controller.close();
+          });
+        }
+        const pendingThread = pendingServerThreads.get(remoteId);
+        if (pendingThread) {
+          const title = pendingThread.title || guessThreadTitle(messages);
+          if (title && title !== "New conversation") pendingServerThreads.setTitle(remoteId, title);
+          return createAssistantStream((controller) => {
+            controller.appendText(title || "New conversation");
             controller.close();
           });
         }
@@ -1696,7 +1786,8 @@ export function PortalShell(props: {
     setEnabledSkillIds(normalizedIds);
 
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
-    if (!threadId) return;
+    // A task not on the server yet takes the selection with its first send.
+    if (!threadId || pendingServerThreads.has(threadId)) return;
     setSkillSelectionPendingCount(count => count + 1);
     try {
       await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}/skills`, {
@@ -2237,7 +2328,7 @@ export function PortalShell(props: {
   }, []);
 
   useEffect(() => {
-    if (!activeRemoteThreadId) {
+    if (!activeRemoteThreadId || pendingServerThreads.has(activeRemoteThreadId)) {
       setActiveTaskFiles([]);
       return undefined;
     }
@@ -2253,7 +2344,7 @@ export function PortalShell(props: {
     return () => {
       cancelled = true;
     };
-  }, [activeRemoteThreadId, workspaceDataSource]);
+  }, [activeRemoteThreadId, serverThreadRevision, workspaceDataSource]);
   const attachmentWorkspaceFilesValue = useMemo<AttachmentWorkspaceFilesContextValue | null>(
     () => activeRemoteThreadId ? { apiBasePath: workspaceDataSource.apiBasePath, files: activeTaskFiles } : null,
     [activeRemoteThreadId, activeTaskFiles, workspaceDataSource.apiBasePath]
@@ -2261,6 +2352,23 @@ export function PortalShell(props: {
 
   const requestPortalRunCancel = useCallback(() => {
     const run = activePortalRunRef.current;
+    if (run && !run.sessionId) {
+      // A single-request send still starting its session: the server finds it by run id.
+      composerWorkflowController.markInterrupted(run.threadId);
+      void api<{ cancelled: boolean }>("/api/chat/cancel", {
+        method: "POST",
+        json: {
+          client_run_id: run.runId,
+          thread_id: run.threadId,
+          user_message_id: run.userMessageId,
+          client_cancel_clicked_at: new Date().toISOString(),
+          client_cancel_source: "portal_stop_button_preflight"
+        }
+      }).catch((error) => {
+        console.warn("portal chat cancel failed", error);
+      });
+      return;
+    }
     if (!run?.sessionId) {
       // Background response (this tab reloaded or lost the stream): cancel by thread.
       const threadId = activeRemoteThreadIdRef.current;
@@ -2372,6 +2480,7 @@ export function PortalShell(props: {
             const out = await api<ThreadListOut>("/api/threads");
             return out.threads || [];
           },
+          findPendingRemoteThreadId: (localThreadId) => pendingServerThreads.findByLocalId(localThreadId)?.remoteId,
           attempts: 8,
           waitMs: 80
         });
@@ -2414,44 +2523,50 @@ export function PortalShell(props: {
         updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
         startRunningStageWaitTimers();
 
-        try {
-          updateRunningStage("Saving your message", { kind: "text" });
-          await api(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
-            method: "POST",
-            json: pendingPortalUserMessageAppend({
-              messageId: latestUserMessageId,
-              parentId: latestUserMessage?.parentId ?? null,
-              message: latestUserMessageForPersistence
-            })
-          });
-        } catch (error) {
-          if (error instanceof ApiError && error.code === "PORTAL_RUN_ACTIVE") {
-            // This thread still runs a response this tab does not stream (another tab or a
-            // reload). The server kept nothing: queue the message and drop the optimistic copy.
-            composerWorkflowController.requeueRejectedSend(threadId, prompt);
-            setServerRunningThreadIds((prev) =>
-              updateRunningThreadMapForKeys(prev, normalizeThreadIdentityKeys(threadId, localThreadId), true)
-            );
-            setErrorText(t("thread.runActiveQueued"));
-            setStatusText("Ready");
+        // Single-request send: the stream request itself creates the task (when new), saves the
+        // message and starts the session. Older releases get the separate requests below.
+        const singleRequest = singleRequestSendSupported();
+        const pendingThread = singleRequest ? pendingServerThreads.get(threadId) : undefined;
+        if (!singleRequest) {
+          try {
+            updateRunningStage("Saving your message", { kind: "text" });
+            await api(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
+              method: "POST",
+              json: pendingPortalUserMessageAppend({
+                messageId: latestUserMessageId,
+                parentId: latestUserMessage?.parentId ?? null,
+                message: latestUserMessageForPersistence
+              })
+            });
+          } catch (error) {
+            if (error instanceof ApiError && error.code === "PORTAL_RUN_ACTIVE") {
+              // This thread still runs a response this tab does not stream (another tab or a
+              // reload). The server kept nothing: queue the message and drop the optimistic copy.
+              composerWorkflowController.requeueRejectedSend(threadId, prompt);
+              setServerRunningThreadIds((prev) =>
+                updateRunningThreadMapForKeys(prev, normalizeThreadIdentityKeys(threadId, localThreadId), true)
+              );
+              setErrorText(t("thread.runActiveQueued"));
+              setStatusText("Ready");
+              stopRunningStageWaitTimers();
+              updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
+              window.setTimeout(() => void reloadThreadHistoryRef.current?.(threadId).catch(() => undefined), 0);
+              return;
+            }
+            if (shouldBrowserReportSendFailure(error)) {
+              reportSendFailure({ stage: "message_save", threadId, error, ...sendFailureContext });
+            }
+            const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
+            if (latestUserMessage) window.dispatchEvent(new CustomEvent("bailey-restore-composer", { detail: {
+              threadId,
+              text: latestUserMessage.message.content.filter(part => part.type === "text").map(part => (part as { text: string }).text).join("\n"),
+              attachments: latestUserMessage.message.attachments
+            } }));
+            setErrorText(notice);
             stopRunningStageWaitTimers();
-            updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
-            window.setTimeout(() => void reloadThreadHistoryRef.current?.(threadId).catch(() => undefined), 0);
-            return;
+            updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
+            throw new Error(notice);
           }
-          if (shouldBrowserReportSendFailure(error)) {
-            reportSendFailure({ stage: "message_save", threadId, error, ...sendFailureContext });
-          }
-          const notice = formatAssistantErrorNoticeFromError(error, "Failed to save your message", t);
-          if (latestUserMessage) window.dispatchEvent(new CustomEvent("bailey-restore-composer", { detail: {
-            threadId,
-            text: latestUserMessage.message.content.filter(part => part.type === "text").map(part => (part as { text: string }).text).join("\n"),
-            attachments: latestUserMessage.message.attachments
-          } }));
-          setErrorText(notice);
-          stopRunningStageWaitTimers();
-          updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
-          throw new Error(notice);
         }
         updateRunningStage("Preparing response", { kind: "text" });
 
@@ -2472,54 +2587,60 @@ export function PortalShell(props: {
           runtimeModeOverride.modeId === runtimeModeRef.current
         );
         const clientRunId = createPortalRunId();
-        let ensured: ThreadSessionOut;
-        try {
-          ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
-            method: "POST",
-            json: {
-              model: cfg.model,
-              reasoning_effort: cfg.reasoningEffort,
-              knowledge_set_ids: knowledgeSetIds,
-              selected_skill_ids: turnSelectedSkillIds,
-              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
-              allow_mode_change: allowModeChange,
-              client_run_id: clientRunId,
-              client_user_message_id: latestUserMessageId,
-              client_assistant_message_id: options.unstable_assistantMessageId,
-              portal_locale: localeRef.current
-            }
-          });
-          if (allowModeChange) {
-            runtimeModeOverrideRef.current = null;
-            setWorkspaceThreads((current) => current.map((thread) =>
-              thread.id === threadId
-                ? {
-                    ...thread,
-                    mode_id: runtimeModeRef.current,
-                    model: ensured.session.model,
-                    reasoning_effort: ensured.session.reasoning_effort
-                  }
-                : thread
-            ));
-          }
-        } catch (error) {
-          if (shouldBrowserReportSendFailure(error)) {
-            reportSendFailure({ stage: "session_start", threadId, error, clientRunId, ...sendFailureContext });
-          }
-          const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session", t);
-          setErrorText(notice);
-          void refreshPortalSubscriptionStatusRef.current({ silent: true });
-          stopRunningStageWaitTimers();
-          updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
-          throw new Error(notice);
-        }
-        const session = ensured.session;
         const activeRun: PortalActiveRun = {
-          sessionId: session.session_id,
+          sessionId: "",
           runId: clientRunId,
           threadId,
           userMessageId: latestUserMessageId
         };
+        let activeSessionModel = "";
+        const applyStartedSession = (started: { model?: string; reasoning_effort?: string }) => {
+          if (started.model) activeSessionModel = started.model;
+          if (!allowModeChange) return;
+          runtimeModeOverrideRef.current = null;
+          setWorkspaceThreads((current) => current.map((thread) =>
+            thread.id === threadId
+              ? {
+                  ...thread,
+                  mode_id: runtimeModeRef.current,
+                  model: started.model ?? thread.model,
+                  reasoning_effort: (started.reasoning_effort as ThreadOut["reasoning_effort"]) ?? thread.reasoning_effort
+                }
+              : thread
+          ));
+        };
+        if (!singleRequest) {
+          let ensured: ThreadSessionOut;
+          try {
+            ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
+              method: "POST",
+              json: {
+                model: cfg.model,
+                reasoning_effort: cfg.reasoningEffort,
+                knowledge_set_ids: knowledgeSetIds,
+                selected_skill_ids: turnSelectedSkillIds,
+                codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
+                allow_mode_change: allowModeChange,
+                client_run_id: clientRunId,
+                client_user_message_id: latestUserMessageId,
+                client_assistant_message_id: options.unstable_assistantMessageId,
+                portal_locale: localeRef.current
+              }
+            });
+            applyStartedSession(ensured.session);
+          } catch (error) {
+            if (shouldBrowserReportSendFailure(error)) {
+              reportSendFailure({ stage: "session_start", threadId, error, clientRunId, ...sendFailureContext });
+            }
+            const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session", t);
+            setErrorText(notice);
+            void refreshPortalSubscriptionStatusRef.current({ silent: true });
+            stopRunningStageWaitTimers();
+            updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
+            throw new Error(notice);
+          }
+          activeRun.sessionId = ensured.session.session_id;
+        }
         activePortalRunRef.current = activeRun;
 
         let hasTextUpdate = false;
@@ -3025,31 +3146,102 @@ export function PortalShell(props: {
         setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
         try {
           try {
-          for await (const { event, data } of iterateSSE(`${apiBase()}/api/chat/stream`, {
+          const streamRequestBody = JSON.stringify({
+            ...(singleRequest
+              ? {
+                  ...(pendingThread
+                    ? {
+                        new_thread: {
+                          id: threadId,
+                          external_id: pendingThread.localId || undefined,
+                          title: pendingThread.title || guessThreadTitle(options.messages) || undefined,
+                          folder_id: pendingThread.folderId,
+                          local_root_id: pendingThread.localRootId,
+                          codex_run_config: newThreadRunSettingsRef.current().codex_run_config
+                        }
+                      }
+                    : {}),
+                  model: cfg.model,
+                  reasoning_effort: cfg.reasoningEffort,
+                  knowledge_set_ids: knowledgeSetIds,
+                  codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current),
+                  allow_mode_change: allowModeChange
+                }
+              : { session_id: activeRun.sessionId }),
+            client_run_id: clientRunId,
+            client_assistant_message_id: options.unstable_assistantMessageId,
+            thread_id: threadId,
+            user_message_id: latestUserMessageId,
+            client_user_message_id: latestUserMessageId,
+            parent_id: latestUserMessage?.parentId ?? null,
+            user_message: latestUserMessageForPersistence,
+            display_message: prompt,
+            selected_skill_ids: turnSelectedSkillIds,
+            portal_locale: localeRef.current,
+            message: runtimePrompt
+          });
+          const openStream = () => iterateSSE(`${apiBase()}/api/chat/stream`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               ...authHeaders()
             },
-            body: JSON.stringify({
-              session_id: session.session_id,
-              client_run_id: clientRunId,
-              client_assistant_message_id: options.unstable_assistantMessageId,
-              thread_id: threadId,
-              user_message_id: latestUserMessageId,
-              client_user_message_id: latestUserMessageId,
-              parent_id: latestUserMessage?.parentId ?? null,
-              user_message: latestUserMessageForPersistence,
-              display_message: prompt,
-              selected_skill_ids: turnSelectedSkillIds,
-              portal_locale: localeRef.current,
-              message: runtimePrompt
-            }),
+            body: streamRequestBody,
             signal: options.abortSignal
-          })) {
+          });
+          // Until the server accepts the message, a dropped connection is retried silently with the
+          // same run id; the user only sees "reconnecting" while it lasts.
+          const streamEvents = singleRequest
+            ? streamPortalSendWithRetry({
+                open: openStream,
+                signal: options.abortSignal,
+                onRetry: () => {
+                  updateRunningStage(t("thread.sendReconnecting"), { fallback: false, kind: "text" });
+                },
+                onDelivered: (result: PortalSendAttemptResult) => {
+                  if (result.attempts <= 1) return;
+                  updateRunningStage("Preparing response", { kind: "text" });
+                  reportSendFailure({
+                    stage: "chat_stream_recovered",
+                    threadId,
+                    error: result.lastError,
+                    errorCode: "recovered_after_retry",
+                    attempts: result.attempts,
+                    clientRunId,
+                    ...sendFailureContext
+                  });
+                }
+              })
+            : openStream();
+          for await (const { event, data } of streamEvents) {
             const updates: any[] = [];
             let textChanged = false;
             const payload = asRecord(data);
+
+            if (event === "accepted") {
+              const acceptedThread = asRecord(payload?.thread);
+              if (pendingThread && acceptedThread && typeof acceptedThread.id === "string") {
+                handleServerThreadCreatedRef.current(acceptedThread as unknown as ThreadOut, pendingThread.localId);
+              } else if (pendingThread && pendingServerThreads.has(threadId)) {
+                pendingServerThreads.confirm(threadId);
+                setServerThreadRevision((value) => value + 1);
+              }
+              if (payload?.duplicate === true) {
+                // A retry of a send the server already has: follow that response instead.
+                break;
+              }
+              continue;
+            }
+
+            if (event === "session") {
+              const startedSessionId = asString(payload?.session_id);
+              if (startedSessionId) activeRun.sessionId = startedSessionId;
+              applyStartedSession({
+                model: asString(payload?.model) || undefined,
+                reasoning_effort: asString(payload?.reasoning_effort) || undefined
+              });
+              continue;
+            }
 
             if (event === "error" && payload?.code === "PORTAL_RUN_ACTIVE") {
               // The previous response is still running on the server (this tab lost its
@@ -3325,6 +3517,10 @@ export function PortalShell(props: {
             }
 
             if (event === "meta") {
+              const metaSessionId = asString(payload?.session_id);
+              if (metaSessionId && !activeRun.sessionId) activeRun.sessionId = metaSessionId;
+              const metaModel = asString(payload?.model);
+              if (metaModel && !activeSessionModel) activeSessionModel = metaModel;
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
@@ -3397,7 +3593,7 @@ export function PortalShell(props: {
               const runtimeUsage = parseTurnUsage(usageInfo?.last_token_usage ?? usageInfo?.total_token_usage);
               const runtimeContextLimit = toTokenCount(usageInfo?.model_context_window);
               if (runtimeUsage && runtimeContextLimit !== null && runtimeContextLimit > 0) {
-                const usageModel = String(session.model || cfg.model || "").trim();
+                const usageModel = String(activeSessionModel || cfg.model || "").trim();
                 const snapshot: ContextUsageSnapshot = {
                   threadId,
                   model: usageModel || "unknown",
@@ -3413,7 +3609,7 @@ export function PortalShell(props: {
             if (eventType === "turn.completed") {
               const usage = parseTurnUsage(raw?.usage ?? payload?.usage);
               if (usage) {
-                const usageModel = String(session.model || cfg.model || "").trim();
+                const usageModel = String(activeSessionModel || cfg.model || "").trim();
                 const runtimeSnapshot = usageByThreadRef.current[threadId];
                 const snapshot: ContextUsageSnapshot = {
                   threadId,
@@ -3788,6 +3984,24 @@ export function PortalShell(props: {
             throw new Error("connection closed before response completion");
           }
           } catch (error) {
+            if (error instanceof PortalSendNotDeliveredError && !options.abortSignal.aborted) {
+              // Never reached the server after the silent retries: nothing was saved there.
+              portalRunFailed = true;
+              reportSendFailure({
+                stage: "chat_stream",
+                threadId,
+                error: error.lastError,
+                errorCode: "send_not_delivered",
+                attempts: error.attempts,
+                clientRunId,
+                ...sendFailureContext
+              });
+              setErrorText("");
+              stopRunningStageWaitTimers();
+              updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
+              // The empty-answer view turns this error into the "not sent" notice with a resend button.
+              throw new Error("portal_send_not_delivered");
+            }
             if (options.abortSignal.aborted || portalRunFailed || !isPortalTransportDisconnect(error)) {
               throw error;
             }

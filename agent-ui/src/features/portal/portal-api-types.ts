@@ -37,6 +37,8 @@ export type ThreadListOut = {
 
 export type RunningThreadsOut = {
   thread_ids: string[];
+  /** 2 = the chat service accepts single-request sends. Missing on older releases. */
+  send_protocol?: number;
 };
 
 export type ThreadOneOut = {

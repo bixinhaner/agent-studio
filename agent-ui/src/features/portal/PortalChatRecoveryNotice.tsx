@@ -4,7 +4,7 @@ import { usePortalI18n } from "./i18n";
 
 type PortalChatRecoveryNoticeProps =
   | { state: "recovering" }
-  | { state: "failed"; canRerun: boolean; onRerun: () => void };
+  | { state: "failed"; canRerun: boolean; onRerun: () => void; reason?: "send_not_delivered" };
 
 export function PortalChatRecoveryNotice(props: PortalChatRecoveryNoticeProps) {
   const { t } = usePortalI18n();
@@ -21,17 +21,18 @@ export function PortalChatRecoveryNotice(props: PortalChatRecoveryNoticeProps) {
     );
   }
 
+  const notDelivered = props.reason === "send_not_delivered";
   return (
     <div className="assistant-error-card" role="alert" aria-live="polite">
       <div className="assistant-error-card-head">
         <AlertCircleIcon size={16} aria-hidden="true" />
-        <strong>{t("thread.recoveryFailed")}</strong>
+        <strong>{t(notDelivered ? "thread.sendNotDelivered" : "thread.recoveryFailed")}</strong>
       </div>
-      <p>{t("thread.recoveryFailedHelp")}</p>
+      <p>{t(notDelivered ? "thread.sendNotDeliveredHelp" : "thread.recoveryFailedHelp")}</p>
       {props.canRerun ? (
         <button type="button" className="assistant-error-retry" onClick={props.onRerun}>
           <RefreshCcwIcon size={15} aria-hidden="true" />
-          <span>{t("thread.rerun")}</span>
+          <span>{t(notDelivered ? "thread.resend" : "thread.rerun")}</span>
         </button>
       ) : null}
     </div>

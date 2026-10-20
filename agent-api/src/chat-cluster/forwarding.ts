@@ -188,7 +188,10 @@ export function resolveChatRunKey(req: Request): RunKey | undefined {
   // owner so it supersedes the old turn exactly as on a single instance.
   if (path === "/api/chat/cancel" || path === "/api/chat/steer" || path === "/api/chat/stream") {
     const id = bodyString(req, "session_id");
-    return id ? { kind: "portal_session", id } : undefined;
+    if (id) return { kind: "portal_session", id };
+    // A single-request send (or its retry) carries no session yet; its run id finds the owner.
+    const runId = bodyString(req, "client_run_id");
+    return runId ? { kind: "portal_run", id: runId } : undefined;
   }
   if (path === "/api/integrations/crest/chat/cancel") {
     const id = bodyString(req, "clientRunId");

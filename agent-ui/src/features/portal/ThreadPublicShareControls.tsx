@@ -8,6 +8,7 @@ import {
   revokeThreadPublicShare
 } from "../public-share/api";
 import { type ThreadPublicShareStatus } from "../public-share/types";
+import { pendingServerThreads } from "./pending-server-threads";
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
 import { usePortalI18n } from "./i18n";
 import { formatUserLocalDateTime } from "./portal-formatting";
@@ -141,7 +142,8 @@ export const ThreadPublicShareControls: FC<
   useEffect(() => {
     let cancelled = false;
     setActiveShare(null);
-    if (!threadId || skipStatusLookup) return;
+    // A new task the server has not created yet has no share.
+    if (!threadId || skipStatusLookup || pendingServerThreads.has(threadId)) return;
     void fetchThreadPublicShareStatus(threadId)
       .then((share) => {
         if (!cancelled) setActiveShare(share);

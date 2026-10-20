@@ -50,4 +50,16 @@ describe("send failure report", () => {
     expect(init.keepalive).toBe(true);
     expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ stage: "thread_resolve", detail: "no id" }));
   });
+
+  it("adds the number of attempts of a retried send to the detail", () => {
+    const body = buildSendFailureReportBody({
+      stage: "chat_stream",
+      error: new TypeError("Failed to fetch"),
+      errorCode: "send_not_delivered",
+      attempts: 4,
+      clientRunId: "run-1"
+    });
+    expect(body).toMatchObject({ stage: "chat_stream", error_code: "send_not_delivered", client_run_id: "run-1" });
+    expect(body.detail).toBe("TypeError: Failed to fetch | attempts=4");
+  });
 });

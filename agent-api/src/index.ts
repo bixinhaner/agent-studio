@@ -227,6 +227,16 @@ import {
 } from "./portal/chat-failure-presentation.js";
 import { portalFailedAssistantMessage } from "./portal/chat-failure-message.js";
 import { createPortalPartialSnapshot, PortalPartialAnswerCollector, type PortalPartialAssistantSnapshot } from "./portal/chat-partial-answer.js";
+import {
+  findBlockingPortalActiveChatRun,
+  findPortalChatRunById,
+  findPortalPreflightChatRun,
+  gcPortalActiveChatRuns,
+  portalActiveChatRuns,
+  portalPreflightChatRuns,
+  registerPortalPreflightChatRun,
+  type PortalActiveChatRun
+} from "./portal/portal-run-registry.js";
 import { portalStoppedAssistantMessage } from "./portal/chat-stopped-message.js";
 import {
   portalAutoRecoveryPrompt,
@@ -260,6 +270,7 @@ import {
 import { ThreadCommentRepository, type ThreadCommentRepositoryDb } from "./persistence/thread-comment-repository.js";
 import {
   ThreadRepository,
+  storedTurnDelivery,
   type ReasoningEffort,
   type ThreadFeedback,
   type ThreadRecord,
@@ -616,7 +627,7 @@ async function isThreadActiveForAdmin(threadId: string): Promise<boolean> {
 
 /** Whether a portal task runs on this or another chat instance (blocks binding changes mid-run). */
 async function isPortalThreadRunningInCluster(threadId: string): Promise<boolean> {
-  if ([...portalActiveChatRuns.values()].some((run) => run.threadId === threadId)) return true;
+  if ([...portalActiveChatRuns.values(), ...portalPreflightChatRuns.values()].some((run) => run.threadId === threadId)) return true;
   if (!chatCluster.enabled) return false;
   const peers = await chatPeerThreadActivity();
   return peers.items.some((item) => threadIdOf(item) === threadId);
@@ -2708,8 +2719,26 @@ const createSessionSchema = z.object({
 });
 
 const streamSchema = z.object({
-  session_id: z.string().min(1),
+  /** Absent on single-request sends: the server saves the message and starts the session itself. */
+  session_id: z.string().min(1).optional(),
   thread_id: z.string().min(1).optional(),
+  /** Single-request send on a thread the browser has not created on the server yet. */
+  new_thread: z
+    .object({
+      id: z.string().trim().regex(/^[a-f0-9]{32}$/),
+      external_id: z.string().trim().min(1).max(200).optional(),
+      title: z.string().max(500).optional(),
+      folder_id: z.string().trim().min(1).nullable().optional(),
+      local_root_id: z.string().min(1).nullable().optional(),
+      /** The task's own settings (with its enabled skills); the top-level config is the session's. */
+      codex_run_config: z.record(z.unknown()).optional()
+    })
+    .optional(),
+  model: z.string().optional(),
+  reasoning_effort: reasoningEffortSchema.optional(),
+  knowledge_set_ids: z.array(z.string()).optional(),
+  codex_run_config: z.record(z.unknown()).optional(),
+  allow_mode_change: z.boolean().optional(),
   client_run_id: z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9._:-]+$/).optional(),
   client_assistant_message_id: z.string().trim().min(1).max(256).optional(),
   user_message_id: z.string().trim().min(1).optional(),
@@ -2837,6 +2866,8 @@ const crestArtifactContentSchema = z.object({
 });
 
 const createThreadSchema = z.object({
+  /** Client-chosen id (32 hex chars) so creation can be retried without duplicates. */
+  id: z.string().trim().regex(/^[a-f0-9]{32}$/).optional(),
   local_root_id: z.string().min(1).nullable().optional(),
   title: z.string().optional(),
   external_id: z.string().optional(),
@@ -4652,37 +4683,9 @@ function mergeAbortSignals(signals: AbortSignal[]): { signal: AbortSignal; dispo
   };
 }
 
-type PortalActiveChatRun = {
-  userId: string;
-  organizationId: string;
-  controller: AbortController;
-  createdAt: number;
-  runId: string;
-  traceId?: string;
-  session?: SessionRecord;
-  threadId?: string;
-  userMessageId?: string;
-  assistantMessageId?: string;
-  assistantMessageWritten?: boolean;
-  /** Snapshot of what the run has produced so far, kept by a stop so the partial answer survives a refresh. */
-  partialSnapshot?: () => PortalPartialAssistantSnapshot;
-  /** Aborted when a retiring chat instance reaches its limit; the turn ends as "interrupted by a system update". */
-  systemInterrupt?: AbortController;
-  acceptedAt: string;
-};
-
-const portalActiveChatRuns = new Map<string, PortalActiveChatRun>();
 const PORTAL_RUN_ACTIVE_ERROR_CODE = "PORTAL_RUN_ACTIVE";
-const PORTAL_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
-
-function gcPortalActiveChatRuns(): void {
-  const cutoff = Date.now() - PORTAL_ACTIVE_CHAT_RUN_TTL_MS;
-  for (const [sessionId, entry] of portalActiveChatRuns.entries()) {
-    if (entry.createdAt < cutoff) {
-      portalActiveChatRuns.delete(sessionId);
-    }
-  }
-}
+/** 2: `/api/chat/stream` without session_id creates the thread, saves the message and starts the session. */
+const PORTAL_SEND_PROTOCOL = 2;
 
 type ActiveThreadStatus = {
   thread_id: string;
@@ -4728,7 +4731,7 @@ function activeThreadStatus(): ActiveThreadStatus[] {
       startedAtMs: turn.startedAtMs
     });
   }
-  for (const run of portalActiveChatRuns.values()) {
+  for (const run of [...portalActiveChatRuns.values(), ...portalPreflightChatRuns.values()]) {
     add({
       threadId: run.threadId,
       userId: run.userId,
@@ -4775,33 +4778,6 @@ function portalUserInputPendingText(locale: string | undefined): string {
 function runtimeEventCarriesUserInputRequest(event: RuntimeStreamEvent): boolean {
   const raw = asRecord(event.raw);
   return Boolean(codexUserInputRequestFromItem(raw?.item));
-}
-
-/**
- * Returns the response that is still running for this session, if any. A new portal
- * message must not start (and must not abort it); the client queues or steers instead.
- */
-function findBlockingPortalActiveChatRun(
-  sessionId: string,
-  userId: string,
-  threadId?: string
-): PortalActiveChatRun | undefined {
-  gcPortalActiveChatRuns();
-  const live = (run: PortalActiveChatRun | undefined) =>
-    run && run.userId === userId && !run.controller.signal.aborted && !run.systemInterrupt?.signal.aborted
-      ? run
-      : undefined;
-  const normalizedSessionId = trimOrUndefined(sessionId);
-  const bySession = normalizedSessionId ? live(portalActiveChatRuns.get(normalizedSessionId)) : undefined;
-  if (bySession) return bySession;
-  // Sessions are per tab, so a reloaded or second tab reaches the same thread with a new session id.
-  const normalizedThreadId = trimOrUndefined(threadId);
-  if (!normalizedThreadId) return undefined;
-  for (const run of portalActiveChatRuns.values()) {
-    const runThreadId = trimOrUndefined(run.session?.threadId) ?? run.threadId;
-    if (runThreadId === normalizedThreadId && live(run)) return run;
-  }
-  return undefined;
 }
 
 /**
@@ -10058,7 +10034,7 @@ function portalUserMessage(input: {
   id: string;
   message: unknown;
   displayText: string;
-  sessionId: string;
+  sessionId?: string;
 }) {
   const payload = asRecord(input.message);
   const now = new Date().toISOString();
@@ -10129,13 +10105,21 @@ function findStoredMessageById(
   return repository.messages.find((item) => storedMessageId(item.message) === normalizedId);
 }
 
+/** The delivery recorded on the user message when it belongs to this run. */
+async function portalTurnDeliveryForRun(threadId: string, userMessageId: string, runId: string) {
+  const repository = await conversationRecords.getMessageRepository(threadId);
+  const delivery = storedTurnDelivery(findStoredMessageById(repository, userMessageId)?.runConfig);
+  return delivery?.runId === runId ? delivery : undefined;
+}
+
 async function ensurePortalStreamUserMessage(input: {
   threadId: string;
   userMessageId?: string;
   parentId?: string | null;
   userMessage?: unknown;
   displayText: string;
-  sessionId: string;
+  /** Unknown while a single-request send saves the message before starting its session. */
+  sessionId?: string;
 }): Promise<string> {
   const requestedUserMessageId = trimOrUndefined(input.userMessageId);
   const payloadId = storedMessageId(input.userMessage);
@@ -11629,6 +11613,12 @@ function ownedChatRuns(): OwnedRuns {
     [...runs.entries()].filter(([, run]) => !run.controller.signal.aborted).map(([id]) => id);
   return {
     portal_session: live(portalActiveChatRuns),
+    portal_run: [
+      ...new Set([
+        ...[...portalActiveChatRuns.values()].filter((run) => !run.controller.signal.aborted).map((run) => run.runId),
+        ...live(portalPreflightChatRuns)
+      ])
+    ],
     crest_run: live(crestActiveChatRuns),
     action_connector_run: [
       ...new Set([
@@ -13205,87 +13195,100 @@ app.get("/api/threads/running", async (req: Request, res: Response) => {
     return;
   }
   res.setHeader("Cache-Control", "no-store");
-  res.json({ thread_ids: Array.from(result.threadIds) });
+  // Browsers switch to single-request sends once the serving release reports protocol 2.
+  res.json({ thread_ids: Array.from(result.threadIds), send_protocol: PORTAL_SEND_PROTOCOL });
 });
 
-app.post("/api/threads", async (req: Request, res: Response) => {
-  const timing = createRuntimeStartupTimer({
-    traceId: randomUUID(),
-    source: "portal",
-    operation: "create_thread",
-    route: "POST /api/threads"
-  });
+/** A thread the caller already created with this client-chosen id; another owner's id is a conflict. */
+async function reusablePortalThread(threadId: string, currentUser: CurrentActor): Promise<ThreadRecord | undefined> {
+  if (!(await threads.get(threadId))) return undefined;
+  const owned = await getPortalOwnedThread(threadId, currentUser);
+  if (!owned) throw Object.assign(new Error("Thread id is already in use"), { code: "THREAD_ID_CONFLICT" });
+  return owned;
+}
+
+/**
+ * Creates a portal thread. A client-chosen `id` makes it idempotent, so the single send
+ * request (and its silent retries) can create the thread together with the first message.
+ */
+async function createPortalThreadForActor(
+  currentUser: CurrentActor,
+  input: z.infer<typeof createThreadSchema>,
+  timing: RuntimeStartupTimer
+): Promise<{ thread: ThreadRecord; session?: SessionRecord; created: boolean; modeId?: string }> {
+  const requestedThreadId = input.id?.trim();
+  if (requestedThreadId) {
+    const reused = await reusablePortalThread(requestedThreadId, currentUser);
+    if (reused) return { thread: reused, created: false };
+  }
+  const threadId = requestedThreadId ?? randomUUID().replace(/-/g, "");
+  timing.updateContext({ threadId });
+  const securityDomainId = await timing.time("create_thread.resolve_security_domain", () =>
+    portalSecurityDomainIdForActor(currentUser)
+  );
+  const workspaceScope = await timing.time("create_thread.resolve_user_workspace", () =>
+    portalWorkspaces.resolveTaskScope({
+      actor: {
+        userId: currentUser.id,
+        organizationId: currentUser.organizationId,
+        securityDomainId
+      },
+      folderId: input.folder_id ?? undefined,
+      fallbackToHistory: true
+    })
+  );
+  if (workspaceScope.fellBackFromFolderId) {
+    console.warn(
+      `[portal-thread-folder-fallback] ${JSON.stringify({
+        user_id: currentUser.id,
+        organization_id: currentUser.organizationId,
+        requested_folder_id: workspaceScope.fellBackFromFolderId,
+        history_folder_id: workspaceScope.folderId
+      })}`
+    );
+  }
+  const modeHint = modeIdFromRunConfig(input.codex_run_config);
+  const allocated = await timing.time("create_thread.allocate_workspace", () =>
+    allocateUserAgentWorkspacePath({
+      currentUser,
+      modeHint,
+      securityDomainId,
+      threadId
+    }),
+    { modeHint }
+  );
+  const options = await timing.time("create_thread.resolve_session_options", () =>
+    resolveSessionOptions(
+      {
+        model: input.model,
+        reasoning_effort: input.reasoning_effort,
+        knowledge_set_ids: input.knowledge_set_ids,
+        codex_run_config: input.codex_run_config
+      },
+      currentUser,
+      allocated.workspacePath,
+      allocated.modeId,
+      allocated.runtimeProfile,
+      timing
+    )
+  );
+  timing.updateContext({ model: options.model });
+  await timing.time("create_thread.assert_chat_access", () =>
+    assertChatAllowsNewSession({
+      currentUser,
+      model: options.model,
+      featureType: "chat"
+    })
+  );
+  const shouldStartSession = input.start_session !== false;
+  if (shouldStartSession) {
+    await timing.time("create_thread.check_deploy_drain", () =>
+      assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
+    );
+  }
+  let createdThread: ThreadRecord;
   try {
-    timing.mark("request_received");
-    const currentUser = currentActorFromRequest(req);
-    timing.updateContext({ organizationType: currentUser.organizationType });
-    const input = createThreadSchema.parse(req.body || {});
-    const threadId = randomUUID().replace(/-/g, "");
-    timing.updateContext({ threadId });
-    const securityDomainId = await timing.time("create_thread.resolve_security_domain", () =>
-      portalSecurityDomainIdForActor(currentUser)
-    );
-    const workspaceScope = await timing.time("create_thread.resolve_user_workspace", () =>
-      portalWorkspaces.resolveTaskScope({
-        actor: {
-          userId: currentUser.id,
-          organizationId: currentUser.organizationId,
-          securityDomainId
-        },
-        folderId: input.folder_id ?? undefined,
-        fallbackToHistory: true
-      })
-    );
-    if (workspaceScope.fellBackFromFolderId) {
-      console.warn(
-        `[portal-thread-folder-fallback] ${JSON.stringify({
-          user_id: currentUser.id,
-          organization_id: currentUser.organizationId,
-          requested_folder_id: workspaceScope.fellBackFromFolderId,
-          history_folder_id: workspaceScope.folderId
-        })}`
-      );
-    }
-    const modeHint = modeIdFromRunConfig(input.codex_run_config);
-    const allocated = await timing.time("create_thread.allocate_workspace", () =>
-      allocateUserAgentWorkspacePath({
-        currentUser,
-        modeHint,
-        securityDomainId,
-        threadId
-      }),
-      { modeHint }
-    );
-    const options = await timing.time("create_thread.resolve_session_options", () =>
-      resolveSessionOptions(
-        {
-          model: input.model,
-          reasoning_effort: input.reasoning_effort,
-          knowledge_set_ids: input.knowledge_set_ids,
-          codex_run_config: input.codex_run_config
-        },
-        currentUser,
-        allocated.workspacePath,
-        allocated.modeId,
-        allocated.runtimeProfile,
-        timing
-      )
-    );
-    timing.updateContext({ model: options.model });
-    await timing.time("create_thread.assert_chat_access", () =>
-      assertChatAllowsNewSession({
-        currentUser,
-        model: options.model,
-        featureType: "chat"
-      })
-    );
-    const shouldStartSession = input.start_session !== false;
-    if (shouldStartSession) {
-      await timing.time("create_thread.check_deploy_drain", () =>
-        assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
-      );
-    }
-    const createdThread = await timing.time("create_thread.persist_thread", () =>
+    createdThread = await timing.time("create_thread.persist_thread", () =>
       threads.create({
         id: threadId,
         organizationId: currentUser.organizationId,
@@ -13302,28 +13305,52 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         codexRunConfig: options.codexRunConfig
       })
     );
-    if (input.local_root_id) await bindLocalRoot(db, currentUser.id, createdThread.id, input.local_root_id);
-    const session = shouldStartSession
-      ? await timing.time("create_thread.create_session", () =>
-          createSession(options, createdThread.id, timing)
-        )
-      : undefined;
-    if (session) {
-      timing.updateContext({ sessionId: session.sessionId });
-    } else {
-      timing.mark("create_thread.defer_session_start");
-    }
-    const updated = session
-      ? (await timing.time("create_thread.reload_thread", () =>
-          threads.get(createdThread.id, currentUser.organizationId)
-        )) ?? createdThread
-      : createdThread;
+  } catch (error) {
+    // A retried send can race its first attempt; the client-chosen id makes the second one a no-op.
+    const reused = requestedThreadId ? await reusablePortalThread(requestedThreadId, currentUser) : undefined;
+    if (reused) return { thread: reused, created: false };
+    throw error;
+  }
+  if (input.local_root_id) await bindLocalRoot(db, currentUser.id, createdThread.id, input.local_root_id);
+  const session = shouldStartSession
+    ? await timing.time("create_thread.create_session", () =>
+        createSession(options, createdThread.id, timing)
+      )
+    : undefined;
+  if (session) {
+    timing.updateContext({ sessionId: session.sessionId });
+  } else {
+    timing.mark("create_thread.defer_session_start");
+  }
+  const updated = session
+    ? (await timing.time("create_thread.reload_thread", () =>
+        threads.get(createdThread.id, currentUser.organizationId)
+      )) ?? createdThread
+    : createdThread;
+  return { thread: updated, session, created: true, modeId: allocated.modeId };
+}
 
+app.post("/api/threads", async (req: Request, res: Response) => {
+  const timing = createRuntimeStartupTimer({
+    traceId: randomUUID(),
+    source: "portal",
+    operation: "create_thread",
+    route: "POST /api/threads"
+  });
+  try {
+    timing.mark("request_received");
+    const currentUser = currentActorFromRequest(req);
+    timing.updateContext({ organizationType: currentUser.organizationType });
+    const input = createThreadSchema.parse(req.body || {});
+    if (!input.id) {
+      logPortalStreamLifecycle("legacy_send_path", { endpoint: "thread_create", user_id: currentUser.id });
+    }
+    const result = await createPortalThreadForActor(currentUser, input, timing);
     res.json({
-      thread: threadOut(updated, { brand: req.publicBrand }),
-      session: session ? sessionOut(session) : null
+      thread: threadOut(result.thread, { brand: req.publicBrand }),
+      session: result.session ? sessionOut(result.session) : null
     });
-    timing.finish("success", { modeId: allocated.modeId, sessionStarted: shouldStartSession });
+    timing.finish("success", { modeId: result.modeId, sessionStarted: Boolean(result.session), reused: !result.created });
   } catch (error) {
     timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
     const status = statusCodeForSessionAccessError(error);
@@ -13560,6 +13587,13 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = ensureThreadSessionSchema.parse(req.body || {});
     failureContext = { currentUser, input };
+    // Browsers from before single-request sends; kept until they are gone.
+    logPortalStreamLifecycle("legacy_send_path", {
+      endpoint: "thread_session",
+      thread_id: threadId,
+      run_id: input.client_run_id,
+      user_id: currentUser.id
+    });
     await timing.time("ensure_thread_session.check_deploy_drain", () =>
       assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
     );
@@ -13796,6 +13830,12 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       return;
     }
     if (asRecord(input.message)?.role === "user") {
+      logPortalStreamLifecycle("legacy_send_path", {
+        endpoint: "message_save",
+        thread_id: threadId,
+        message_id: storedMessageId(input.message),
+        user_id: currentUser.id
+      });
       // A user message is saved before its stream starts. While another tab (or a reloaded
       // page) still streams a response on this thread, keep nothing so the thread head stays
       // on that response; the client queues the message instead.
@@ -13988,6 +14028,24 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
       input.session_id || !input.thread_id
         ? undefined
         : findPortalActiveChatRunSessionIdForThread(input.thread_id, currentUser.id);
+    const preflightRun = input.session_id || threadSessionId
+      ? undefined
+      : findPortalPreflightChatRun({ userId: currentUser.id, threadId: input.thread_id, runId: input.client_run_id });
+    if (preflightRun) {
+      // Still starting its session: the stream sees the abort and saves the stopped answer.
+      preflightRun.controller.abort(new Error("portal_user_cancelled"));
+      logPortalStreamLifecycle("cancel_matched_preflight_run", {
+        cancel_trace_id: cancelTraceId,
+        trace_id: preflightRun.traceId,
+        run_id: preflightRun.runId,
+        thread_id: preflightRun.threadId,
+        user_message_id: preflightRun.userMessageId,
+        user_id: currentUser.id,
+        organization_id: currentUser.organizationId
+      });
+      res.json({ cancelled: true });
+      return;
+    }
     if (!input.session_id && !threadSessionId) {
       // Stopping a response this tab does not stream: it may run on the other chat slot.
       const ownerPeer = await portalThreadRunOwnerPeer(req, input.thread_id, currentUser.id);
@@ -14251,6 +14309,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   const runAbort = mergeAbortSignals([explicitCancel.signal, systemInterrupt.signal]);
   let directInputLength: number | undefined;
   let unregisterPortalRun: (() => void) | undefined;
+  let unregisterPortalPreflightRun: (() => void) | undefined;
   let portalRuntimeSession: SessionRecord | undefined;
   let portalRequestedSessionId: string | undefined;
   let portalRunId: string = portalStreamTraceId;
@@ -14319,12 +14378,238 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       });
     };
     logPortalStream("stream_opened", {
-      requested_thread_id: input.thread_id,
+      requested_thread_id: input.thread_id ?? input.new_thread?.id,
+      single_request: !input.session_id,
       lifecycle: streamAbort.snapshot()
     });
     directInputLength = input.message.length;
     assertDirectChatMessageWithinLimit(input.message);
-    timing.updateContext({ sessionId: input.session_id, threadId: input.thread_id });
+    let requestedSessionId = input.session_id;
+    if (!requestedSessionId) {
+      // Single-request send: create the thread if needed, save the message and start the
+      // session here, so one request either delivers the message or fails as a whole.
+      const recordStreamSendFailure = (
+        stage: "thread_create" | "message_save" | "session_start",
+        error: unknown,
+        failurePayload: { detail: string; code?: string },
+        threadExists: boolean
+      ) => {
+        const rawDetail = error instanceof Error ? error.message : String(error);
+        void recordPortalSendFailure({
+          threadId: threadExists ? portalThreadId : undefined,
+          userId: currentUser.id,
+          organizationId: currentUser.organizationId,
+          source: "server",
+          stage,
+          errorCode: errorCodeFromUnknown(error) ?? failurePayload.code,
+          httpStatus: statusCodeForSessionAccessError(error),
+          detail: [
+            failurePayload.detail,
+            rawDetail !== failurePayload.detail ? rawDetail : undefined,
+            !threadExists && input.new_thread ? `thread_id=${input.new_thread.id}` : undefined,
+            `trace_id=${portalStreamTraceId}`
+          ].filter(Boolean).join(" | "),
+          clientRunId: portalRunId,
+          ...portalSendFailureMessageFields(input.user_message),
+          userAgent: req.get("user-agent")
+        });
+      };
+      const endWithError = (failurePayload: Record<string, unknown>, reason: string) => {
+        sendTrackedSSE("error", failurePayload);
+        finishTiming("error", { reason });
+        res.end();
+      };
+      timing.mark("chat_stream.single_request");
+      if (!input.client_run_id || !portalUserMessageId || (!input.thread_id && !input.new_thread)) {
+        endWithError({ detail: "Invalid send request", code: "invalid_request", reason_code: "invalid_request" }, "invalid_request");
+        return;
+      }
+      const singleUserMessageId = portalUserMessageId;
+      let singleThread: ThreadRecord | undefined;
+      let singleThreadCreated = false;
+      try {
+        if (input.thread_id) {
+          singleThread = await timing.time("chat_stream.load_thread", () => getPortalOwnedThread(input.thread_id!, currentUser));
+        }
+        const newThread = input.new_thread;
+        if (!singleThread && newThread && (!input.thread_id || input.thread_id === newThread.id)) {
+          const created = await timing.time("chat_stream.create_thread", () =>
+            createPortalThreadForActor(
+              currentUser,
+              {
+                id: newThread.id,
+                external_id: newThread.external_id,
+                title: newThread.title,
+                folder_id: newThread.folder_id,
+                local_root_id: newThread.local_root_id,
+                model: input.model,
+                reasoning_effort: input.reasoning_effort,
+                knowledge_set_ids: input.knowledge_set_ids,
+                codex_run_config: newThread.codex_run_config ?? input.codex_run_config,
+                start_session: false
+              },
+              timing
+            )
+          );
+          singleThread = created.thread;
+          singleThreadCreated = created.created;
+        }
+      } catch (error) {
+        const failurePayload = payloadForSessionAccessError(error, "Failed to create thread", portalLocale);
+        recordStreamSendFailure("thread_create", error, failurePayload, false);
+        logPortalStream("send_thread_create_failed", { detail: failurePayload.detail, code: failurePayload.code });
+        endWithError(failurePayload, "thread_create_failed");
+        return;
+      }
+      if (!singleThread) {
+        endWithError({ detail: "Thread does not exist", code: "PORTAL_THREAD_NOT_FOUND", reason_code: "thread_not_found" }, "thread_not_found");
+        return;
+      }
+      const singleThreadId = singleThread.id;
+      portalThreadId = singleThreadId;
+      timing.updateContext({ threadId: singleThreadId });
+
+      // A retry of a send that was already accepted (its response was lost on the way back)
+      // must not run the turn twice; the browser follows the running or finished response instead.
+      const duplicateRun = findPortalChatRunById(portalRunId, currentUser.id);
+      const priorDelivery = duplicateRun
+        ? undefined
+        : await timing.time("chat_stream.check_prior_delivery", () =>
+            portalTurnDeliveryForRun(singleThreadId, singleUserMessageId, portalRunId)
+          );
+      if (duplicateRun || priorDelivery) {
+        const status = duplicateRun ? "running" : priorDelivery!.status;
+        logPortalStream("duplicate_send_accepted", { status, lifecycle: streamAbort.snapshot() });
+        sendTrackedSSE("accepted", {
+          thread_id: singleThreadId,
+          run_id: portalRunId,
+          user_message_id: singleUserMessageId,
+          duplicate: true,
+          status
+        });
+        finishTiming("success", { duplicate: true, status });
+        res.end();
+        return;
+      }
+
+      const singleBlockingPeer = await portalThreadRunOwnerPeer(req, singleThreadId, currentUser.id);
+      // The local check and registration run in the same tick so two requests cannot both pass.
+      const singleBlockingRun = findBlockingPortalActiveChatRun("", currentUser.id, singleThreadId, portalRunId);
+      if (singleBlockingRun || singleBlockingPeer) {
+        // Nothing is saved: the client keeps the message and offers queue/steer.
+        logPortalStream("rejected_while_response_running", {
+          active_run_id: singleBlockingRun?.runId,
+          active_trace_id: singleBlockingRun?.traceId,
+          active_peer: singleBlockingPeer?.url,
+          lifecycle: streamAbort.snapshot()
+        });
+        endWithError({
+          detail: "The previous response is still running. Your message was kept so you can queue it or send it as guidance.",
+          code: PORTAL_RUN_ACTIVE_ERROR_CODE,
+          reason_code: "response_still_running",
+          active_run_id: singleBlockingRun?.runId,
+          thread_id: singleBlockingRun?.threadId ?? singleThreadId
+        }, "response_still_running");
+        return;
+      }
+      unregisterPortalPreflightRun = registerPortalPreflightChatRun({
+        runId: portalRunId,
+        userId: currentUser.id,
+        organizationId: currentUser.organizationId,
+        controller: explicitCancel,
+        systemInterrupt,
+        threadId: singleThreadId,
+        userMessageId: singleUserMessageId,
+        traceId: portalStreamTraceId,
+        assistantMessageId: portalAssistantMessageId,
+        acceptedAt: portalRunAcceptedAt
+      });
+
+      try {
+        portalUserMessageId = await timing.time("chat_stream.persist_user_message", () =>
+          ensurePortalStreamUserMessage({
+            threadId: singleThreadId,
+            userMessageId: singleUserMessageId,
+            parentId: input.parent_id ?? null,
+            userMessage: input.user_message,
+            displayText: input.display_message ?? input.message
+          })
+        );
+      } catch (error) {
+        const failurePayload = payloadForSessionAccessError(error, "Failed to save your message", portalLocale);
+        recordStreamSendFailure("message_save", error, failurePayload, true);
+        logPortalStream("send_message_save_failed", { detail: failurePayload.detail });
+        endWithError(failurePayload, "message_save_failed");
+        return;
+      }
+      sendTrackedSSE("accepted", {
+        thread_id: singleThreadId,
+        run_id: portalRunId,
+        user_message_id: portalUserMessageId,
+        accepted_at: portalRunAcceptedAt,
+        ...(input.new_thread ? { thread: threadOut(singleThread, { brand: req.publicBrand }) } : {})
+      });
+      timing.mark("chat_stream.accepted_sent");
+      logPortalStream("send_accepted", {
+        thread_created: singleThreadCreated,
+        lifecycle: streamAbort.snapshot()
+      });
+
+      let singleSession: SessionRecord;
+      try {
+        await timing.time("chat_stream.check_deploy_drain", () =>
+          assertDeploymentAllowsRuntimeStart(getDeploymentDrainReason)
+        );
+        singleSession = await ensureThreadSession(
+          currentUser,
+          singleThreadId,
+          {
+            model: input.model,
+            reasoning_effort: input.reasoning_effort,
+            knowledge_set_ids: input.knowledge_set_ids,
+            selected_skill_ids: input.selected_skill_ids,
+            codex_run_config: input.codex_run_config,
+            allow_mode_change: input.allow_mode_change
+          },
+          timing,
+          true
+        );
+      } catch (error) {
+        const failurePayload = payloadForSessionAccessError(error, "Failed to ensure thread session", portalLocale);
+        logPortalStream("send_session_start_failed", {
+          detail: failurePayload.detail,
+          cancelled: explicitCancel.signal.aborted
+        });
+        if (!explicitCancel.signal.aborted) {
+          recordStreamSendFailure("session_start", error, failurePayload, true);
+          await persistEarlyStreamFailure(failurePayload).catch((persistError) => {
+            console.warn("portal preflight failure persistence failed", {
+              threadId: singleThreadId,
+              userMessageId: portalUserMessageId,
+              detail: persistError instanceof Error ? persistError.message : String(persistError)
+            });
+          });
+          sendTrackedSSE("error", failurePayload);
+        }
+        finishTiming("error", { reason: "session_start_failed" });
+        res.end();
+        return;
+      }
+      requestedSessionId = singleSession.sessionId;
+      sendTrackedSSE("session", {
+        session_id: singleSession.sessionId,
+        thread_id: singleThreadId,
+        model: singleSession.model,
+        reasoning_effort: singleSession.reasoningEffort
+      });
+      if (explicitCancel.signal.aborted) {
+        // Stopped while the session started: the finally block saves the stopped answer.
+        portalRuntimeSession = singleSession;
+        throw new Error("portal_user_cancelled");
+      }
+    }
+    portalRequestedSessionId = requestedSessionId;
+    timing.updateContext({ sessionId: requestedSessionId, threadId: input.thread_id ?? portalThreadId });
     const drainReason = await timing.time("chat_stream.check_deploy_drain", () => getDeploymentDrainReason());
     if (drainReason) {
       const failurePayload = {
@@ -14339,7 +14624,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       return;
     }
     let session = await timing.time("chat_stream.load_session", () =>
-      sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId)
+      sessions.getOwned(requestedSessionId, currentUser.id, currentUser.organizationId)
     );
     if (session?.threadId && !(await getPortalOwnedThread(session.threadId, currentUser))) {
       session = undefined;
@@ -14408,7 +14693,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     portalThreadId = currentSession.threadId ?? requestedThreadId;
     const blockingPeer = await portalThreadRunOwnerPeer(req, portalThreadId, currentUser.id);
     // The local check and registration run in the same tick so two requests cannot both pass.
-    const blockingRun = findBlockingPortalActiveChatRun(currentSession.sessionId, currentUser.id, portalThreadId);
+    const blockingRun = findBlockingPortalActiveChatRun(currentSession.sessionId, currentUser.id, portalThreadId, portalRunId);
     if (blockingRun || blockingPeer) {
       // The user message is not persisted: the client keeps it and offers queue/steer.
       logPortalStream("rejected_while_response_running", {
@@ -14441,6 +14726,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       assistantMessageId: portalAssistantMessageId,
       acceptedAt: portalRunAcceptedAt
     });
+    // Same tick as the registration above, so the run is never missing from the registries.
+    unregisterPortalPreflightRun?.();
+    unregisterPortalPreflightRun = undefined;
     attachPortalActiveChatRun({
       sessionId: currentSession.sessionId,
       userId: currentUser.id,
@@ -14500,6 +14788,19 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     );
     if (deliveryClaim.outcome === "superseded") {
       throw new Error("Portal turn was superseded before runtime start");
+    }
+    if (deliveryClaim.outcome === "already_claimed") {
+      // The same run id was already delivered (a resent request): never run the turn twice.
+      logPortalStream("duplicate_run_ignored", { lifecycle: streamAbort.snapshot() });
+      sendTrackedSSE("accepted", {
+        thread_id: currentSession.threadId,
+        run_id: portalRunId,
+        user_message_id: persistedPortalUserMessageId,
+        duplicate: true,
+        status: "running"
+      });
+      finishTiming("success", { duplicate: true });
+      return;
     }
     await timing.time("chat_stream.enqueue_security_review", async () => {
       try {
@@ -15049,6 +15350,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       lifecycle: streamAbort.snapshot()
     });
     unregisterPortalRun?.();
+    unregisterPortalPreflightRun?.();
     runAbort.dispose();
     streamAbort.markSettled();
     streamAbort.dispose();
@@ -15111,7 +15413,7 @@ async function shutdownChatInstance(input: { interruptRemaining: boolean; reason
   });
   if (input.interruptRemaining) {
     const interruption = new Error("system_update_interrupted");
-    for (const run of portalActiveChatRuns.values()) {
+    for (const run of [...portalActiveChatRuns.values(), ...portalPreflightChatRuns.values()]) {
       if (!run.controller.signal.aborted) run.systemInterrupt?.abort(interruption);
     }
     for (const run of crestActiveChatRuns.values()) {
@@ -15124,7 +15426,7 @@ async function shutdownChatInstance(input: { interruptRemaining: boolean; reason
     proactiveActionConnectors.stop();
     // Give interrupted turns time to persist their partial answer.
     const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline && (portalActiveChatRuns.size > 0 || crestActiveChatRuns.size > 0 || actionConnectorActiveRuns.size > 0)) {
+    while (Date.now() < deadline && (portalActiveChatRuns.size > 0 || portalPreflightChatRuns.size > 0 || crestActiveChatRuns.size > 0 || actionConnectorActiveRuns.size > 0)) {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }

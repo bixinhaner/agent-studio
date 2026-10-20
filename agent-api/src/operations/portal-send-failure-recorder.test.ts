@@ -94,6 +94,21 @@ describe("portal send failure router", () => {
     expect(recorded[0]?.threadId).toBeUndefined();
   });
 
+  it("accepts single-request send outcomes reported by the browser", async () => {
+    const { app, recorded } = createApp();
+    await request(app)
+      .post("/api/send-failures")
+      .set("x-test-user", "user-1")
+      .send({ stage: "chat_stream", error_code: "send_not_delivered", detail: "Failed to fetch | attempts=4", client_run_id: "run-1" })
+      .expect(202);
+    await request(app)
+      .post("/api/send-failures")
+      .set("x-test-user", "user-1")
+      .send({ stage: "chat_stream_recovered", error_code: "recovered_after_retry", detail: "attempts=2", client_run_id: "run-2" })
+      .expect(202);
+    expect(recorded.map((item) => item.stage)).toEqual(["chat_stream", "chat_stream_recovered"]);
+  });
+
   it("rejects unknown stages and malformed bodies", async () => {
     const { app, recorded } = createApp();
     await request(app).post("/api/send-failures").set("x-test-user", "user-1").send({ ...report, stage: "drop_table" }).expect(400);

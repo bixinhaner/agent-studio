@@ -1,5 +1,6 @@
 import { createContext, type FC, type PropsWithChildren, useContext, useEffect, useMemo, useRef } from "react";
 import { RuntimeAdapterProvider, type ThreadMessage, useAui } from "@assistant-ui/react";
+import { pendingServerThreads } from "./pending-server-threads";
 import {
   CompositeAttachmentAdapter,
   type ExportedMessageRepository,
@@ -325,9 +326,10 @@ export const AgentRuntimeAdapterProvider: FC<
             new WorkspaceFileAttachmentAdapter(async () => {
               const item = aui.threadListItem();
               const current = String(item.getState().remoteId || "").trim();
-              if (current) return current;
-              const initialized = await item.initialize();
-              return String(initialized.remoteId || item.getState().remoteId || "").trim();
+              const remoteId = current || String((await item.initialize()).remoteId || item.getState().remoteId || "").trim();
+              // Uploads are stored under the task, so a new task is created on the server first.
+              await pendingServerThreads.ensureCreated(remoteId);
+              return remoteId;
             })
           ])
         : undefined,

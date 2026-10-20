@@ -3,6 +3,7 @@ import { Alert, Button, Drawer, Modal, Popover } from 'antd';
 import { Check, ChevronDown, Cloud, Computer, Download, Ellipsis, Folder, FolderPlus, LoaderCircle, Monitor, Terminal, Trash2, X } from 'lucide-react';
 import { fetchLocalBridgeDevices, localBridgeApi, revokeLocalBridgeDevice, type LocalBridgeDevice } from '../api';
 import { usePortalI18n } from '../i18n';
+import { pendingServerThreads } from '../pending-server-threads';
 import './local-workspace.css';
 export type LocalSelection = { id: string; thread_id?: string; root_id: string; path: string; label: string; device_id: string; device_name: string; status: 'online' | 'offline'; update_required?: boolean };
 const DOWNLOAD_PREFIX = '/downloads/local-bridge/Agent-Studio-Local-Bridge-latest-';
@@ -92,6 +93,8 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
     setDialog(false); setError(''); setConnection(null);
     if (connectionRef.current) void localBridgeApi(`/api/local-bridge/connections/${connectionRef.current.id}`, { method: 'DELETE' }).catch(() => {});
     if (!threadId || !enabled) { setSelection(null); setBusy(false); return; }
+    // A new task keeps the location picked before it existed; its first send creates it with that binding.
+    if (pendingServerThreads.has(threadId)) { pendingServerThreads.setLocalRootId(threadId, selectionRef.current?.root_id); setBusy(false); return; }
     setBusy(true);
     void localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${threadId}/binding`).then(out => { if (generation.current === ticket && selectionVersion === selectionRevision.current) setSelection(out.binding); }).catch(e => { if (generation.current === ticket && selectionVersion === selectionRevision.current) { setError(translate.current("localWorkspace.bindingFailed")); setBindingLoadFailed(true); setSelection(null); } }).finally(() => { if (generation.current === ticket && selectionVersion === selectionRevision.current) setBusy(false); });
   }, [threadId, enabled, loadRevision]);
@@ -100,7 +103,7 @@ export function useLocalWorkspace(threadId: string, enabled: boolean) {
     selectionRevision.current++;
     setBusy(true); setError('');
     try {
-      const next = target ? (await localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${target}/binding`, { method: 'PUT', json: { root_id: root?.root_id || null } })).binding : root;
+      const next = target && !pendingServerThreads.setLocalRootId(target, root?.root_id || undefined) ? (await localBridgeApi<{ binding: LocalSelection | null }>(`/api/local-bridge/threads/${target}/binding`, { method: 'PUT', json: { root_id: root?.root_id || null } })).binding : root;
       if (ticket === generation.current) { selectionRef.current = next; setSelection(next); }
     } catch (e) { if (ticket === generation.current) setError(translate.current("localWorkspace.selectFailed")); throw e; }
     finally { if (ticket === generation.current) setBusy(false); }

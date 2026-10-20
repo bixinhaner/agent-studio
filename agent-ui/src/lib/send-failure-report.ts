@@ -13,7 +13,11 @@ export type SendFailureStage =
   | "thread_resolve"
   | "thread_create"
   | "message_save"
-  | "session_start";
+  | "session_start"
+  /** A single-request send that never reached the server after the silent retries. */
+  | "chat_stream"
+  /** A single-request send that reached the server only after a retry (network quality signal). */
+  | "chat_stream_recovered";
 
 export type SendFailureAttachment = {
   name: string;
@@ -30,6 +34,8 @@ export type SendFailureReport = {
   messagePreview?: string | null;
   attachments?: SendFailureAttachment[];
   clientRunId?: string | null;
+  /** Requests made for one send, when it was retried. */
+  attempts?: number;
 };
 
 function clip(value: string | null | undefined, max: number): string | undefined {
@@ -64,7 +70,7 @@ export function buildSendFailureReportBody(report: SendFailureReport): Record<st
     thread_id: clip(report.threadId, 200),
     error_code: clip(report.errorCode ?? apiError?.code ?? apiError?.reasonCode, 120),
     http_status: apiError ? apiError.status : undefined,
-    detail: clip(detail, 4000),
+    detail: clip([detail, report.attempts ? `attempts=${report.attempts}` : undefined].filter(Boolean).join(" | "), 4000),
     message_preview: clip(report.messagePreview, 1000),
     attachments: (report.attachments ?? []).slice(0, 20).map((item) => ({
       name: item.name.slice(0, 300),

@@ -33,4 +33,17 @@ describe("PortalChatRecoveryNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run again" }));
     expect(onRerun).toHaveBeenCalledOnce();
   });
+
+  it("tells the user a send that never reached the server was not sent and offers to resend", () => {
+    const onRerun = vi.fn();
+    render(
+      <PortalI18nProvider>
+        <PortalChatRecoveryNotice state="failed" reason="send_not_delivered" canRerun onRerun={onRerun} />
+      </PortalI18nProvider>
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Network connection lost. Your message was not sent");
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+    expect(onRerun).toHaveBeenCalledOnce();
+  });
 });
