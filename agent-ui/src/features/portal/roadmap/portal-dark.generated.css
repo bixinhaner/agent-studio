@@ -606,6 +606,7 @@
   border: 2px solid transparent;
   background: linear-gradient(var(--portal-surface-1), var(--portal-surface-1)) padding-box,
               linear-gradient(135deg, var(--brand-primary, #FF4614), var(--brand-accent, #FF833D), var(--brand-primary, #FF4614)) border-box;
+  background-size: 300% 300%;
   box-shadow: 0 12px 36px color-mix(in srgb, var(--brand-primary, #FF4614) 8%, transparent);
 }
 :root[data-portal-theme="dark"] .assistant-error-card {
@@ -4421,6 +4422,8 @@
     var(--portal-surface-2) 40%,
     var(--portal-surface-2) 100%
   );
+  background-repeat: no-repeat;
+  background-size: 800px 100%;
 }
 :root[data-portal-theme="dark"] .preview-file-item {
   border: 1px solid var(--portal-line);
@@ -4892,6 +4895,9 @@
     var(--portal-shimmer-base) 60%,
     var(--portal-shimmer-base) 100%
   );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
   color: transparent;
 }
 :root[data-portal-theme="dark"] .portal-workbench-root .assistant-running-card {
@@ -4965,6 +4971,9 @@
     var(--portal-shimmer-base) 60%,
     var(--portal-shimmer-base) 100%
   );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
   color: transparent;
 }
 :root[data-portal-theme="dark"] .assistant-process-step-subject {

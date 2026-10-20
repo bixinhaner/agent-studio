@@ -53,6 +53,18 @@ const COLOR_PROPS = new Set([
   "-webkit-text-fill-color"
 ]);
 
+// The copied `background` shorthand resets these, so a rule that sets them after it (e.g.
+// gradient text via background-clip: text) must get them again or it paints a solid block.
+const BACKGROUND_LONGHANDS = new Set([
+  "background-size",
+  "background-position",
+  "background-repeat",
+  "background-origin",
+  "background-clip",
+  "-webkit-background-clip",
+  "background-attachment"
+]);
+
 // ---------- colour helpers ----------
 const NAMED = { white: "#ffffff", black: "#000000" };
 
@@ -288,14 +300,20 @@ function walk(css) {
     }
     if (/::view-transition/.test(head)) continue;
     const declarations = [];
+    let copiedBackgroundShorthand = false;
     for (const raw of splitTopLevel(body, ";")) {
       const colon = raw.indexOf(":");
       if (colon < 0) continue;
       const prop = raw.slice(0, colon).trim().toLowerCase();
       const value = raw.slice(colon + 1).trim();
       if (!value) continue;
+      if (copiedBackgroundShorthand && BACKGROUND_LONGHANDS.has(prop)) {
+        declarations.push(`  ${prop}: ${value};`);
+        continue;
+      }
       const mapped = transformDeclaration(prop, value);
       if (mapped === null) continue;
+      if (prop === "background") copiedBackgroundShorthand = true;
       declarations.push(`  ${prop}: ${mapped};`);
     }
     if (declarations.length) out += `${prefixSelector(head)} {\n${declarations.join("\n")}\n}\n`;
