@@ -22,7 +22,8 @@ describe("DeepSeek Codex model catalog", () => {
       tool_mode: null,
       multi_agent_version: "v1",
       default_reasoning_summary: "auto",
-      include_skills_usage_instructions: false
+      include_skills_usage_instructions: false,
+      comp_hash: null
     });
   });
 
