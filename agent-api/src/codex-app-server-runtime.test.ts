@@ -1175,6 +1175,37 @@ describe("Codex app-server runtime", () => {
     ]);
   });
 
+  it("passes the model catalog after the app-server subcommand, where Codex honours it", async () => {
+    const catalogPath = path.join(testTempDir, "deepseek-catalog.json");
+    await fs.writeFile(catalogPath, "{\"models\":[]}", "utf8");
+    const runtime = new CodexRuntime({
+      config: { model_catalog_json: catalogPath },
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-model-catalog")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "deepseek-flash",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "runtime-app-policy")) {
+      if (event.delta) answer += event.delta;
+    }
+
+    expect(JSON.parse(answer).startupArgs).toEqual([
+      "app-server",
+      "--disable",
+      "enable_mcp_apps",
+      "-c",
+      `model_catalog_json=${JSON.stringify(catalogPath)}`,
+      "--listen",
+      "stdio://"
+    ]);
+  });
+
   it("lists every app-server model page with capabilities", async () => {
     const runtime = new CodexRuntime({
       envOverrides: {

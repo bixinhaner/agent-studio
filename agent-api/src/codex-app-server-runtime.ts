@@ -1160,8 +1160,9 @@ class CodexAppServerProcess {
       // Metering must never block a conversation; start without telemetry export.
     }
     const launch = isolatedWorkloadCommand(this.scope.binaryPath, [
-      ...codexModelCatalogLaunchArgs(this.scope.config),
-      "app-server", "--disable", "enable_mcp_apps", ...telemetryArgs, "--listen", "stdio://"
+      // Config flags must follow the subcommand: Codex drops root-level -c flags once app-server has its own.
+      "app-server", "--disable", "enable_mcp_apps", ...codexModelCatalogLaunchArgs(this.scope.config), ...telemetryArgs,
+      "--listen", "stdio://"
     ]);
     this.workloadId = launch.id;
     this.proc = spawn(launch.command, launch.args, {
