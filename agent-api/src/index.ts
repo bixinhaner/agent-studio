@@ -1180,9 +1180,9 @@ const usageIngestion = new UsageIngestionService({
 const usageRecorder = new UsageRecorder({ usageIngestion });
 const integrationInstancesForUsage = new IntegrationInstanceRepository(db as unknown as IntegrationInstanceRepositoryDb);
 /**
- * Codex background agents (native memory consolidation) bill the provider outside any user turn and
- * leave no rollout, so they never reach recordCodexUsage. Their token counts arrive per response via
- * OTEL; recordDirectUsage is used because there is no RuntimeUsageSnapshot or thread to diff against.
+ * Codex native memory work (stage-1 extraction, consolidation) bills the provider outside any user turn
+ * and never reaches a rollout, so it never reaches recordCodexUsage. Its token counts arrive per response
+ * via OTEL; recordDirectUsage is used because there is no RuntimeUsageSnapshot or turn to diff against.
  */
 const codexBackgroundUsage = runsChatService
   ? new CodexBackgroundUsageCollector({

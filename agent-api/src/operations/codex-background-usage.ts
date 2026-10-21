@@ -9,9 +9,13 @@ import type { RecordDirectUsageInput } from "./usage-recorder.js";
  * Codex background work (native memory consolidation and similar internal agents) calls the model
  * outside any user turn: it writes no rollout and emits no thread/tokenUsage notification, so the
  * runtime ledger never sees it. Codex does export every model response through OpenTelemetry, so each
- * app-server sends its OTEL logs back to this process, and responses whose conversation has no
- * rollout in that CODEX_HOME are recorded as background usage. Conversations with a rollout (user
- * threads, subagents) are already metered from the rollout and are skipped, so nothing is counted twice.
+ * app-server sends its OTEL logs back to this process. A response is background usage when its exact
+ * (input, cached, output) token counts are not among the calls recorded in its conversation's rollout:
+ * - memory consolidation runs as its own conversation and writes no rollout at all;
+ * - memory stage-1 extraction is tagged with the user thread that triggered it, but never reaches that
+ *   thread's rollout.
+ * User-turn calls are always in the rollout (token_usage_record / token_count) and are already metered
+ * by the runtime ledger, so they are skipped and nothing is counted twice.
  */
 
 export const CODEX_OTEL_PATH = "/internal/codex-otel/v1/logs";
@@ -174,6 +178,53 @@ export function codexBackgroundUsageId(codexHome: string, event: CodexOtelTokenE
   return `codex-bg-${digest.slice(0, 40)}`;
 }
 
+const usageKey = (input: unknown, cached: unknown, output: unknown): string | undefined =>
+  [input, cached, output].every((value) => typeof value === "number" && Number.isSafeInteger(value)) ? `${input}/${cached}/${output}` : undefined;
+
+/** Token triples of every model call a rollout recorded, read incrementally as the rollout grows. */
+export class RolloutCallIndex {
+  private readonly files = new Map<string, { offset: number; calls: Set<string> }>();
+
+  constructor(private readonly maxFiles = 200) {}
+
+  async has(file: string, event: Pick<CodexOtelTokenEvent, "inputTokens" | "cachedInputTokens" | "outputTokens">): Promise<boolean> {
+    const calls = await this.calls(file);
+    return calls.has(`${event.inputTokens}/${event.cachedInputTokens}/${event.outputTokens}`);
+  }
+
+  private async calls(file: string): Promise<Set<string>> {
+    let entry = this.files.get(file);
+    const size = (await fs.stat(file)).size;
+    if (!entry || size < entry.offset) entry = { offset: 0, calls: new Set() };
+    this.files.delete(file);
+    this.files.set(file, entry);
+    while (this.files.size > this.maxFiles) this.files.delete(this.files.keys().next().value!);
+    if (size === entry.offset) return entry.calls;
+    const handle = await fs.open(file, "r");
+    try {
+      const buffer = Buffer.alloc(size - entry.offset);
+      await handle.read(buffer, 0, buffer.length, entry.offset);
+      // Only consume whole lines; a line still being written is read next time.
+      const end = buffer.lastIndexOf(0x0a);
+      if (end < 0) return entry.calls;
+      for (const line of buffer.subarray(0, end).toString("utf8").split("\n")) {
+        if (!line.includes("token_usage_record") && !line.includes("token_count")) continue;
+        let row: any;
+        try { row = JSON.parse(line); } catch { continue; }
+        const payload = row?.payload ?? {};
+        const usage = row?.type === "token_usage_record" ? payload.usage
+          : row?.type === "event_msg" && payload.type === "token_count" ? payload.info?.last_token_usage : undefined;
+        const key = usage && usageKey(usage.input_tokens, usage.cached_input_tokens, usage.output_tokens);
+        if (key) entry.calls.add(key);
+      }
+      entry.offset += end + 1;
+      return entry.calls;
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
 function isDuplicateKeyError(error: unknown): boolean {
   return asRecord(error)?.code === "P2002" || /unique constraint/i.test(error instanceof Error ? error.message : "");
 }
@@ -181,6 +232,7 @@ function isDuplicateKeyError(error: unknown): boolean {
 export class CodexBackgroundUsageCollector {
   private readonly pending = new Set<ReturnType<typeof setTimeout>>();
   private readonly rolloutDelayMs: number;
+  private readonly rolloutCalls = new RolloutCallIndex();
 
   constructor(
     private readonly deps: {
@@ -190,7 +242,7 @@ export class CodexBackgroundUsageCollector {
       /** Conversations Agent Studio has bound to a thread are user work, metered by the runtime ledger. */
       isKnownThread?: (conversationId: string) => Promise<boolean>;
       logger?: Logger;
-      /** A new thread's rollout is created as its first turn starts; wait before calling a conversation rollout-less. */
+      /** A call reaches its rollout right after it completes; wait before deciding the rollout lacks it. */
       rolloutDelayMs?: number;
     }
   ) {
@@ -220,8 +272,9 @@ export class CodexBackgroundUsageCollector {
   async classify(codexHome: string, event: CodexOtelTokenEvent): Promise<"recorded" | "skipped_rollout" | "skipped_thread" | "duplicate" | "failed"> {
     try {
       const rollout = await (this.deps.findRollout ?? findThreadRollout)(codexHome, event.conversationId);
-      if (rollout) return "skipped_rollout";
-      if (await this.deps.isKnownThread?.(event.conversationId)) return "skipped_thread";
+      if (rollout && await this.rolloutCalls.has(rollout, event)) return "skipped_rollout";
+      // A known thread whose rollout is not in this home (moved or archived) cannot be checked call by call.
+      if (!rollout && await this.deps.isKnownThread?.(event.conversationId)) return "skipped_thread";
       const manifest = await readCodexHomeManifest(codexHome);
       const owner = await this.deps.resolveOwner(manifest, codexHome);
       await this.deps.recordDirectUsage({
@@ -238,6 +291,8 @@ export class CodexBackgroundUsageCollector {
         createdAt: event.timestamp,
         metadata: {
           source: "codex_otel",
+          // memory_agent: own conversation (consolidation); outside_rollout: tagged with a user thread (stage-1 extraction).
+          backgroundKind: rollout ? "outside_rollout" : "memory_agent",
           codexConversationId: event.conversationId,
           codexHomeScope: owner?.scope ?? manifest?.scope ?? "unknown",
           ...(owner?.integrationInstanceId ? { integrationInstanceId: owner.integrationInstanceId } : {}),

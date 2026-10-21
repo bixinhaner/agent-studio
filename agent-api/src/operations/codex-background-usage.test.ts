@@ -165,6 +165,7 @@ describe("CodexBackgroundUsageCollector", () => {
         source: "codex_otel",
         codexConversationId: "01a15cf6-e4f2-7a11-b42d-3453b6636e5b",
         codexHomeScope: "user_agent",
+        backgroundKind: "memory_agent",
         reasoningTokens: 7,
         _costProfile: expect.objectContaining({ pricingPeriod: "off_peak", timeOfDayMultiplier: 0.5 })
       }
@@ -186,12 +187,44 @@ describe("CodexBackgroundUsageCollector", () => {
     expect(stored[0].estimatedCost).toBe("0.155400");
   });
 
-  it("skips conversations that have a rollout or are bound to an Agent Studio thread", async () => {
+  it("records calls tagged with a user thread that its rollout never recorded (memory stage-1 extraction)", async () => {
+    const home = await userHome();
+    const threadId = "01a15d0a-6425-7f42-853f-bbb7cb348570";
+    const day = new Date(parseInt(threadId.replaceAll("-", "").slice(0, 12), 16)).toISOString().slice(0, 10).replaceAll("-", "/");
+    const rollout = path.join(home, "sessions", day, `rollout-2026-10-21T05-58-44-${threadId}.jsonl`);
+    await fs.mkdir(path.dirname(rollout), { recursive: true });
+    const line = (row: unknown) => `${JSON.stringify(row)}\n`;
+    await fs.writeFile(rollout, line({ type: "session_meta", payload: { id: threadId } }) +
+      line({ type: "token_usage_record", payload: { turn_id: "t1", response_id: "r1", usage: { input_tokens: 8563, cached_input_tokens: 8320, output_tokens: 80 } } }));
+    const recorded: any[] = [];
+    const collector = new CodexBackgroundUsageCollector({
+      recordDirectUsage: async (input) => { recorded.push(input); },
+      resolveOwner: async () => ({ scope: "user_agent", organizationId: "org-acme", userId: "user-1" }),
+      isKnownThread: async () => true
+    });
+    const [userCall, stage1, laterUserCall] = parseCodexOtelTokenEvents(otlpExport([
+      completed(threadId, { input: "8563", cached: "8320", output: "80" }),
+      completed(threadId, { input: "7018", cached: "6272", output: "1336" }),
+      completed(threadId, { input: "8859", cached: "8704", output: "2" })
+    ]));
+    await expect(collector.classify(home, userCall)).resolves.toBe("skipped_rollout");
+    await expect(collector.classify(home, stage1)).resolves.toBe("recorded");
+    // The rollout keeps growing; calls appended later (token_count form, plus a half-written line) are picked up incrementally.
+    await fs.appendFile(rollout, line({ type: "event_msg", payload: { type: "token_count", info: {
+      last_token_usage: { input_tokens: 8859, cached_input_tokens: 8704, output_tokens: 2 } } } }) + '{"type":"event_msg","payl');
+    await expect(collector.classify(home, laterUserCall)).resolves.toBe("skipped_rollout");
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ inputTokens: 7018, cachedInputTokens: 6272, outputTokens: 1336,
+      metadata: { backgroundKind: "outside_rollout", codexConversationId: threadId } });
+  });
+
+  it("skips calls recorded in the rollout and known threads whose rollout is elsewhere", async () => {
     const home = await userHome();
     const threadId = "01a15cf6-c3be-79c0-a4f2-720c46d032f5";
     const day = new Date(parseInt(threadId.replaceAll("-", "").slice(0, 12), 16)).toISOString().slice(0, 10).replaceAll("-", "/");
     await fs.mkdir(path.join(home, "sessions", day), { recursive: true });
-    await fs.writeFile(path.join(home, "sessions", day, `rollout-2026-10-21T05-37-18-${threadId}.jsonl`), "");
+    await fs.writeFile(path.join(home, "sessions", day, `rollout-2026-10-21T05-37-18-${threadId}.jsonl`),
+      `${JSON.stringify({ type: "token_usage_record", payload: { usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 1 } } })}\n`);
     const recorded: unknown[] = [];
     const collector = new CodexBackgroundUsageCollector({
       recordDirectUsage: async (input) => { recorded.push(input); },
