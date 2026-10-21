@@ -152,23 +152,36 @@ export function buildCodexOtelLaunchArgs(input: { endpoint: string; secret: stri
   ];
 }
 
+/**
+ * Reads who a CODEX_HOME belongs to. Materialized homes write manifest v2, which only carries the
+ * scope path segments built by runtime-scope-resolver: `[organizationKey, userId, agent-…]` for a
+ * user, `["integrations", provider, instanceId, agent-…]` for an integration.
+ */
 export async function readCodexHomeManifest(codexHome: string): Promise<CodexHomeManifest | undefined> {
   const raw = await fs.readFile(path.join(codexHome, ".agent-studio", "manifest.json"), "utf8").catch(() => undefined);
   if (!raw) return undefined;
+  let manifest: Record<string, unknown> | undefined;
   try {
-    const manifest = asRecord(JSON.parse(raw));
-    if (!manifest) return undefined;
-    return {
-      scope: text(manifest.scope),
-      organizationKey: text(manifest.organizationKey),
-      userId: text(manifest.userId),
-      integrationInstanceId: text(manifest.integrationInstanceId),
-      provider: text(manifest.provider),
-      modeId: text(manifest.modeId)
-    };
+    manifest = asRecord(JSON.parse(raw));
   } catch {
     return undefined;
   }
+  if (!manifest) return undefined;
+  const segments = Array.isArray(manifest.scopeSegments) ? manifest.scopeSegments.map(text) : [];
+  const fromSegments: CodexHomeManifest =
+    segments[0] === "integrations" && segments[2]
+      ? { scope: "integration_agent", provider: segments[1], integrationInstanceId: segments[2] }
+      : segments.length >= 3 && segments[0] && segments[1] && segments[2]?.startsWith("agent-")
+        ? { scope: "user_agent", organizationKey: segments[0], userId: segments[1] }
+        : {};
+  return {
+    scope: text(manifest.scope) ?? fromSegments.scope,
+    organizationKey: text(manifest.organizationKey) ?? fromSegments.organizationKey,
+    userId: text(manifest.userId) ?? fromSegments.userId,
+    integrationInstanceId: text(manifest.integrationInstanceId) ?? fromSegments.integrationInstanceId,
+    provider: text(manifest.provider) ?? fromSegments.provider,
+    modeId: text(manifest.modeId)
+  };
 }
 
 export function codexBackgroundUsageId(codexHome: string, event: CodexOtelTokenEvent): string {
@@ -180,6 +193,8 @@ export function codexBackgroundUsageId(codexHome: string, event: CodexOtelTokenE
 
 const usageKey = (input: unknown, cached: unknown, output: unknown): string | undefined =>
   [input, cached, output].every((value) => typeof value === "number" && Number.isSafeInteger(value)) ? `${input}/${cached}/${output}` : undefined;
+
+const ROLLOUT_READ_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** Token triples of every model call a rollout recorded, read incrementally as the rollout grows. */
 export class RolloutCallIndex {
@@ -202,26 +217,40 @@ export class RolloutCallIndex {
     if (size === entry.offset) return entry.calls;
     const handle = await fs.open(file, "r");
     try {
-      const buffer = Buffer.alloc(size - entry.offset);
-      await handle.read(buffer, 0, buffer.length, entry.offset);
-      // Only consume whole lines; a line still being written is read next time.
-      const end = buffer.lastIndexOf(0x0a);
-      if (end < 0) return entry.calls;
-      for (const line of buffer.subarray(0, end).toString("utf8").split("\n")) {
-        if (!line.includes("token_usage_record") && !line.includes("token_count")) continue;
-        let row: any;
-        try { row = JSON.parse(line); } catch { continue; }
-        const payload = row?.payload ?? {};
-        const usage = row?.type === "token_usage_record" ? payload.usage
-          : row?.type === "event_msg" && payload.type === "token_count" ? payload.info?.last_token_usage : undefined;
-        const key = usage && usageKey(usage.input_tokens, usage.cached_input_tokens, usage.output_tokens);
-        if (key) entry.calls.add(key);
+      // Rollouts can reach tens of MB; read in bounded chunks and only consume whole lines.
+      const chunk = Buffer.alloc(Math.min(ROLLOUT_READ_CHUNK_BYTES, size - entry.offset));
+      // Bytes from entry.offset not yet ending in a newline (split lines and split UTF-8 characters).
+      let carry = Buffer.alloc(0);
+      let position = entry.offset;
+      while (position < size) {
+        const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, size - position), position);
+        if (bytesRead === 0) break;
+        position += bytesRead;
+        const data = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
+        const end = data.lastIndexOf(0x0a);
+        if (end < 0) {
+          carry = data;
+          continue;
+        }
+        for (const line of data.subarray(0, end).toString("utf8").split("\n")) this.indexLine(line, entry.calls);
+        entry.offset += end + 1;
+        carry = Buffer.from(data.subarray(end + 1));
       }
-      entry.offset += end + 1;
       return entry.calls;
     } finally {
       await handle.close();
     }
+  }
+
+  private indexLine(line: string, calls: Set<string>): void {
+    if (!line.includes("token_usage_record") && !line.includes("token_count")) return;
+    let row: any;
+    try { row = JSON.parse(line); } catch { return; }
+    const payload = row?.payload ?? {};
+    const usage = row?.type === "token_usage_record" ? payload.usage
+      : row?.type === "event_msg" && payload.type === "token_count" ? payload.info?.last_token_usage : undefined;
+    const key = usage && usageKey(usage.input_tokens, usage.cached_input_tokens, usage.output_tokens);
+    if (key) calls.add(key);
   }
 }
 

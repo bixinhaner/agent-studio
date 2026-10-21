@@ -8,7 +8,9 @@ import {
   CODEX_OTEL_HOME_HEADER,
   CODEX_OTEL_SIGNATURE_HEADER,
   CodexBackgroundUsageCollector,
+  RolloutCallIndex,
   buildCodexOtelLaunchArgs,
+  readCodexHomeManifest,
   parseCodexOtelTokenEvents,
   signCodexHome,
   verifyCodexHomeSignature
@@ -127,6 +129,40 @@ describe("codex OTEL launch args", () => {
     expect(verifyCodexHomeSignature("s3cret", "/srv/homes/a \"b\"", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(true);
     expect(verifyCodexHomeSignature("other", "/srv/homes/a \"b\"", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(false);
     expect(verifyCodexHomeSignature("s3cret", "/srv/homes/other", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(false);
+  });
+});
+
+describe("readCodexHomeManifest", () => {
+  it("derives the owner from manifest v2 scope segments", async () => {
+    const write = async (manifest: unknown) => {
+      const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-bg-manifest-"));
+      homes.push(home);
+      await fs.mkdir(path.join(home, ".agent-studio"));
+      await fs.writeFile(path.join(home, ".agent-studio", "manifest.json"), JSON.stringify(manifest));
+      return home;
+    };
+    await expect(readCodexHomeManifest(await write({ version: 2, scopeSegments: ["internal", "cmogxdg9s00grp15nk8rbc124", "agent-cmnff-d47832b16a12"] })))
+      .resolves.toMatchObject({ scope: "user_agent", organizationKey: "internal", userId: "cmogxdg9s00grp15nk8rbc124" });
+    await expect(readCodexHomeManifest(await write({ version: 2, scopeSegments: ["integrations", "dingtalk", "inst-1", "agent-default-abc"] })))
+      .resolves.toMatchObject({ scope: "integration_agent", provider: "dingtalk", integrationInstanceId: "inst-1" });
+    await expect(readCodexHomeManifest(await write({ version: 2, scopeSegments: ["thread-x"] }))).resolves.toMatchObject({ scope: undefined, userId: undefined });
+  });
+});
+
+describe("RolloutCallIndex", () => {
+  it("indexes rollouts larger than one read chunk without splitting lines or UTF-8 characters", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-bg-rollout-"));
+    homes.push(home);
+    const file = path.join(home, "rollout.jsonl");
+    const filler = `${JSON.stringify({ type: "response_item", payload: { text: "记忆".repeat(700_000) } })}\n`;
+    const call = (input: number) => `${JSON.stringify({ type: "token_usage_record", payload: { usage: { input_tokens: input, cached_input_tokens: 1, output_tokens: 2 } } })}\n`;
+    await fs.writeFile(file, filler + call(100) + filler + call(200));
+    const index = new RolloutCallIndex();
+    await expect(index.has(file, { inputTokens: 100, cachedInputTokens: 1, outputTokens: 2 })).resolves.toBe(true);
+    await expect(index.has(file, { inputTokens: 200, cachedInputTokens: 1, outputTokens: 2 })).resolves.toBe(true);
+    await expect(index.has(file, { inputTokens: 300, cachedInputTokens: 1, outputTokens: 2 })).resolves.toBe(false);
+    await fs.appendFile(file, call(300));
+    await expect(index.has(file, { inputTokens: 300, cachedInputTokens: 1, outputTokens: 2 })).resolves.toBe(true);
   });
 });
 
