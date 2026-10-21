@@ -155,6 +155,31 @@ describe("createDeepSeekProxyHandler", () => {
     expect(seen[1]).toMatchObject({ method: "GET", url: "/models" });
   });
 
+  it("retries once when a pooled upstream connection was already closed", async () => {
+    const perSocket = new WeakMap<object, number>();
+    let resets = 0;
+    const upstream = await listen((req, res) => {
+      const count = (perSocket.get(req.socket) ?? 0) + 1;
+      perSocket.set(req.socket, count);
+      if (count === 2) {
+        resets += 1;
+        req.socket.destroy();
+        return;
+      }
+      req.resume();
+      req.on("end", () => res.end("ok"));
+    });
+    const app = express();
+    const handler = createDeepSeekProxyHandler({ isLocalRequest: () => true, upstreamBase: () => upstream, log: () => {} });
+    app.all(`${DEEPSEEK_PROXY_PATH}/:host/*`, express.raw({ type: () => true }), handler);
+    const proxy = await listen(app);
+    for (let index = 0; index < 2; index += 1) {
+      const response = await fetch(`${proxy}${DEEPSEEK_PROXY_PATH}/api.deepseek.com/responses`, { method: "POST", body: "{}" });
+      expect(await response.text()).toBe("ok");
+    }
+    expect(resets).toBe(1);
+  });
+
   it("refuses non-DeepSeek hosts and non-local callers", async () => {
     const local = await setup();
     expect((await fetch(`${local.proxy}${DEEPSEEK_PROXY_PATH}/example.com/responses`, { method: "POST", body: "{}" })).status).toBe(404);

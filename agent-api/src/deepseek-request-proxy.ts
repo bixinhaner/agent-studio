@@ -221,27 +221,40 @@ export function createDeepSeekProxyHandler(deps: DeepSeekProxyDeps) {
     if (body.length > 0) headers["content-length"] = String(body.length);
 
     const transport = target.protocol === "https:" ? https : http;
-    const upstream = transport.request(target, { method: req.method, headers }, (upstreamRes) => {
-      const responseHeaders: Record<string, string | string[]> = {};
-      for (const [name, value] of Object.entries(upstreamRes.headers)) {
-        if (value === undefined || (HOP_BY_HOP_HEADERS.has(name) && name !== "content-length")) continue;
-        responseHeaders[name] = value;
-      }
-      res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
-      upstreamRes.pipe(res);
-    });
+    let upstream: http.ClientRequest | undefined;
     // The caller going away (turn interrupted) must not leave the upstream stream running.
     res.on("close", () => {
-      if (!res.writableFinished) upstream.destroy();
+      if (!res.writableFinished) upstream?.destroy();
     });
-    upstream.on("error", (error) => {
-      deps.log?.({ event: "deepseek_proxy_upstream_error", path: target.pathname, error: error.message });
-      if (!res.headersSent) {
-        res.status(502).json({ error: { message: `DeepSeek proxy upstream error: ${error.message}`, type: "proxy_error" } });
-      } else {
-        res.destroy(error);
-      }
-    });
-    upstream.end(body.length > 0 ? body : undefined);
+    const send = (attempt: number): void => {
+      let responded = false;
+      const request = transport.request(target, { method: req.method, headers }, (upstreamRes) => {
+        responded = true;
+        const responseHeaders: Record<string, string | string[]> = {};
+        for (const [name, value] of Object.entries(upstreamRes.headers)) {
+          if (value === undefined || (HOP_BY_HOP_HEADERS.has(name) && name !== "content-length")) continue;
+          responseHeaders[name] = value;
+        }
+        res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
+        upstreamRes.pipe(res);
+      });
+      upstream = request;
+      request.on("error", (error) => {
+        // A pooled keep-alive connection the server already closed fails before any response; the
+        // request never reached DeepSeek, so one retry on a fresh connection is safe.
+        if (!responded && request.reusedSocket && attempt === 0 && !res.destroyed) {
+          send(1);
+          return;
+        }
+        deps.log?.({ event: "deepseek_proxy_upstream_error", path: target.pathname, error: error.message, attempt });
+        if (!res.headersSent) {
+          res.status(502).json({ error: { message: `DeepSeek proxy upstream error: ${error.message}`, type: "proxy_error" } });
+        } else {
+          res.destroy(error);
+        }
+      });
+      request.end(body.length > 0 ? body : undefined);
+    };
+    send(0);
   };
 }
