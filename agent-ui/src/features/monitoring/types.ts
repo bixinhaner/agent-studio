@@ -279,6 +279,21 @@ export type NotificationRecordListResponse = {
   notificationRecords: NotificationRecord[];
 };
 
+export type TimeOfDayPeakWindow = {
+  /** ISO weekdays, 1 = Monday … 7 = Sunday. */
+  weekdays: number[];
+  start: string;
+  end: string;
+};
+
+export type TimeOfDayPricing = {
+  timezone: string;
+  peakWindows: TimeOfDayPeakWindow[];
+  offPeakMultiplier: number;
+  offPeakDates?: string[];
+  workdayDates?: string[];
+};
+
 export type CostProfileRecord = {
   id: string;
   organizationId?: string | null;
@@ -291,6 +306,7 @@ export type CostProfileRecord = {
   longContextInputMultiplier?: string;
   longContextOutputMultiplier?: string;
   internalCostMultiplier: string;
+  timeOfDayPricing?: TimeOfDayPricing | null;
   isActive: boolean;
 };
 
@@ -308,6 +324,7 @@ export type CreateCostProfileInput = {
   longContextInputMultiplier?: string | number;
   longContextOutputMultiplier?: string | number;
   internalCostMultiplier?: string | number;
+  timeOfDayPricing?: TimeOfDayPricing | null;
   isActive?: boolean;
 };
 
@@ -320,6 +337,7 @@ export type UpdateCostProfileInput = {
   longContextInputMultiplier?: string | number;
   longContextOutputMultiplier?: string | number;
   internalCostMultiplier?: string | number;
+  timeOfDayPricing?: TimeOfDayPricing | null;
   isActive?: boolean;
 };
 

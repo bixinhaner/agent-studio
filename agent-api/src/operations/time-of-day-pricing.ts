@@ -2,6 +2,8 @@
  * Peak/off-peak pricing for a cost profile. Profile prices are the peak (list) prices; outside
  * the peak windows, and on the listed off-peak dates (e.g. public holidays), every token price is
  * multiplied by offPeakMultiplier. Windows and dates are read in the given IANA time zone.
+ * workdayDates are weekend make-up workdays that use the Monday–Friday windows; DeepSeek's own
+ * rule only names Monday–Friday, so leave them empty unless a provider bills them as peak.
  */
 export type TimeOfDayPeakWindow = {
   /** ISO weekdays, 1 = Monday … 7 = Sunday. */
@@ -18,6 +20,8 @@ export type TimeOfDayPricing = {
   offPeakMultiplier: number;
   /** "YYYY-MM-DD" dates that are off-peak all day. */
   offPeakDates?: string[];
+  /** "YYYY-MM-DD" weekend make-up workdays that follow the Monday–Friday peak windows. */
+  workdayDates?: string[];
 };
 
 export type PricingPeriod = {
@@ -64,15 +68,25 @@ export function normalizeTimeOfDayPricing(value: unknown): TimeOfDayPricing | nu
     if (!TIME.test(start) || !TIME.test(end) || minutes(start) >= minutes(end)) {
       throw new Error("高峰时段必须是同一天内的 HH:MM 起止时间");
     }
-    return { weekdays: [...new Set(weekdays)].sort(), start, end };
+    return { weekdays: [...new Set(weekdays)].sort((a, b) => a - b), start, end };
   });
-  const offPeakDates = Array.isArray(record.offPeakDates) ? record.offPeakDates.map(String) : [];
-  if (offPeakDates.some((date) => !DATE.test(date))) throw new Error("谷时日期必须是 YYYY-MM-DD");
+  const dates = (key: string, label: string): string[] => {
+    const values = Array.isArray(record[key]) ? (record[key] as unknown[]).map(String) : [];
+    if (values.some((date) => !DATE.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)))) {
+      throw new Error(`${label}必须是 YYYY-MM-DD`);
+    }
+    return [...new Set(values)].sort();
+  };
+  const offPeakDates = dates("offPeakDates", "节假日");
+  const workdayDates = dates("workdayDates", "调休上班日");
+  const clash = workdayDates.find((date) => offPeakDates.includes(date));
+  if (clash) throw new Error(`${clash} 不能同时是节假日和调休上班日`);
   return {
     timezone,
     peakWindows,
     offPeakMultiplier,
-    ...(offPeakDates.length > 0 ? { offPeakDates: [...new Set(offPeakDates)].sort() } : {})
+    ...(offPeakDates.length > 0 ? { offPeakDates } : {}),
+    ...(workdayDates.length > 0 ? { workdayDates } : {})
   };
 }
 
@@ -94,7 +108,8 @@ export function pricingPeriodAt(pricing: TimeOfDayPricing | null | undefined, at
       .map((part) => [part.type, part.value])
   );
   const date = `${parts.year}-${parts.month}-${parts.day}`;
-  const weekday = WEEKDAYS[parts.weekday];
+  // A make-up workday prices like a Monday.
+  const weekday = pricing.workdayDates?.includes(date) ? 1 : WEEKDAYS[parts.weekday];
   const minuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
   const offPeak = { period: "off_peak" as const, multiplier: pricing.offPeakMultiplier };
   if (pricing.offPeakDates?.includes(date)) return offPeak;

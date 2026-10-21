@@ -115,4 +115,58 @@ describe("CostProfilesView", () => {
       })
     );
   });
+
+  it("submits the DeepSeek preset with its peak/off-peak config", async () => {
+    render(<CostProfilesView />);
+    await waitFor(() => expect(fetchCostProfiles).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("价格预设"), { target: { value: "deepseek-flash" } });
+    expect(screen.getByText("谷时 ×0.5")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存模型定价" }));
+
+    await waitFor(() => expect(createCostProfile).toHaveBeenCalled());
+    const input = (createCostProfile as any).mock.calls[0][0];
+    expect(input).toMatchObject({ model: "deepseek-flash", inputTokenPrice: "0.300000", internalCostMultiplier: "1.0000" });
+    expect(input.timeOfDayPricing).toMatchObject({
+      timezone: "Asia/Shanghai",
+      offPeakMultiplier: 0.5,
+      peakWindows: [
+        { weekdays: [1, 2, 3, 4, 5], start: "09:00", end: "12:00" },
+        { weekdays: [1, 2, 3, 4, 5], start: "14:00", end: "18:00" }
+      ]
+    });
+    expect(input.timeOfDayPricing.offPeakDates).toContain("2026-10-01");
+    expect(input.timeOfDayPricing.workdayDates).toBeUndefined();
+  });
+
+  it("enables peak/off-peak pricing on a saved profile and adds make-up workdays", async () => {
+    render(<CostProfilesView />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "启用峰谷计价" }));
+    fireEvent.click(screen.getByRole("button", { name: /填入 2026 年调休上班日/ }));
+    fireEvent.click(screen.getByRole("button", { name: "高峰时段 1 周六" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存峰谷设置" }));
+
+    await waitFor(() => expect(updateCostProfile).toHaveBeenCalled());
+    const [profileId, changes] = (updateCostProfile as any).mock.calls[0];
+    expect(profileId).toBe("profile-gpt55");
+    expect(changes.timeOfDayPricing.workdayDates).toEqual(["2026-01-04", "2026-02-14", "2026-02-28", "2026-05-09", "2026-09-20", "2026-10-10"]);
+    expect(changes.timeOfDayPricing.peakWindows[0].weekdays).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("blocks saving an invalid window and explains why", async () => {
+    render(<CostProfilesView />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "启用峰谷计价" }));
+    fireEvent.change(screen.getByLabelText("高峰时段 1 结束"), { target: { value: "08:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存峰谷设置" }));
+
+    expect(await screen.findByText("高峰时段 1 的结束时间需要晚于开始时间（同一天内）。")).toBeTruthy();
+    expect(updateCostProfile).not.toHaveBeenCalled();
+  });
 });
+

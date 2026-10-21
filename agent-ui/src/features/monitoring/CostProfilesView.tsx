@@ -4,7 +4,9 @@ import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 import { formatUsdAmount } from "../../lib/formatters";
 import { MODEL_OPTIONS } from "../../lib/model-config";
 import { createCostProfile, fetchCostProfiles, updateCostProfile } from "./api";
-import type { CostProfileRecord } from "./types";
+import { TimeOfDayPricingModal } from "./TimeOfDayPricingModal";
+import { DEEPSEEK_TIME_OF_DAY_PRICING, formatMultiplier, summarizeTimeOfDayPricing } from "./time-of-day-pricing";
+import type { CostProfileRecord, TimeOfDayPricing } from "./types";
 
 type CostProfilePreset = {
   key: string;
@@ -18,6 +20,7 @@ type CostProfilePreset = {
   longContextInputMultiplier: string;
   longContextOutputMultiplier: string;
   internalCostMultiplier: string;
+  timeOfDayPricing?: TimeOfDayPricing;
 };
 
 const CUSTOM_PRESET_KEY = "custom";
@@ -99,6 +102,20 @@ const COST_PROFILE_PRESETS: CostProfilePreset[] = [
     longContextInputMultiplier: "1.0000",
     longContextOutputMultiplier: "1.0000",
     internalCostMultiplier: "1.0000"
+  },
+  {
+    key: "deepseek-flash",
+    label: "DeepSeek Flash（峰谷）",
+    model: "deepseek-flash",
+    inputTokenPrice: "0.300000",
+    cachedInputTokenPrice: "0.006000",
+    cacheWriteTokenPrice: "0.000000",
+    outputTokenPrice: "1.200000",
+    longContextThresholdTokens: "",
+    longContextInputMultiplier: "1.0000",
+    longContextOutputMultiplier: "1.0000",
+    internalCostMultiplier: "1.0000",
+    timeOfDayPricing: DEEPSEEK_TIME_OF_DAY_PRICING
   }
 ];
 
@@ -119,8 +136,15 @@ export function CostProfilesView() {
   const [longContextInputMultiplier, setLongContextInputMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.longContextInputMultiplier);
   const [longContextOutputMultiplier, setLongContextOutputMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.longContextOutputMultiplier);
   const [internalCostMultiplier, setInternalCostMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.internalCostMultiplier);
+  // undefined: leave the saved profile's peak/off-peak config as it is; null: turn it off.
+  const [timeOfDayPricing, setTimeOfDayPricing] = useState<TimeOfDayPricing | null | undefined>(undefined);
+  const [timeOfDayTarget, setTimeOfDayTarget] = useState<"form" | CostProfileRecord | null>(null);
+  const [timeOfDaySaving, setTimeOfDaySaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  const savedProfileForModel = costProfiles.find((profile) => profile.model === model.trim() && !profile.organizationId);
+  const formTimeOfDayPricing = timeOfDayPricing !== undefined ? timeOfDayPricing : savedProfileForModel?.timeOfDayPricing ?? null;
 
   const suggestedModels = Array.from(new Set([...MODEL_OPTIONS.map((option) => option.value), ...costProfiles.map((profile) => profile.model)])).sort(
     (left, right) => left.localeCompare(right)
@@ -154,6 +178,7 @@ export function CostProfilesView() {
     setLongContextInputMultiplier(preset.longContextInputMultiplier);
     setLongContextOutputMultiplier(preset.longContextOutputMultiplier);
     setInternalCostMultiplier(preset.internalCostMultiplier);
+    setTimeOfDayPricing(preset.timeOfDayPricing);
   }
 
   function handlePresetChange(nextPresetKey: string) {
@@ -182,7 +207,8 @@ export function CostProfilesView() {
         longContextThresholdTokens: longContextThresholdTokens || undefined,
         longContextInputMultiplier,
         longContextOutputMultiplier,
-        internalCostMultiplier
+        internalCostMultiplier,
+        ...(timeOfDayPricing !== undefined ? { timeOfDayPricing } : {})
       });
       setMessage("模型定价已保存");
       await load();
@@ -190,6 +216,28 @@ export function CostProfilesView() {
       setErrorText(error instanceof Error ? error.message : "保存模型定价失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveTimeOfDayPricing(next: TimeOfDayPricing | null) {
+    if (timeOfDayTarget === "form") {
+      setTimeOfDayPricing(next);
+      setTimeOfDayTarget(null);
+      return;
+    }
+    if (!timeOfDayTarget) return;
+    setTimeOfDaySaving(true);
+    setErrorText("");
+    setMessage("");
+    try {
+      await updateCostProfile(timeOfDayTarget.id, { timeOfDayPricing: next });
+      setMessage(next ? `${timeOfDayTarget.model} 已按峰谷计价，新调用立即生效` : `${timeOfDayTarget.model} 已改为全时段标价`);
+      setTimeOfDayTarget(null);
+      await load();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "保存峰谷计价失败");
+    } finally {
+      setTimeOfDaySaving(false);
     }
   }
 
@@ -346,8 +394,22 @@ export function CostProfilesView() {
             }}
           />
         </label>
+        <div className="field monitoring-form-span-full tod-form-row">
+          <span className="field-label">峰谷计价</span>
+          <div className="tod-form-summary">
+            <TimeOfDaySummary pricing={formTimeOfDayPricing} />
+            <Button size="small" onClick={() => setTimeOfDayTarget("form")} aria-label="设置峰谷计价">
+              设置峰谷计价
+            </Button>
+          </div>
+          <small className="field-help">
+            {timeOfDayPricing === undefined && savedProfileForModel
+              ? "沿用该模型已保存的峰谷设置；保存价格不会改动它。"
+              : "上面的单价按高峰标价填写，谷时按系数折算。"}
+          </small>
+        </div>
         <Button className="monitoring-action-btn" type="primary" htmlType="submit" aria-label="保存模型定价" loading={saving}>
-          {saving ? "保存中..." : "保存模型定价"}
+          {saving ? "保存中…" : "保存模型定价"}
         </Button>
       </form>
       <datalist id="cost-profile-model-options">
@@ -368,6 +430,7 @@ export function CostProfilesView() {
               <th>缓存写入 / 1M (USD)</th>
               <th>输出 / 1M (USD)</th>
               <th>长上下文规则</th>
+              <th>峰谷计价</th>
               <th>内部系数</th>
               <th>状态</th>
               <th>操作</th>
@@ -376,7 +439,7 @@ export function CostProfilesView() {
           <tbody>
             {costProfiles.map((profile) => (
               <tr key={profile.id}>
-                <td>{profile.model}</td>
+                <td className="tod-mono tod-model-cell">{profile.model}</td>
                 <td>{formatUsdAmount(profile.inputTokenPrice)}</td>
                 <td>{formatUsdAmount(profile.cachedInputTokenPrice)}</td>
                 <td>{formatUsdAmount(profile.cacheWriteTokenPrice)}</td>
@@ -386,11 +449,22 @@ export function CostProfilesView() {
                     ? `>${profile.longContextThresholdTokens.toLocaleString()} · 输入 ${profile.longContextInputMultiplier ?? "1.0000"}x · 输出 ${profile.longContextOutputMultiplier ?? "1.0000"}x`
                     : "—"}
                 </td>
+                <td>
+                  <TimeOfDaySummary pricing={profile.timeOfDayPricing} compact />
+                </td>
                 <td>{profile.internalCostMultiplier}</td>
                 <td>
                   <Tag color={profile.isActive ? "success" : "default"}>{profile.isActive ? "启用" : "停用"}</Tag>
                 </td>
-                <td>
+                <td className="tod-actions-cell">
+                  <Button
+                    type="link"
+                    className="monitoring-link-btn"
+                    aria-label={`设置 ${profile.model} 峰谷计价`}
+                    onClick={() => setTimeOfDayTarget(profile)}
+                  >
+                    峰谷
+                  </Button>
                   <Button
                     type="link"
                     className="monitoring-link-btn"
@@ -405,6 +479,26 @@ export function CostProfilesView() {
           </tbody>
         </table>
       </div>
+      <TimeOfDayPricingModal
+        open={timeOfDayTarget !== null}
+        model={timeOfDayTarget === "form" ? model : timeOfDayTarget?.model ?? ""}
+        value={timeOfDayTarget === "form" ? formTimeOfDayPricing : timeOfDayTarget?.timeOfDayPricing ?? null}
+        saving={timeOfDaySaving}
+        onCancel={() => setTimeOfDayTarget(null)}
+        onSave={saveTimeOfDayPricing}
+      />
     </Card>
+  );
+}
+
+function TimeOfDaySummary({ pricing, compact }: { pricing: TimeOfDayPricing | null | undefined; compact?: boolean }) {
+  if (!pricing) return <span className="monitoring-subtle">{compact ? "—" : "未启用，所有时段按标价"}</span>;
+  return (
+    <span className="tod-summary">
+      <Tag color="processing" className="tod-tag">
+        谷时 {formatMultiplier(pricing.offPeakMultiplier)}
+      </Tag>
+      <span className="tod-summary-meta">{summarizeTimeOfDayPricing(pricing)}</span>
+    </span>
   );
 }

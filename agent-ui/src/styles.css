@@ -5374,6 +5374,359 @@ body.access-request-route #root {
   font-size: 12px;
 }
 
+/* Cost profile peak/off-peak pricing */
+.tod-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tod-modal-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tod-modal-title .tod-mono {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-editor {
+  display: grid;
+  gap: 16px;
+  max-height: min(70vh, 720px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tod-switch-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--admin-color-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--admin-radius-md, 12px);
+  background: var(--admin-color-surface-solid, #fff);
+}
+
+.tod-help,
+.tod-disabled-note,
+.tod-empty {
+  font-size: 12px;
+  text-wrap: pretty;
+}
+
+.tod-disabled-note,
+.tod-empty {
+  margin: 0;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.tod-grid-2 .field {
+  margin-bottom: 0;
+}
+
+.tod-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--admin-color-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--admin-radius-md, 12px);
+}
+
+.tod-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tod-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--admin-color-text, #111827);
+}
+
+.tod-count {
+  padding: 0 8px;
+  border-radius: var(--admin-radius-full, 999px);
+  background: var(--admin-color-accent-soft, rgba(0, 102, 255, 0.1));
+  color: var(--admin-color-accent, #0066ff);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tod-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--admin-color-border, rgba(0, 0, 0, 0.08));
+}
+
+.tod-weekdays {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.tod-day {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--admin-color-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--admin-radius-full, 999px);
+  background: transparent;
+  color: var(--admin-color-subtle, #6b7280);
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 100ms ease;
+}
+
+.tod-day:hover {
+  border-color: var(--admin-color-accent, #0066ff);
+  color: var(--admin-color-accent, #0066ff);
+}
+
+.tod-day.is-selected {
+  border-color: var(--admin-color-accent, #0066ff);
+  background: var(--admin-color-accent, #0066ff);
+  color: #fff;
+}
+
+.tod-day:active {
+  transform: scale(0.94);
+}
+
+.tod-day:focus-visible,
+.tod-chip-remove:focus-visible {
+  outline: 2px solid var(--admin-color-accent, #0066ff);
+  outline-offset: 2px;
+}
+
+.tod-times {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-times .field-input {
+  width: 118px;
+}
+
+.tod-icon-btn {
+  margin-left: auto;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 12px;
+  border-radius: var(--admin-radius-md, 12px);
+  background: var(--admin-color-bg, #f3f4f6);
+}
+
+.tod-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tod-swatch {
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border-radius: 3px;
+  background: var(--admin-color-accent-soft, rgba(0, 102, 255, 0.1));
+}
+
+.tod-swatch.is-peak {
+  background: var(--admin-color-accent, #0066ff);
+}
+
+.tod-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.tod-row-label {
+  font-size: 12px;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-track {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border-radius: var(--admin-radius-sm, 6px);
+  background: var(--admin-color-accent-soft, rgba(0, 102, 255, 0.1));
+}
+
+.tod-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: var(--admin-color-accent, #0066ff);
+}
+
+.tod-axis-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-now {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--admin-color-text, #111827);
+  text-wrap: pretty;
+}
+
+.tod-date-actions,
+.tod-date-add {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tod-date-add .field-input {
+  width: 160px;
+}
+
+.tod-date-year {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.tod-year-label {
+  padding-top: 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.tod-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tod-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 8px;
+  border-radius: var(--admin-radius-sm, 6px);
+  background: var(--admin-color-accent-soft, rgba(0, 102, 255, 0.1));
+  color: var(--admin-color-text, #111827);
+  font-size: 12px;
+}
+
+.tod-chip-remove {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--admin-color-subtle, #6b7280);
+  cursor: pointer;
+}
+
+.tod-chip-remove:hover {
+  color: #dc2626;
+}
+
+.tod-form-summary,
+.tod-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tod-summary .tod-tag {
+  margin-inline-end: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tod-summary-meta {
+  font-size: 12px;
+  color: var(--admin-color-subtle, #6b7280);
+}
+
+.monitoring-table td.tod-model-cell {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.tod-actions-cell {
+  white-space: nowrap;
+}
+
+.tod-actions-cell .monitoring-link-btn + .monitoring-link-btn {
+  margin-left: 4px;
+}
+
+@media (max-width: 640px) {
+  .tod-grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tod-section-head {
+    flex-direction: column;
+  }
+
+  .tod-icon-btn {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tod-day {
+    transition: none;
+  }
+
+  .tod-day:active {
+    transform: none;
+  }
+}
+
 .ops-analytics-page {
   gap: 10px;
 }
