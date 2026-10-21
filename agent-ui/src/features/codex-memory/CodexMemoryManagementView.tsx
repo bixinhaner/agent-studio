@@ -97,6 +97,7 @@ const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
   enabled: true,
   useMemories: true,
   generateMemories: true,
+  generateMemoriesWithApiProvider: false,
   generationEngine: "agent_studio",
   llmProvider: "active_codex_provider",
   llmApiMode: "auto",
@@ -487,6 +488,7 @@ function SettingSwitch(props: {
   title: string;
   description: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -505,7 +507,7 @@ function SettingSwitch(props: {
           {props.description}
         </Typography.Text>
       </div>
-      <Switch checked={props.checked} onChange={props.onChange} />
+      <Switch checked={props.checked} disabled={props.disabled} onChange={props.onChange} />
     </div>
   );
 }
@@ -1376,6 +1378,13 @@ export function CodexMemoryManagementView() {
                 description="由 Codex 原生机制在对话空闲后提取并整理长期记忆。Agent Studio 不再自行提取，只保留用户在 portal 手动添加的记忆。"
                 checked={settings.generateMemories}
                 onChange={(generateMemories) => updateSetting("generateMemories", generateMemories)}
+              />
+              <SettingSwitch
+                title="API 模式下也生成记忆"
+                description="使用 DeepSeek 等 API Key 模型时，记忆提取和整合会按 token 计费且整合是多轮调用，默认关闭；关闭时仍读取已有记忆和用户手动添加的记忆。ChatGPT 登录态不受此开关影响。"
+                checked={settings.generateMemoriesWithApiProvider}
+                disabled={!settings.generateMemories}
+                onChange={(value) => updateSetting("generateMemoriesWithApiProvider", value)}
               />
               <SettingSwitch
                 title="外部上下文时暂停生成"
@@ -2471,7 +2480,7 @@ export function CodexMemoryManagementView() {
               <Space wrap>
                 <Tag>Codex 原生生成</Tag>
                 <Tag>{settings.useMemories ? "读取已有记忆" : "不读取记忆"}</Tag>
-                <Tag>{settings.generateMemories ? "允许生成" : "不生成"}</Tag>
+                <Tag>{settings.generateMemories ? (settings.generateMemoriesWithApiProvider ? "允许生成" : "仅 ChatGPT 登录态生成") : "不生成"}</Tag>
               </Space>
               <Alert
                 type={settings.enabled ? "success" : "info"}
@@ -2621,7 +2630,7 @@ export function CodexMemoryManagementView() {
                 </Space>
                 <Space>
                   <CheckCircle2 size={16} color={settings.generateMemories ? "#16a34a" : "#f59e0b"} />
-                  <Typography.Text>{settings.generateMemories ? "允许自动生成" : "不自动生成"}</Typography.Text>
+                  <Typography.Text>{settings.generateMemories ? (settings.generateMemoriesWithApiProvider ? "允许自动生成" : "仅 ChatGPT 登录态自动生成，API 模式不生成") : "不自动生成"}</Typography.Text>
                 </Space>
               </Space>
             </div>

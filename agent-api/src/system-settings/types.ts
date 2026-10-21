@@ -229,6 +229,7 @@ export const systemSettingsCodexMemorySchema = z
     enabled: z.boolean(),
     useMemories: z.boolean(),
     generateMemories: z.boolean(),
+    generateMemoriesWithApiProvider: z.boolean(),
     generationEngine: z.enum(["agent_studio", "codex_native"]),
     llmProvider: z.enum(["active_codex_provider", "openai_responses", "openai_compatible", "azure_openai"]),
     llmApiMode: z.enum(["auto", "responses", "chat_completions"]),
@@ -613,6 +614,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     enabled: true,
     useMemories: true,
     generateMemories: true,
+    // API-key providers bill every extraction and consolidation call; keep reading existing memories only.
+    generateMemoriesWithApiProvider: false,
     // Agent Studio extraction is retired; the field stays for stored settings compatibility.
     generationEngine: "codex_native",
     llmProvider: "active_codex_provider",

@@ -131,7 +131,7 @@ import {
   resolveCodexThreadContinuity,
   resolveCodexThreadContinuityWithHistory
 } from "./codex-thread-continuity.js";
-import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
+import { applyCodexMemoryToProviderSnapshot, codexMemoryGenerationActive, mergeCodexConfig } from "./codex-memory-config.js";
 import {
   CodexMemoryEngine,
   codexHomeFromRunConfig as codexHomeFromMemoryRunConfig,
@@ -12208,9 +12208,14 @@ app.use(
       const actor = currentActorFromRequest(req);
       return { userId: actor.id, organizationId: actor.organizationId };
     },
-    getSettings: async () =>
-      (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
-      createDefaultSystemSettingsPayload().codexMemory,
+    getSettings: async () => {
+      const settings =
+        (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+        createDefaultSystemSettingsPayload().codexMemory;
+      // Users see "learning" only when memories are really generated for the active provider.
+      const providerKind = (await codexProviders.resolveActiveProviderSnapshot()).kind;
+      return { ...settings, generateMemories: codexMemoryGenerationActive(providerKind, settings) };
+    },
     resolveModeNames: async (modeIds) =>
       Object.fromEntries(
         (await db.agentMode.findMany({ where: { id: { in: modeIds } }, select: { id: true, name: true } })).map((mode) => [mode.id, mode.name])

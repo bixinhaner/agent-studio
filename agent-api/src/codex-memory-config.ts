@@ -70,16 +70,30 @@ export function applyCodexMemoryToRuntimeOptions(
   };
 }
 
+/** Memory generation is on for this provider: ChatGPT sign-in follows the switch, API-key providers also need their own opt-in. */
+export function codexMemoryGenerationActive(
+  providerKind: ManagedCodexProviderSnapshot["kind"] | undefined,
+  settings: SystemSettingsCodexMemory | undefined
+): boolean {
+  if (!settings?.enabled || !settings.generateMemories) return false;
+  return providerKind === "chatgpt" || settings.generateMemoriesWithApiProvider;
+}
+
 /**
- * Codex picks OpenAI model names (e.g. gpt-5.6-luna) for memory extraction and consolidation by default.
- * API-key providers such as DeepSeek reject those names, so memory generation silently fails; pin both
- * phases to the provider's default model instead. ChatGPT sign-in keeps Codex's own choice.
+ * With an API-key provider (DeepSeek and other OpenAI-compatible endpoints) every memory extraction and
+ * consolidation call is billed per token, and consolidation runs as a multi-turn agent, so generation is off
+ * unless `generateMemoriesWithApiProvider` opts in. Existing memories are still read (use_memories untouched).
+ * When it is on, Codex's default memory models are OpenAI names (e.g. gpt-5.6-luna) that such providers
+ * reject, so both phases are pinned to the provider's default model. ChatGPT sign-in keeps Codex's own choice.
  */
 export function buildCodexMemoryModelOverrides(
   snapshot: Pick<ManagedCodexProviderSnapshot, "kind" | "config">,
   settings: SystemSettingsCodexMemory | undefined
 ): Record<string, unknown> | undefined {
   if (!settings?.enabled || snapshot.kind === "chatgpt") return undefined;
+  if (!codexMemoryGenerationActive(snapshot.kind, settings)) {
+    return { memories: { generate_memories: false } };
+  }
   const model = snapshot.config.defaultModel?.trim();
   if (!model) return undefined;
   return { memories: { extract_model: model, consolidation_model: model } };

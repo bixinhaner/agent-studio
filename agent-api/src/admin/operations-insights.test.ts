@@ -459,6 +459,64 @@ describe("buildOperationsInsights", () => {
     });
   });
 
+  it("counts Codex background memory work in cost and tokens but not as questions or sessions", () => {
+    const usageEvents = [
+      makeUsageEvent({
+        id: "evt-chat",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "deepseek-flash",
+        featureType: "chat",
+        inputTokens: 1000,
+        outputTokens: 200,
+        estimatedCost: "1.000000",
+        internalCost: "0.100000",
+        metadata: { source: "chat_stream" },
+        createdAt: "2026-04-15T01:00:00.000Z"
+      }),
+      ...["memory_agent", "outside_rollout"].map((backgroundKind, index) => makeUsageEvent({
+        id: `evt-background-${index}`,
+        organizationId: "org-a",
+        userId: "user-a",
+        model: "deepseek-flash",
+        featureType: "codex_background",
+        inputTokens: 500,
+        outputTokens: 100,
+        estimatedCost: "0.500000",
+        internalCost: "0.050000",
+        metadata: { source: "codex_background", backgroundKind },
+        createdAt: `2026-04-15T01:0${index + 1}:00.000Z`
+      }))
+    ];
+
+    const response = buildOperationsInsights({
+      usageEvents,
+      sessionsById: new Map(),
+      organizationsById: new Map([
+        ["org-a", { id: "org-a", slug: "alpha", name: "Alpha Corp", type: "internal", status: "active", createdAt: "", updatedAt: "" }]
+      ]),
+      usersById: new Map([["user-a", { id: "user-a", displayName: "Alice", email: "alice@example.com", createdAt: "", updatedAt: "" }]]),
+      departmentsById: new Map(),
+      filters: { days: 30, timeZone: "Asia/Shanghai", sessionPage: 1, sessionPageSize: 20 },
+      now: new Date("2026-04-16T00:00:00.000Z")
+    });
+
+    expect(response.summary).toMatchObject({
+      totalSessions: 1,
+      totalRequests: 1,
+      totalTokens: 2400,
+      estimatedCost: "2.000000",
+      internalCost: "0.200000"
+    });
+    expect(response.trends).toEqual([expect.objectContaining({ sessionCount: 1, requestCount: 1, totalTokens: 2400 })]);
+    expect(response.users[0]).toMatchObject({ userId: "user-a", requestCount: 1, sessionCount: 1, totalTokens: 2400 });
+    expect(response.organizations[0]).toMatchObject({ requestCount: 1, sessionCount: 1 });
+    expect(response.breakdowns.entries.find((item) => item.key === "codex_background")).toMatchObject({ requestCount: 0, totalTokens: 1200 });
+    expect(response.sessions).toMatchObject({ totalItems: 1, items: [expect.objectContaining({ sessionId: "session-a", requestCount: 1 })] });
+  });
+
   it("labels Zendesk usage as a first-class operations analytics source", () => {
     const usageEvents = [
       makeUsageEvent({

@@ -6,6 +6,7 @@ import type { UsageEventRecord } from "../persistence/usage-event-repository.js"
 import type { CodexQuotaSnapshotRecord } from "../persistence/codex-quota-snapshot-repository.js";
 import { usageCacheShare, usageTotalTokens } from "../operations/usage-metrics.js";
 import { DEFAULT_CODEX_QUOTA_SNAPSHOT_INTERVAL_MS } from "../operations/codex-quota-snapshot-service.js";
+import { CODEX_BACKGROUND_FEATURE_TYPE } from "../operations/codex-background-usage.js";
 
 export type OperationsInsightsFilters = {
   days: number;
@@ -235,6 +236,10 @@ type NormalizedEvent = {
   departmentId?: string;
   departmentName?: string;
   sessionId: string;
+  /** False for events that are not a user question (Codex background memory work); they still add tokens and cost. */
+  countsAsRequest: boolean;
+  /** False when sessionId is only the per-event fallback of a background event, so it must not count as a session. */
+  hasSession: boolean;
   threadId?: string;
   model: string;
   entryKey: string;
@@ -760,6 +765,8 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
       departmentId,
       departmentName: department?.name ?? departmentId,
       sessionId: trimOrUndefined(record.sessionId) ?? `event:${record.id}`,
+      countsAsRequest: record.featureType !== CODEX_BACKGROUND_FEATURE_TYPE,
+      hasSession: Boolean(trimOrUndefined(record.sessionId)) || record.featureType !== CODEX_BACKGROUND_FEATURE_TYPE,
       threadId: trimOrUndefined(record.threadId) ?? trimOrUndefined(session?.threadId),
       model: record.model,
       entryKey: entry.key,
@@ -860,14 +867,14 @@ function ensureAggregateState(target: Map<string, AggregateState>, key: string):
 }
 
 function applyToAggregate(target: AggregateState, record: NormalizedEvent): void {
-  target.requestCount += 1;
+  if (record.countsAsRequest) target.requestCount += 1;
   target.inputTokens += record.inputTokens;
   target.cachedInputTokens += record.cachedInputTokens;
   target.outputTokens += record.outputTokens;
   target.totalTokens += record.totalTokens;
   target.estimatedCost += record.estimatedCost;
   target.internalCost += record.internalCost;
-  target.sessionIds.add(record.sessionId);
+  if (record.hasSession) target.sessionIds.add(record.sessionId);
   if (record.userId) target.userIds.add(record.userId);
   if (record.organizationId) target.organizationIds.add(record.organizationId);
 }
@@ -878,7 +885,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
   const filtered = normalized.filter((record) => record.featureType !== "security_review");
   const securityReview = buildSecurityReviewSummary(securityReviewEvents);
   const now = input.now ?? new Date();
-  const summaryRequestCount = filtered.length;
+  const summaryRequestCount = filtered.filter((record) => record.countsAsRequest).length;
   const sessionBuckets = new Map<string, SessionAggregateState>();
   const organizationBuckets = new Map<string, OrganizationAggregateState>();
   const userBuckets = new Map<string, UserAggregateState>();
@@ -924,13 +931,16 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
     modelLabels.set(record.model, record.model);
     entryLabels.set(record.entryKey, record.entryLabel);
 
+    const requestUnit = record.countsAsRequest ? 1 : 0;
+
     applyToAggregate(ensureAggregateState(pathBuckets, record.pathKey), record);
     applyToAggregate(ensureAggregateState(modelBuckets, record.model), record);
     applyToAggregate(ensureAggregateState(entryBuckets, record.entryKey), record);
 
-    const sessionExisting = sessionBuckets.get(record.sessionId);
+    // Background memory work has no session of its own; its cost still lands in the totals above.
+    const sessionExisting = record.hasSession ? sessionBuckets.get(record.sessionId) : undefined;
     if (sessionExisting) {
-      sessionExisting.requestCount += 1;
+      sessionExisting.requestCount += requestUnit;
       sessionExisting.inputTokens += record.inputTokens;
       sessionExisting.cachedInputTokens += record.cachedInputTokens;
       sessionExisting.cacheWriteTokens += record.cacheWriteTokens;
@@ -946,7 +956,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
         sessionExisting.lastActiveAt = record.createdAt;
         sessionExisting.lastActiveAtMs = record.createdAtMs;
       }
-    } else {
+    } else if (record.hasSession) {
       sessionBuckets.set(record.sessionId, {
         sessionId: record.sessionId,
         threadId: record.threadId,
@@ -961,7 +971,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
         entryLabel: record.entryLabel,
         pathKey: record.pathKey,
         pathLabel: record.pathLabel,
-        requestCount: 1,
+        requestCount: requestUnit,
         inputTokens: record.inputTokens,
         cachedInputTokens: record.cachedInputTokens,
         cacheWriteTokens: record.cacheWriteTokens,
@@ -979,17 +989,17 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
     if (record.organizationId) {
       const existing = organizationBuckets.get(record.organizationId);
       if (existing) {
-        existing.requestCount += 1;
+        existing.requestCount += requestUnit;
         existing.inputTokens += record.inputTokens;
         existing.cachedInputTokens += record.cachedInputTokens;
         existing.outputTokens += record.outputTokens;
         existing.totalTokens += record.totalTokens;
         existing.estimatedCost += record.estimatedCost;
         existing.internalCost += record.internalCost;
-        existing.sessionIds.add(record.sessionId);
+        if (record.hasSession) existing.sessionIds.add(record.sessionId);
         if (record.userId) existing.userIds.add(record.userId);
-        existing.modelCounts.set(record.model, (existing.modelCounts.get(record.model) ?? 0) + 1);
-        existing.pathCounts.set(record.pathLabel, (existing.pathCounts.get(record.pathLabel) ?? 0) + 1);
+        existing.modelCounts.set(record.model, (existing.modelCounts.get(record.model) ?? 0) + requestUnit);
+        existing.pathCounts.set(record.pathLabel, (existing.pathCounts.get(record.pathLabel) ?? 0) + requestUnit);
         if (record.createdAtMs > existing.lastActiveAtMs) {
           existing.lastActiveAt = record.createdAt;
           existing.lastActiveAtMs = record.createdAtMs;
@@ -1000,19 +1010,19 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
           organizationName: record.organizationName ?? record.organizationId,
           organizationSlug: record.organizationSlug,
           organizationType: record.organizationType,
-          requestCount: 1,
+          requestCount: requestUnit,
           inputTokens: record.inputTokens,
           cachedInputTokens: record.cachedInputTokens,
           outputTokens: record.outputTokens,
           totalTokens: record.totalTokens,
           estimatedCost: record.estimatedCost,
           internalCost: record.internalCost,
-          sessionIds: new Set<string>([record.sessionId]),
+          sessionIds: new Set<string>(record.hasSession ? [record.sessionId] : []),
           userIds: new Set<string>(record.userId ? [record.userId] : []),
           lastActiveAt: record.createdAt,
           lastActiveAtMs: record.createdAtMs,
-          modelCounts: new Map<string, number>([[record.model, 1]]),
-          pathCounts: new Map<string, number>([[record.pathLabel, 1]])
+          modelCounts: new Map<string, number>([[record.model, requestUnit]]),
+          pathCounts: new Map<string, number>([[record.pathLabel, requestUnit]])
         });
       }
     }
@@ -1020,16 +1030,16 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
     if (record.userId) {
       const existing = userBuckets.get(record.userId);
       if (existing) {
-        existing.requestCount += 1;
+        existing.requestCount += requestUnit;
         existing.inputTokens += record.inputTokens;
         existing.cachedInputTokens += record.cachedInputTokens;
         existing.outputTokens += record.outputTokens;
         existing.totalTokens += record.totalTokens;
         existing.estimatedCost += record.estimatedCost;
         existing.internalCost += record.internalCost;
-        existing.sessionIds.add(record.sessionId);
-        existing.modelCounts.set(record.model, (existing.modelCounts.get(record.model) ?? 0) + 1);
-        existing.pathCounts.set(record.pathLabel, (existing.pathCounts.get(record.pathLabel) ?? 0) + 1);
+        if (record.hasSession) existing.sessionIds.add(record.sessionId);
+        existing.modelCounts.set(record.model, (existing.modelCounts.get(record.model) ?? 0) + requestUnit);
+        existing.pathCounts.set(record.pathLabel, (existing.pathCounts.get(record.pathLabel) ?? 0) + requestUnit);
         if (record.createdAtMs > existing.lastActiveAtMs) {
           existing.lastActiveAt = record.createdAt;
           existing.lastActiveAtMs = record.createdAtMs;
@@ -1042,36 +1052,36 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
           organizationId: record.organizationId,
           organizationName: record.organizationName,
           departmentName: record.departmentName,
-          requestCount: 1,
+          requestCount: requestUnit,
           inputTokens: record.inputTokens,
           cachedInputTokens: record.cachedInputTokens,
           outputTokens: record.outputTokens,
           totalTokens: record.totalTokens,
           estimatedCost: record.estimatedCost,
           internalCost: record.internalCost,
-          sessionIds: new Set<string>([record.sessionId]),
+          sessionIds: new Set<string>(record.hasSession ? [record.sessionId] : []),
           lastActiveAt: record.createdAt,
           lastActiveAtMs: record.createdAtMs,
-          modelCounts: new Map<string, number>([[record.model, 1]]),
-          pathCounts: new Map<string, number>([[record.pathLabel, 1]])
+          modelCounts: new Map<string, number>([[record.model, requestUnit]]),
+          pathCounts: new Map<string, number>([[record.pathLabel, requestUnit]])
         });
       }
     }
 
     const trend = trendBuckets.get(record.day);
     if (trend) {
-      trend.requestCount += 1;
+      trend.requestCount += requestUnit;
       trend.totalTokens += record.totalTokens;
       trend.estimatedCost += record.estimatedCost;
       trend.internalCost += record.internalCost;
-      trend.sessionIds.add(record.sessionId);
+      if (record.hasSession) trend.sessionIds.add(record.sessionId);
       if (record.userId) trend.userIds.add(record.userId);
       if (record.organizationId) trend.organizationIds.add(record.organizationId);
     } else {
       trendBuckets.set(record.day, {
         day: record.day,
-        requestCount: 1,
-        sessionIds: new Set<string>([record.sessionId]),
+        requestCount: requestUnit,
+        sessionIds: new Set<string>(record.hasSession ? [record.sessionId] : []),
         userIds: new Set<string>(record.userId ? [record.userId] : []),
         organizationIds: new Set<string>(record.organizationId ? [record.organizationId] : []),
         totalTokens: record.totalTokens,
