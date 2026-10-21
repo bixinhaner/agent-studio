@@ -27,7 +27,8 @@ export const DEEPSEEK_TIME_OF_DAY_PRICING: TimeOfDayPricing = {
     { weekdays: [1, 2, 3, 4, 5], start: "09:00", end: "12:00" },
     { weekdays: [1, 2, 3, 4, 5], start: "14:00", end: "18:00" }
   ],
-  offPeakDates: CN_HOLIDAYS_2026
+  offPeakDates: CN_HOLIDAYS_2026,
+  holidaySync: { source: "holiday-cn", includeWorkdays: false }
 };
 
 export const TIMEZONE_OPTIONS = ["Asia/Shanghai", "UTC", "Asia/Singapore", "Asia/Jakarta", "America/Los_Angeles", "America/New_York", "Europe/London"];
@@ -100,6 +101,7 @@ export function summarizeTimeOfDayPricing(pricing: TimeOfDayPricing): string {
   const parts = [pricing.timezone, `${pricing.peakWindows.length} 个高峰时段`];
   if (pricing.offPeakDates?.length) parts.push(`节假日 ${pricing.offPeakDates.length} 天`);
   if (pricing.workdayDates?.length) parts.push(`调休 ${pricing.workdayDates.length} 天`);
+  if (pricing.holidaySync) parts.push(pricing.holidaySync.lastError ? "节假日同步失败" : "节假日自动同步");
   return parts.join(" · ");
 }
 

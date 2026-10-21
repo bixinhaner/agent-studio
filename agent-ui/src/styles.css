@@ -5672,6 +5672,57 @@ body.access-request-route #root {
   color: #dc2626;
 }
 
+.tod-switch-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tod-switch-sub {
+  padding-top: 8px;
+  border-top: 1px dashed var(--admin-color-border, rgba(0, 0, 0, 0.08));
+}
+
+.tod-sub-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--admin-color-text, #111827);
+}
+
+.tod-sync-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--admin-color-subtle, #6b7280);
+  text-wrap: pretty;
+}
+
+.tod-sync-status.is-error {
+  color: #b91c1c;
+}
+
+.tod-status-label {
+  padding: 0 6px;
+  border-radius: var(--admin-radius-sm, 6px);
+  background: var(--admin-color-accent-soft, rgba(0, 102, 255, 0.1));
+  color: var(--admin-color-accent, #0066ff);
+  font-weight: 500;
+}
+
+.tod-status-label.is-ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.tod-sync-status.is-error .tod-status-label {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
 .tod-form-summary,
 .tod-summary {
   display: flex;

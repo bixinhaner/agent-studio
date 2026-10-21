@@ -31,6 +31,7 @@ type MonitoringRouterOptions = {
   notificationRecords: Pick<NotificationRecordRepository, "list">;
   quotaSnapshots: Pick<CodexQuotaSnapshotRepository, "list">;
   quotaSnapshotIntervalMs?: number;
+  holidayCalendarSync?: { syncProfile(profileId: string): Promise<unknown> };
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -367,6 +368,19 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
       res.json({ costProfile });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/cost-profiles/:profileId/holiday-sync", options.requirePermission("quota.write"), async (req: Request, res: Response) => {
+    if (!options.holidayCalendarSync) {
+      res.status(503).json({ detail: "节假日同步未启用" });
+      return;
+    }
+    try {
+      const costProfile = await options.holidayCalendarSync.syncProfile(req.params.profileId);
+      res.json({ costProfile });
+    } catch (error) {
+      res.status(502).json({ detail: detailFromError(error) });
     }
   });
 

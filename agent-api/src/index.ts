@@ -404,6 +404,7 @@ import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { AlertEvaluationService } from "./operations/alert-evaluation-service.js";
 import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
+import { HolidayCalendarSync } from "./operations/holiday-calendar-sync.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
 import { createDingTalkDetailCacheLoader, type DingTalkDetailCacheDb } from "./org-sync/dingtalk-detail-cache.js";
 import { resolveWorkspaceAgentsMdContent } from "./agent-mode/workspace-agents-md.js";
@@ -2249,6 +2250,7 @@ const orgSyncService = new OrgSyncService({
   resourceAccessLogs,
   afterSuccessfulSync: () => securityDomains.refreshAll()
 });
+const holidayCalendarSync = new HolidayCalendarSync({ costProfiles, logger: console });
 const orgSyncScheduler = new OrgSyncScheduler(orgSyncService, syncJobs, {
   enabled: appConfig.orgSync.enabled,
   intervalMinutes: appConfig.orgSync.intervalMinutes,
@@ -11918,6 +11920,7 @@ registerCommonApiRoutes(app, {
     departments,
     quotaPolicies,
     costProfiles,
+    holidayCalendarSync,
     alertRules,
     alertEvents,
     notificationRecords,
@@ -15356,6 +15359,7 @@ async function bootstrap() {
     }
     startSharedRuntimeCleanupPolicySync();
     orgSyncScheduler.start();
+    holidayCalendarSync.start();
     zendeskAiReviewEmailReminderScheduler.start();
     conversationSecurityReviewScheduler.start();
     if (process.env.NODE_ENV === "production") {

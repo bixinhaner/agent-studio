@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCostProfile, fetchCostProfiles, updateCostProfile } from "../api";
+import { createCostProfile, fetchCostProfiles, syncCostProfileHolidays, updateCostProfile } from "../api";
 import { CostProfilesView } from "../CostProfilesView";
 
 vi.mock("../api");
@@ -137,6 +137,7 @@ describe("CostProfilesView", () => {
     });
     expect(input.timeOfDayPricing.offPeakDates).toContain("2026-10-01");
     expect(input.timeOfDayPricing.workdayDates).toBeUndefined();
+    expect(input.timeOfDayPricing.holidaySync).toEqual({ source: "holiday-cn", includeWorkdays: false });
   });
 
   it("enables peak/off-peak pricing on a saved profile and adds make-up workdays", async () => {
@@ -167,6 +168,59 @@ describe("CostProfilesView", () => {
 
     expect(await screen.findByText("高峰时段 1 的结束时间需要晚于开始时间（同一天内）。")).toBeTruthy();
     expect(updateCostProfile).not.toHaveBeenCalled();
+  });
+
+  it("turns on holiday auto-sync and syncs right after saving", async () => {
+    (syncCostProfileHolidays as any).mockResolvedValue({
+      costProfile: { id: "profile-gpt55", timeOfDayPricing: { holidaySync: { source: "holiday-cn", includeWorkdays: false, syncedYears: [2026] } } }
+    });
+    render(<CostProfilesView />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "设置 gpt-5.5 峰谷计价" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "启用峰谷计价" }));
+    const autoSync = screen.getByRole("switch", { name: "自动同步中国法定节假日" });
+    expect(autoSync.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("保存后立即同步一次。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存峰谷设置" }));
+
+    await waitFor(() => expect(syncCostProfileHolidays).toHaveBeenCalledWith("profile-gpt55"));
+    expect((updateCostProfile as any).mock.calls[0][1].timeOfDayPricing.holidaySync).toEqual({ source: "holiday-cn", includeWorkdays: false });
+    expect(await screen.findByText("gpt-5.5 已按峰谷计价，新调用立即生效；已同步 2026 年法定节假日")).toBeTruthy();
+  });
+
+  it("shows a sync failure and keeps the dates", async () => {
+    (fetchCostProfiles as any).mockResolvedValue({
+      costProfiles: [
+        {
+          id: "profile-flash",
+          model: "deepseek-flash",
+          inputTokenPrice: "0.300000",
+          cachedInputTokenPrice: "0.006000",
+          cacheWriteTokenPrice: "0.000000",
+          outputTokenPrice: "1.200000",
+          internalCostMultiplier: "1.0000",
+          isActive: true,
+          timeOfDayPricing: {
+            timezone: "Asia/Shanghai",
+            offPeakMultiplier: 0.5,
+            peakWindows: [{ weekdays: [1, 2, 3, 4, 5], start: "09:00", end: "12:00" }],
+            offPeakDates: ["2026-10-01"],
+            holidaySync: {
+              source: "holiday-cn",
+              includeWorkdays: false,
+              syncedAt: "2026-10-20T00:00:00.000Z",
+              lastError: "节假日数据获取失败（HTTP 503）",
+              lastErrorAt: "2026-10-21T00:00:00.000Z"
+            }
+          }
+        }
+      ]
+    });
+    render(<CostProfilesView />);
+    expect(await screen.findByText(/节假日同步失败/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "设置 deepseek-flash 峰谷计价" }));
+    expect(await screen.findByText(/节假日数据获取失败（HTTP 503）。已保留现有日期/)).toBeTruthy();
   });
 });
 

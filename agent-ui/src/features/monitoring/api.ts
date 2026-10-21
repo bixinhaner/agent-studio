@@ -128,3 +128,12 @@ export async function updateCostProfile(
     }
   );
 }
+
+export async function syncCostProfileHolidays(
+  profileId: string
+): Promise<{ costProfile: CostProfileListResponse["costProfiles"][number] }> {
+  return api<{ costProfile: CostProfileListResponse["costProfiles"][number] }>(
+    `/api/admin/cost-profiles/${encodeURIComponent(profileId)}/holiday-sync`,
+    { method: "POST" }
+  );
+}

@@ -22,6 +22,19 @@ export type TimeOfDayPricing = {
   offPeakDates?: string[];
   /** "YYYY-MM-DD" weekend make-up workdays that follow the Monday–Friday peak windows. */
   workdayDates?: string[];
+  /** Keeps offPeakDates (and optionally workdayDates) in sync with an official holiday calendar. */
+  holidaySync?: HolidaySyncSettings;
+};
+
+export type HolidaySyncSettings = {
+  /** holiday-cn: China's statutory holidays, generated from State Council notices. */
+  source: "holiday-cn";
+  includeWorkdays: boolean;
+  syncedAt?: string;
+  /** Years whose dates came from the calendar on the last successful sync. */
+  syncedYears?: number[];
+  lastError?: string;
+  lastErrorAt?: string;
 };
 
 export type PricingPeriod = {
@@ -81,13 +94,35 @@ export function normalizeTimeOfDayPricing(value: unknown): TimeOfDayPricing | nu
   const workdayDates = dates("workdayDates", "调休上班日");
   const clash = workdayDates.find((date) => offPeakDates.includes(date));
   if (clash) throw new Error(`${clash} 不能同时是节假日和调休上班日`);
+  const holidaySync = normalizeHolidaySync(record.holidaySync);
   return {
     timezone,
     peakWindows,
     offPeakMultiplier,
     ...(offPeakDates.length > 0 ? { offPeakDates } : {}),
-    ...(workdayDates.length > 0 ? { workdayDates } : {})
+    ...(workdayDates.length > 0 ? { workdayDates } : {}),
+    ...(holidaySync ? { holidaySync } : {})
   };
+}
+
+function normalizeHolidaySync(value: unknown): HolidaySyncSettings | undefined {
+  if (value === null || value === undefined || value === false) return undefined;
+  const record = (typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+  if (record.source !== "holiday-cn") throw new Error("节假日同步来源只支持 holiday-cn");
+  const text = (key: string) => (typeof record[key] === "string" && record[key] ? String(record[key]) : undefined);
+  const syncedYears = Array.isArray(record.syncedYears)
+    ? record.syncedYears.map(Number).filter((year) => Number.isInteger(year)).sort((a, b) => a - b)
+    : [];
+  return Object.fromEntries(
+    Object.entries({
+      source: "holiday-cn" as const,
+      includeWorkdays: record.includeWorkdays === true,
+      syncedAt: text("syncedAt"),
+      syncedYears: syncedYears.length > 0 ? syncedYears : undefined,
+      lastError: text("lastError"),
+      lastErrorAt: text("lastErrorAt")
+    }).filter(([, item]) => item !== undefined)
+  ) as HolidaySyncSettings;
 }
 
 /** Peak or off-peak, and the price multiplier, for a usage event at the given instant. */

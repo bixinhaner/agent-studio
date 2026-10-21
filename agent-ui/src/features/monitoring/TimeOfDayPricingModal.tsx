@@ -13,7 +13,7 @@ import {
   pricingPeriodAt,
   validateTimeOfDayPricing
 } from "./time-of-day-pricing";
-import type { TimeOfDayPricing } from "./types";
+import { formatLocalDateTime, type HolidaySyncSettings, type TimeOfDayPricing } from "./types";
 
 type Props = {
   open: boolean;
@@ -222,9 +222,17 @@ export function TimeOfDayPricingModal({ open, model, value, saving, onCancel, on
               <WeekPreview config={config} valid={!validation} />
             </section>
 
+            <HolidaySyncPanel
+              value={draft.holidaySync}
+              onChange={(holidaySync) => setDraft((current) => ({ ...current, holidaySync }))}
+            />
             <DateListEditor
               title="节假日（全天谷时）"
-              help="法定节假日即使落在工作日也按谷时计费。每年国务院公布次年安排后需要补充。"
+              help={
+                draft.holidaySync
+                  ? "法定节假日即使落在工作日也按谷时计费。自动同步会用官方日期替换已公布年份的日期，其他年份手动添加的日期保留。"
+                  : "法定节假日即使落在工作日也按谷时计费。未开启自动同步时，每年国务院公布次年安排后需要手动补充。"
+              }
               dates={draft.offPeakDates ?? []}
               presetLabel="填入 2026 年法定节假日"
               preset={CN_HOLIDAYS_2026}
@@ -397,3 +405,68 @@ function DateListEditor(props: {
     </section>
   );
 }
+
+function HolidaySyncPanel({ value, onChange }: { value: HolidaySyncSettings | undefined; onChange: (value: HolidaySyncSettings | undefined) => void }) {
+  const enabled = Boolean(value);
+  return (
+    <section className="tod-section" aria-label="节假日自动同步">
+      <div className="tod-switch-line">
+        <div>
+          <div className="tod-section-title">自动同步中国法定节假日</div>
+          <small className="field-help">
+            每 6 小时从 holiday-cn（依据国务院公告生成）同步当年和下一年；次年安排公布后自动生效，尚未公布的年份保留现有日期。
+          </small>
+        </div>
+        <Switch
+          checked={enabled}
+          aria-label="自动同步中国法定节假日"
+          onChange={(checked) => onChange(checked ? { source: "holiday-cn", includeWorkdays: false } : undefined)}
+        />
+      </div>
+      {value ? (
+        <>
+          <div className="tod-switch-line tod-switch-sub">
+            <div>
+              <div className="tod-sub-title">同时同步调休上班日</div>
+              <small className="field-help">开启后周末调休上班日按工作日高峰计费。DeepSeek 官方规则只写周一至周五，建议关闭。</small>
+            </div>
+            <Switch
+              size="small"
+              checked={value.includeWorkdays}
+              aria-label="同时同步调休上班日"
+              onChange={(checked) => onChange({ ...value, includeWorkdays: checked })}
+            />
+          </div>
+          <HolidaySyncStatus value={value} />
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function HolidaySyncStatus({ value }: { value: HolidaySyncSettings }) {
+  if (value.lastError && (!value.syncedAt || (value.lastErrorAt ?? "") > value.syncedAt)) {
+    return (
+      <p className="tod-sync-status is-error" role="status">
+        <span className="tod-status-label">同步失败</span>
+        {formatLocalDateTime(value.lastErrorAt)}：{value.lastError}。已保留现有日期，系统会自动重试。
+      </p>
+    );
+  }
+  if (value.syncedAt) {
+    return (
+      <p className="tod-sync-status" role="status">
+        <span className="tod-status-label is-ok">已同步</span>
+        {formatLocalDateTime(value.syncedAt)}
+        {value.syncedYears?.length ? ` · 已获取 ${value.syncedYears.join("、")} 年安排` : " · 暂无已公布的年份"}
+      </p>
+    );
+  }
+  return (
+    <p className="tod-sync-status" role="status">
+      <span className="tod-status-label">待同步</span>
+      保存后立即同步一次。
+    </p>
+  );
+}
+

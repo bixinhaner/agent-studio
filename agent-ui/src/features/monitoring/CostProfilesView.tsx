@@ -3,7 +3,7 @@ import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 
 import { formatUsdAmount } from "../../lib/formatters";
 import { MODEL_OPTIONS } from "../../lib/model-config";
-import { createCostProfile, fetchCostProfiles, updateCostProfile } from "./api";
+import { createCostProfile, fetchCostProfiles, syncCostProfileHolidays, updateCostProfile } from "./api";
 import { TimeOfDayPricingModal } from "./TimeOfDayPricingModal";
 import { DEEPSEEK_TIME_OF_DAY_PRICING, formatMultiplier, summarizeTimeOfDayPricing } from "./time-of-day-pricing";
 import type { CostProfileRecord, TimeOfDayPricing } from "./types";
@@ -198,7 +198,7 @@ export function CostProfilesView() {
     setErrorText("");
     setMessage("");
     try {
-      await createCostProfile({
+      const created = await createCostProfile({
         model,
         inputTokenPrice,
         cachedInputTokenPrice,
@@ -210,7 +210,8 @@ export function CostProfilesView() {
         internalCostMultiplier,
         ...(timeOfDayPricing !== undefined ? { timeOfDayPricing } : {})
       });
-      setMessage("模型定价已保存");
+      const syncNote = created.costProfile?.timeOfDayPricing?.holidaySync ? await syncHolidaysAfterSave(created.costProfile.id) : "";
+      setMessage(`模型定价已保存${syncNote}`);
       await load();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "保存模型定价失败");
@@ -231,13 +232,25 @@ export function CostProfilesView() {
     setMessage("");
     try {
       await updateCostProfile(timeOfDayTarget.id, { timeOfDayPricing: next });
-      setMessage(next ? `${timeOfDayTarget.model} 已按峰谷计价，新调用立即生效` : `${timeOfDayTarget.model} 已改为全时段标价`);
+      const syncNote = next?.holidaySync ? await syncHolidaysAfterSave(timeOfDayTarget.id) : "";
+      setMessage(next ? `${timeOfDayTarget.model} 已按峰谷计价，新调用立即生效${syncNote}` : `${timeOfDayTarget.model} 已改为全时段标价`);
       setTimeOfDayTarget(null);
       await load();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "保存峰谷计价失败");
     } finally {
       setTimeOfDaySaving(false);
+    }
+  }
+
+  /** Pulls the holiday calendar right after saving so the admin sees the result instead of waiting for the 6-hour job. */
+  async function syncHolidaysAfterSave(profileId: string): Promise<string> {
+    try {
+      const synced = await syncCostProfileHolidays(profileId);
+      const years = synced.costProfile.timeOfDayPricing?.holidaySync?.syncedYears ?? [];
+      return years.length ? `；已同步 ${years.join("、")} 年法定节假日` : "；节假日数据源暂无已公布年份，保留现有日期";
+    } catch (error) {
+      return `；节假日同步失败（${error instanceof Error ? error.message : "未知原因"}），已保留现有日期，系统会自动重试`;
     }
   }
 

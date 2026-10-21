@@ -292,6 +292,16 @@ export type TimeOfDayPricing = {
   offPeakMultiplier: number;
   offPeakDates?: string[];
   workdayDates?: string[];
+  holidaySync?: HolidaySyncSettings;
+};
+
+export type HolidaySyncSettings = {
+  source: "holiday-cn";
+  includeWorkdays: boolean;
+  syncedAt?: string;
+  syncedYears?: number[];
+  lastError?: string;
+  lastErrorAt?: string;
 };
 
 export type CostProfileRecord = {
