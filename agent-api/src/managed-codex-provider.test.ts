@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import { appConfig } from "./config.js";
+
 import {
   ManagedCodexProviderResolver,
   createLocalAuthProviderSnapshot,
@@ -90,6 +92,13 @@ describe("DeepSeek context limits", () => {
     const catalog = JSON.parse(readFileSync(config?.model_catalog_json, "utf8"));
     expect(catalog.models.map((model: { slug: string; context_window: number }) => [model.slug, model.context_window]))
       .toEqual([["deepseek-flash", 1_000_000], ["deepseek-v4-pro", 1_000_000]]);
+  });
+
+  it("sends DeepSeek traffic through the local image-shrinking proxy and leaves other gateways direct", () => {
+    const providerOf = (baseUrl: string) =>
+      deepseek(baseUrl).runtimeOptions.config?.model_providers?.agentstudio_openai_compatible?.base_url;
+    expect(providerOf("https://api.deepseek.com")).toBe(`http://127.0.0.1:${appConfig.port}/internal/deepseek-proxy/api.deepseek.com`);
+    expect(providerOf("https://example.com/v1")).toBe("https://example.com/v1");
   });
 
   it("leaves other gateways and ChatGPT sign-in on Codex's own model metadata", () => {

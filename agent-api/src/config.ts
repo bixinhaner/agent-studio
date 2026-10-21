@@ -8,6 +8,8 @@ import { DEFAULT_MODEL, REASONING_EFFORT_VALUES, normalizeModel, normalizeReason
 const schema = z.object({
   NODE_ENV: z.string().optional(),
   PORT: z.string().default("8787"),
+  // "off" sends Codex DeepSeek traffic directly instead of through the local image-shrinking proxy.
+  DEEPSEEK_REQUEST_PROXY: z.string().optional(),
   HOST: z.string().default("0.0.0.0"),
   AGENT_STUDIO_SERVICE_ROLE: z.enum(["all", "admin", "chat"]).default("all"),
   AGENT_STUDIO_CHAT_SLOT: z.string().optional(),
@@ -235,6 +237,7 @@ function defaultCookieSecure(nodeEnv: string | undefined): boolean {
 
 export const appConfig = {
   port: Number(env.PORT) || 8787,
+  deepSeekRequestProxy: (env.DEEPSEEK_REQUEST_PROXY ?? "").trim().toLowerCase() !== "off",
   host: env.HOST,
   serviceRole: env.AGENT_STUDIO_SERVICE_ROLE,
   chatCluster: {

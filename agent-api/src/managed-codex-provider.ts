@@ -1,6 +1,7 @@
 import { appConfig } from "./config.js";
 import { applyCodexMemoryToProviderSnapshot } from "./codex-memory-config.js";
 import { CODEX_MODEL_CATALOG_CONFIG_KEY, ensureDeepSeekModelCatalogFile } from "./codex-deepseek-catalog.js";
+import { deepSeekProxyBaseUrl } from "./deepseek-request-proxy.js";
 import type { CodexRuntimeOptions } from "./codex-runtime.js";
 import {
   normalizeModel,
@@ -205,6 +206,12 @@ function providerContextLimits(baseUrl: string): Record<string, unknown> {
   return limits;
 }
 
+/** DeepSeek traffic goes through the local proxy that keeps image-heavy requests under its body limit. */
+function providerRequestBaseUrl(baseUrl: string): string {
+  if (!appConfig.deepSeekRequestProxy) return baseUrl;
+  return deepSeekProxyBaseUrl(baseUrl, appConfig.port) ?? baseUrl;
+}
+
 export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & {
   integrationInstanceId?: string;
   integrationSlug?: string;
@@ -232,7 +239,7 @@ export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & 
         model_providers: {
           [OPENAI_COMPATIBLE_PROVIDER_ID]: {
             name: "Agent Studio OpenAI Compatible",
-            base_url: config.baseUrl,
+            base_url: providerRequestBaseUrl(config.baseUrl),
             env_key: "CODEX_API_KEY",
             wire_api: "responses"
           }

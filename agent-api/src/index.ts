@@ -359,6 +359,7 @@ import {
   type CodexHomeManifest,
   type CodexHomeOwner
 } from "./operations/codex-background-usage.js";
+import { createDeepSeekProxyHandler, DEEPSEEK_PROXY_PATH } from "./deepseek-request-proxy.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
@@ -11634,6 +11635,13 @@ app.post(CODEX_OTEL_PATH, express.json({ limit: "16mb" }), (req: Request, res: R
   codexBackgroundUsage.accept(codexHome, req.body);
   res.json({});
 });
+// Codex app-servers reach DeepSeek through here so image-heavy threads stay under its body limit.
+const deepSeekProxy = createDeepSeekProxyHandler({
+  isLocalRequest: isLocalDeployStatusRequest,
+  log: (entry) => console.log(JSON.stringify(entry))
+});
+app.all(`${DEEPSEEK_PROXY_PATH}/:host`, express.raw({ type: () => true, limit: "256mb" }), deepSeekProxy);
+app.all(`${DEEPSEEK_PROXY_PATH}/:host/*`, express.raw({ type: () => true, limit: "256mb" }), deepSeekProxy);
 // File reads travel as base64 (2 MB files become ~2.7 MB); oversized results are failed explicitly.
 app.use("/api/local-bridge", express.json({ limit: "16mb" }), localBridgeBodyErrorHandler(db));
 app.use(express.json({ limit: "1mb" }));
