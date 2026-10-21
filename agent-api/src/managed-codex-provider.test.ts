@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ManagedCodexProviderResolver,
+  createLocalAuthProviderSnapshot,
   createManagedCodexProviderSnapshot,
   normalizeManagedCodexProviderSnapshot,
   resolveManagedCodexDefaults
@@ -70,6 +71,36 @@ describe("createManagedCodexProviderSnapshot", () => {
     expect(snapshot.runtimeOptions.envOverrides).toEqual({
       AZURE_OPENAI_API_KEY: "azure-secret"
     });
+  });
+});
+
+describe("DeepSeek context limits", () => {
+  const deepseek = (baseUrl: string) => createManagedCodexProviderSnapshot({
+    config: { providerKind: "openai_api", baseUrl, defaultModel: "deepseek-flash", defaultReasoningEffort: "high" },
+    secrets: { apiKey: "test-key" }
+  });
+
+  it("gives the DeepSeek endpoint its 1M window so GPT-era threads are not compacted with the old model", () => {
+    expect(deepseek("https://api.deepseek.com").runtimeOptions.config).toMatchObject({
+      model_context_window: 1_000_000,
+      model_auto_compact_token_limit: 600_000,
+      model_provider: "agentstudio_openai_compatible"
+    });
+  });
+
+  it("leaves other gateways and ChatGPT sign-in on Codex's own model metadata", () => {
+    expect(deepseek("https://example.com/v1").runtimeOptions.config).not.toHaveProperty("model_context_window");
+    expect(deepseek("https://notdeepseek.com.example.org").runtimeOptions.config).not.toHaveProperty("model_context_window");
+    expect(createLocalAuthProviderSnapshot().runtimeOptions.config ?? {}).not.toHaveProperty("model_context_window");
+  });
+
+  it("re-derives the limits for stored DeepSeek snapshots and does not persist them across a provider switch", () => {
+    const stored = JSON.parse(JSON.stringify(deepseek("https://api.deepseek.com")));
+    expect(normalizeManagedCodexProviderSnapshot(stored)?.runtimeOptions.config).toMatchObject({ model_context_window: 1_000_000 });
+    const switched = normalizeManagedCodexProviderSnapshot({ ...stored, kind: "openai_api",
+      config: { ...stored.config, baseUrl: "https://example.com/v1", defaultModel: "gpt-5.4" } });
+    expect(switched?.runtimeOptions.config).not.toHaveProperty("model_context_window");
+    expect(switched?.runtimeOptions.config).not.toHaveProperty("model_auto_compact_token_limit");
   });
 });
 

@@ -174,6 +174,33 @@ export function normalizeManagedCodexProviderConfig(input: ProviderConfigInput =
   };
 }
 
+const DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000;
+// Above the 475K GPT window, so threads carried over from GPT fit without a forced compaction.
+const DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
+
+function isDeepSeekBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "deepseek.com" || host.endsWith(".deepseek.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Codex has no metadata for DeepSeek models and falls back to a ~258K window. Threads carried over
+ * from GPT (up to 475K) then look oversized, and Codex compacts them with the previous GPT model
+ * before every turn, which DeepSeek rejects, so the turn fails. deepseek-flash and deepseek-v4-pro
+ * both have a 1M context (api-docs.deepseek.com). Only the DeepSeek endpoint gets these limits.
+ */
+function providerContextLimits(baseUrl: string): Record<string, unknown> {
+  if (!isDeepSeekBaseUrl(baseUrl)) return {};
+  return {
+    model_context_window: DEEPSEEK_CONTEXT_WINDOW_TOKENS,
+    model_auto_compact_token_limit: DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT
+  };
+}
+
 export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & {
   integrationInstanceId?: string;
   integrationSlug?: string;
@@ -196,6 +223,7 @@ export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & 
       // OpenAI-only /responses/compact endpoint. A named provider keeps normal
       // calls on the gateway while letting Codex fall back to local compaction.
       runtimeOptions.config = {
+        ...providerContextLimits(config.baseUrl),
         model_provider: OPENAI_COMPATIBLE_PROVIDER_ID,
         model_providers: {
           [OPENAI_COMPATIBLE_PROVIDER_ID]: {
