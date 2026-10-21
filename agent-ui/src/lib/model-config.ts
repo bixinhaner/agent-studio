@@ -232,6 +232,12 @@ export function normalizeReasoningEffortForModel(
   return option.defaultReasoningEffort;
 }
 
+/** Display name for a model ID; unknown models show the ID itself rather than a generic label. */
+export function modelLabelFor(model: string, modelOptions: readonly ModelOption[] = MODEL_OPTIONS): string {
+  const normalized = normalizeModel(model);
+  return (modelOptions.find((option) => option.value === normalized) ?? MODEL_OPTION_MAP.get(normalized))?.label || normalized;
+}
+
 export function contextLimitForModel(model: string, modelOptions?: readonly ModelOption[]): number {
   return modelOptionFor(model, modelOptions).contextLimit;
 }

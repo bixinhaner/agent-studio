@@ -39,6 +39,27 @@ function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+// One "model-id = display name" per line, so admins can add names the provider's /models omits (e.g. a release date).
+function formatModelDisplayNames(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    .map(([model, name]) => `${model} = ${name}`)
+    .join("\n");
+}
+
+function parseModelDisplayNames(text: string): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const separator = line.indexOf("=");
+    if (separator < 0) continue;
+    const model = line.slice(0, separator).trim();
+    const name = line.slice(separator + 1).trim();
+    if (model && name) names[model] = name;
+  }
+  return names;
+}
+
 function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
   return {
     providerKind:
@@ -49,7 +70,8 @@ function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
     azureApiVersion: asString(detail.config.azureApiVersion),
     apiKeyDraft: "",
     defaultModel: asString(detail.config.defaultModel),
-    defaultReasoningEffort: asString(detail.config.defaultReasoningEffort)
+    defaultReasoningEffort: asString(detail.config.defaultReasoningEffort),
+    modelDisplayNames: formatModelDisplayNames(detail.config.modelDisplayNames)
   };
 }
 
@@ -97,7 +119,8 @@ export function OpenAICodexIntegrationView(props: {
           baseUrl: draft.baseUrl.trim(),
           azureApiVersion: draft.azureApiVersion.trim(),
           defaultModel: draft.defaultModel.trim(),
-          defaultReasoningEffort: draft.defaultReasoningEffort.trim()
+          defaultReasoningEffort: draft.defaultReasoningEffort.trim(),
+          modelDisplayNames: parseModelDisplayNames(draft.modelDisplayNames)
         },
         secretState: draft.apiKeyDraft.trim()
           ? {
@@ -307,6 +330,21 @@ export function OpenAICodexIntegrationView(props: {
                           }
                         />
                       </label>
+                      {draft.providerKind !== "chatgpt" ? (
+                        <label className="field">
+                          <span className="field-label">模型显示名称（可选）</span>
+                          <Input.TextArea
+                            value={draft.modelDisplayNames}
+                            placeholder={"deepseek-flash = DeepSeek-V4.1-Flash-1017"}
+                            autoSize={{ minRows: 2, maxRows: 6 }}
+                            disabled={saving}
+                            onChange={(event) => setDraft((current) => ({ ...current, modelDisplayNames: event.target.value }))}
+                          />
+                          <span className="field-help">
+                            每行一个“模型 ID = 显示名称”，用于 portal 和模式配置里的模型名。未填写的模型使用服务商 /models 返回的名称，没有则显示模型 ID。保存后约 5 分钟内生效。
+                          </span>
+                        </label>
+                      ) : null}
                     </div>
                   )
                 }

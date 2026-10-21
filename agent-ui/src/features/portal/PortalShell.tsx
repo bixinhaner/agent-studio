@@ -28,6 +28,7 @@ import { ApiError, api, apiBase, authHeaders, notifyAuthInvalidStatus } from "..
 import {
   DEFAULT_MODEL,
   contextLimitForModel,
+  modelLabelFor,
   modelOptionsFromCatalog,
   normalizeReasoningEffortForModel,
   type ReasoningEffort
@@ -1991,7 +1992,10 @@ export function PortalShell(props: {
   );
   const threadReadOnlyPresentation = resolveThreadReadOnlyPresentation({ trainingReadOnly, sharedThreadReadonly });
   const threadReadOnly = threadReadOnlyPresentation.mutationReadOnly;
-  const selectedModelLabel = appliedConfig.model;
+  const selectedModelLabel = useMemo(
+    () => modelLabelFor(appliedConfig.model, modelOptionsFromCatalog(runtimeOptions?.modelCatalog)),
+    [appliedConfig.model, runtimeOptions?.modelCatalog]
+  );
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
   const assistantDisplayName = branding.assistantName.trim() || "AI Assistant";
@@ -2026,7 +2030,7 @@ export function PortalShell(props: {
     [refreshRuntimeOptionsNow, runtimeReadinessNotice, runtimeReadinessStatus]
   );
   const runtimeSummaryText = runtimeReadinessStatus === "ready"
-    ? `${appliedConfig.model} · ${selectedModeLabel}`
+    ? `${selectedModelLabel} · ${selectedModeLabel}`
     : runtimeReadinessNotice;
   const topbarRuntimeSummaryText = runtimeReadinessStatus === "ready" && isMobile
     ? selectedModeLabel

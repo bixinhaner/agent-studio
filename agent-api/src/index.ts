@@ -52,6 +52,7 @@ import { createTeamUsageService, TeamUsageAccessError } from "./portal/team-usag
 import { createPersonalUsageService } from "./portal/personal-usage-service.js";
 import { CodexMemoryReadObserver } from "./codex-memory/memory-read-observer.js";
 import { createPortalMemoryRouter } from "./codex-memory/portal-memory-router.js";
+import { applyModelDisplayNames, fetchProviderModelNames, readModelDisplayNames } from "./provider-model-labels.js";
 import { PortalMemoryService } from "./codex-memory/portal-memory-service.js";
 import { DingTalkPushService } from "./notifications/dingtalk-push-service.js";
 import { createNotificationSubscriptionRouter } from "./notifications/subscription-router.js";
@@ -210,7 +211,7 @@ import {
   type RuntimeStreamEvent,
   type RuntimeUsageSnapshot
 } from "./live-runtime-session.js";
-import { REASONING_EFFORT_VALUES, fallbackModelCatalog, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
+import { REASONING_EFFORT_VALUES, fallbackModelCatalog, normalizeModel, normalizeReasoningEffortForModel, type CodexModelCapability } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { createServiceTokenMiddleware } from "./service-token.js";
 import {
@@ -3889,10 +3890,27 @@ async function resolveProviderSnapshot(input?: {
   return await codexProviders.resolveActiveProviderSnapshot();
 }
 
+async function labelProviderModels(
+  models: CodexModelCapability[],
+  snapshot: ManagedCodexProviderSnapshot
+): Promise<CodexModelCapability[]> {
+  if (snapshot.kind === "chatgpt" || !snapshot.integrationInstanceId) return models;
+  const [configRow, providerNames] = await Promise.all([
+    db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: snapshot.integrationInstanceId } }),
+    snapshot.kind === "openai_api"
+      ? fetchProviderModelNames({ baseUrl: snapshot.config.baseUrl, apiKey: snapshot.secrets.apiKey })
+      : Promise.resolve(new Map<string, string>())
+  ]);
+  return applyModelDisplayNames(models, {
+    overrides: readModelDisplayNames(asRecord(configRow?.config) ?? undefined),
+    providerNames
+  });
+}
+
 const codexModelCatalog = new CodexModelCatalogService({
   listModels: async () => {
     const snapshot = await resolveProviderSnapshot();
-    return await createRuntimeForProviderSnapshot(snapshot).listModels();
+    return await labelProviderModels(await createRuntimeForProviderSnapshot(snapshot).listModels(), snapshot);
   },
   fallbackCatalog: fallbackModelCatalog
 });

@@ -343,6 +343,7 @@ export type OpenAICodexConfigInput = {
   azureApiVersion?: string;
   defaultModel?: string;
   defaultReasoningEffort?: string;
+  modelDisplayNames?: Record<string, string>;
 };
 
 export type OpenAICodexSecretInput = {
@@ -355,6 +356,7 @@ export type OpenAICodexConfigDraft = {
   azureApiVersion: string;
   defaultModel: string;
   defaultReasoningEffort: string;
+  modelDisplayNames: string;
   apiKeyDraft: string;
 };
 
