@@ -117,6 +117,7 @@ import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { sendBufferContent, sendFileContent } from "./files/raw-content-response.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import {
+  configureCodexAppServerTelemetry,
   isAppServerRuntimeEnabled,
   isCodexThreadWriterConflict,
   releaseIdleCodexThreadWriters,
@@ -347,7 +348,17 @@ import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence
 import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
 import { CodexSkillRepository, type CodexSkillRepositoryDb } from "./persistence/codex-skill-repository.js";
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
-import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
+import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
+import {
+  CODEX_OTEL_HOME_HEADER,
+  CODEX_OTEL_PATH,
+  CODEX_OTEL_SIGNATURE_HEADER,
+  CodexBackgroundUsageCollector,
+  buildCodexOtelLaunchArgs,
+  verifyCodexHomeSignature,
+  type CodexHomeManifest,
+  type CodexHomeOwner
+} from "./operations/codex-background-usage.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
@@ -1167,6 +1178,46 @@ const usageIngestion = new UsageIngestionService({
   afterRecord: rebuildUsageRollupForEvent
 });
 const usageRecorder = new UsageRecorder({ usageIngestion });
+const integrationInstancesForUsage = new IntegrationInstanceRepository(db as unknown as IntegrationInstanceRepositoryDb);
+/**
+ * Codex background agents (native memory consolidation) bill the provider outside any user turn and
+ * leave no rollout, so they never reach recordCodexUsage. Their token counts arrive per response via
+ * OTEL; recordDirectUsage is used because there is no RuntimeUsageSnapshot or thread to diff against.
+ */
+const codexBackgroundUsage = runsChatService
+  ? new CodexBackgroundUsageCollector({
+      recordDirectUsage: (input) => usageRecorder.recordDirectUsage(input),
+      resolveOwner: resolveCodexHomeOwner,
+      isKnownThread: async (codexThreadId) => {
+        const [thread, ticket] = await Promise.all([
+          db.thread.findFirst({ where: { codexThreadId }, select: { id: true } }),
+          db.zendeskTicketBinding.findFirst({ where: { codexThreadId }, select: { id: true } })
+        ]);
+        return Boolean(thread || ticket);
+      },
+      logger: console
+    })
+  : undefined;
+const codexOtelSecret = randomBytes(32).toString("hex");
+if (codexBackgroundUsage) {
+  configureCodexAppServerTelemetry((codexHome) =>
+    buildCodexOtelLaunchArgs({ endpoint: `http://127.0.0.1:${appConfig.port}${CODEX_OTEL_PATH}`, secret: codexOtelSecret, codexHome })
+  );
+}
+
+async function resolveCodexHomeOwner(manifest: CodexHomeManifest | undefined): Promise<CodexHomeOwner | undefined> {
+  if (manifest?.scope === "user_agent" && manifest.organizationKey) {
+    const organization =
+      (await organizations.getBySlug(manifest.organizationKey).catch(() => undefined)) ??
+      (await organizations.getById(manifest.organizationKey).catch(() => undefined));
+    return { scope: "user_agent", organizationId: organization?.id, userId: manifest.userId };
+  }
+  if (manifest?.scope === "integration_agent" && manifest.integrationInstanceId) {
+    const instance = await integrationInstancesForUsage.getInstance(manifest.integrationInstanceId).catch(() => null);
+    return { scope: "integration_agent", organizationId: instance?.organizationId, integrationInstanceId: manifest.integrationInstanceId };
+  }
+  return manifest?.scope ? { scope: manifest.scope } : undefined;
+}
 const trainingTranslations = new TrainingTranslationService(db, async (input) => {
   const providerSnapshot = await codexProviders.resolveActiveProviderSnapshot();
   const model = providerSnapshot.config.defaultModel;
@@ -11572,6 +11623,17 @@ app.post(
     }
   }
 );
+// Codex app-servers started by this process post their OTEL logs here (see CodexBackgroundUsageCollector).
+app.post(CODEX_OTEL_PATH, express.json({ limit: "16mb" }), (req: Request, res: Response) => {
+  const codexHome = req.header(CODEX_OTEL_HOME_HEADER) ?? "";
+  const signature = req.header(CODEX_OTEL_SIGNATURE_HEADER) ?? "";
+  if (!codexBackgroundUsage || !isLocalDeployStatusRequest(req) || !codexHome || !verifyCodexHomeSignature(codexOtelSecret, codexHome, signature)) {
+    res.status(404).json({ detail: "Not found" });
+    return;
+  }
+  codexBackgroundUsage.accept(codexHome, req.body);
+  res.json({});
+});
 // File reads travel as base64 (2 MB files become ~2.7 MB); oversized results are failed explicitly.
 app.use("/api/local-bridge", express.json({ limit: "16mb" }), localBridgeBodyErrorHandler(db));
 app.use(express.json({ limit: "1mb" }));

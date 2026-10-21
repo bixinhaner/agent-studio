@@ -419,6 +419,13 @@ function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown
   return mergeConfig(fromOptions, { openai_base_url: baseUrl });
 }
 
+let telemetryLaunchArgs: ((codexHome: string) => string[] | undefined) | undefined;
+
+/** Lets the host add per-CODEX_HOME telemetry export (background usage metering) to every app-server it starts. */
+export function configureCodexAppServerTelemetry(provider: ((codexHome: string) => string[] | undefined) | undefined): void {
+  telemetryLaunchArgs = provider;
+}
+
 function runtimeScope(options: CodexRuntimeOptions, workloadIdentity?: string): RuntimeScope {
   const env = effectiveEnv(options);
   const binaryPath = resolveCodexAppServerBinaryPath();
@@ -1144,7 +1151,16 @@ class CodexAppServerProcess {
   }
 
   private async startInner(): Promise<void> {
-    const launch = isolatedWorkloadCommand(this.scope.binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"]);
+    const codexHome = trimOrUndefined(this.scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex");
+    let telemetryArgs: string[] = [];
+    try {
+      telemetryArgs = telemetryLaunchArgs?.(codexHome) ?? [];
+    } catch {
+      // Metering must never block a conversation; start without telemetry export.
+    }
+    const launch = isolatedWorkloadCommand(this.scope.binaryPath, [
+      "app-server", "--disable", "enable_mcp_apps", ...telemetryArgs, "--listen", "stdio://"
+    ]);
     this.workloadId = launch.id;
     this.proc = spawn(launch.command, launch.args, {
       detached: process.platform !== "win32",

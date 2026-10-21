@@ -70,12 +70,31 @@ export function applyCodexMemoryToRuntimeOptions(
   };
 }
 
+/**
+ * Codex picks OpenAI model names (e.g. gpt-5.6-luna) for memory extraction and consolidation by default.
+ * API-key providers such as DeepSeek reject those names, so memory generation silently fails; pin both
+ * phases to the provider's default model instead. ChatGPT sign-in keeps Codex's own choice.
+ */
+export function buildCodexMemoryModelOverrides(
+  snapshot: Pick<ManagedCodexProviderSnapshot, "kind" | "config">,
+  settings: SystemSettingsCodexMemory | undefined
+): Record<string, unknown> | undefined {
+  if (!settings?.enabled || snapshot.kind === "chatgpt") return undefined;
+  const model = snapshot.config.defaultModel?.trim();
+  if (!model) return undefined;
+  return { memories: { extract_model: model, consolidation_model: model } };
+}
+
 export function applyCodexMemoryToProviderSnapshot(
   snapshot: ManagedCodexProviderSnapshot,
   settings: SystemSettingsCodexMemory | undefined
 ): ManagedCodexProviderSnapshot {
+  const runtimeOptions = applyCodexMemoryToRuntimeOptions(snapshot.runtimeOptions, settings);
   return {
     ...snapshot,
-    runtimeOptions: applyCodexMemoryToRuntimeOptions(snapshot.runtimeOptions, settings)
+    runtimeOptions: {
+      ...runtimeOptions,
+      config: mergeCodexConfig(runtimeOptions.config, buildCodexMemoryModelOverrides(snapshot, settings))
+    }
   };
 }
