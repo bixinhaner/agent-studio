@@ -6,6 +6,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { appConfig } from "../config.js";
 import { createDbClient } from "../db/client.js";
 import { calculateEstimatedCost } from "../operations/usage-ingestion-service.js";
+import { timeOfDayPricingFromMetadata } from "../operations/time-of-day-pricing.js";
 import { UsageRollupService } from "../operations/usage-rollup-service.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "../persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "../persistence/usage-rollup-repository.js";
@@ -170,6 +171,7 @@ function historicalProfile(metadata: unknown): CostProfileRecord | undefined {
     cacheWriteTokenPrice,
     outputTokenPrice,
     longContextThresholdTokens: toTokenCount(cost.longContextThresholdTokens),
+    timeOfDayPricing: timeOfDayPricingFromMetadata(cost),
     longContextInputMultiplier: stringValue("longContextInputMultiplier") ?? "1",
     longContextOutputMultiplier: stringValue("longContextOutputMultiplier") ?? "1",
     internalCostMultiplier: stringValue("internalCostMultiplier") ?? "1",
@@ -418,7 +420,8 @@ async function main(): Promise<void> {
           outputTokens: event.outputTokens,
           cacheWriteTelemetryAvailable,
           modelInvocations: invocations.map((record) => ({ ...record.last, modelContextWindow: record.modelContextWindow })),
-          longContextPricingBasis: "model_invocation"
+          longContextPricingBasis: "model_invocation",
+          pricedAt: new Date(event.createdAt)
         });
         const oldEstimatedCost = Number(event.estimatedCost).toFixed(6);
         const oldInternalCost = Number(event.internalCost).toFixed(6);

@@ -111,6 +111,7 @@ function normalizeCostProfileInput(body: Record<string, unknown>): UpsertCostPro
     longContextInputMultiplier: String(body.longContextInputMultiplier ?? "1"),
     longContextOutputMultiplier: String(body.longContextOutputMultiplier ?? "1"),
     internalCostMultiplier: String(body.internalCostMultiplier ?? "1"),
+    timeOfDayPricing: body.timeOfDayPricing,
     isActive: typeof body.isActive === "boolean" ? body.isActive : undefined
   };
 }
@@ -359,6 +360,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
           "longContextInputMultiplier",
           "longContextOutputMultiplier",
           "internalCostMultiplier",
+          "timeOfDayPricing",
           "isActive"
         ])
       });

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Prisma } from "@prisma/client";
 import { createDbClient } from "../db/client.js";
 import { calculateEstimatedCost } from "../operations/usage-ingestion-service.js";
+import { timeOfDayPricingFromMetadata } from "../operations/time-of-day-pricing.js";
 import { readRolloutUsage, sumInvocations, usageHash, type RolloutTurnUsage } from "../operations/codex-usage-ledger.js";
 import { UsageRollupService } from "../operations/usage-rollup-service.js";
 import { UsageEventRepository } from "../persistence/usage-event-repository.js";
@@ -21,6 +22,7 @@ export function historicalProfile(metadata: any): CostProfileRecord | undefined 
     longContextThresholdTokens: c.longContextThresholdTokens,
     longContextInputMultiplier: String(c.longContextInputMultiplier ?? 1),
     longContextOutputMultiplier: String(c.longContextOutputMultiplier ?? 1),
+    timeOfDayPricing: timeOfDayPricingFromMetadata(c),
     isActive: true, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z"
   };
 }
@@ -46,7 +48,8 @@ export function correctionFor(event: any, turn: RolloutTurnUsage): { data?: any;
   if (!profile) return { blocked: "historical_price_missing" };
   const usage = sumInvocations(turn.invocations);
   const priced = calculateEstimatedCost({ profile, ...usage, cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-    cacheWriteTelemetryAvailable: usage.cacheWriteTokens !== undefined, modelInvocations: turn.invocations, longContextPricingBasis: "model_invocation" });
+    cacheWriteTelemetryAvailable: usage.cacheWriteTokens !== undefined, modelInvocations: turn.invocations, longContextPricingBasis: "model_invocation",
+    pricedAt: event.createdAt ? new Date(event.createdAt) : undefined });
   return { data: {
     ...usage, cacheWriteTokens: usage.cacheWriteTokens ?? 0,
     estimatedCost: priced.estimatedCost, internalCost: priced.internalCost,

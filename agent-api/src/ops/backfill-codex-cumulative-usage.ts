@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { createDbClient } from "../db/client.js";
 import { calculateEstimatedCost } from "../operations/usage-ingestion-service.js";
+import { timeOfDayPricingFromMetadata } from "../operations/time-of-day-pricing.js";
 import { UsageRollupService } from "../operations/usage-rollup-service.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "../persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "../persistence/usage-rollup-repository.js";
@@ -105,6 +106,7 @@ function historicalProfile(metadata: unknown): CostProfileRecord | null {
     cacheWriteTokenPrice: string("cacheWriteTokenPrice") ?? "0",
     outputTokenPrice,
     longContextThresholdTokens: token(cost.longContextThresholdTokens),
+    timeOfDayPricing: timeOfDayPricingFromMetadata(cost),
     longContextInputMultiplier: string("longContextInputMultiplier") ?? "1",
     longContextOutputMultiplier: string("longContextOutputMultiplier") ?? "1",
     internalCostMultiplier: string("internalCostMultiplier") ?? "1",
@@ -212,7 +214,8 @@ async function main(): Promise<void> {
               const priced = calculateEstimatedCost({
                 profile,
                 ...usage,
-                cacheWriteTelemetryAvailable: snapshot.cacheWriteTokens !== undefined
+                cacheWriteTelemetryAvailable: snapshot.cacheWriteTokens !== undefined,
+                pricedAt: new Date(event.createdAt)
               });
               const rootMetadata = asRecord(event.metadata) ?? {};
               const previousCorrection = asRecord(rootMetadata._usageCorrection);

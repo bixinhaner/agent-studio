@@ -864,4 +864,86 @@ describe("UsageIngestionService", () => {
       outputTokens: 0
     });
   });
+
+  describe("time-of-day pricing", () => {
+    const flash: CostProfileRecord = {
+      ...profile,
+      id: "cost_profile_deepseek_flash_global",
+      model: "deepseek-flash",
+      inputTokenPrice: "0.3",
+      cachedInputTokenPrice: "0.006",
+      cacheWriteTokenPrice: "0",
+      outputTokenPrice: "1.2",
+      internalCostMultiplier: "1",
+      timeOfDayPricing: {
+        timezone: "Asia/Shanghai",
+        offPeakMultiplier: 0.5,
+        peakWindows: [
+          { weekdays: [1, 2, 3, 4, 5], start: "09:00", end: "12:00" },
+          { weekdays: [1, 2, 3, 4, 5], start: "14:00", end: "18:00" }
+        ]
+      }
+    };
+    const usage = { inputTokens: 1_000_000, cachedInputTokens: 900_000, cacheWriteTokens: 0, cacheWriteTelemetryAvailable: true, outputTokens: 100_000 };
+
+    it("charges list price at peak and the off-peak multiplier outside the peak windows", () => {
+      // 100K uncached * 0.3 + 900K cached * 0.006 + 100K output * 1.2 per 1M = 0.03 + 0.0054 + 0.12
+      expect(calculateEstimatedCost({ profile: flash, ...usage, pricedAt: new Date("2026-10-21T02:00:00Z") }))
+        .toMatchObject({ estimatedCost: "0.155400", internalCost: "0.155400", pricingPeriod: "peak", timeOfDayMultiplier: 1 });
+      expect(calculateEstimatedCost({ profile: flash, ...usage, pricedAt: new Date("2026-10-21T05:00:00Z") }))
+        .toMatchObject({ estimatedCost: "0.077700", internalCost: "0.077700", pricingPeriod: "off_peak", timeOfDayMultiplier: 0.5 });
+    });
+
+    it("bounds cached input to input before applying the off-peak multiplier", () => {
+      expect(calculateEstimatedCost({ profile: flash, inputTokens: 1_000, cachedInputTokens: 5_000, cacheWriteTokens: 0,
+        cacheWriteTelemetryAvailable: true, outputTokens: 0, pricedAt: new Date("2026-10-24T02:00:00Z") }).estimatedCost)
+        .toBe("0.000003");
+    });
+
+    it("prices a recorded event by its own time and keeps the config in cost metadata for the rollup", async () => {
+      let rolledUp: any;
+      const service = new UsageIngestionService({
+        costProfiles: { async getActiveByModel() { return flash; } },
+        usageEvents: {
+          async list() { return []; },
+          async create(input) { return { ...input, id: "usage-flash", createdAt: "2026-10-21T05:00:00.000Z" } as any; }
+        },
+        async afterRecord(event) { rolledUp = event; }
+      });
+      await service.record({ model: "deepseek-flash", featureType: "chat", createdAt: "2026-10-21T05:00:00.000Z",
+        inputTokens: 1_000_000, cachedInputTokens: 900_000, outputTokens: 100_000 });
+      expect(rolledUp.estimatedCost).toBe("0.077700");
+      expect(rolledUp.metadata._costProfile).toMatchObject({ pricingPeriod: "off_peak", timeOfDayMultiplier: 0.5,
+        timeOfDayPricing: flash.timeOfDayPricing });
+    });
+
+    it("prices Codex cumulative deltas, including after a thread switch, at the off-peak rate", async () => {
+      const stored: any[] = [];
+      const service = new UsageIngestionService({
+        costProfiles: { async getActiveByModel() { return flash; } },
+        usageEvents: {
+          async list() { return []; },
+          async create() { throw new Error("cumulative path expected"); },
+          async createCodexCumulative({ codexThreadId, buildInput }) {
+            const previous = stored.filter((event) => event.metadata.codexThreadId === codexThreadId).at(-1);
+            const built = { ...buildInput(previous), createdAt: "2026-10-24T03:00:00.000Z" };
+            stored.push(built);
+            return built as any;
+          }
+        }
+      });
+      const snapshot = (inputTokens: number, cachedInputTokens: number, outputTokens: number) => ({
+        model: "deepseek-flash", featureType: "chat", createdAt: "2026-10-24T03:00:00.000Z",
+        inputTokens, cachedInputTokens, outputTokens });
+      await service.recordCodexRuntimeUsage({ ...snapshot(1_000_000, 900_000, 100_000), codexThreadId: "thread-a" });
+      await service.recordCodexRuntimeUsage({ ...snapshot(2_000_000, 1_800_000, 200_000), codexThreadId: "thread-a" });
+      await service.recordCodexRuntimeUsage({ ...snapshot(1_000_000, 900_000, 100_000), codexThreadId: "thread-b" });
+      expect(stored.map((event) => [event.inputTokens, event.estimatedCost, event.metadata._costProfile.pricingPeriod])).toEqual([
+        [1_000_000, "0.077700", "off_peak"],
+        [1_000_000, "0.077700", "off_peak"],
+        [1_000_000, "0.077700", "off_peak"]
+      ]);
+    });
+  });
 });
+

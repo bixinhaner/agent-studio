@@ -3,6 +3,7 @@ import type {
   CostProfileRecord,
   CostProfileRepository
 } from "../persistence/cost-profile-repository.js";
+import { pricingPeriodAt } from "./time-of-day-pricing.js";
 import type {
   CodexCumulativeUsageCursor,
   CreateUsageEventInput,
@@ -182,6 +183,8 @@ function metadataWithCostProfile(input: {
     | "maxInvocationInputTokens"
     | "longContextPricingBasis"
     | "longContextPricingComplete"
+    | "pricingPeriod"
+    | "timeOfDayMultiplier"
   >;
 }): Record<string, unknown> {
   const cacheWritePrice = parseDecimal(input.profile?.cacheWriteTokenPrice);
@@ -206,6 +209,13 @@ function metadataWithCostProfile(input: {
           longContextPricingBasis: input.pricing.longContextPricingBasis,
           longContextPricingComplete: input.pricing.longContextPricingComplete,
           internalCostMultiplier: input.profile.internalCostMultiplier,
+          ...(input.profile.timeOfDayPricing
+            ? {
+                timeOfDayPricing: input.profile.timeOfDayPricing,
+                pricingPeriod: input.pricing.pricingPeriod,
+                timeOfDayMultiplier: input.pricing.timeOfDayMultiplier
+              }
+            : {}),
           costCompleteness:
             cacheWritePrice > 0 && !input.cacheWriteTelemetryAvailable
               ? "upper_bound_missing_cache_write_tokens"
@@ -255,6 +265,8 @@ export type CalculatedUsageCost = {
   maxInvocationInputTokens: number;
   longContextPricingBasis: "aggregate_request" | "model_invocation";
   longContextPricingComplete: boolean;
+  pricingPeriod: "peak" | "off_peak";
+  timeOfDayMultiplier: number;
 };
 
 type PricingInvocation = {
@@ -322,6 +334,8 @@ export function calculateEstimatedCost(input: {
   outputTokens: number;
   modelInvocations?: RecordUsageInput["codexRuntimeModelInvocations"];
   longContextPricingBasis?: "aggregate_request" | "model_invocation";
+  /** When the usage happened; selects peak or off-peak prices for profiles with time-of-day pricing. */
+  pricedAt?: Date;
 }): CalculatedUsageCost {
   const longContextPricingBasis = input.longContextPricingBasis ?? "aggregate_request";
   if (!input.profile) {
@@ -332,7 +346,9 @@ export function calculateEstimatedCost(input: {
       longContextInvocationCount: 0,
       maxInvocationInputTokens: 0,
       longContextPricingBasis,
-      longContextPricingComplete: longContextPricingBasis === "aggregate_request"
+      longContextPricingComplete: longContextPricingBasis === "aggregate_request",
+      pricingPeriod: "peak",
+      timeOfDayMultiplier: 1
     };
   }
 
@@ -375,7 +391,8 @@ export function calculateEstimatedCost(input: {
     const normalOutputCost = invocation.outputTokens * outputTokenPrice;
     return sum + normalInputCost * (inputPriceMultiplier - 1) + normalOutputCost * (outputPriceMultiplier - 1);
   }, 0);
-  const estimated = baseEstimated + longContextExtra;
+  const timeOfDay = pricingPeriodAt(input.profile.timeOfDayPricing, input.pricedAt ?? new Date());
+  const estimated = (baseEstimated + longContextExtra) * timeOfDay.multiplier;
   const internal = estimated * internalCostMultiplier;
   const maxInvocationInputTokens = candidates.reduce((max, invocation) => Math.max(max, invocation.inputTokens), 0);
 
@@ -387,7 +404,9 @@ export function calculateEstimatedCost(input: {
     maxInvocationInputTokens,
     longContextPricingBasis,
     longContextPricingComplete:
-      longContextPricingBasis === "aggregate_request" || pricingInvocations.complete
+      longContextPricingBasis === "aggregate_request" || pricingInvocations.complete,
+    pricingPeriod: timeOfDay.period,
+    timeOfDayMultiplier: timeOfDay.multiplier
   };
 }
 
@@ -439,7 +458,8 @@ export class UsageIngestionService {
       modelInvocations: input.codexRuntimeModelInvocations,
       longContextPricingBasis: input.codexRuntimeModelInvocations !== undefined
         ? "model_invocation"
-        : "aggregate_request"
+        : "aggregate_request",
+      pricedAt: input.createdAt ? new Date(input.createdAt) : undefined
     });
 
     const create = input.codexThreadId && input.codexTurnId && this.dependencies.usageEvents.createCodexTurn
@@ -547,7 +567,8 @@ export class UsageIngestionService {
             ...usage,
             cacheWriteTelemetryAvailable: deltaInput.cacheWriteTokens !== undefined,
             modelInvocations: deltaInput.codexRuntimeModelInvocations,
-            longContextPricingBasis: "model_invocation"
+            longContextPricingBasis: "model_invocation",
+            pricedAt: deltaInput.createdAt ? new Date(deltaInput.createdAt) : undefined
           });
           return {
             ...deltaInput,

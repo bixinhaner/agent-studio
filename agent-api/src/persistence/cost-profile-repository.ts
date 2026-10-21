@@ -1,3 +1,6 @@
+import { Prisma } from "@prisma/client";
+import { normalizeTimeOfDayPricing, type TimeOfDayPricing } from "../operations/time-of-day-pricing.js";
+
 export type CostProfileRecord = {
   id: string;
   organizationId?: string;
@@ -10,6 +13,8 @@ export type CostProfileRecord = {
   longContextInputMultiplier?: string;
   longContextOutputMultiplier?: string;
   internalCostMultiplier: string;
+  /** Peak/off-peak pricing; the token prices above are the peak prices. */
+  timeOfDayPricing?: TimeOfDayPricing;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -27,6 +32,7 @@ export type UpsertCostProfileInput = {
   longContextInputMultiplier?: string;
   longContextOutputMultiplier?: string;
   internalCostMultiplier?: string;
+  timeOfDayPricing?: unknown;
   isActive?: boolean;
 };
 
@@ -40,6 +46,7 @@ export type UpdateCostProfileInput = {
   longContextInputMultiplier?: string;
   longContextOutputMultiplier?: string;
   internalCostMultiplier?: string;
+  timeOfDayPricing?: unknown;
   isActive?: boolean;
 };
 
@@ -55,6 +62,7 @@ type CostProfileRow = {
   longContextInputMultiplier?: unknown;
   longContextOutputMultiplier?: unknown;
   internalCostMultiplier: unknown;
+  timeOfDayPricing?: unknown;
   isActive: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -102,6 +110,15 @@ function formatDecimal(value: unknown, digits = 6): string {
   return digits === 4 ? "1.0000" : "0.000000";
 }
 
+function storedTimeOfDayPricing(value: unknown): TimeOfDayPricing | undefined {
+  try {
+    return normalizeTimeOfDayPricing(value) ?? undefined;
+  } catch {
+    // A malformed stored config must not break billing; such a profile prices at list (peak) price.
+    return undefined;
+  }
+}
+
 function mapCostProfile(row: CostProfileRow): CostProfileRecord {
   return {
     id: row.id,
@@ -115,6 +132,7 @@ function mapCostProfile(row: CostProfileRow): CostProfileRecord {
     longContextInputMultiplier: formatDecimal(row.longContextInputMultiplier, 4),
     longContextOutputMultiplier: formatDecimal(row.longContextOutputMultiplier, 4),
     internalCostMultiplier: formatDecimal(row.internalCostMultiplier, 4),
+    timeOfDayPricing: storedTimeOfDayPricing(row.timeOfDayPricing),
     isActive: row.isActive,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
@@ -203,6 +221,10 @@ export class CostProfileRepository {
       longContextInputMultiplier: trimOrUndefined(input.longContextInputMultiplier) ?? "1.0000",
       longContextOutputMultiplier: trimOrUndefined(input.longContextOutputMultiplier) ?? "1.0000",
       internalCostMultiplier: trimOrUndefined(input.internalCostMultiplier) ?? "1.0000",
+      // The admin form does not send this field yet; leave a stored config alone unless it is given.
+      ...(input.timeOfDayPricing !== undefined
+        ? { timeOfDayPricing: normalizeTimeOfDayPricing(input.timeOfDayPricing) ?? Prisma.DbNull }
+        : {}),
       isActive: input.isActive ?? true,
       updatedAt: new Date()
     };
@@ -263,6 +285,9 @@ export class CostProfileRepository {
           : {}),
         ...(input.changes.internalCostMultiplier !== undefined
           ? { internalCostMultiplier: trimOrUndefined(input.changes.internalCostMultiplier) ?? existing.internalCostMultiplier }
+          : {}),
+        ...(input.changes.timeOfDayPricing !== undefined
+          ? { timeOfDayPricing: normalizeTimeOfDayPricing(input.changes.timeOfDayPricing) ?? Prisma.DbNull }
           : {}),
         ...(typeof input.changes.isActive === "boolean" ? { isActive: input.changes.isActive } : {}),
         updatedAt: new Date()
