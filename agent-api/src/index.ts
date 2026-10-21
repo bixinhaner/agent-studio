@@ -7291,7 +7291,8 @@ async function resolveSessionOptions(
     systemSettings: publishedSystemSettings,
     providerSnapshot,
     model: input.model,
-    reasoningEffort: input.reasoning_effort
+    reasoningEffort: input.reasoning_effort,
+    runProfile: runtimeProfile
   });
   const enabledSkills = await time("resolve_session_options.resolve_enabled_skills", () =>
     resolveEnabledSkillsForMode({
@@ -7515,7 +7516,8 @@ async function ensureThreadSessionCore(
     model: patch?.allow_mode_change ? patch.model || thread.model : thread.model,
     reasoningEffort: patch?.allow_mode_change
       ? patch.reasoning_effort || thread.reasoningEffort
-      : thread.reasoningEffort
+      : thread.reasoningEffort,
+    runProfile: modeSelection.runtimeProfile
   });
   const desiredBaseCodexRunConfig = await time("ensure_thread_session.resolve_knowledge_sets", () =>
     resolveKnowledgeSetRunConfig({

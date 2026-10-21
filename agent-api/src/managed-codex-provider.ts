@@ -287,8 +287,23 @@ export function resolveManagedCodexDefaults(input: {
   providerSnapshot?: ManagedCodexProviderSnapshot | undefined;
   model?: string | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
+  /** The run profile's model list wins over a stored or client-sent model outside it. */
+  runProfile?: { defaultModel?: string; allowedModels?: string[]; defaultReasoningEffort?: string } | undefined;
 }): { model: string; reasoningEffort: ReasoningEffort } {
   const systemDefaults = input.systemSettings?.payload.platformDefaults;
+  const allowedModels = (input.runProfile?.allowedModels ?? []).map(normalizeModel);
+  const profileDefaultModel = asString(input.runProfile?.defaultModel);
+  // A thread keeps the model it was created with, and a page loaded before an admin changed
+  // models still sends the old one. A provider switch then turns that into a request the new
+  // provider rejects, so a model the run profile no longer allows falls back to its default.
+  if (input.model && profileDefaultModel && allowedModels.length > 0 && !allowedModels.includes(normalizeModel(input.model))) {
+    return resolveManagedCodexDefaults({
+      ...input,
+      runProfile: undefined,
+      model: profileDefaultModel,
+      reasoningEffort: asReasoningEffort(input.runProfile?.defaultReasoningEffort)
+    });
+  }
   const preferredModel = normalizeModel(
     input.model ||
       asString(systemDefaults?.model) ||

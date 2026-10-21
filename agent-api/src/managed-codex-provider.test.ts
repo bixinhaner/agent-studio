@@ -416,4 +416,34 @@ describe("resolveManagedCodexDefaults", () => {
       reasoningEffort: "medium"
     });
   });
+
+  it("replaces a model the run profile no longer allows with the profile default", () => {
+    expect(
+      resolveManagedCodexDefaults({
+        model: "gpt-6.1-sol",
+        reasoningEffort: "high",
+        runProfile: { defaultModel: "deepseek-flash", allowedModels: ["deepseek-flash"], defaultReasoningEffort: "max" }
+      })
+    ).toEqual({ model: "deepseek-flash", reasoningEffort: "max" });
+  });
+
+  it("keeps an allowed model and its effort", () => {
+    expect(
+      resolveManagedCodexDefaults({
+        model: "gpt-6-sol",
+        reasoningEffort: "medium",
+        runProfile: { defaultModel: "gpt-6.1-sol", allowedModels: ["gpt-6-sol", "gpt-6.1-sol"], defaultReasoningEffort: "high" }
+      })
+    ).toEqual({ model: "gpt-6-sol", reasoningEffort: "medium" });
+  });
+
+  it("does not constrain when the run profile lists no models", () => {
+    expect(
+      resolveManagedCodexDefaults({
+        model: "gpt-6-sol",
+        reasoningEffort: "medium",
+        runProfile: { defaultModel: "gpt-6.1-sol", allowedModels: [], defaultReasoningEffort: "high" }
+      })
+    ).toEqual({ model: "gpt-6-sol", reasoningEffort: "medium" });
+  });
 });
