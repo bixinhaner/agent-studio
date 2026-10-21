@@ -344,6 +344,7 @@ export type OpenAICodexConfigInput = {
   defaultModel?: string;
   defaultReasoningEffort?: string;
   modelDisplayNames?: Record<string, string>;
+  autoCompactThreshold?: number;
 };
 
 export type OpenAICodexSecretInput = {
@@ -357,6 +358,7 @@ export type OpenAICodexConfigDraft = {
   defaultModel: string;
   defaultReasoningEffort: string;
   modelDisplayNames: string;
+  autoCompactThreshold: string;
   apiKeyDraft: string;
 };
 

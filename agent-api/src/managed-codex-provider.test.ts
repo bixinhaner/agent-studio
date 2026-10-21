@@ -7,8 +7,10 @@ import {
   ManagedCodexProviderResolver,
   createLocalAuthProviderSnapshot,
   createManagedCodexProviderSnapshot,
+  normalizeAutoCompactThreshold,
   normalizeManagedCodexProviderSnapshot,
-  resolveManagedCodexDefaults
+  resolveManagedCodexDefaults,
+  withAutoCompactThreshold
 } from "./managed-codex-provider.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 
@@ -114,6 +116,40 @@ describe("DeepSeek context limits", () => {
       config: { ...stored.config, baseUrl: "https://example.com/v1", defaultModel: "gpt-5.4" } });
     expect(switched?.runtimeOptions.config).not.toHaveProperty("model_catalog_json");
     expect(switched?.runtimeOptions.config).not.toHaveProperty("model_auto_compact_token_limit");
+  });
+});
+
+describe("DeepSeek auto-compact threshold", () => {
+  const deepseek = (config: Record<string, unknown> = {}, baseUrl = "https://api.deepseek.com") => createManagedCodexProviderSnapshot({
+    config: { providerKind: "openai_api", baseUrl, defaultModel: "deepseek-flash", defaultReasoningEffort: "high", ...config },
+    secrets: { apiKey: "test-key" }
+  });
+
+  it("uses the admin-set threshold and ignores values outside the safe range", () => {
+    expect(deepseek({ autoCompactThreshold: 400_000 }).runtimeOptions.config?.model_auto_compact_token_limit).toBe(400_000);
+    expect(deepseek({ autoCompactThreshold: "350000" }).runtimeOptions.config?.model_auto_compact_token_limit).toBe(350_000);
+    for (const invalid of [50_000, 950_000, 400_000.5, "abc", "", null]) {
+      expect(normalizeAutoCompactThreshold(invalid)).toBeUndefined();
+      expect(deepseek({ autoCompactThreshold: invalid }).runtimeOptions.config?.model_auto_compact_token_limit).toBe(600_000);
+    }
+  });
+
+  it("keeps the threshold through snapshot storage", () => {
+    const stored = JSON.parse(JSON.stringify(deepseek({ autoCompactThreshold: 400_000 })));
+    expect(normalizeManagedCodexProviderSnapshot(stored)?.runtimeOptions.config?.model_auto_compact_token_limit).toBe(400_000);
+  });
+
+  it("applies a threshold changed after the thread started, and only to DeepSeek snapshots", () => {
+    const started = deepseek();
+    const lowered = withAutoCompactThreshold(started, 400_000);
+    expect(lowered.runtimeOptions.config?.model_auto_compact_token_limit).toBe(400_000);
+    expect(lowered.config.autoCompactThreshold).toBe(400_000);
+    expect(withAutoCompactThreshold(lowered, undefined).runtimeOptions.config?.model_auto_compact_token_limit).toBe(600_000);
+    expect(withAutoCompactThreshold(started, undefined)).toBe(started);
+    const gateway = deepseek({}, "https://example.com/v1");
+    expect(withAutoCompactThreshold(gateway, 400_000)).toBe(gateway);
+    const chatgpt = createLocalAuthProviderSnapshot();
+    expect(withAutoCompactThreshold(chatgpt, 400_000)).toBe(chatgpt);
   });
 });
 

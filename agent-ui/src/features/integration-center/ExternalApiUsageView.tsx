@@ -1,6 +1,7 @@
 import { ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Input, Segmented, Space, Spin, Tag } from "antd";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useModelLabel } from "../../lib/use-model-labels";
 
 import { fetchExternalApiUsage } from "./api";
 import type { ExternalApiUsageBreakdownRow, ExternalApiUsageResponse, ExternalApiUsageRecord } from "./types";
@@ -221,6 +222,7 @@ function recordMatchesDeliveryFilter(record: ExternalApiUsageRecord, filter: (ty
 }
 
 export function ExternalApiUsageView(props: { instanceId: string }) {
+  const modelLabel = useModelLabel();
   const [windowDays, setWindowDays] = useState<number>(14);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [data, setData] = useState<ExternalApiUsageResponse | null>(null);
@@ -484,7 +486,7 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                     </td>
                     <td>
                       <div className="external-api-usage-cell-stack">
-                        <strong>{record.model}</strong>
+                        <strong>{modelLabel(record.model)}</strong>
                         <span>请求侧: {record.requestedModel || "未传"}</span>
                         <div className="external-api-usage-chip-row">
                           <Tag color={responseModeLabel(record.responseMode, record.stream) === "stream" ? "processing" : "default"}>

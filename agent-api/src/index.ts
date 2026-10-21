@@ -170,7 +170,9 @@ import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
   createLocalAuthProviderSnapshot,
+  normalizeAutoCompactThreshold,
   resolveManagedCodexDefaults,
+  withAutoCompactThreshold,
   type ManagedCodexProviderInstance,
   type ManagedCodexProviderSnapshot
 } from "./managed-codex-provider.js";
@@ -3874,6 +3876,14 @@ function createRuntimeForProviderSnapshot(
   });
 }
 
+/** Settings an admin may change after a thread started (the DeepSeek compaction threshold) follow the provider's current config. */
+async function withCurrentProviderTuning(snapshot: ManagedCodexProviderSnapshot): Promise<ManagedCodexProviderSnapshot> {
+  if (snapshot.kind !== "openai_api" || !snapshot.integrationInstanceId) return snapshot;
+  const configRow = await db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: snapshot.integrationInstanceId } });
+  if (!configRow) return snapshot;
+  return withAutoCompactThreshold(snapshot, normalizeAutoCompactThreshold(asRecord(configRow.config)?.autoCompactThreshold));
+}
+
 async function resolveProviderSnapshot(input?: {
   existingSnapshot?: ManagedCodexProviderSnapshot;
   fallbackToLocalAuth?: boolean;
@@ -3882,7 +3892,7 @@ async function resolveProviderSnapshot(input?: {
     (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
     createDefaultSystemSettingsPayload().codexMemory;
   if (input?.existingSnapshot) {
-    return applyCodexMemoryToProviderSnapshot(input.existingSnapshot, memorySettings);
+    return applyCodexMemoryToProviderSnapshot(await withCurrentProviderTuning(input.existingSnapshot), memorySettings);
   }
   if (input?.fallbackToLocalAuth) {
     return applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), memorySettings);

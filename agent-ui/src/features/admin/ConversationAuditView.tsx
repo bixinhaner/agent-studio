@@ -27,6 +27,7 @@ import {
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { UrlTransform } from "react-markdown";
+import { useModelLabel } from "../../lib/use-model-labels";
 
 import { formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPreview } from "../../lib/formatters";
 import { openWarningConfirm } from "../../lib/warning-modal";
@@ -1648,6 +1649,7 @@ function ConversationDetail(props: {
   hardDeleting: boolean;
   onHardDelete: (conversationId: string) => void;
 }) {
+  const modelLabel = useModelLabel();
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const [feedbackExpanded, setFeedbackExpanded] = useState(false);
   const messageRefs = useRef(new Map<string, HTMLElement>());
@@ -1743,7 +1745,7 @@ function ConversationDetail(props: {
             <Tag color={conversationStatusColor(conversation.status)}>
               {conversation.status === "archived" ? "已归档" : "正常会话"}
             </Tag>
-            <Tag>{conversation.model}</Tag>
+            <Tag>{modelLabel(conversation.model)}</Tag>
             {props.canHardDelete ? (
               <Button
                 danger
@@ -2229,6 +2231,7 @@ const API_SORT_OPTIONS: Array<{ value: AdminApiAuditSort; label: string }> = [
 ];
 
 function ApiAuditWorkspace() {
+  const modelLabel = useModelLabel();
   const [query, setQuery] = useState("");
   const [resultFilter, setResultFilter] = useState<AdminApiAuditResultFilter>("all");
   const [sort, setSort] = useState<AdminApiAuditSort>("created_desc");
@@ -2290,7 +2293,7 @@ function ApiAuditWorkspace() {
                onClick={() => setSelectedId(rec.id)}
              >
                <div className="admin-master-header">
-                 <span className="admin-master-title">{rec.model}</span>
+                 <span className="admin-master-title">{modelLabel(rec.model)}</span>
                  <span className="admin-master-time">{formatLocalDateTime(rec.createdAt).split(' ')[1]}</span>
                </div>
                <div className="admin-master-preview" style={{ fontFamily: 'monospace' }}>
@@ -2317,6 +2320,7 @@ function ApiAuditWorkspace() {
 }
 
 function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loading: boolean }) {
+  const modelLabel = useModelLabel();
   if (props.loading && !props.detail) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Spin size="large" /></div>;
   }
@@ -2343,7 +2347,7 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
           <Space>
             <Tag color={record.status.result === "success" ? "success" : "error"}>{record.status.result}</Tag>
             <Tag color={record.status.delivery === "delivered" ? "success" : "warning"}>{record.status.delivery}</Tag>
-            <Tag>{record.model}</Tag>
+            <Tag>{modelLabel(record.model)}</Tag>
           </Space>
         </div>
         

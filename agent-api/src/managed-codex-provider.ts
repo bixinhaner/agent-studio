@@ -20,6 +20,8 @@ export type ManagedCodexProviderConfig = {
   azureApiVersion?: string;
   defaultModel: string;
   defaultReasoningEffort: ReasoningEffort;
+  /** Admin-set compaction threshold for DeepSeek; unset means DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT. */
+  autoCompactThreshold?: number;
 };
 
 export type ManagedCodexProviderSecrets = {
@@ -172,12 +174,23 @@ export function normalizeManagedCodexProviderConfig(input: ProviderConfigInput =
     baseUrl: kind === "azure_openai" ? normalizeAzureBaseUrl(config.baseUrl) : asString(config.baseUrl),
     azureApiVersion: kind === "azure_openai" ? normalizeAzureApiVersion(config.azureApiVersion) : undefined,
     defaultModel: preferredModel,
-    defaultReasoningEffort
+    defaultReasoningEffort,
+    autoCompactThreshold: normalizeAutoCompactThreshold(config.autoCompactThreshold)
   };
 }
 
 // Above the 475K GPT window, so threads carried over from GPT fit without a forced compaction.
-const DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
+export const DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
+// Below this Codex compacts nearly every turn of a tool-heavy thread; above it a turn can overflow the 950K usable window.
+export const AUTO_COMPACT_THRESHOLD_RANGE = { min: 128_000, max: 900_000 } as const;
+
+/** Integer token count inside AUTO_COMPACT_THRESHOLD_RANGE, otherwise undefined (use the default). */
+export function normalizeAutoCompactThreshold(value: unknown): number | undefined {
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isInteger(parsed)) return undefined;
+  if (parsed < AUTO_COMPACT_THRESHOLD_RANGE.min || parsed > AUTO_COMPACT_THRESHOLD_RANGE.max) return undefined;
+  return parsed;
+}
 
 function isDeepSeekBaseUrl(baseUrl: string): boolean {
   try {
@@ -195,9 +208,11 @@ function isDeepSeekBaseUrl(baseUrl: string): boolean {
  * both have a 1M context (api-docs.deepseek.com), given to Codex through a model catalog file.
  * Only the DeepSeek endpoint gets these limits; ChatGPT sign-in and other gateways keep Codex's own.
  */
-function providerContextLimits(baseUrl: string): Record<string, unknown> {
+function providerContextLimits(baseUrl: string, autoCompactThreshold?: number): Record<string, unknown> {
   if (!isDeepSeekBaseUrl(baseUrl)) return {};
-  const limits: Record<string, unknown> = { model_auto_compact_token_limit: DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT };
+  const limits: Record<string, unknown> = {
+    model_auto_compact_token_limit: autoCompactThreshold ?? DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT
+  };
   try {
     limits[CODEX_MODEL_CATALOG_CONFIG_KEY] = ensureDeepSeekModelCatalogFile(appConfig.codex.sessionHomeRoot);
   } catch {
@@ -234,7 +249,7 @@ export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & 
       // OpenAI-only /responses/compact endpoint. A named provider keeps normal
       // calls on the gateway while letting Codex fall back to local compaction.
       runtimeOptions.config = {
-        ...providerContextLimits(config.baseUrl),
+        ...providerContextLimits(config.baseUrl, config.autoCompactThreshold),
         model_provider: OPENAI_COMPATIBLE_PROVIDER_ID,
         model_providers: {
           [OPENAI_COMPATIBLE_PROVIDER_ID]: {
@@ -283,6 +298,27 @@ export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & 
     config,
     secrets,
     runtimeOptions
+  };
+}
+
+/**
+ * Threads keep the provider snapshot taken when they started, so a threshold the admin changes later is
+ * applied here on each resolve. Only snapshots that already carry a DeepSeek limit are touched.
+ */
+export function withAutoCompactThreshold(
+  snapshot: ManagedCodexProviderSnapshot,
+  autoCompactThreshold: number | undefined
+): ManagedCodexProviderSnapshot {
+  const config = snapshot.runtimeOptions.config;
+  if (!config || !("model_auto_compact_token_limit" in config)) return snapshot;
+  const limit = autoCompactThreshold ?? DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT;
+  if (config.model_auto_compact_token_limit === limit && snapshot.config.autoCompactThreshold === autoCompactThreshold) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    config: { ...snapshot.config, autoCompactThreshold },
+    runtimeOptions: { ...snapshot.runtimeOptions, config: { ...config, model_auto_compact_token_limit: limit } }
   };
 }
 

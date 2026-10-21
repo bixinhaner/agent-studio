@@ -60,6 +60,20 @@ function parseModelDisplayNames(text: string): Record<string, string> {
   return names;
 }
 
+// Same bounds the backend enforces; outside them the backend falls back to its 600K default.
+const AUTO_COMPACT_THRESHOLD_MIN = 128_000;
+const AUTO_COMPACT_THRESHOLD_MAX = 900_000;
+
+function autoCompactThresholdError(text: string): string {
+  const value = text.trim();
+  if (!value) return "";
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < AUTO_COMPACT_THRESHOLD_MIN || parsed > AUTO_COMPACT_THRESHOLD_MAX) {
+    return `请输入 ${AUTO_COMPACT_THRESHOLD_MIN} 到 ${AUTO_COMPACT_THRESHOLD_MAX} 之间的整数，或留空使用默认 600000`;
+  }
+  return "";
+}
+
 function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
   return {
     providerKind:
@@ -71,7 +85,8 @@ function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
     apiKeyDraft: "",
     defaultModel: asString(detail.config.defaultModel),
     defaultReasoningEffort: asString(detail.config.defaultReasoningEffort),
-    modelDisplayNames: formatModelDisplayNames(detail.config.modelDisplayNames)
+    modelDisplayNames: formatModelDisplayNames(detail.config.modelDisplayNames),
+    autoCompactThreshold: typeof detail.config.autoCompactThreshold === "number" ? String(detail.config.autoCompactThreshold) : ""
   };
 }
 
@@ -106,6 +121,11 @@ export function OpenAICodexIntegrationView(props: {
   }, [props.detail]);
 
   async function handleSave() {
+    const compactError = draft.providerKind === "openai_api" ? autoCompactThresholdError(draft.autoCompactThreshold) : "";
+    if (compactError) {
+      setErrorText(compactError);
+      return;
+    }
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -120,7 +140,8 @@ export function OpenAICodexIntegrationView(props: {
           azureApiVersion: draft.azureApiVersion.trim(),
           defaultModel: draft.defaultModel.trim(),
           defaultReasoningEffort: draft.defaultReasoningEffort.trim(),
-          modelDisplayNames: parseModelDisplayNames(draft.modelDisplayNames)
+          modelDisplayNames: parseModelDisplayNames(draft.modelDisplayNames),
+          ...(draft.autoCompactThreshold.trim() ? { autoCompactThreshold: Number(draft.autoCompactThreshold.trim()) } : {})
         },
         secretState: draft.apiKeyDraft.trim()
           ? {
@@ -330,6 +351,25 @@ export function OpenAICodexIntegrationView(props: {
                           }
                         />
                       </label>
+                      {draft.providerKind === "openai_api" ? (
+                        <label className="field">
+                          <span className="field-label">自动压缩阈值（tokens，可选）</span>
+                          <Input
+                            value={draft.autoCompactThreshold}
+                            inputMode="numeric"
+                            placeholder="600000"
+                            status={autoCompactThresholdError(draft.autoCompactThreshold) ? "error" : undefined}
+                            disabled={saving}
+                            onChange={(event) => setDraft((current) => ({ ...current, autoCompactThreshold: event.target.value }))}
+                          />
+                          {autoCompactThresholdError(draft.autoCompactThreshold) ? (
+                            <span className="field-error">{autoCompactThresholdError(draft.autoCompactThreshold)}</span>
+                          ) : null}
+                          <span className="field-help">
+                            仅 DeepSeek 生效。单次请求的上下文超过该值时 Codex 先压缩历史再继续；调低可降低每轮成本，但长对话会更早压缩、丢失细节。留空为 600000，范围 128000–900000。低于 475000 时，从 GPT 迁移来的大对话会在下一轮先压缩一次。保存后各对话下一轮生效。
+                          </span>
+                        </label>
+                      ) : null}
                       {draft.providerKind !== "chatgpt" ? (
                         <label className="field">
                           <span className="field-label">模型显示名称（可选）</span>

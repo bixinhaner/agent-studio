@@ -1,6 +1,7 @@
 import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs, Tag, Tooltip } from "antd";
 import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useModelLabel } from "../../lib/use-model-labels";
 
 import { formatUsdAmount } from "../../lib/formatters";
 import { fetchOperationsInsights } from "./api";
@@ -394,6 +395,7 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
 }
 
 function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] }) {
+  const modelLabel = useModelLabel();
   const [sort, setSort] = useState<SortState<OrganizationSortKey>>({ key: "internalCost", direction: "desc" });
   const rows = useMemo(() => sortRows(props.rows, sort, ORGANIZATION_SORT_ACCESSORS), [props.rows, sort]);
   const handleSort = (key: OrganizationSortKey, defaultDirection?: SortDirection) =>
@@ -454,7 +456,7 @@ function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] })
               <td>{formatCount(row.totalTokens)}</td>
               <td>{formatUsdAmount(row.estimatedCost)}</td>
               <td>{formatUsdAmount(row.internalCost)}</td>
-              <td>{row.topModel}</td>
+              <td>{modelLabel(row.topModel)}</td>
               <td>{row.topPath}</td>
               <td>{formatPercent(row.cacheShare)}</td>
               <td>{formatLocalDateTime(row.lastActiveAt)}</td>
@@ -469,6 +471,7 @@ function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] })
 }
 
 function UserTable(props: { rows: OperationsInsightsUserRow[] }) {
+  const modelLabel = useModelLabel();
   const [sort, setSort] = useState<SortState<UserSortKey>>({ key: "internalCost", direction: "desc" });
   const rows = useMemo(() => sortRows(props.rows, sort, USER_SORT_ACCESSORS), [props.rows, sort]);
   const handleSort = (key: UserSortKey, defaultDirection?: SortDirection) => setSort((current) => nextSortState(current, key, defaultDirection));
@@ -532,7 +535,7 @@ function UserTable(props: { rows: OperationsInsightsUserRow[] }) {
               <td>{formatCount(row.totalTokens)}</td>
               <td>{formatUsdAmount(row.estimatedCost)}</td>
               <td>{formatUsdAmount(row.internalCost)}</td>
-              <td>{row.topModel}</td>
+              <td>{modelLabel(row.topModel)}</td>
               <td>{row.topPath}</td>
               <td>{formatPercent(row.cacheShare)}</td>
               <td>{formatLocalDateTime(row.lastActiveAt)}</td>
@@ -551,6 +554,7 @@ function SessionTable(props: {
   sort: SortState<SessionSortKey>;
   onSort: (key: SessionSortKey, defaultDirection?: SortDirection) => void;
 }) {
+  const modelLabel = useModelLabel();
   return props.rows.length ? (
     <div className="monitoring-table-wrap">
       <table className="monitoring-table ops-analytics-sortable-table">
@@ -623,7 +627,7 @@ function SessionTable(props: {
                     <span>{row.organizationName || "未关联组织"}</span>
                   </div>
                 </td>
-                <td>{row.model}</td>
+                <td>{modelLabel(row.model)}</td>
                 <td>{row.entryLabel}</td>
                 <td>{row.pathLabel}</td>
                 <td>{formatCount(row.requestCount)}</td>
@@ -662,6 +666,7 @@ function SessionTable(props: {
 }
 
 export function OperationsAnalyticsView() {
+  const modelLabel = useModelLabel();
   const [days, setDays] = useState(30);
   const [organizationId, setOrganizationId] = useState<string | undefined>();
   const [model, setModel] = useState<string | undefined>();
@@ -776,7 +781,7 @@ export function OperationsAnalyticsView() {
               allowClear
               placeholder="全部模型"
               value={model}
-              options={data?.options.models ?? []}
+              options={(data?.options.models ?? []).map((option) => ({ ...option, label: modelLabel(option.value) }))}
               onChange={(value) => {
                 setModel(value);
                 setSessionPage(1);
@@ -914,7 +919,7 @@ export function OperationsAnalyticsView() {
                     <BreakdownPanel
                       title="模型分布"
                       subtitle="看哪些模型在吞掉 tokens 和价值预算。"
-                      rows={data.breakdowns.models}
+                      rows={data.breakdowns.models.map((row) => ({ ...row, label: modelLabel(row.key) }))}
                       emptyText="当前窗口内没有模型分布数据"
                     />
                     <BreakdownPanel
