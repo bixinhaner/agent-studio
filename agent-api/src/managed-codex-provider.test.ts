@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   ManagedCodexProviderResolver,
@@ -81,25 +82,28 @@ describe("DeepSeek context limits", () => {
   });
 
   it("gives the DeepSeek endpoint its 1M window so GPT-era threads are not compacted with the old model", () => {
-    expect(deepseek("https://api.deepseek.com").runtimeOptions.config).toMatchObject({
-      model_context_window: 1_000_000,
+    const config = deepseek("https://api.deepseek.com").runtimeOptions.config;
+    expect(config).toMatchObject({
       model_auto_compact_token_limit: 600_000,
       model_provider: "agentstudio_openai_compatible"
     });
+    const catalog = JSON.parse(readFileSync(config?.model_catalog_json, "utf8"));
+    expect(catalog.models.map((model: { slug: string; context_window: number }) => [model.slug, model.context_window]))
+      .toEqual([["deepseek-flash", 1_000_000], ["deepseek-v4-pro", 1_000_000]]);
   });
 
   it("leaves other gateways and ChatGPT sign-in on Codex's own model metadata", () => {
-    expect(deepseek("https://example.com/v1").runtimeOptions.config).not.toHaveProperty("model_context_window");
-    expect(deepseek("https://notdeepseek.com.example.org").runtimeOptions.config).not.toHaveProperty("model_context_window");
-    expect(createLocalAuthProviderSnapshot().runtimeOptions.config ?? {}).not.toHaveProperty("model_context_window");
+    expect(deepseek("https://example.com/v1").runtimeOptions.config).not.toHaveProperty("model_catalog_json");
+    expect(deepseek("https://notdeepseek.com.example.org").runtimeOptions.config).not.toHaveProperty("model_catalog_json");
+    expect(createLocalAuthProviderSnapshot().runtimeOptions.config ?? {}).not.toHaveProperty("model_catalog_json");
   });
 
   it("re-derives the limits for stored DeepSeek snapshots and does not persist them across a provider switch", () => {
     const stored = JSON.parse(JSON.stringify(deepseek("https://api.deepseek.com")));
-    expect(normalizeManagedCodexProviderSnapshot(stored)?.runtimeOptions.config).toMatchObject({ model_context_window: 1_000_000 });
+    expect(normalizeManagedCodexProviderSnapshot(stored)?.runtimeOptions.config?.model_catalog_json).toMatch(/deepseek-\w+\.json$/);
     const switched = normalizeManagedCodexProviderSnapshot({ ...stored, kind: "openai_api",
       config: { ...stored.config, baseUrl: "https://example.com/v1", defaultModel: "gpt-5.4" } });
-    expect(switched?.runtimeOptions.config).not.toHaveProperty("model_context_window");
+    expect(switched?.runtimeOptions.config).not.toHaveProperty("model_catalog_json");
     expect(switched?.runtimeOptions.config).not.toHaveProperty("model_auto_compact_token_limit");
   });
 });

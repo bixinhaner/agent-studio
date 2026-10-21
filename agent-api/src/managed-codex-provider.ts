@@ -1,5 +1,6 @@
 import { appConfig } from "./config.js";
 import { applyCodexMemoryToProviderSnapshot } from "./codex-memory-config.js";
+import { CODEX_MODEL_CATALOG_CONFIG_KEY, ensureDeepSeekModelCatalogFile } from "./codex-deepseek-catalog.js";
 import type { CodexRuntimeOptions } from "./codex-runtime.js";
 import {
   normalizeModel,
@@ -174,7 +175,6 @@ export function normalizeManagedCodexProviderConfig(input: ProviderConfigInput =
   };
 }
 
-const DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000;
 // Above the 475K GPT window, so threads carried over from GPT fit without a forced compaction.
 const DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT = 600_000;
 
@@ -191,14 +191,18 @@ function isDeepSeekBaseUrl(baseUrl: string): boolean {
  * Codex has no metadata for DeepSeek models and falls back to a ~258K window. Threads carried over
  * from GPT (up to 475K) then look oversized, and Codex compacts them with the previous GPT model
  * before every turn, which DeepSeek rejects, so the turn fails. deepseek-flash and deepseek-v4-pro
- * both have a 1M context (api-docs.deepseek.com). Only the DeepSeek endpoint gets these limits.
+ * both have a 1M context (api-docs.deepseek.com), given to Codex through a model catalog file.
+ * Only the DeepSeek endpoint gets these limits; ChatGPT sign-in and other gateways keep Codex's own.
  */
 function providerContextLimits(baseUrl: string): Record<string, unknown> {
   if (!isDeepSeekBaseUrl(baseUrl)) return {};
-  return {
-    model_context_window: DEEPSEEK_CONTEXT_WINDOW_TOKENS,
-    model_auto_compact_token_limit: DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT
-  };
+  const limits: Record<string, unknown> = { model_auto_compact_token_limit: DEEPSEEK_AUTO_COMPACT_TOKEN_LIMIT };
+  try {
+    limits[CODEX_MODEL_CATALOG_CONFIG_KEY] = ensureDeepSeekModelCatalogFile(appConfig.codex.sessionHomeRoot);
+  } catch {
+    // Without the catalog DeepSeek still runs, on Codex's fallback window.
+  }
+  return limits;
 }
 
 export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & {

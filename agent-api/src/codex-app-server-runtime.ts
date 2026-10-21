@@ -15,6 +15,7 @@ import {
   type CodexModelCapability,
   type ReasoningEffort
 } from "./model-config.js";
+import { codexModelCatalogLaunchArgs } from "./codex-deepseek-catalog.js";
 import {
   CODEX_RUNTIME_ERROR_CODE,
   CodexRuntimeUserError
@@ -1159,6 +1160,7 @@ class CodexAppServerProcess {
       // Metering must never block a conversation; start without telemetry export.
     }
     const launch = isolatedWorkloadCommand(this.scope.binaryPath, [
+      ...codexModelCatalogLaunchArgs(this.scope.config),
       "app-server", "--disable", "enable_mcp_apps", ...telemetryArgs, "--listen", "stdio://"
     ]);
     this.workloadId = launch.id;
