@@ -7,6 +7,7 @@ import type { CodexQuotaSnapshotRecord } from "../persistence/codex-quota-snapsh
 import { usageCacheShare, usageTotalTokens } from "../operations/usage-metrics.js";
 import { DEFAULT_CODEX_QUOTA_SNAPSHOT_INTERVAL_MS } from "../operations/codex-quota-snapshot-service.js";
 import { CODEX_BACKGROUND_FEATURE_TYPE } from "../operations/codex-background-usage.js";
+import { USAGE_RESULT_CANCELLED, isUsageFailure } from "../operations/usage-result-status.js";
 
 export type OperationsInsightsFilters = {
   days: number;
@@ -52,6 +53,12 @@ export type OperationsInsightsSummary = {
   estimatedCost: string;
   internalCost: string;
   incompleteCostRequestCount: number;
+  /** Business requests by outcome; user-stopped turns are neither successes nor failures. */
+  successfulRequestCount: number;
+  failedRequestCount: number;
+  cancelledRequestCount: number;
+  /** success / (success + failed); user cancellations are excluded. */
+  successRate: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
@@ -885,7 +892,11 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
   const filtered = normalized.filter((record) => record.featureType !== "security_review");
   const securityReview = buildSecurityReviewSummary(securityReviewEvents);
   const now = input.now ?? new Date();
-  const summaryRequestCount = filtered.filter((record) => record.countsAsRequest).length;
+  const summaryRequests = filtered.filter((record) => record.countsAsRequest);
+  const summaryRequestCount = summaryRequests.length;
+  const successfulRequestCount = summaryRequests.filter((record) => record.resultStatus === "success").length;
+  const failedRequestCount = summaryRequests.filter((record) => isUsageFailure(record.resultStatus)).length;
+  const cancelledRequestCount = summaryRequests.filter((record) => record.resultStatus === USAGE_RESULT_CANCELLED).length;
   const sessionBuckets = new Map<string, SessionAggregateState>();
   const organizationBuckets = new Map<string, OrganizationAggregateState>();
   const userBuckets = new Map<string, UserAggregateState>();
@@ -1299,6 +1310,12 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       estimatedCost: formatDecimal(estimatedCost),
       internalCost: formatDecimal(internalCost),
       incompleteCostRequestCount,
+      successfulRequestCount,
+      failedRequestCount,
+      cancelledRequestCount,
+      successRate: formatRatio(
+        successfulRequestCount + failedRequestCount ? successfulRequestCount / (successfulRequestCount + failedRequestCount) : 0
+      ),
       avgRequestsPerSession: formatAverage(totalSessions ? summaryRequestCount / totalSessions : 0),
       avgTokensPerSession: formatAverage(totalSessions ? totalTokens / totalSessions : 0),
       avgInternalCostPerSession: formatDecimal(totalSessions ? internalCost / totalSessions : 0),

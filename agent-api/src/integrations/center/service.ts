@@ -28,6 +28,7 @@ import type { PolicyService } from "../../resources/policy-service.js";
 import { ActionConnectorIntegrationAdapter, normalizeActionConnectorApiProfile } from "./action-connector-adapter.js";
 import { CrestCrmIntegrationAdapter } from "./crest-crm-adapter.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
+import { USAGE_RESULT_CANCELLED, isUsageFailure } from "../../operations/usage-result-status.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
 import { OpenAICompatibleApiIntegrationAdapter } from "./openai-compatible-api-adapter.js";
 import type { ZendeskOverview } from "../zendesk/types.js";
@@ -613,6 +614,8 @@ export function createIntegrationCenterService(options: {
         return "生成成功";
       case "failed":
         return "生成失败";
+      case USAGE_RESULT_CANCELLED:
+        return "用户中止";
       default:
         return key;
     }
@@ -647,7 +650,7 @@ export function createIntegrationCenterService(options: {
       };
       bucket.requestCount += 1;
       if (record.resultStatus === "success") bucket.successCount += 1;
-      else bucket.failureCount += 1;
+      else if (isUsageFailure(record.resultStatus)) bucket.failureCount += 1;
       bucket.totalTokens += usageTotalTokens(record.inputTokens, record.outputTokens);
       bucket.estimatedCost += toNumber(record.estimatedCost);
       bucket.internalCost += toNumber(record.internalCost);
@@ -1149,7 +1152,7 @@ export function createIntegrationCenterService(options: {
           trend.requestCount += 1;
           if (record.resultStatus === "success") {
             trend.successCount += 1;
-          } else {
+          } else if (isUsageFailure(record.resultStatus)) {
             trend.failureCount += 1;
           }
           if (deliveryStatus === "delivered") {
@@ -1164,7 +1167,7 @@ export function createIntegrationCenterService(options: {
 
         if (record.resultStatus === "success") {
           successCount += 1;
-        } else {
+        } else if (isUsageFailure(record.resultStatus)) {
           failureCount += 1;
         }
         if (deliveryStatus === "delivered") {

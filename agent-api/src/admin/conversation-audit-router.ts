@@ -70,6 +70,7 @@ import { ConversationRecordService } from "../operations/conversation-record-ser
 import { decodeStoredJson } from "../local-bridge-result.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
+import { isUsageFailure } from "../operations/usage-result-status.js";
 import { ConversationSummaryIndex, type SummaryIndexRawDb } from "./conversation-summary-index.js";
 import {
   PRODUCT_FEEDBACK_REPLY_IMAGE_MIME_TYPES,
@@ -1979,7 +1980,7 @@ function buildApiAggregateSummary(records: ApiAuditRecord[]) {
   return {
     totalRequests: records.length,
     successCount: records.filter((item) => item.status.result === "success").length,
-    failureCount: records.filter((item) => item.status.result !== "success").length,
+    failureCount: records.filter((item) => isUsageFailure(item.status.result)).length,
     deliveredCount: records.filter((item) => item.status.delivery === "delivered").length,
     deliveryFailureCount: records.filter((item) => item.status.delivery !== "delivered").length,
     streamCount: records.filter((item) => item.stream).length,

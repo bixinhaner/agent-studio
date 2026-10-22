@@ -4,6 +4,7 @@ import type {
   UsageEventRecord,
   UsageEventRepository
 } from "../persistence/usage-event-repository.js";
+import { isUsageFailure } from "./usage-result-status.js";
 
 export type UsageLedgerRanking = {
   key: string;
@@ -108,7 +109,7 @@ function buildTrends(records: UsageEventRecord[]): UsageLedgerTrend[] {
     };
     existing.requestCount += 1;
     existing.successCount += record.resultStatus === "success" ? 1 : 0;
-    existing.failureCount += record.resultStatus === "success" ? 0 : 1;
+    existing.failureCount += isUsageFailure(record.resultStatus) ? 1 : 0;
     existing.estimatedCost = (toNumber(existing.estimatedCost) + toNumber(record.estimatedCost)).toFixed(6);
     existing.internalCost = (toNumber(existing.internalCost) + toNumber(record.internalCost)).toFixed(6);
     buckets.set(rollupDate, existing);

@@ -1,5 +1,6 @@
 import { UsageEventRepository, type UsageEventRecord } from "../persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageDailyRollupRecord } from "../persistence/usage-rollup-repository.js";
+import { isUsageFailure } from "./usage-result-status.js";
 
 export type RebuildUsageRollupsInput = {
   rollupDate: string | Date;
@@ -76,7 +77,7 @@ function aggregateEvents(
   for (const event of events) {
     const requestCount = 1;
     const successCount = event.resultStatus === "success" ? 1 : 0;
-    const failureCount = event.resultStatus === "success" ? 0 : 1;
+    const failureCount = isUsageFailure(event.resultStatus) ? 1 : 0;
     const inputTokens = event.inputTokens ?? 0;
     const cachedInputTokens = event.cachedInputTokens ?? 0;
     const cacheWriteTokens = event.cacheWriteTokens ?? 0;

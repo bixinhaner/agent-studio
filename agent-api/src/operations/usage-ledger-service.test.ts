@@ -84,6 +84,16 @@ describe("UsageLedgerService", () => {
     expect(service.buildRankings(events).topUsers[0]).not.toHaveProperty("key");
   });
 
+  it("counts user-stopped requests as neither success nor failure", () => {
+    const service = new UsageLedgerService({ usageEvents: { list: vi.fn(), listByExactCreatedAtRange: vi.fn() } as never });
+    const events = ["success", "failed", "cancelled"].map((resultStatus, index) =>
+      usageEvent({ id: `usage-${index}`, resultStatus, estimatedCost: "0.100000" })
+    );
+    expect(service.buildOverview(events).trends).toEqual([
+      expect.objectContaining({ requestCount: 3, successCount: 1, failureCount: 1, estimatedCost: "0.300000" })
+    ]);
+  });
+
   it("routes external API event reads through the canonical feature filter", async () => {
     const list = vi.fn(async () => []);
     const service = new UsageLedgerService({

@@ -26,6 +26,12 @@ export type OperationsInsightsSummary = {
   estimatedCost: string;
   internalCost: string;
   incompleteCostRequestCount: number;
+  /** Business requests by outcome; user-stopped turns are neither successes nor failures. */
+  successfulRequestCount: number;
+  failedRequestCount: number;
+  cancelledRequestCount: number;
+  /** success / (success + failed); user cancellations are excluded. */
+  successRate: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;

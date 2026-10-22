@@ -517,6 +517,56 @@ describe("buildOperationsInsights", () => {
     expect(response.sessions).toMatchObject({ totalItems: 1, items: [expect.objectContaining({ sessionId: "session-a", requestCount: 1 })] });
   });
 
+  it("reports user-stopped answers separately from failed answers", () => {
+    const statuses = ["success", "success", "success", "failed", "cancelled", "cancelled"];
+    const usageEvents = [
+      ...statuses.map((resultStatus, index) => makeUsageEvent({
+        id: `evt-${index}`,
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "deepseek-flash",
+        featureType: "chat",
+        resultStatus,
+        inputTokens: 100,
+        outputTokens: 10,
+        metadata: { source: "chat_stream" },
+        createdAt: `2026-04-15T01:0${index}:00.000Z`
+      })),
+      makeUsageEvent({
+        id: "evt-background",
+        organizationId: "org-a",
+        userId: "user-a",
+        model: "deepseek-flash",
+        featureType: "codex_background",
+        resultStatus: "failed",
+        metadata: { source: "codex_background", backgroundKind: "memory_agent" },
+        createdAt: "2026-04-15T01:09:00.000Z"
+      })
+    ];
+
+    const response = buildOperationsInsights({
+      usageEvents,
+      sessionsById: new Map(),
+      organizationsById: new Map([
+        ["org-a", { id: "org-a", slug: "alpha", name: "Alpha Corp", type: "internal", status: "active", createdAt: "", updatedAt: "" }]
+      ]),
+      usersById: new Map([["user-a", { id: "user-a", displayName: "Alice", email: "alice@example.com", createdAt: "", updatedAt: "" }]]),
+      departmentsById: new Map(),
+      filters: { days: 30, timeZone: "Asia/Shanghai", sessionPage: 1, sessionPageSize: 20 },
+      now: new Date("2026-04-16T00:00:00.000Z")
+    });
+
+    expect(response.summary).toMatchObject({
+      totalRequests: 6,
+      successfulRequestCount: 3,
+      failedRequestCount: 1,
+      cancelledRequestCount: 2,
+      successRate: 0.75
+    });
+  });
+
   it("labels Zendesk usage as a first-class operations analytics source", () => {
     const usageEvents = [
       makeUsageEvent({

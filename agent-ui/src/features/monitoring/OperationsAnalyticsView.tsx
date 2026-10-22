@@ -860,6 +860,14 @@ export function OperationsAnalyticsView() {
                 value={formatPercent(data.summary.cacheShare)}
                 meta={`业务缓存写入 ${formatCount(data.summary.cacheWriteTokens)} tokens`}
               />
+              <MetricItem label="回答成功" value={formatCount(data.summary.successfulRequestCount)} meta="完整返回回答的问题" />
+              <MetricItem label="回答失败" value={formatCount(data.summary.failedRequestCount)} meta="模型、运行环境或系统中断导致" />
+              <MetricItem label="用户中止" value={formatCount(data.summary.cancelledRequestCount)} meta="用户主动停止，不计入失败" />
+              <MetricItem
+                label="回答成功率"
+                value={formatPercent(data.summary.successRate)}
+                meta="成功 ÷（成功 + 失败），不含用户中止"
+              />
             </section>
           </div>
         ) : null}

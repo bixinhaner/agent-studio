@@ -453,6 +453,7 @@ import {
 } from "./operations/visible-conversation-failure-reporter.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
+import { usageResultStatusForTurn } from "./operations/usage-result-status.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
 import {
   ConversationSecurityReviewScheduler,
@@ -4361,7 +4362,7 @@ type CodexChannelTurnResult = {
 type CodexChannelTurnUsageContext = {
   session: SessionRecord;
   usage: RuntimeUsageSnapshot;
-  resultStatus: "success" | "failed";
+  resultStatus: ReturnType<typeof usageResultStatusForTurn>;
 };
 
 type CodexChannelTurnInput = {
@@ -4378,6 +4379,8 @@ type CodexChannelTurnInput = {
   usageMetadata?: Record<string, unknown> | ((context: CodexChannelTurnUsageContext) => Promise<Record<string, unknown>> | Record<string, unknown>);
   departmentIdSnapshot?: () => Promise<string | undefined>;
   signal?: AbortSignal;
+  /** Fires only on the user's explicit stop; a failed turn after it is recorded as `cancelled`. */
+  userCancelSignal?: AbortSignal;
   emptyAnswerText: string;
   locale?: string;
   projectionOptions?: ConstructorParameters<typeof CodexRunProjection>[0];
@@ -4508,7 +4511,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
           finalizedProcess
         });
       },
-      async recordUsage(usage, resultStatus = "success") {
+      async recordUsage(usage, runtimeResultStatus = "success") {
+        const resultStatus = usageResultStatusForTurn(runtimeResultStatus, input.userCancelSignal);
         const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
         const extraMetadata =
           typeof input.usageMetadata === "function"
@@ -5920,6 +5924,7 @@ async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRu
       conversationId: prepared.conversationId
     },
     usageSource: "action_connector_chat_stream",
+    userCancelSignal: explicitCancel.signal,
     usageMetadata: {
       channel: ACTION_CONNECTOR_CHANNEL,
       integrationInstanceId: input.connector.id,
@@ -6168,6 +6173,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         conversationId: input.conversationId
       },
       usageSource: "crest_chat_stream",
+      userCancelSignal: explicitCancel.signal,
       signal: runAbort.signal,
       emptyAnswerText: "(无输出)",
       locale: "zh",
@@ -15025,7 +15031,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           timing.mark("chat_stream.done_sent");
           finishTiming("success", { firstCodexEventSeen });
         },
-        async recordUsage(usage, resultStatus = "success") {
+        async recordUsage(usage, runtimeResultStatus = "success") {
+          const resultStatus = usageResultStatusForTurn(runtimeResultStatus, explicitCancel.signal);
           const departmentIdSnapshot =
             trimOrUndefined(currentUser.organizationType) === "internal"
               ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
