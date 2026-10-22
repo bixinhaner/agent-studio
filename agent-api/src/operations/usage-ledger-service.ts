@@ -1,4 +1,5 @@
 import type {
+  ListOperationsInsightEventsInput,
   ListUsageEventsByExactRangeInput,
   ListUsageEventsInput,
   UsageEventRecord,
@@ -37,7 +38,7 @@ export type UsageLedgerRankings = {
 };
 
 type UsageEventStore = Pick<UsageEventRepository, "list" | "listByExactCreatedAtRange"> &
-  Partial<Pick<UsageEventRepository, "sumByUserInRange">>;
+  Partial<Pick<UsageEventRepository, "sumByUserInRange" | "listForOperationsInsights">>;
 
 const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 
@@ -121,6 +122,14 @@ export class UsageLedgerService {
   constructor(private readonly deps: { usageEvents: UsageEventStore }) {}
 
   async listEvents(input: ListUsageEventsInput = {}): Promise<UsageEventRecord[]> {
+    return this.deps.usageEvents.list(input);
+  }
+
+  /** Events for operations analytics with only the metadata keys it reads (much smaller rows). */
+  async listInsightEvents(input: ListOperationsInsightEventsInput): Promise<UsageEventRecord[]> {
+    if (this.deps.usageEvents.listForOperationsInsights) {
+      return this.deps.usageEvents.listForOperationsInsights(input);
+    }
     return this.deps.usageEvents.list(input);
   }
 

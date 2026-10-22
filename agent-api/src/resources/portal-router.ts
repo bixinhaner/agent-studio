@@ -21,6 +21,8 @@ type KnowledgeSetRecord = {
 
 type KnowledgeSetRepositoryLike = {
   list(): Promise<KnowledgeSetRecord[]>;
+  /** Same sets without item rows; preferred because only the set fields are read here. */
+  listSummaries?(): Promise<KnowledgeSetRecord[]>;
 };
 
 const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
@@ -71,7 +73,7 @@ export function createResourcesPortalRouter(options: {
       ? await options.listDepartmentIdsForUser(currentUser.id)
       : [];
 
-    const allKnowledgeSets = await options.knowledgeSets.list();
+    const allKnowledgeSets = await (options.knowledgeSets.listSummaries?.() ?? options.knowledgeSets.list());
     const activeKnowledgeSets = allKnowledgeSets.filter(
       (knowledgeSet) => knowledgeSet.status === "active" && knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE
     );
@@ -131,7 +133,7 @@ export function createResourcesPortalRouter(options: {
     const departmentIds = isInternalOrganizationType(req.currentOrganization?.type)
       ? await options.listDepartmentIdsForUser(currentUser.id)
       : [];
-    const allKnowledgeSets = await options.knowledgeSets.list();
+    const allKnowledgeSets = await (options.knowledgeSets.listSummaries?.() ?? options.knowledgeSets.list());
     const activeKnowledgeSets = allKnowledgeSets.filter(
       (knowledgeSet) => knowledgeSet.status === "active" && knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE
     );

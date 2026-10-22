@@ -124,7 +124,39 @@ type UsageEventTable = {
 export type UsageEventRepositoryDb = {
   usageEvent: UsageEventTable;
   $transaction?<T>(callback: (transaction: UsageEventTransaction) => Promise<T>): Promise<T>;
+  $queryRawUnsafe?<T>(query: string, ...values: unknown[]): Promise<T>;
 };
+
+export type ListOperationsInsightEventsInput = {
+  organizationId?: string;
+  model?: string;
+  from: string | Date;
+};
+
+/**
+ * Metadata operations analytics reads. Billing detail (_usageAccounting, _codexRuntimeUsage, the rest of
+ * _costProfile) is ~95% of a row, so it stays in the database. Extend this when the analytics reads a new key.
+ */
+const OPERATIONS_INSIGHT_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(
+  'source', metadata -> 'source',
+  'integrationSlug', metadata -> 'integrationSlug',
+  'actorName', metadata -> 'actorName',
+  'reviewId', metadata -> 'reviewId',
+  '_costProfile', jsonb_strip_nulls(jsonb_build_object('costCompleteness', metadata -> '_costProfile' -> 'costCompleteness')),
+  '_usageAccounting', jsonb_strip_nulls(jsonb_build_object('status', metadata -> '_usageAccounting' -> 'status'))
+))`;
+
+function slimOperationsInsightMetadata(metadata: unknown): unknown {
+  const record = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, any>) : undefined;
+  if (!record) return undefined;
+  const slim: Record<string, unknown> = {};
+  for (const key of ["source", "integrationSlug", "actorName", "reviewId"]) {
+    if (record[key] !== undefined && record[key] !== null) slim[key] = record[key];
+  }
+  slim._costProfile = record._costProfile?.costCompleteness ? { costCompleteness: record._costProfile.costCompleteness } : {};
+  slim._usageAccounting = record._usageAccounting?.status ? { status: record._usageAccounting.status } : {};
+  return slim;
+}
 
 type UsageEventTransaction = {
   usageEvent: UsageEventTable;
@@ -355,6 +387,38 @@ export class UsageEventRepository {
       take: input.take
     });
 
+    return rows.map(mapUsageEvent);
+  }
+
+  /** Same rows and day-aligned window as list(), with only the metadata operations analytics reads. */
+  async listForOperationsInsights(input: ListOperationsInsightEventsInput): Promise<UsageEventRecord[]> {
+    if (!this.db.$queryRawUnsafe) {
+      const rows = await this.list({ organizationId: input.organizationId, model: input.model, from: input.from });
+      return rows.map((row) => ({ ...row, metadata: slimOperationsInsightMetadata(row.metadata) }));
+    }
+    const values: unknown[] = [toDayStart(input.from)];
+    const conditions = ["created_at >= $1"];
+    const organizationId = trimOrUndefined(input.organizationId);
+    if (organizationId) {
+      values.push(organizationId);
+      conditions.push(`organization_id = $${values.length}`);
+    }
+    const model = trimOrUndefined(input.model);
+    if (model) {
+      values.push(model);
+      conditions.push(`model = $${values.length}`);
+    }
+    const rows = await this.db.$queryRawUnsafe<UsageEventRow[]>(
+      `SELECT id, organization_id AS "organizationId", user_id AS "userId", department_id_snapshot AS "departmentIdSnapshot",
+        thread_id AS "threadId", session_id AS "sessionId", model, feature_type AS "featureType",
+        input_tokens AS "inputTokens", cached_input_tokens AS "cachedInputTokens", cache_write_tokens AS "cacheWriteTokens",
+        output_tokens AS "outputTokens", estimated_cost AS "estimatedCost", internal_cost AS "internalCost",
+        result_status AS "resultStatus", created_at AS "createdAt", ${OPERATIONS_INSIGHT_METADATA_SQL} AS metadata
+      FROM usage_events
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY created_at DESC`,
+      ...values
+    );
     return rows.map(mapUsageEvent);
   }
 

@@ -30,7 +30,10 @@ type DepartmentRow = {
 
 type DepartmentTable = {
   findUnique(args: { where: { id?: string; externalId?: string } }): Promise<DepartmentRow | null>;
-  findMany(args?: { orderBy?: Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }> }): Promise<DepartmentRow[]>;
+  findMany(args?: {
+    where?: { id?: { in: string[] } };
+    orderBy?: Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }>;
+  }): Promise<DepartmentRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<DepartmentRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<DepartmentRow>;
 };
@@ -204,5 +207,12 @@ export class DepartmentRepository {
     if (!departmentId) return null;
     const row = await this.db.department.findUnique({ where: { id: departmentId } });
     return row ? mapDepartment(row) : null;
+  }
+
+  async listByIds(ids: string[]): Promise<DepartmentRecord[]> {
+    const departmentIds = [...new Set(ids.map((id) => trimOrUndefined(id)).filter((id): id is string => Boolean(id)))];
+    if (departmentIds.length === 0) return [];
+    const rows = await this.db.department.findMany({ where: { id: { in: departmentIds } } });
+    return rows.map(mapDepartment);
   }
 }

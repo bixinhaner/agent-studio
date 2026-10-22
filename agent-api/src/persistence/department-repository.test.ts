@@ -52,4 +52,14 @@ describe("DepartmentRepository", () => {
     );
     expect(row.organizationId).toBe("org_internal");
   });
+
+  it("loads many departments in one query", async () => {
+    const findMany = vi.fn(async () => [departmentRow({ id: "department-1" }), departmentRow({ id: "department-2" })]);
+    const repository = new DepartmentRepository({ department: { findMany } } as unknown as DepartmentRepositoryDb);
+    const departments = await repository.listByIds(["department-1", "department-2", "department-1"]);
+    expect(departments.map((department) => department.id)).toEqual(["department-1", "department-2"]);
+    expect(findMany).toHaveBeenCalledWith({ where: { id: { in: ["department-1", "department-2"] } } });
+    await expect(repository.listByIds([" "])).resolves.toEqual([]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
 });

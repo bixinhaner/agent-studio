@@ -1,6 +1,6 @@
 import { Alert, Button, Empty, Input, Pagination, Segmented, Select, Spin, Tabs, Tag, Tooltip } from "antd";
 import { ArrowDown, ArrowUp, ArrowUpDown, Info, RefreshCcw, Search, ShieldCheck } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useModelLabel } from "../../lib/use-model-labels";
 
 import { formatUsdAmount } from "../../lib/formatters";
@@ -737,18 +737,28 @@ export function OperationsAnalyticsView() {
   const [sessionSort, setSessionSort] = useState<SortState<SessionSortKey>>({ key: "lastActiveAt", direction: "desc" });
   const [activeTab, setActiveTab] = useState<OperationsAnalyticsTab>("overview");
   const [refreshToken, setRefreshToken] = useState(0);
+  const loadedRefreshTokenRef = useRef(refreshToken);
 
   const [data, setData] = useState<OperationsInsightsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
 
-  const deferredQuery = useDeferredValue(query.trim());
+  // Wait for a typing pause so each keystroke does not start its own request.
+  const [deferredQuery, setDeferredQuery] = useState("");
+  useEffect(() => {
+    const next = query.trim();
+    if (next === deferredQuery) return;
+    const timer = window.setTimeout(() => setDeferredQuery(next), next ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [query, deferredQuery]);
   const timeZone = useMemo(() => resolveLocalTimeZone(), []);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setErrorText("");
+    const refresh = loadedRefreshTokenRef.current !== refreshToken;
+    loadedRefreshTokenRef.current = refreshToken;
 
     fetchOperationsInsights({
       days,
@@ -761,7 +771,8 @@ export function OperationsAnalyticsView() {
       sessionPage,
       sessionPageSize,
       sessionSortKey: sessionSort.key,
-      sessionSortDirection: sessionSort.direction
+      sessionSortDirection: sessionSort.direction,
+      refresh
     })
       .then((response) => {
         if (!active) return;

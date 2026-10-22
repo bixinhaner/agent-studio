@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createLocalAuthProviderSnapshot,
@@ -175,5 +175,20 @@ describe("SessionRepository", () => {
       sessionId: created.sessionId,
       codexThreadId: "codex-thread-1"
     });
+  });
+
+  it("lists insight refs with only the normalized provider snapshot fields", async () => {
+    const queryRaw = vi.fn(async () => [
+      { externalId: "session-1", threadId: "thread-1", hasSnapshot: true, source: "integration", kind: "azure_openai", integrationSlug: "crest" },
+      { externalId: "session-2", threadId: null, hasSnapshot: null, source: "local_auth", kind: "chatgpt", integrationSlug: null }
+    ]);
+    const repository = new SessionRepository({ runtimeSession: {}, $queryRawUnsafe: queryRaw } as unknown as SessionRepositoryDb, 60_000);
+    await expect(repository.listInsightRefsByIds([" session-1 ", "session-2", "session-1", ""])).resolves.toEqual([
+      { sessionId: "session-1", threadId: "thread-1", providerSnapshot: { source: "integration", kind: "azure_openai", integrationSlug: "crest" } },
+      { sessionId: "session-2", threadId: undefined, providerSnapshot: undefined }
+    ]);
+    expect(queryRaw.mock.calls[0]).toEqual([expect.stringContaining("'providerKind'"), ["session-1", "session-2"]]);
+    await expect(repository.listInsightRefsByIds([])).resolves.toEqual([]);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 });

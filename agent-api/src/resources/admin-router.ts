@@ -15,6 +15,8 @@ const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
 
 type KnowledgeSetRepositoryLike = {
   list(): Promise<Array<{ id?: string; sourceType?: string; slug?: string; storageKey?: string } & Record<string, unknown>>>;
+  /** Same sets without item rows (the list page never shows items; they were megabytes per request). */
+  listSummaries?(): Promise<Array<{ id?: string; sourceType?: string; slug?: string; storageKey?: string } & Record<string, unknown>>>;
   create(payload: {
     organizationId?: string;
     name: string;
@@ -499,7 +501,9 @@ export function createResourcesAdminRouter(options: {
   const requirePermission = options.requirePermission ?? ((_permissionKey: string) => (_req, _res, next) => next());
 
   router.get("/knowledge-sets", async (_req: Request, res: Response) => {
-    const knowledgeSets = await options.knowledgeSets.list();
+    const knowledgeSets = options.knowledgeSets.listSummaries
+      ? await options.knowledgeSets.listSummaries()
+      : (await options.knowledgeSets.list()).map(({ items: _items, ...knowledgeSet }) => knowledgeSet);
     res.json({
       knowledgeSets: knowledgeSets.filter((knowledgeSet) => knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE)
     });
@@ -509,7 +513,7 @@ export function createResourcesAdminRouter(options: {
     try {
       const name = normalizeKnowledgeSetName(req.body?.name);
       const sourceType = normalizeKnowledgeSetSourceType(req.body?.sourceType);
-      const existingKnowledgeSets = await options.knowledgeSets.list();
+      const existingKnowledgeSets = await (options.knowledgeSets.listSummaries?.() ?? options.knowledgeSets.list());
       const slug = resolveCreateKnowledgeSetSlug({
         requestedSlug: req.body?.slug,
         name,

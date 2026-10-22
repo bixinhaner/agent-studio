@@ -131,4 +131,37 @@ describe("UsageEventRepository.sumByUserInRange", () => {
     expect(groupBy.mock.calls[1][0]).toMatchObject({ by: ["userId", "threadId"], where: { threadId: { not: null } } });
     await expect(repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", userIds: [] })).resolves.toEqual([]);
   });
+
+  it("lists operations-insight events with only the metadata keys the analytics reads", async () => {
+    const createdAt = new Date("2026-10-20T08:00:00.000Z");
+    const row = {
+      id: "usage-1", organizationId: "org-1", userId: "user-1", departmentIdSnapshot: null, threadId: "thread-1",
+      sessionId: "session-1", model: "gpt-5.6-sol", featureType: "chat", inputTokens: 10, cachedInputTokens: 4,
+      cacheWriteTokens: 0, outputTokens: 2, estimatedCost: "0.100000", internalCost: "0.010000", resultStatus: "success",
+      createdAt,
+      metadata: {
+        source: "dingtalk", actorName: "Ada", prompt: "large prompt text",
+        _costProfile: { costCompleteness: "partial", rates: { input: 1 } },
+        _usageAccounting: { status: "complete", cursor: 12 }
+      }
+    };
+    const findMany = vi.fn(async () => [row]);
+    const fallback = new UsageEventRepository({ usageEvent: { findMany } } as unknown as UsageEventRepositoryDb);
+    const [event] = await fallback.listForOperationsInsights({ organizationId: "org-1", from: "2026-10-01T05:00:00Z" });
+    expect(event.metadata).toEqual({
+      source: "dingtalk", actorName: "Ada",
+      _costProfile: { costCompleteness: "partial" },
+      _usageAccounting: { status: "complete" }
+    });
+    expect(findMany.mock.calls[0]).toMatchObject([{ where: { organizationId: "org-1" } }]);
+
+    const queryRaw = vi.fn(async () => [{ ...row, metadata: { source: "dingtalk" } }]);
+    const raw = new UsageEventRepository({ usageEvent: { findMany }, $queryRawUnsafe: queryRaw } as unknown as UsageEventRepositoryDb);
+    const [rawEvent] = await raw.listForOperationsInsights({ organizationId: "org-1", model: "gpt-5.6-sol", from: "2026-10-01T05:00:00Z" });
+    const [sql, ...values] = queryRaw.mock.calls[0] as unknown as [string, ...unknown[]];
+    expect(sql).toContain("created_at >= $1 AND organization_id = $2 AND model = $3");
+    expect(sql).not.toContain("'prompt'");
+    expect(values).toEqual([new Date("2026-10-01T00:00:00.000Z"), "org-1", "gpt-5.6-sol"]);
+    expect(rawEvent).toMatchObject({ id: "usage-1", createdAt: createdAt.toISOString(), metadata: { source: "dingtalk" } });
+  });
 });

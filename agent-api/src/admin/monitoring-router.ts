@@ -5,7 +5,7 @@ import type { AlertEventRepository } from "../persistence/alert-event-repository
 import type { CodexQuotaSnapshotRepository } from "../persistence/codex-quota-snapshot-repository.js";
 import type { AlertRuleRepository, CreateAlertRuleInput } from "../persistence/alert-rule-repository.js";
 import type { CostProfileRepository, UpsertCostProfileInput } from "../persistence/cost-profile-repository.js";
-import type { DepartmentRepository } from "../persistence/department-repository.js";
+import type { DepartmentRecord, DepartmentRepository } from "../persistence/department-repository.js";
 import type { NotificationRecordRepository } from "../persistence/notification-record-repository.js";
 import type { OrganizationRepository } from "../persistence/organization-repository.js";
 import type { QuotaPolicyRepository, UpsertQuotaPolicyInput } from "../persistence/quota-policy-repository.js";
@@ -13,17 +13,23 @@ import type { ResourceAccessLogRepository } from "../persistence/resource-access
 import type { SessionRepository } from "../persistence/session-repository.js";
 import type { UsageRollupRepository } from "../persistence/usage-rollup-repository.js";
 import type { UsageLedgerService } from "../operations/usage-ledger-service.js";
-import type { UserRepositoryLike } from "../persistence/user-repository.js";
+import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
+
+type OperationsInsightsInputs = Pick<
+  Parameters<typeof buildOperationsInsights>[0],
+  "usageEvents" | "sessionsById" | "organizationsById" | "usersById" | "departmentsById" | "quotaSnapshots"
+>;
 
 type MonitoringRouterOptions = {
   requirePermission: (permissionKey: string) => RequestHandler;
   resourceAccessLogs: Pick<ResourceAccessLogRepository, "list">;
-  usageLedger: Pick<UsageLedgerService, "buildOverview" | "buildRankings" | "buildTrends" | "listEvents">;
+  usageLedger: Pick<UsageLedgerService, "buildOverview" | "buildRankings" | "buildTrends" | "listEvents"> &
+    Partial<Pick<UsageLedgerService, "listInsightEvents">>;
   usageRollups: Pick<UsageRollupRepository, "list">;
-  sessions: Pick<SessionRepository, "listByIds">;
-  users: Pick<UserRepositoryLike, "getById">;
+  sessions: Pick<SessionRepository, "listByIds"> & Partial<Pick<SessionRepository, "listInsightRefsByIds">>;
+  users: Pick<UserRepositoryLike, "getById"> & { listByIds?: (ids: string[]) => Promise<AuthenticatedUser[]> };
   organizations: Pick<OrganizationRepository, "listByIds">;
-  departments: Pick<DepartmentRepository, "getById">;
+  departments: Pick<DepartmentRepository, "getById"> & Partial<Pick<DepartmentRepository, "listByIds">>;
   quotaPolicies: Pick<QuotaPolicyRepository, "list" | "upsert" | "getById" | "update">;
   costProfiles: Pick<CostProfileRepository, "list" | "listActive" | "upsert" | "getById" | "update">;
   alertRules: Pick<AlertRuleRepository, "list" | "create" | "getById" | "update">;
@@ -31,6 +37,8 @@ type MonitoringRouterOptions = {
   notificationRecords: Pick<NotificationRecordRepository, "list">;
   quotaSnapshots: Pick<CodexQuotaSnapshotRepository, "list">;
   quotaSnapshotIntervalMs?: number;
+  /** How long loaded operations-insights inputs are reused; 0 disables the cache. */
+  operationsInsightsCacheTtlMs?: number;
   holidayCalendarSync?: { syncProfile(profileId: string): Promise<unknown> };
 };
 
@@ -145,6 +153,90 @@ function pickObject<T extends Record<string, unknown>>(value: T, keys: string[])
 export function createMonitoringRouter(options: MonitoringRouterOptions): Router {
   const router = Router();
 
+  // The analytics page re-requests the same range for every filter, sort and page change. Loading the
+  // events and their lookups is the slow part, so it is shared for a short while; in-flight loads are
+  // shared too. The refresh button passes refresh=1 to bypass it.
+  const insightsCacheTtlMs = options.operationsInsightsCacheTtlMs ?? 60_000;
+  const insightsCache = new Map<string, { expiresAt: number; promise: Promise<OperationsInsightsInputs> }>();
+
+  async function readOperationsInsightsInputs(input: {
+    days: number;
+    organizationId?: string;
+    model?: string;
+  }): Promise<OperationsInsightsInputs> {
+    const usageEventsFrom = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+    const eventQuery = { organizationId: input.organizationId, model: input.model, from: usageEventsFrom };
+    const usageEvents = options.usageLedger.listInsightEvents
+      ? await options.usageLedger.listInsightEvents(eventQuery)
+      : await options.usageLedger.listEvents(eventQuery);
+
+    const sessionIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.sessionId)).filter(Boolean) as string[])];
+    const organizationIds = [
+      ...new Set(usageEvents.map((item) => trimOrUndefined(item.organizationId)).filter(Boolean) as string[])
+    ];
+    const userIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.userId)).filter(Boolean) as string[])];
+    const departmentIds = [
+      ...new Set(usageEvents.map((item) => trimOrUndefined(item.departmentIdSnapshot)).filter(Boolean) as string[])
+    ];
+
+    const [sessions, organizations, users, departments, quotaSnapshots] = await Promise.all([
+      options.sessions.listInsightRefsByIds
+        ? options.sessions.listInsightRefsByIds(sessionIds)
+        : options.sessions.listByIds(sessionIds),
+      options.organizations.listByIds(organizationIds),
+      options.users.listByIds
+        ? options.users.listByIds(userIds)
+        : Promise.all(userIds.map((userId) => options.users.getById(userId))).then((items) =>
+            items.filter((item): item is AuthenticatedUser => Boolean(item))
+          ),
+      options.departments.listByIds
+        ? options.departments.listByIds(departmentIds)
+        : Promise.all(departmentIds.map((departmentId) => options.departments.getById(departmentId))).then((items) =>
+            items.filter((item): item is DepartmentRecord => Boolean(item))
+          ),
+      options.quotaSnapshots
+        .list({
+          // Include one reset window before the requested range so the first day's delta has a baseline.
+          from: new Date(usageEventsFrom.getTime() - 8 * 24 * 60 * 60 * 1000)
+        })
+        .catch(() => [])
+    ]);
+
+    return {
+      usageEvents,
+      sessionsById: new Map(sessions.map((item) => [item.sessionId, item] as const)),
+      organizationsById: new Map(organizations.map((item) => [item.id, item] as const)),
+      usersById: new Map(users.map((item) => [item.id, item] as const)),
+      departmentsById: new Map(departments.map((item) => [item.id, item] as const)),
+      quotaSnapshots
+    };
+  }
+
+  function loadOperationsInsightsInputs(
+    input: { days: number; organizationId?: string; model?: string },
+    refresh: boolean
+  ): Promise<OperationsInsightsInputs> {
+    if (insightsCacheTtlMs <= 0) return readOperationsInsightsInputs(input);
+    const key = [input.days, input.organizationId ?? "", input.model ?? ""].join("|");
+    const now = Date.now();
+    for (const [cachedKey, entry] of insightsCache) {
+      if (entry.expiresAt <= now) insightsCache.delete(cachedKey);
+    }
+    const cached = insightsCache.get(key);
+    if (cached && !refresh) return cached.promise;
+    const promise = readOperationsInsightsInputs(input);
+    insightsCache.set(key, { expiresAt: now + insightsCacheTtlMs, promise });
+    promise.catch(() => {
+      if (insightsCache.get(key)?.promise === promise) insightsCache.delete(key);
+    });
+    while (insightsCache.size > 20) {
+      const oldestKey = insightsCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      insightsCache.delete(oldestKey);
+    }
+    return promise;
+  }
+
   router.get("/monitoring/overview", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
       const [usageEvents, accessLogs, alertEvents, notificationRecords] = await Promise.all([
@@ -200,44 +292,14 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         sessionSortDirection: parseSortDirection(req.query.sessionSortDirection)
       } as const;
 
-      const usageEventsFrom = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-      const usageEvents = await options.usageLedger.listEvents({
-        organizationId: filters.organizationId,
-        model: filters.model,
-        from: usageEventsFrom
-      });
-
-      const sessionIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.sessionId)).filter(Boolean) as string[])];
-      const organizationIds = [
-        ...new Set(usageEvents.map((item) => trimOrUndefined(item.organizationId)).filter(Boolean) as string[])
-      ];
-      const userIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.userId)).filter(Boolean) as string[])];
-      const departmentIds = [
-        ...new Set(usageEvents.map((item) => trimOrUndefined(item.departmentIdSnapshot)).filter(Boolean) as string[])
-      ];
-
-      const [sessions, organizations, users, departments, quotaSnapshots] = await Promise.all([
-        options.sessions.listByIds(sessionIds),
-        options.organizations.listByIds(organizationIds),
-        Promise.all(userIds.map(async (userId) => [userId, await options.users.getById(userId)] as const)),
-        Promise.all(departmentIds.map(async (departmentId) => [departmentId, await options.departments.getById(departmentId)] as const)),
-        options.quotaSnapshots
-          .list({
-            // Include one reset window before the requested range so the first day's delta has a baseline.
-            from: new Date(usageEventsFrom.getTime() - 8 * 24 * 60 * 60 * 1000)
-          })
-          .catch(() => [])
-      ]);
-
+      const inputs = await loadOperationsInsightsInputs(
+        { days, organizationId: filters.organizationId, model: filters.model },
+        req.query.refresh === "1"
+      );
       res.json(
         buildOperationsInsights({
-          usageEvents,
-          sessionsById: new Map(sessions.map((item) => [item.sessionId, item] as const)),
-          organizationsById: new Map(organizations.map((item) => [item.id, item] as const)),
-          usersById: new Map(users.flatMap(([key, value]) => (value ? [[key, value] as const] : []))),
-          departmentsById: new Map(departments),
+          ...inputs,
           filters,
-          quotaSnapshots,
           quotaSnapshotIntervalMs: options.quotaSnapshotIntervalMs
         })
       );

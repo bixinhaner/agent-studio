@@ -26,6 +26,9 @@ export type KnowledgeSetRecord = {
   items: KnowledgeSetItemRecord[];
 };
 
+/** A knowledge set without its item rows; enough for listing, access checks and mounting. */
+export type KnowledgeSetSummary = Omit<KnowledgeSetRecord, "items">;
+
 type CreateKnowledgeSetPayload = {
   id?: string;
   organizationId?: string;
@@ -113,6 +116,22 @@ function toIsoString(value: Date | string): string {
   return parsed.toISOString();
 }
 
+function mapKnowledgeSetSummary(row: KnowledgeSetRow): KnowledgeSetSummary {
+  return {
+    id: row.id,
+    organizationId: trimOrUndefined(row.organizationId),
+    name: row.name,
+    slug: row.slug,
+    description: trimOrUndefined(row.description),
+    status: trimOrUndefined(row.status) ?? "active",
+    sourceType: row.sourceType,
+    rootPath: trimOrUndefined(row.rootPath),
+    storageKey: trimOrUndefined(row.storageKey),
+    createdAt: toIsoString(row.createdAt),
+    updatedAt: toIsoString(row.updatedAt)
+  };
+}
+
 function mapKnowledgeSetItem(row: KnowledgeSetItemRow): KnowledgeSetItemRecord {
   return {
     id: row.id,
@@ -160,6 +179,14 @@ export class KnowledgeSetRepository {
       orderBy: { createdAt: "asc" }
     });
     return Promise.all(rows.map((row) => this.loadRecord(this.db, row)));
+  }
+
+  /** list() without the item rows (thousands per set); use it whenever items are not read. */
+  async listSummaries(): Promise<KnowledgeSetSummary[]> {
+    const rows = await this.db.knowledgeSet.findMany({
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => mapKnowledgeSetSummary(row));
   }
 
   async update(
@@ -256,19 +283,6 @@ export class KnowledgeSetRepository {
       })
       .then((records) => records.map(mapKnowledgeSetItem));
 
-    return {
-      id: row.id,
-      organizationId: trimOrUndefined(row.organizationId),
-      name: row.name,
-      slug: row.slug,
-      description: trimOrUndefined(row.description),
-      status: trimOrUndefined(row.status) ?? "active",
-      sourceType: row.sourceType,
-      rootPath: trimOrUndefined(row.rootPath),
-      storageKey: trimOrUndefined(row.storageKey),
-      createdAt: toIsoString(row.createdAt),
-      updatedAt: toIsoString(row.updatedAt),
-      items
-    };
+    return { ...mapKnowledgeSetSummary(row), items };
   }
 }

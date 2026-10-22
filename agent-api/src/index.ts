@@ -8084,7 +8084,7 @@ async function resolveZendeskAgentRuntimeOptions(input: {
   );
   const knowledgeSetIds = asStringArray(input.settings.knowledgeSetIds);
   const knowledgeSetMap = new Map(
-    (await knowledgeSets.list())
+    (await knowledgeSets.listSummaries())
       .filter((item) => trimOrUndefined(item.status) === "active" && trimOrUndefined(item.sourceType) === "managed_upload")
       .map((item) => [item.id, item] as const)
   );
@@ -9266,7 +9266,7 @@ async function resolveDingTalkBotSessionOptions(input: {
   );
   const knowledgeSetIds = input.instance.robot.knowledgeSetIds;
   const knowledgeSetMap = new Map(
-    (await knowledgeSets.list())
+    (await knowledgeSets.listSummaries())
       .filter((item) => trimOrUndefined(item.status) === "active" && trimOrUndefined(item.sourceType) === "managed_upload")
       .map((item) => [item.id, item] as const)
   );
@@ -10881,7 +10881,7 @@ async function inspectArtifactFileForPolicy(input: {
 async function checksumExistsInKnowledgeSets(checksum: string): Promise<boolean> {
   const normalizedChecksum = trimOrUndefined(checksum);
   if (!normalizedChecksum) return false;
-  const sets = await knowledgeSets.list();
+  const sets = await knowledgeSets.listSummaries();
   for (const knowledgeSet of sets) {
     if (trimOrUndefined(knowledgeSet.status) !== "active" || trimOrUndefined(knowledgeSet.sourceType) !== "managed_upload") {
       continue;

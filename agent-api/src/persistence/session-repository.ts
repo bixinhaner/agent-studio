@@ -67,6 +67,14 @@ type RuntimeSessionTable = {
 
 export type SessionRepositoryDb = {
   runtimeSession: RuntimeSessionTable;
+  $queryRawUnsafe?<T>(query: string, ...values: unknown[]): Promise<T>;
+};
+
+/** The few session fields operations analytics needs: thread link and the provider path label. */
+export type SessionInsightRef = {
+  sessionId: string;
+  threadId?: string;
+  providerSnapshot?: { source?: string; kind?: string; integrationSlug?: string };
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -281,6 +289,47 @@ export class SessionRepository {
       where: { externalId: { in: normalizedIds } }
     })) as RuntimeSessionRow[];
     return rows.map((row) => this.mapSession(row));
+  }
+
+  /** listByIds without the session metadata blob (~2.5KB per session; only three snapshot fields are needed). */
+  async listInsightRefsByIds(sessionIds: string[]): Promise<SessionInsightRef[]> {
+    const normalizedIds = [...new Set(sessionIds.map((item) => trimOrUndefined(item)).filter(Boolean) as string[])];
+    if (!normalizedIds.length) return [];
+    if (!this.db.$queryRawUnsafe) {
+      return (await this.listByIds(normalizedIds)).map((session) => ({
+        sessionId: session.sessionId,
+        threadId: session.threadId,
+        providerSnapshot: session.providerSnapshot
+          ? {
+              source: session.providerSnapshot.source,
+              kind: session.providerSnapshot.kind,
+              integrationSlug: session.providerSnapshot.integrationSlug
+            }
+          : undefined
+      }));
+    }
+    // Mirrors normalizeManagedCodexProviderSnapshot: kind comes from config.providerKind (default chatgpt) and any
+    // non-integration source is local_auth.
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ externalId: string; threadId: string | null; hasSnapshot: boolean; source: string; kind: string; integrationSlug: string | null }>
+    >(
+      `SELECT external_id AS "externalId", thread_id AS "threadId",
+        jsonb_typeof(metadata -> 'providerSnapshot') = 'object' AS "hasSnapshot",
+        CASE WHEN metadata -> 'providerSnapshot' ->> 'source' = 'integration' THEN 'integration' ELSE 'local_auth' END AS source,
+        CASE WHEN metadata -> 'providerSnapshot' -> 'config' ->> 'providerKind' IN ('chatgpt', 'openai_api', 'azure_openai')
+          THEN metadata -> 'providerSnapshot' -> 'config' ->> 'providerKind' ELSE 'chatgpt' END AS kind,
+        NULLIF(BTRIM(metadata -> 'providerSnapshot' ->> 'integrationSlug'), '') AS "integrationSlug"
+      FROM runtime_sessions
+      WHERE external_id = ANY($1::text[])`,
+      normalizedIds
+    );
+    return rows.map((row) => ({
+      sessionId: row.externalId,
+      threadId: row.threadId ?? undefined,
+      providerSnapshot: row.hasSnapshot
+        ? { source: row.source, kind: row.kind, integrationSlug: row.integrationSlug ?? undefined }
+        : undefined
+    }));
   }
 
   private mapSession(row: RuntimeSessionRow): SessionRecord {

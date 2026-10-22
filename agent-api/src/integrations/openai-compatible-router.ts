@@ -156,6 +156,7 @@ type OpenAICompatibleRouterOptions = {
   };
   knowledgeSets: {
     list(): Promise<KnowledgeSetRecord[]>;
+    listSummaries?(): Promise<KnowledgeSetRecord[]>;
   };
   knowledgeSetStorage: {
     resolveReadableMountPath(knowledgeSetId: string): string;
@@ -802,7 +803,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       selectedKnowledgeSetIds = authenticated.config.knowledgeSetIds;
 
       const knowledgeSetMap = new Map(
-        (await options.knowledgeSets.list())
+        (await (options.knowledgeSets.listSummaries?.() ?? options.knowledgeSets.list()))
           .filter((item) => trimOrUndefined(item.status) === "active" && trimOrUndefined(item.sourceType) === MANAGED_UPLOAD_SOURCE_TYPE)
           .map((item) => [item.id, item] as const)
       );

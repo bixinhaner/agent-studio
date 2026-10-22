@@ -272,4 +272,14 @@ describe("UserRepository", () => {
       }
     });
   });
+
+  it("loads many users in one query", async () => {
+    const findMany = vi.fn(async () => [buildUserRow({ id: "user_1" }), buildUserRow({ id: "user_2" })]);
+    const repository = new UserRepository({ user: { findMany } } as unknown as UserRepositoryDb);
+    const users = await repository.listByIds(["user_1", " user_2 ", "user_1", ""]);
+    expect(users.map((user) => user.id)).toEqual(["user_1", "user_2"]);
+    expect(findMany).toHaveBeenCalledWith({ where: { id: { in: ["user_1", "user_2"] } } });
+    await expect(repository.listByIds([])).resolves.toEqual([]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
 });

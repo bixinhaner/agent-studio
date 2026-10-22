@@ -18,6 +18,8 @@ type KnowledgeSetRecord = {
 
 type KnowledgeSetRepositoryLike = {
   list(): Promise<KnowledgeSetRecord[]>;
+  /** Same sets without item rows; preferred because only the set fields are read here. */
+  listSummaries?(): Promise<KnowledgeSetRecord[]>;
 };
 
 type PolicyServiceLike = {
@@ -202,7 +204,7 @@ export class RuntimeKnowledgeSetService {
         });
 
     const knowledgeSetById = new Map(
-      (await this.options.knowledgeSets.list())
+      (await (this.options.knowledgeSets.listSummaries?.() ?? this.options.knowledgeSets.list()))
         .filter(
           (knowledgeSet) =>
             knowledgeSet.status === "active" &&

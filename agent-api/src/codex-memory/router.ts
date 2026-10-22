@@ -23,6 +23,7 @@ type CodexMemoryAdminRouterOptions = {
   };
   users?: {
     getById(id: string): Promise<{ displayName?: string; email?: string } | undefined>;
+    listByIds?(ids: string[]): Promise<Array<{ id: string; displayName?: string; email?: string }>>;
   };
   agentModes?: {
     get(id: string): Promise<{ name: string; slug: string } | undefined>;
@@ -110,6 +111,26 @@ type CodexMemoryRunLogItem = {
 
 const MAX_SCAN_DEPTH = 8;
 const MAX_SCOPE_COUNT = 2000;
+// Codex home subdirectories that never hold a memory scope but can contain tens of thousands of
+// directories (rollouts, caches, plugin checkouts). Only skipped below the organization level so an
+// organization key that happens to share a name is still scanned.
+const NON_SCOPE_CODEX_HOME_DIRECTORIES = new Set([
+  "sessions",
+  "archived_sessions",
+  "shell_snapshots",
+  "tmp",
+  ".tmp",
+  "cache",
+  "plugins",
+  "skills",
+  "thread-writer-locks",
+  "mcp-oauth-locks",
+  "generated_images",
+  ".agent-studio",
+  "log",
+  "node_modules",
+  ".git"
+]);
 const MAX_FILE_CONTENT_BYTES = 1024 * 1024;
 const MAX_RUN_LOG_ITEMS = 1000;
 const MEMORY_RUN_LOG_PATH = path.join(".agent-studio", "memory-runs.jsonl");
@@ -325,12 +346,18 @@ async function enrichMemoryScopes(
   const integrationsById = new Map<string, { id: string; type: string; slug: string; name: string; status: string }>();
 
   await Promise.all([
-    Promise.all(
-      userIds.map(async (userId) => {
-        const user = await options.users?.getById(userId);
-        if (user) usersById.set(userId, user);
-      })
-    ),
+    (async () => {
+      if (options.users?.listByIds) {
+        for (const user of await options.users.listByIds(userIds)) usersById.set(user.id, user);
+        return;
+      }
+      await Promise.all(
+        userIds.map(async (userId) => {
+          const user = await options.users?.getById(userId);
+          if (user) usersById.set(userId, user);
+        })
+      );
+    })(),
     Promise.all(
       agentModeIds.map(async (agentModeId) => {
         const mode = await options.agentModes?.get(agentModeId);
@@ -613,26 +640,30 @@ async function listMemoryScopes(sessionHomeRoot: string): Promise<CodexMemorySco
     } catch {
       return;
     }
-    for (const entry of entries) {
-      const absolutePath = path.join(current, entry.name);
-      if (!entry.isDirectory()) continue;
-      if (entry.name === "memories") {
-        const codexHome = path.dirname(absolutePath);
-        const relativeHome = toUnixRelative(path.relative(sessionHomeRoot, codexHome));
-        const memoriesPath = adminMemoryPathForCodexHome(codexHome);
-        const summary = await summarizeMemoryDirectory(memoriesPath);
-        scopes.push({
-          id: encodeScopeId(relativeHome),
-          relativeHome,
-          codexHome,
-          memoriesPath,
-          ...classifyScope(relativeHome),
-          ...summary
-        });
-        continue;
-      }
-      await walk(absolutePath, depth + 1);
-    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        const absolutePath = path.join(current, entry.name);
+        if (!entry.isDirectory()) return;
+        if (entry.name === "memories") {
+          if (scopes.length >= MAX_SCOPE_COUNT) return;
+          const codexHome = path.dirname(absolutePath);
+          const relativeHome = toUnixRelative(path.relative(sessionHomeRoot, codexHome));
+          const memoriesPath = adminMemoryPathForCodexHome(codexHome);
+          const summary = await summarizeMemoryDirectory(memoriesPath);
+          scopes.push({
+            id: encodeScopeId(relativeHome),
+            relativeHome,
+            codexHome,
+            memoriesPath,
+            ...classifyScope(relativeHome),
+            ...summary
+          });
+          return;
+        }
+        if (depth >= 1 && NON_SCOPE_CODEX_HOME_DIRECTORIES.has(entry.name)) return;
+        await walk(absolutePath, depth + 1);
+      })
+    );
   }
 
   await walk(sessionHomeRoot, 0);

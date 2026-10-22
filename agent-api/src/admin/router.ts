@@ -480,15 +480,151 @@ async function resolveEnterpriseManager(
   };
 }
 
-async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUser> {
-  const memberships = (await db.departmentMembership.findMany({
-    where: { userId: row.id },
-    orderBy: { createdAt: "asc" }
-  })) as DepartmentMembershipRow[];
+/** Per-user lookups for buildUserDetail; the list view swaps in preloaded maps instead of ~8 queries per user. */
+type UserDetailLookups = {
+  memberships(userId: string): Promise<DepartmentMembershipRow[]>;
+  departmentExternalId(departmentId: string): Promise<string>;
+  roleAssignments(userId: string): Promise<UserRoleDbRow[]>;
+  identities(userId: string): Promise<AuthIdentityRow[]>;
+  organizationMemberships(userId: string): Promise<UserOrganizationMembershipRow[]>;
+  enterpriseProfile(userId: string): Promise<EnterpriseUserProfileRow | null>;
+  manager(profile: EnterpriseUserProfileRow | null): Promise<{ displayName: string | null; email: string | null } | null>;
+};
+
+type AdminDetailTables = {
+  userRole?: { findMany(args: unknown): Promise<UserRoleDbRow[]> };
+  authIdentity?: { findMany(args: unknown): Promise<AuthIdentityRow[]> };
+  organizationMembership?: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> };
+  enterpriseUserProfile?: { findMany?(args: unknown): Promise<EnterpriseUserProfileRow[]> };
+};
+
+function singleUserDetailLookups(db: AdminDb): UserDetailLookups {
+  const tables = db as AdminDb & AdminDetailTables;
+  return {
+    memberships: async (userId) =>
+      (await db.departmentMembership.findMany({
+        where: { userId },
+        orderBy: { createdAt: "asc" }
+      })) as DepartmentMembershipRow[],
+    departmentExternalId: (departmentId) => resolveDepartmentExternalId(db, departmentId),
+    roleAssignments: async (userId) =>
+      typeof tables.userRole?.findMany === "function"
+        ? tables.userRole.findMany({ where: { userId }, include: { role: true }, orderBy: { createdAt: "asc" } })
+        : [],
+    identities: async (userId) =>
+      typeof tables.authIdentity?.findMany === "function"
+        ? tables.authIdentity.findMany({ where: { userId }, orderBy: { createdAt: "asc" } })
+        : [],
+    organizationMemberships: async (userId) =>
+      typeof tables.organizationMembership?.findMany === "function"
+        ? tables.organizationMembership.findMany({
+            where: { userId },
+            include: { organization: { include: { publicBrand: true } } },
+            orderBy: { createdAt: "asc" }
+          })
+        : [],
+    enterpriseProfile: (userId) => getEnterpriseProfileForUser(db, userId),
+    manager: (profile) => resolveEnterpriseManager(db, profile)
+  };
+}
+
+function groupByUserId<T extends { userId: string }>(rows: T[]): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = grouped.get(row.userId);
+    if (list) list.push(row);
+    else grouped.set(row.userId, [row]);
+  }
+  return grouped;
+}
+
+/**
+ * Same results as singleUserDetailLookups for every user in `rows`, loaded with one query per table.
+ * `rows` must be every user so managers resolve like the per-user lookup does.
+ */
+async function batchUserDetailLookups(db: AdminDb, rows: UserRow[]): Promise<UserDetailLookups> {
+  const tables = db as AdminDb & AdminDetailTables;
+  const single = singleUserDetailLookups(db);
+  const userIds = rows.map((row) => row.id);
+  const byUserId = { where: { userId: { in: userIds } } };
+  const [memberships, departments, roleAssignments, identities, organizationMemberships, profiles] = await Promise.all([
+    (db.departmentMembership as unknown as { findMany(args: unknown): Promise<DepartmentMembershipRow[]> }).findMany({
+      ...byUserId,
+      orderBy: { createdAt: "asc" }
+    }),
+    db.department.findMany() as Promise<DepartmentRow[]>,
+    typeof tables.userRole?.findMany === "function"
+      ? tables.userRole.findMany({ ...byUserId, include: { role: true }, orderBy: { createdAt: "asc" } })
+      : undefined,
+    typeof tables.authIdentity?.findMany === "function"
+      ? tables.authIdentity.findMany({ ...byUserId, orderBy: { createdAt: "asc" } })
+      : undefined,
+    typeof tables.organizationMembership?.findMany === "function"
+      ? tables.organizationMembership.findMany({
+          ...byUserId,
+          include: { organization: { include: { publicBrand: true } } },
+          orderBy: { createdAt: "asc" }
+        })
+      : undefined,
+    typeof tables.enterpriseUserProfile?.findMany === "function"
+      ? tables.enterpriseUserProfile.findMany(byUserId)
+      : undefined
+  ]);
+
+  const membershipsByUser = groupByUserId(memberships);
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const departmentsByExternalId = new Map(departments.map((department) => [department.externalId, department]));
+  const rolesByUser = roleAssignments ? groupByUserId(roleAssignments as Array<UserRoleDbRow & { userId: string }>) : undefined;
+  const identitiesByUser = identities ? groupByUserId(identities as Array<AuthIdentityRow & { userId: string }>) : undefined;
+  const organizationsByUser = organizationMemberships
+    ? groupByUserId(organizationMemberships as Array<UserOrganizationMembershipRow & { userId: string }>)
+    : undefined;
+  const profileByUser = new Map<string, EnterpriseUserProfileRow>();
+  for (const profile of profiles ?? []) {
+    if (!profileByUser.has(profile.userId)) profileByUser.set(profile.userId, profile);
+  }
+  const usersById = new Map(rows.map((row) => [row.id, row]));
+  const usersByDingTalkId = new Map(
+    rows.flatMap((row) => (trimOrUndefined(row.dingtalkUserId) ? [[row.dingtalkUserId as string, row] as const] : []))
+  );
+
+  return {
+    memberships: async (userId) => membershipsByUser.get(userId) ?? [],
+    departmentExternalId: async (departmentId) =>
+      (departmentsById.get(departmentId) ?? departmentsByExternalId.get(departmentId))?.externalId ?? departmentId,
+    roleAssignments: async (userId) => (rolesByUser ? rolesByUser.get(userId) ?? [] : single.roleAssignments(userId)),
+    identities: async (userId) => (identitiesByUser ? identitiesByUser.get(userId) ?? [] : single.identities(userId)),
+    organizationMemberships: async (userId) =>
+      organizationsByUser ? organizationsByUser.get(userId) ?? [] : single.organizationMemberships(userId),
+    enterpriseProfile: async (userId) => (profiles ? profileByUser.get(userId) ?? null : single.enterpriseProfile(userId)),
+    manager: async (profile) => {
+      if (!profile) return null;
+      const managerUserId = trimOrUndefined(profile.managerUserId ?? undefined);
+      const managerDingTalkUserId = trimOrUndefined(profile.managerDingTalkUserId ?? undefined);
+      const manager = managerUserId
+        ? usersById.get(managerUserId)
+        : managerDingTalkUserId
+          ? usersByDingTalkId.get(managerDingTalkUserId)
+          : undefined;
+      if (!manager) return null;
+      return {
+        displayName: trimOrUndefined(manager.displayName) ?? null,
+        email: trimOrUndefined(manager.email) ?? null
+      };
+    }
+  };
+}
+
+async function buildUserDetail(
+  db: AdminDb,
+  row: UserRow,
+  lookups: UserDetailLookups = singleUserDetailLookups(db)
+): Promise<AdminDetailUser> {
+  const memberships = await lookups.memberships(row.id);
   const departmentIds: string[] = [];
   let primaryDepartmentId: string | null = null;
   for (const membership of memberships) {
-    const externalId = await resolveDepartmentExternalId(db, membership.departmentId);
+    const externalId = await lookups.departmentExternalId(membership.departmentId);
     departmentIds.push(externalId);
     if (membership.isPrimary && !primaryDepartmentId) {
       primaryDepartmentId = externalId;
@@ -501,13 +637,7 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
     isLeader: membership.isLeader ?? null
   }));
 
-  const roleAssignments = typeof (db as AdminDb & { userRole?: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole?.findMany === "function"
-    ? await (db as AdminDb & { userRole: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole.findMany({
-        where: { userId: row.id },
-        include: { role: true },
-        orderBy: { createdAt: "asc" }
-      })
-    : [];
+  const roleAssignments = await lookups.roleAssignments(row.id);
   const assignedRoles = roleAssignments
     .filter((assignment) => assignment.role)
     .map((assignment) => ({
@@ -517,24 +647,10 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       isPrimary: Boolean(assignment.isPrimary)
     }));
   const primaryAssignment = assignedRoles.find((assignment) => assignment.isPrimary) ?? null;
-  const identityRows = typeof (db as AdminDb & { authIdentity?: { findMany(args: unknown): Promise<AuthIdentityRow[]> } }).authIdentity?.findMany === "function"
-    ? await (db as AdminDb & { authIdentity: { findMany(args: unknown): Promise<AuthIdentityRow[]> } }).authIdentity.findMany({
-        where: { userId: row.id },
-        orderBy: { createdAt: "asc" }
-      })
-    : [];
-  const organizationMembershipRows =
-    typeof (db as AdminDb & { organizationMembership?: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> } }).organizationMembership?.findMany === "function"
-      ? await (db as AdminDb & {
-          organizationMembership: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> };
-        }).organizationMembership.findMany({
-          where: { userId: row.id },
-          include: { organization: { include: { publicBrand: true } } },
-          orderBy: { createdAt: "asc" }
-        })
-      : [];
-  const enterpriseProfile = await getEnterpriseProfileForUser(db, row.id);
-  const enterpriseManager = await resolveEnterpriseManager(db, enterpriseProfile);
+  const identityRows = await lookups.identities(row.id);
+  const organizationMembershipRows = await lookups.organizationMemberships(row.id);
+  const enterpriseProfile = await lookups.enterpriseProfile(row.id);
+  const enterpriseManager = await lookups.manager(enterpriseProfile);
 
   return {
     id: row.id,
@@ -606,20 +722,10 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
 
 async function listUsers(db: AdminDb): Promise<AdminDetailUser[]> {
   const rows = (await db.user.findMany({ orderBy: { createdAt: "asc" } })) as UserRow[];
-  // Each detail needs several lookups; run a few users at a time instead of strictly one by one.
-  const result: AdminDetailUser[] = new Array(rows.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < rows.length) {
-      const index = next++;
-      result[index] = await buildUserDetail(db, rows[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(LIST_USERS_CONCURRENCY, rows.length) }, worker));
-  return result;
+  if (rows.length === 0) return [];
+  const lookups = await batchUserDetailLookups(db, rows);
+  return Promise.all(rows.map((row) => buildUserDetail(db, row, lookups)));
 }
-
-const LIST_USERS_CONCURRENCY = 8;
 
 async function getUserById(db: AdminDb, userId: string): Promise<UserRow | null> {
   const normalized = trimOrUndefined(userId);

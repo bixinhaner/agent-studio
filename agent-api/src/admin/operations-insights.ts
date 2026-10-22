@@ -1,6 +1,6 @@
 import type { DepartmentRecord } from "../persistence/department-repository.js";
 import type { OrganizationRecord } from "../persistence/organization-repository.js";
-import type { SessionRecord } from "../persistence/session-repository.js";
+import type { SessionInsightRef } from "../persistence/session-repository.js";
 import type { AuthenticatedUser } from "../persistence/user-repository.js";
 import type { UsageEventRecord } from "../persistence/usage-event-repository.js";
 import type { CodexQuotaSnapshotRecord } from "../persistence/codex-quota-snapshot-repository.js";
@@ -217,7 +217,7 @@ export type OperationsInsightsResponse = {
 
 export type BuildOperationsInsightsInput = {
   usageEvents: UsageEventRecord[];
-  sessionsById: Map<string, SessionRecord>;
+  sessionsById: Map<string, SessionInsightRef>;
   organizationsById: Map<string, OrganizationRecord>;
   usersById: Map<string, AuthenticatedUser>;
   departmentsById: Map<string, DepartmentRecord | null>;
@@ -633,7 +633,7 @@ function fallbackUserName(userId?: string, user?: AuthenticatedUser): string {
   return userId || "未关联用户";
 }
 
-function pathFromSession(session?: SessionRecord): LabeledEntity | undefined {
+function pathFromSession(session?: SessionInsightRef): LabeledEntity | undefined {
   const snapshot = session?.providerSnapshot;
   if (!snapshot) return undefined;
   if (snapshot.source === "local_auth") {

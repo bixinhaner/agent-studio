@@ -180,4 +180,15 @@ describe("OperationsAnalyticsView", () => {
     expect(screen.getByText("97.7%")).toBeTruthy();
     expect(screen.getByRole("img", { name: /回答成功率，2 天/ })).toBeTruthy();
   });
+
+  it("bypasses the server cache only when the refresh button is used", async () => {
+    vi.mocked(fetchOperationsInsights).mockResolvedValue(response);
+    render(<OperationsAnalyticsView />);
+    await screen.findByRole("table");
+    expect(vi.mocked(fetchOperationsInsights).mock.calls[0][0]).toMatchObject({ refresh: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "重新拉取" }));
+    await vi.waitFor(() => expect(fetchOperationsInsights).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(fetchOperationsInsights).mock.calls[1][0]).toMatchObject({ refresh: true });
+  });
 });

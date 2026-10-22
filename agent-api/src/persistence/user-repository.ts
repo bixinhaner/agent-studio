@@ -103,7 +103,10 @@ type UserTable = {
     where?: { email?: string; status?: string; role?: string };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<UserRow | null>;
-  findMany(args?: { where?: { status?: string; role?: string }; orderBy?: { createdAt: "asc" | "desc" } }): Promise<UserRow[]>;
+  findMany(args?: {
+    where?: { id?: { in: string[] }; status?: string; role?: string };
+    orderBy?: { createdAt: "asc" | "desc" };
+  }): Promise<UserRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<UserRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<UserRow>;
 };
@@ -262,6 +265,14 @@ export class UserRepository implements UserRepositoryLike {
     if (!userId) return undefined;
     const row = await this.db.user.findUnique({ where: { id: userId } });
     return row ? mapUser(row) : undefined;
+  }
+
+  /** One query for many users (analytics pages resolve hundreds of ids at once). */
+  async listByIds(ids: string[]): Promise<AuthenticatedUser[]> {
+    const userIds = [...new Set(ids.map((id) => trimOrUndefined(id)).filter((id): id is string => Boolean(id)))];
+    if (userIds.length === 0) return [];
+    const rows = await this.db.user.findMany({ where: { id: { in: userIds } } });
+    return rows.map(mapUser);
   }
 
   async getByExternalId(externalId: string): Promise<AuthenticatedUser | undefined> {
