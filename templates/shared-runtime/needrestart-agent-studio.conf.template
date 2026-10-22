@@ -1,6 +1,15 @@
 # Installed by scripts/deploy-agent-studio.sh as /etc/needrestart/conf.d/agent-studio.conf.
 # After unattended security upgrades needrestart restarts services that still map an old
-# library. Restarting the PM2 service stops every chat slot at once and interrupts running
-# conversations ("system update"), so it is deferred here: the next deploy's blue-green
-# switch starts processes on the new libraries without interrupting anyone.
+# library. Each service below interrupts running conversations ("system update") when restarted,
+# so those restarts are deferred:
+# - pm2: stops every chat slot at once; the next deploy's blue-green switch starts processes on
+#   the new libraries without interrupting anyone.
+# - agent-studio-workloads: every Codex app-server runs in its cgroup, so a restart kills all
+#   running turns.
+# - PostgreSQL: drops every API connection mid-turn.
+# - Caddy: cuts every open chat stream.
+# Restart the last three by hand in a quiet window (`needrestart -r l` lists what is pending).
 $nrconf{override_rc}->{qr(^pm2-__APP_USER__\.service$)} = 0;
+$nrconf{override_rc}->{qr(^agent-studio-workloads\.service$)} = 0;
+$nrconf{override_rc}->{qr(^postgresql(@.*)?\.service$)} = 0;
+$nrconf{override_rc}->{qr(^caddy\.service$)} = 0;

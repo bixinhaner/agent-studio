@@ -1458,8 +1458,8 @@ install_shared_runtime_maintenance() {
   done
 }
 
-# Unattended security upgrades must not restart the PM2 service (that stops every chat slot
-# at once and interrupts running conversations), and run in the quietest hour.
+# Unattended security upgrades must not restart services that interrupt running conversations
+# (PM2, the workload cgroup, PostgreSQL, Caddy), and run in the quietest hour.
 install_os_update_policy() {
   command -v systemctl >/dev/null 2>&1 || return 0
   local template_dir="$script_dir/../templates/shared-runtime" rendered timer_changed=0
@@ -1470,7 +1470,7 @@ install_os_update_policy() {
     if ! run_as_root cmp -s "$rendered" /etc/needrestart/conf.d/agent-studio.conf 2>/dev/null; then
       run_as_root install -d -m 755 /etc/needrestart/conf.d
       run_as_root install -o root -g root -m 644 "$rendered" /etc/needrestart/conf.d/agent-studio.conf
-      log_info "Unattended upgrades no longer restart pm2-$APP_USER.service"
+      log_info "Unattended upgrades no longer restart pm2-$APP_USER, agent-studio-workloads, PostgreSQL or Caddy"
     fi
     rm -f "$rendered"
   fi
