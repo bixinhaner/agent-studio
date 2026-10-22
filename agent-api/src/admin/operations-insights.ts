@@ -92,6 +92,12 @@ export type OperationsInsightsTrendPoint = {
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  successfulRequestCount: number;
+  failedRequestCount: number;
+  cancelledRequestCount: number;
+  /** success / (success + failed); null on days with no finished answers. */
+  successRate: number | null;
+  cacheShare: number;
   quotaUsedPercent: number | null;
   quotaDeltaPercent: number | null;
   quotaResetAt: string | null;
@@ -908,9 +914,14 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
     {
       day: string;
       requestCount: number;
+      successfulRequestCount: number;
+      failedRequestCount: number;
+      cancelledRequestCount: number;
       sessionIds: Set<string>;
       userIds: Set<string>;
       organizationIds: Set<string>;
+      inputTokens: number;
+      cachedInputTokens: number;
       totalTokens: number;
       estimatedCost: number;
       internalCost: number;
@@ -1079,27 +1090,39 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       }
     }
 
-    const trend = trendBuckets.get(record.day);
-    if (trend) {
-      trend.requestCount += requestUnit;
-      trend.totalTokens += record.totalTokens;
-      trend.estimatedCost += record.estimatedCost;
-      trend.internalCost += record.internalCost;
-      if (record.hasSession) trend.sessionIds.add(record.sessionId);
-      if (record.userId) trend.userIds.add(record.userId);
-      if (record.organizationId) trend.organizationIds.add(record.organizationId);
-    } else {
-      trendBuckets.set(record.day, {
+    let trend = trendBuckets.get(record.day);
+    if (!trend) {
+      trend = {
         day: record.day,
-        requestCount: requestUnit,
-        sessionIds: new Set<string>(record.hasSession ? [record.sessionId] : []),
-        userIds: new Set<string>(record.userId ? [record.userId] : []),
-        organizationIds: new Set<string>(record.organizationId ? [record.organizationId] : []),
-        totalTokens: record.totalTokens,
-        estimatedCost: record.estimatedCost,
-        internalCost: record.internalCost
-      });
+        requestCount: 0,
+        successfulRequestCount: 0,
+        failedRequestCount: 0,
+        cancelledRequestCount: 0,
+        sessionIds: new Set<string>(),
+        userIds: new Set<string>(),
+        organizationIds: new Set<string>(),
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        totalTokens: 0,
+        estimatedCost: 0,
+        internalCost: 0
+      };
+      trendBuckets.set(record.day, trend);
     }
+    trend.requestCount += requestUnit;
+    if (record.countsAsRequest) {
+      if (record.resultStatus === "success") trend.successfulRequestCount += 1;
+      else if (record.resultStatus === USAGE_RESULT_CANCELLED) trend.cancelledRequestCount += 1;
+      else if (isUsageFailure(record.resultStatus)) trend.failedRequestCount += 1;
+    }
+    trend.inputTokens += record.inputTokens;
+    trend.cachedInputTokens += record.cachedInputTokens;
+    trend.totalTokens += record.totalTokens;
+    trend.estimatedCost += record.estimatedCost;
+    trend.internalCost += record.internalCost;
+    if (record.hasSession) trend.sessionIds.add(record.sessionId);
+    if (record.userId) trend.userIds.add(record.userId);
+    if (record.organizationId) trend.organizationIds.add(record.organizationId);
   }
 
   const totalTokens = usageTotalTokens(inputTokens, outputTokens);
@@ -1269,6 +1292,14 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       totalTokens: bucket.totalTokens,
       estimatedCost: formatDecimal(bucket.estimatedCost),
       internalCost: formatDecimal(bucket.internalCost),
+      successfulRequestCount: bucket.successfulRequestCount,
+      failedRequestCount: bucket.failedRequestCount,
+      cancelledRequestCount: bucket.cancelledRequestCount,
+      successRate:
+        bucket.successfulRequestCount + bucket.failedRequestCount
+          ? formatRatio(bucket.successfulRequestCount / (bucket.successfulRequestCount + bucket.failedRequestCount))
+          : null,
+      cacheShare: formatRatio(usageCacheShare(bucket.inputTokens, bucket.cachedInputTokens)),
       quotaUsedPercent: quotaTrendFields.get(bucket.day)?.quotaUsedPercent ?? null,
       quotaDeltaPercent: quotaTrendFields.get(bucket.day)?.quotaDeltaPercent ?? null,
       quotaResetAt: quotaTrendFields.get(bucket.day)?.quotaResetAt ?? null,

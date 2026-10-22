@@ -65,6 +65,12 @@ export type OperationsInsightsTrendPoint = {
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  successfulRequestCount: number;
+  failedRequestCount: number;
+  cancelledRequestCount: number;
+  /** success / (success + failed); null on days with no finished answers. */
+  successRate: number | null;
+  cacheShare: number;
   quotaUsedPercent: number | null;
   quotaDeltaPercent: number | null;
   quotaResetAt: string | null;

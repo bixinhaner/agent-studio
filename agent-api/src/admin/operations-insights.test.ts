@@ -530,10 +530,24 @@ describe("buildOperationsInsights", () => {
         featureType: "chat",
         resultStatus,
         inputTokens: 100,
+        cachedInputTokens: 60,
         outputTokens: 10,
         metadata: { source: "chat_stream" },
         createdAt: `2026-04-15T01:0${index}:00.000Z`
       })),
+      makeUsageEvent({
+        id: "evt-next-day-stopped",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "deepseek-flash",
+        featureType: "chat",
+        resultStatus: "cancelled",
+        inputTokens: 100,
+        metadata: { source: "chat_stream" },
+        createdAt: "2026-04-15T20:00:00.000Z"
+      }),
       makeUsageEvent({
         id: "evt-background",
         organizationId: "org-a",
@@ -559,12 +573,33 @@ describe("buildOperationsInsights", () => {
     });
 
     expect(response.summary).toMatchObject({
-      totalRequests: 6,
+      totalRequests: 7,
       successfulRequestCount: 3,
       failedRequestCount: 1,
-      cancelledRequestCount: 2,
+      cancelledRequestCount: 3,
       successRate: 0.75
     });
+    // Days follow the local time zone: 20:00 UTC on 04-15 is 04-16 in Shanghai.
+    expect(response.trends).toEqual([
+      expect.objectContaining({
+        day: "2026-04-15",
+        requestCount: 6,
+        successfulRequestCount: 3,
+        failedRequestCount: 1,
+        cancelledRequestCount: 2,
+        successRate: 0.75,
+        cacheShare: 0.6
+      }),
+      expect.objectContaining({
+        day: "2026-04-16",
+        requestCount: 1,
+        successfulRequestCount: 0,
+        failedRequestCount: 0,
+        cancelledRequestCount: 1,
+        successRate: null,
+        cacheShare: 0
+      })
+    ]);
   });
 
   it("labels Zendesk usage as a first-class operations analytics source", () => {

@@ -1,10 +1,11 @@
-import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs, Tag, Tooltip } from "antd";
-import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search, ShieldCheck } from "lucide-react";
+import { Alert, Button, Empty, Input, Pagination, Segmented, Select, Spin, Tabs, Tag, Tooltip } from "antd";
+import { ArrowDown, ArrowUp, ArrowUpDown, Info, RefreshCcw, Search, ShieldCheck } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useModelLabel } from "../../lib/use-model-labels";
 
 import { formatUsdAmount } from "../../lib/formatters";
 import { fetchOperationsInsights } from "./api";
+import { OperationsTrendCharts } from "./OperationsTrendCharts";
 import type {
   OperationsInsightsBreakdownRow,
   OperationsInsightsOrganizationRow,
@@ -35,6 +36,8 @@ type TrendSortKey = keyof Pick<
   | "userCount"
   | "sessionCount"
   | "requestCount"
+  | "successRate"
+  | "cacheShare"
   | "totalTokens"
   | "estimatedCost"
   | "internalCost"
@@ -88,6 +91,10 @@ function formatCount(value: number): string {
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCompact(value: number): string {
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
 function formatQuotaPercent(value: number | null | undefined): string {
@@ -163,12 +170,45 @@ function SortableHeader<Key extends string>(props: {
   );
 }
 
-function MetricItem(props: { label: string; value: string; meta: string }) {
+type SummaryStat = { label: string; value: string; title?: string };
+
+function SummaryCard(props: {
+  label: string;
+  value: string;
+  valueTitle?: string;
+  caption: string;
+  stats: SummaryStat[];
+  bar?: { label: string; segments: { key: string; share: number; label: string }[] };
+}) {
   return (
-    <article className="ops-analytics-metric-item" title={`${props.label}: ${props.value} - ${props.meta}`}>
-      <span className="ops-analytics-metric-label">{props.label}</span>
-      <strong className="ops-analytics-metric-value" title={props.value}>{props.value}</strong>
-      <span className="ops-analytics-metric-meta">{props.meta}</span>
+    <article className="ops-summary-card">
+      <span className="ops-summary-label">{props.label}</span>
+      <strong className="ops-summary-value" title={props.valueTitle ?? props.value}>
+        {props.value}
+      </strong>
+      <span className="ops-summary-caption">{props.caption}</span>
+      {props.bar ? (
+        <div className="ops-summary-bar" role="img" aria-label={props.bar.label}>
+          {props.bar.segments
+            .filter((segment) => segment.share > 0)
+            .map((segment) => (
+              <span
+                key={segment.key}
+                className={`ops-summary-bar-segment is-${segment.key}`}
+                style={{ flexGrow: segment.share }}
+                title={segment.label}
+              />
+            ))}
+        </div>
+      ) : null}
+      <dl className="ops-summary-stats">
+        {props.stats.map((stat) => (
+          <div key={stat.label}>
+            <dt>{stat.label}</dt>
+            <dd title={stat.title ?? stat.value}>{stat.value}</dd>
+          </div>
+        ))}
+      </dl>
     </article>
   );
 }
@@ -279,6 +319,8 @@ const TREND_SORT_ACCESSORS: Record<TrendSortKey, (row: OperationsInsightsTrendPo
   userCount: (row) => row.userCount,
   sessionCount: (row) => row.sessionCount,
   requestCount: (row) => row.requestCount,
+  successRate: (row) => row.successRate,
+  cacheShare: (row) => row.cacheShare,
   totalTokens: (row) => row.totalTokens,
   estimatedCost: (row) => Number(row.estimatedCost),
   internalCost: (row) => Number(row.internalCost),
@@ -321,13 +363,13 @@ function sortAria<Key extends string>(sort: SortState<Key>, key: Key): "ascendin
 }
 
 function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
-  const [sort, setSort] = useState<SortState<TrendSortKey>>({ key: "day", direction: "asc" });
+  const [sort, setSort] = useState<SortState<TrendSortKey>>({ key: "day", direction: "desc" });
   const rows = useMemo(() => sortRows(props.rows, sort, TREND_SORT_ACCESSORS), [props.rows, sort]);
   const handleSort = (key: TrendSortKey, defaultDirection?: SortDirection) => setSort((current) => nextSortState(current, key, defaultDirection));
 
   return rows.length ? (
     <div className="monitoring-table-wrap">
-      <table className="monitoring-table ops-analytics-sortable-table">
+      <table className="monitoring-table ops-analytics-sortable-table ops-analytics-trend-table">
         <thead>
           <tr>
             <th aria-sort={sortAria(sort, "day")}>
@@ -344,6 +386,12 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
             </th>
             <th aria-sort={sortAria(sort, "requestCount")}>
               <SortableHeader label="问题次数" sortKey="requestCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "successRate")}>
+              <SortableHeader label="成功率" sortKey="successRate" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "cacheShare")}>
+              <SortableHeader label="缓存占比" sortKey="cacheShare" sort={sort} onSort={handleSort} />
             </th>
             <th aria-sort={sortAria(sort, "totalTokens")}>
               <SortableHeader label="总 tokens" sortKey="totalTokens" sort={sort} onSort={handleSort} />
@@ -370,6 +418,17 @@ function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
               <td>{formatCount(row.userCount)}</td>
               <td>{formatCount(row.sessionCount)}</td>
               <td>{formatCount(row.requestCount)}</td>
+              <td>
+                <Tooltip
+                  title={`成功 ${formatCount(row.successfulRequestCount)} · 失败 ${formatCount(row.failedRequestCount)} · 用户中止 ${formatCount(row.cancelledRequestCount)}`}
+                >
+                  <span className="ops-analytics-rate-cell">
+                    {row.successRate === null ? "—" : formatPercent(row.successRate)}
+                    {row.failedRequestCount > 0 ? <small>失败 {formatCount(row.failedRequestCount)}</small> : null}
+                  </span>
+                </Tooltip>
+              </td>
+              <td>{formatPercent(row.cacheShare)}</td>
               <td>{formatCount(row.totalTokens)}</td>
               <td>{formatUsdAmount(row.estimatedCost)}</td>
               <td>{formatUsdAmount(row.internalCost)}</td>
@@ -741,137 +800,103 @@ export function OperationsAnalyticsView() {
 
   const valueHint =
     data && data.summary.estimatedCost === "0.000000" && data.summary.internalCost === "0.000000"
-      ? "当前价值列为 0，说明模型定价尚未配置或未命中成本档。"
-      : "价值按每 1M tokens 的模型定价折算；内部价值=预估价值 × 内部成本系数。";
+      ? "当前价值为 0，说明模型定价尚未配置或未命中成本档。"
+      : "价值按每 1M tokens 的模型定价折算；内部价值 = 预估价值 × 内部成本系数。";
+  const summary = data?.summary;
+  const finishedAnswers = summary ? summary.successfulRequestCount + summary.failedRequestCount + summary.cancelledRequestCount : 0;
 
   return (
     <div className="admin-page-container ops-analytics-page">
-      <div className="ops-analytics-sticky-head">
-        <section className="ops-analytics-filterbar">
-          <label className="field">
-            <span className="field-label">时间窗口</span>
-            <Select
-              size="small"
-              value={days}
-              options={DAY_OPTIONS}
-              onChange={(value) => {
-                setDays(value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">组织</span>
-            <Select
-              size="small"
-              allowClear
-              placeholder="全部组织"
-              value={organizationId}
-              options={data?.options.organizations ?? []}
-              onChange={(value) => {
-                setOrganizationId(value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">模型</span>
-            <Select
-              size="small"
-              allowClear
-              placeholder="全部模型"
-              value={model}
-              options={(data?.options.models ?? []).map((option) => ({ ...option, label: modelLabel(option.value) }))}
-              onChange={(value) => {
-                setModel(value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">路径</span>
-            <Select
-              size="small"
-              allowClear
-              placeholder="全部路径"
-              value={path}
-              options={data?.options.paths ?? []}
-              onChange={(value) => {
-                setPath(value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">入口</span>
-            <Select
-              size="small"
-              allowClear
-              placeholder="全部入口"
-              value={entry}
-              options={data?.options.entries ?? []}
-              onChange={(value) => {
-                setEntry(value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <label className="field ops-analytics-search">
-            <span className="field-label">搜索</span>
-            <Input
-              size="small"
-              prefix={<Search size={14} />}
-              value={query}
-              placeholder="搜索用户 / 组织 / session / 线程 / 路径"
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setSessionPage(1);
-              }}
-            />
-          </label>
-          <div className="field ops-analytics-refresh">
-            <span className="field-label">刷新</span>
-            <Button size="small" icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((current) => current + 1)}>
-              重新拉取
-            </Button>
-          </div>
-        </section>
-
-        {data ? (
-          <div className="ops-analytics-business-summary">
-            <div className="ops-analytics-business-summary-head">
-              <strong>业务使用</strong>
-              <span>仅统计用户与渠道请求，已排除后台安全审核</span>
-            </div>
-            <section className="ops-analytics-kpi-strip" aria-label="业务运营关键指标">
-              <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有业务调用的组织" />
-              <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有业务调用的用户" />
-              <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="业务会话，不含安全审核" />
-              <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`业务请求 · 每会话 ${data.summary.avgRequestsPerSession} 次`} />
-              <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`业务使用 · 平均 ${formatCount(Math.round(data.summary.avgTokensPerRequest))} tokens/问题`} />
-              <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="业务使用按模型单价折算" />
-              <MetricItem
-                label="内部价值"
-                value={formatUsdAmount(data.summary.internalCost)}
-                meta={`业务使用 · 平均 ${formatUsdAmount(data.summary.avgInternalCostPerRequest)} /问题`}
-              />
-              <MetricItem
-                label="缓存占比"
-                value={formatPercent(data.summary.cacheShare)}
-                meta={`业务缓存写入 ${formatCount(data.summary.cacheWriteTokens)} tokens`}
-              />
-              <MetricItem label="回答成功" value={formatCount(data.summary.successfulRequestCount)} meta="完整返回回答的问题" />
-              <MetricItem label="回答失败" value={formatCount(data.summary.failedRequestCount)} meta="模型、运行环境或系统中断导致" />
-              <MetricItem label="用户中止" value={formatCount(data.summary.cancelledRequestCount)} meta="用户主动停止，不计入失败" />
-              <MetricItem
-                label="回答成功率"
-                value={formatPercent(data.summary.successRate)}
-                meta="成功 ÷（成功 + 失败），不含用户中止"
-              />
-            </section>
-          </div>
-        ) : null}
-      </div>
+      <section className="ops-analytics-toolbar" aria-label="筛选">
+        <Segmented
+          className="ops-analytics-days"
+          size="small"
+          aria-label="时间窗口"
+          value={days}
+          options={DAY_OPTIONS}
+          onChange={(value) => {
+            setDays(Number(value));
+            setSessionPage(1);
+          }}
+        />
+        <Select
+          size="small"
+          allowClear
+          aria-label="组织"
+          placeholder="全部组织"
+          popupMatchSelectWidth={false}
+          value={organizationId}
+          options={data?.options.organizations ?? []}
+          onChange={(value) => {
+            setOrganizationId(value);
+            setSessionPage(1);
+          }}
+        />
+        <Select
+          size="small"
+          allowClear
+          aria-label="模型"
+          placeholder="全部模型"
+          popupMatchSelectWidth={false}
+          value={model}
+          options={(data?.options.models ?? []).map((option) => ({ ...option, label: modelLabel(option.value) }))}
+          onChange={(value) => {
+            setModel(value);
+            setSessionPage(1);
+          }}
+        />
+        <Select
+          size="small"
+          allowClear
+          aria-label="路径"
+          placeholder="全部路径"
+          popupMatchSelectWidth={false}
+          value={path}
+          options={data?.options.paths ?? []}
+          onChange={(value) => {
+            setPath(value);
+            setSessionPage(1);
+          }}
+        />
+        <Select
+          size="small"
+          allowClear
+          aria-label="入口"
+          placeholder="全部入口"
+          popupMatchSelectWidth={false}
+          value={entry}
+          options={data?.options.entries ?? []}
+          onChange={(value) => {
+            setEntry(value);
+            setSessionPage(1);
+          }}
+        />
+        <Input
+          className="ops-analytics-search"
+          size="small"
+          allowClear
+          aria-label="搜索"
+          name="ops-analytics-search"
+          autoComplete="off"
+          spellCheck={false}
+          prefix={<Search size={14} aria-hidden="true" />}
+          value={query}
+          placeholder="搜索用户、组织、会话、线程或路径"
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setSessionPage(1);
+          }}
+        />
+        <Tooltip title="重新拉取">
+          <Button
+            size="small"
+            aria-label="重新拉取"
+            loading={loading && Boolean(data)}
+            icon={<RefreshCcw size={14} aria-hidden="true" />}
+            onClick={() => setRefreshToken((current) => current + 1)}
+          />
+        </Tooltip>
+      </section>
 
       {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
 
@@ -881,20 +906,82 @@ export function OperationsAnalyticsView() {
         </div>
       ) : null}
 
-      {data ? (
+      {data && summary ? (
         <>
-          <section className="ops-analytics-context-strip">
-            <div className="ops-analytics-context-block">
-              <span className="ops-analytics-context-label">统计窗口</span>
-              <strong>
-                {formatLocalDateTime(data.window.from)} - {formatLocalDateTime(data.window.to)}
-              </strong>
-            </div>
-            <div className="ops-analytics-context-block">
-              <span className="ops-analytics-context-label">价值口径</span>
-              <strong>{valueHint}</strong>
-            </div>
+          <section className="ops-summary-grid" aria-label="业务运营关键指标">
+            <SummaryCard
+              label="回答成功率"
+              value={summary.successfulRequestCount + summary.failedRequestCount ? formatPercent(summary.successRate) : "—"}
+              caption="成功 ÷（成功 + 失败），用户中止不计入"
+              bar={
+                finishedAnswers
+                  ? {
+                      label: `成功 ${formatCount(summary.successfulRequestCount)}，失败 ${formatCount(summary.failedRequestCount)}，用户中止 ${formatCount(summary.cancelledRequestCount)}`,
+                      segments: [
+                        { key: "success", share: summary.successfulRequestCount / finishedAnswers, label: `成功 ${formatCount(summary.successfulRequestCount)}` },
+                        { key: "failed", share: summary.failedRequestCount / finishedAnswers, label: `失败 ${formatCount(summary.failedRequestCount)}` },
+                        { key: "cancelled", share: summary.cancelledRequestCount / finishedAnswers, label: `用户中止 ${formatCount(summary.cancelledRequestCount)}` }
+                      ]
+                    }
+                  : undefined
+              }
+              stats={[
+                { label: "成功", value: formatCount(summary.successfulRequestCount) },
+                { label: "失败", value: formatCount(summary.failedRequestCount) },
+                { label: "用户中止", value: formatCount(summary.cancelledRequestCount) }
+              ]}
+            />
+            <SummaryCard
+              label="问题次数"
+              value={formatCount(summary.totalRequests)}
+              caption={`每会话 ${summary.avgRequestsPerSession} 个问题`}
+              stats={[
+                { label: "活跃用户", value: formatCount(summary.totalUsers) },
+                { label: "有效会话", value: formatCount(summary.totalSessions) },
+                { label: "活跃组织", value: formatCount(summary.totalOrganizations) }
+              ]}
+            />
+            <SummaryCard
+              label="缓存占比"
+              value={formatPercent(summary.cacheShare)}
+              caption="缓存命中的输入 tokens 占全部输入"
+              bar={{
+                label: `缓存命中 ${formatPercent(summary.cacheShare)}`,
+                segments: [
+                  { key: "cached", share: summary.cacheShare, label: `缓存命中 ${formatPercent(summary.cacheShare)}` },
+                  { key: "uncached", share: 1 - summary.cacheShare, label: `未命中 ${formatPercent(1 - summary.cacheShare)}` }
+                ]
+              }}
+              stats={[
+                { label: "总 tokens", value: formatCompact(summary.totalTokens), title: formatCount(summary.totalTokens) },
+                { label: "每问题", value: formatCompact(Math.round(summary.avgTokensPerRequest)), title: `${formatCount(Math.round(summary.avgTokensPerRequest))} tokens` },
+                { label: "缓存写入", value: formatCompact(summary.cacheWriteTokens), title: formatCount(summary.cacheWriteTokens) }
+              ]}
+            />
+            <SummaryCard
+              label="内部价值"
+              value={formatUsdAmount(summary.internalCost)}
+              caption="计入平台成本的业务使用价值"
+              stats={[
+                { label: "预估价值", value: formatUsdAmount(summary.estimatedCost) },
+                { label: "每问题", value: formatUsdAmount(summary.avgInternalCostPerRequest) }
+              ]}
+            />
           </section>
+
+          <p className="ops-analytics-context-line">
+            <span>
+              {formatLocalDateTime(data.window.from)} – {formatLocalDateTime(data.window.to)}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>仅统计用户与渠道请求，不含后台安全审核</span>
+            <Tooltip title={valueHint}>
+              <button type="button" className="ops-analytics-context-help" aria-label={`价值口径：${valueHint}`}>
+                <Info size={13} aria-hidden="true" />
+                价值口径
+              </button>
+            </Tooltip>
+          </p>
 
           <Tabs
             className="ops-analytics-tabs"
@@ -905,12 +992,15 @@ export function OperationsAnalyticsView() {
                 key: "overview",
                 label: "趋势总览",
                 children: (
-                  <TableShell
-                    title="业务趋势"
-                    subtitle="按本地时区回放业务会话、问题次数、tokens 和价值；周额度来自同一凭据与 reset epoch 的上游小时快照，尚未采集时显示 —。"
-                  >
-                    <TrendTable rows={data.trends} />
-                  </TableShell>
+                  <div className="ops-analytics-tab-panel ops-analytics-overview">
+                    <OperationsTrendCharts rows={data.trends} />
+                    <TableShell
+                      title="每日明细"
+                      subtitle="按本地时区汇总；成功率不含用户中止，悬停可看成功、失败、中止次数。周额度来自上游小时快照，未采集时显示 —。"
+                    >
+                      <TrendTable rows={data.trends} />
+                    </TableShell>
+                  </div>
                 )
               },
               {
