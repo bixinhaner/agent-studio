@@ -463,16 +463,30 @@ function toIsoString(value: string | Date): string {
   return parsed.toISOString();
 }
 
-function toDateKeyInTimeZone(value: string | Date, timeZone: string): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
-  try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
+// Building an Intl.DateTimeFormat costs far more than formatting with one, and this runs once per usage event.
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function dayFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = dayFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
       timeZone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit"
     });
+    // Time zones come from request input; keep the cache bounded.
+    if (dayFormatters.size >= 100) dayFormatters.clear();
+    dayFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+function toDateKeyInTimeZone(value: string | Date, timeZone: string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  try {
+    const formatter = dayFormatter(timeZone);
     const parts = formatter.formatToParts(date);
     const year = parts.find((part) => part.type === "year")?.value ?? "0000";
     const month = parts.find((part) => part.type === "month")?.value ?? "01";

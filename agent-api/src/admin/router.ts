@@ -620,7 +620,11 @@ async function buildUserDetail(
   row: UserRow,
   lookups: UserDetailLookups = singleUserDetailLookups(db)
 ): Promise<AdminDetailUser> {
-  const memberships = await lookups.memberships(row.id);
+  // Synced memberships often share a createdAt; break ties by id so the department order is stable.
+  const memberships = [...(await lookups.memberships(row.id))].sort(
+    (left, right) =>
+      new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || left.id.localeCompare(right.id)
+  );
   const departmentIds: string[] = [];
   let primaryDepartmentId: string | null = null;
   for (const membership of memberships) {
