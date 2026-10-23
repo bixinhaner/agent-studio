@@ -599,38 +599,72 @@ function sandboxPolicy(input: AppServerThreadOptions): Record<string, unknown> {
   return { type: "dangerFullAccess" };
 }
 
-function threadStartParams(input: AppServerThreadOptions, scopeConfig: Record<string, unknown> | undefined): Record<string, unknown> {
+/**
+ * With Codex memory on, the agent saves what a user explicitly asks it to remember as a note
+ * under its own CODEX_HOME. That folder sits outside the conversation workspace, so the sandbox
+ * has to list it; MEMORY.md and the generated memory files stay read-only.
+ */
+export function codexMemoryNotesDir(scope: Pick<RuntimeScope, "env" | "config">): string | undefined {
+  if (asRecord(scope.config?.features)?.memories !== true) return undefined;
+  const codexHome = trimOrUndefined(scope.env.CODEX_HOME);
+  return codexHome ? path.join(codexHome, "memories", "extensions", "ad_hoc", "notes") : undefined;
+}
+
+/** The sandbox only accepts writable roots that exist. */
+async function ensureCodexMemoryNotesDir(scope: Pick<RuntimeScope, "env" | "config">): Promise<void> {
+  const notesDir = codexMemoryNotesDir(scope);
+  if (notesDir) await fs.mkdir(notesDir, { recursive: true }).catch(() => undefined);
+}
+
+function withMemoryNotesRoot(input: AppServerThreadOptions, scope: Pick<RuntimeScope, "env" | "config">): AppServerThreadOptions {
+  const notesDir = codexMemoryNotesDir(scope);
+  if (!notesDir) return input;
+  const runConfig = input.codexRunConfig ?? {};
+  return {
+    ...input,
+    codexRunConfig: {
+      ...runConfig,
+      additionalDirectories: [...additionalDirectoriesFromRunConfig(runConfig), notesDir]
+    }
+  };
+}
+
+export function threadStartParams(threadOptions: AppServerThreadOptions, scope: Pick<RuntimeScope, "env" | "config">): Record<string, unknown> {
+  const input = withMemoryNotesRoot(threadOptions, scope);
   return stripUndefined({
     model: input.model,
     cwd: input.workspace,
     approvalPolicy: approvalPolicyFromRunConfig(input.codexRunConfig),
     sandbox: sandboxModeFromRunConfig(input.codexRunConfig),
-    config: mergeConfig(scopeConfig, configFromRunConfig(input)),
+    config: mergeConfig(scope.config, configFromRunConfig(input)),
     threadSource: "user"
   });
 }
 
-function threadResumeParams(
+export function threadResumeParams(
   threadId: string,
-  input: AppServerThreadOptions,
-  scopeConfig: Record<string, unknown> | undefined
+  threadOptions: AppServerThreadOptions,
+  scope: Pick<RuntimeScope, "env" | "config">
 ): Record<string, unknown> {
+  const input = withMemoryNotesRoot(threadOptions, scope);
   return stripUndefined({
     threadId,
     model: input.model,
     cwd: input.workspace,
     approvalPolicy: approvalPolicyFromRunConfig(input.codexRunConfig),
     sandbox: sandboxModeFromRunConfig(input.codexRunConfig),
-    config: mergeConfig(scopeConfig, configFromRunConfig(input))
+    config: mergeConfig(scope.config, configFromRunConfig(input))
   });
 }
 
-function turnStartParams(
+export function turnStartParams(
   threadId: string,
   message: string,
-  input: AppServerThreadOptions,
-  skills: CodexTurnSkill[]
+  threadOptions: AppServerThreadOptions,
+  skills: CodexTurnSkill[],
+  scope: Pick<RuntimeScope, "env" | "config">
 ): Record<string, unknown> {
+  const input = withMemoryNotesRoot(threadOptions, scope);
   return stripUndefined({
     threadId,
     input: [
@@ -1371,7 +1405,8 @@ class CodexAppServerManager {
         });
         assertTurnSkillsVisible(skillsResult, threadOptions.workspace, turnSkillScope.skills);
       }
-      const result = await process.request("thread/start", threadStartParams(threadOptions, turnSkillScope.scope.config));
+      await ensureCodexMemoryNotesDir(turnSkillScope.scope);
+      const result = await process.request("thread/start", threadStartParams(threadOptions, turnSkillScope.scope));
       const threadId = threadIdFromResult(result);
       if (!threadId) throw new Error("Codex app-server did not return a thread id");
       process.loadedThreads.add(threadId);
@@ -1418,7 +1453,7 @@ class CodexAppServerManager {
       if (!process.loadedThreads.has(threadId)) {
         let result: unknown;
         try {
-          result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope.config));
+          result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, turnSkillScope.scope));
         } catch (error) {
           // A fresh process cannot own a thread whose writer is still held by a
           // retired process. Reap this candidate before the caller retries so it
@@ -1791,8 +1826,9 @@ class CodexAppServerManager {
         await process.request("skills/extraRoots/set", { extraRoots: [] });
       }
 
+      await ensureCodexMemoryNotesDir(scope);
       if (!process.loadedThreads.has(thread.id)) {
-        await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
+        await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope));
         process.loadedThreads.add(thread.id);
       }
       this.threadProcessScopes.set(threadProcessKey, process.scopeKey);
@@ -1831,7 +1867,7 @@ class CodexAppServerManager {
       usageFile = await findThreadRollout(trimOrUndefined(scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"), thread.id);
       usageFileStart = usageFile ? (await fs.stat(usageFile).catch(() => undefined))?.size ?? 0 : 0;
       const result = await Promise.race([
-        process.request("turn/start", turnStartParams(thread.id, message, turnOptions, options.skills ?? [])),
+        process.request("turn/start", turnStartParams(thread.id, message, turnOptions, options.skills ?? [], scope)),
         abortPromise
       ]);
       turnId = turnIdFromResult(result);

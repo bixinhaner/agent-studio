@@ -927,6 +927,34 @@ describe("Codex app-server runtime", () => {
     expect(thread.id).toBe("thread-1");
   });
 
+  it("creates the memory notes folder and lets the turn sandbox write it when memory is on", async () => {
+    const codexHome = path.join(testTempDir, "codex-home-memory-notes");
+    const notesDir = path.join(codexHome, "memories", "extensions", "ad_hoc", "notes");
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: codexHome },
+      config: { features: { memories: true }, memories: { use_memories: true } }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: { sandboxMode: "workspace-write", approvalPolicy: "never" }
+    });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "turn-overrides", {
+      codexRunConfig: { sandboxMode: "workspace-write", approvalPolicy: "never", networkAccessEnabled: false }
+    })) {
+      if (event.delta) answer += event.delta;
+    }
+
+    expect(JSON.parse(answer).sandboxPolicy).toMatchObject({
+      type: "workspaceWrite",
+      writableRoots: [testTempDir, notesDir]
+    });
+    expect((await fs.stat(notesDir)).isDirectory()).toBe(true);
+  });
+
   it("isolates selected managed Skills while preserving automatic plugin discovery", async () => {
     const runtime = new CodexRuntime({
       envOverrides: {
