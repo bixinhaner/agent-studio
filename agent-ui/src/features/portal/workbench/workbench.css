@@ -7333,7 +7333,7 @@ button.session-rail-new-btn:active,
 .portal-workbench-root .thread-wrap .aui-user-message-content {
   background: color-mix(in srgb, var(--brand-primary, #FF4614) 7%, #ffffff) !important;
   color: var(--portal-text-strong) !important;
-  border: 1px solid color-mix(in srgb, var(--brand-primary, #FF4614) 18%, #ffffff) !important;
+  border: 1px solid transparent !important; /* tint alone marks the bubble; an outline doubled every chip edge */
   border-radius: 16px 16px 4px 16px !important;
   box-shadow: none !important;
   padding: 10px 14px !important;

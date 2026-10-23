@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { attachmentReference, inlineAttachmentIds } from "./inline-attachments";
-import { skillReference, parseInlineReferences, inlineSkillIds, inlineReferencePlainText, hasInlineComposerRequest } from "./inline-references";
+import { skillReference, parseInlineReferences, inlineSkillIds, inlineReferencePlainText, hasInlineComposerRequest, splitLeadingReferences } from "./inline-references";
 
 describe("inline skills and files", () => {
   it("keeps distinct identities, order and escaped labels across persisted message text", () => {
@@ -25,5 +25,24 @@ describe("inline skills and files", () => {
     expect(hasInlineComposerRequest(skills + "分析一下")).toBe(true);
     expect(hasInlineComposerRequest(skills, 1)).toBe(true);
     expect(hasInlineComposerRequest(attachmentReference("file", "test.md"))).toBe(true);
+  });
+});
+
+describe("splitLeadingReferences", () => {
+  it("lifts chips the message starts with onto their own row and trims the gap before the question", () => {
+    const text = `${skillReference("siteapp", "siteapp-surge-support")} ${attachmentReference("img", "image.png")} 能帮忙看看这个vpn是谁在用吗`;
+    const { leading, rest } = splitLeadingReferences(parseInlineReferences(text));
+    expect(leading.map(part => part.type)).toEqual(["skill", "attachment"]);
+    expect(rest).toEqual([{ type: "text", text: "能帮忙看看这个vpn是谁在用吗" }]);
+  });
+
+  it("keeps chips inline when they appear mid-sentence", () => {
+    const parts = parseInlineReferences(`请用 ${skillReference("a", "A")} 处理`);
+    expect(splitLeadingReferences(parts)).toEqual({ leading: [], rest: parts });
+  });
+
+  it("keeps a chips-only message inline", () => {
+    const parts = parseInlineReferences(`${skillReference("a", "A")} `);
+    expect(splitLeadingReferences(parts)).toEqual({ leading: [], rest: parts });
   });
 });

@@ -307,6 +307,8 @@ Agent 工作流比普通 CRUD 更需要解释和反馈。
 - 移动端点击：全局关闭 `-webkit-tap-highlight-color`，由组件自己的 hover/active 状态提供反馈；可点击元素加 `touch-action: manipulation` 去掉双击缩放延迟。
 - 滚动边缘渐隐：会话栏、技能列表、过程记录这类可滚动列表使用共享的 `.scroll-fade-y`，内容未滚到头的一侧边缘渐隐，滚到顶或滚到底时该侧恢复清晰。不要给整页正文滚动区加渐隐，以免遮住正在阅读的文字。
 - 单闭合边框：已有边框的容器（composer、卡片、popover）内部的次级按钮和 chip 不再画边框，用 `--portal-surface-2/3` 底色区分；只有输入焦点和主操作允许出现内层描边。
+- composer 统一控件：工具栏所有控件（`+`、工作区、Skills、立即引导/加入队列、停止、发送）共用 `--composer-control-h`（桌面 36px，手机 44px）和 10px 圆角；闲置控件无底无框，hover 用 `--portal-surface-2`，“已开启”状态用品牌弱强调底（`--composer-ref-skill-bg`）+ 品牌文字色，不再出现蓝色；主操作只有一个实心品牌色按钮。
+- 引用 chip：Skill chip 在按钮、输入框、已发送消息里都用同一套品牌弱强调色；文件 chip 用中性底 + 按类型着色的图标；chip 不画边框、不加下划线，高度跟随所在文字行并垂直居中。消息以 chip 开头时，chip 单独成一行，问题文字从下一行开始。
 - 按区域宽度响应：聊天列宽度随会话栏、右侧面板变化，composer 工具栏、消息操作条、空状态使用 `@container` 而不是 viewport media query 收缩：先隐藏按钮文字只留图标，再收起次要操作。
 - 键盘可达：弹出菜单（`/` 指令、`@` 引用、技能选择）支持 ↑/↓ 移动、Enter 选择、Esc 关闭，使用 `role="listbox"` / `role="option"` 与 `aria-activedescendant` 让读屏软件知道当前项。
 - 中文输入法：Enter 发送前必须排除 `isComposing`、`keyCode === 229`、`key === "Process"`，统一走 `composer-keyboard.ts`。

@@ -4949,7 +4949,7 @@
   --portal-shimmer-highlight: #d4d4d8;
   --portal-text-strong: var(--portal-text-1);
   --portal-text-muted: var(--portal-text-2);
-  --portal-line: var(--portal-line);
+  --portal-line: #3e3b33;
 }
 :root[data-portal-theme="dark"] .portal-workbench-root .thread-wrap .aui-assistant-message-content {
   background: transparent !important;
@@ -4960,7 +4960,7 @@
 :root[data-portal-theme="dark"] .portal-workbench-root .thread-wrap .aui-user-message-content {
   background: color-mix(in srgb, var(--brand-primary, #FF4614) 7%, var(--portal-surface-1)) !important;
   color: var(--portal-text-strong) !important;
-  border: 1px solid color-mix(in srgb, var(--brand-primary, #ff3600) 18%, var(--portal-line-subtle)) !important;
+  border: 1px solid transparent !important;
   box-shadow: none !important;
 }
 :root[data-portal-theme="dark"] .portal-workbench-root .thread-wrap .aui-user-message-content a {
@@ -5282,21 +5282,18 @@
   color: var(--workbench-muted, var(--portal-text-2));
 }
 :root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip {
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  border-color: color-mix(in srgb, currentColor 22%, transparent);
+  border: 0;
+  background: color-mix(in srgb, var(--portal-surface-1) 72%, transparent);
   color: inherit;
 }
 :root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip:hover {
-  background: color-mix(in srgb, currentColor 19%, transparent);
+  background: var(--portal-surface-1);
 }
 :root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip:focus-visible {
   outline-color: currentColor;
 }
-:root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip > svg {
-  color: inherit;
-}
-:root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip:not(.inline-skill-chip) .inline-file-name {
-  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+:root[data-portal-theme="dark"] .portal-inline-message-text .inline-file-chip.is-failed {
+  border: 1px dashed currentColor;
 }
 :root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection {
   color: var(--workbench-accent, var(--brand-primary, #e97353));
@@ -5304,6 +5301,76 @@
 :root[data-portal-theme="dark"] .portal-composer-tools-left .local-workspace-error {
   background: var(--workbench-surface, var(--portal-surface-1));
   border: 1px solid var(--workbench-border, var(--portal-line-subtle));
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-running-composer-actions .portal-running-action {
+  border: 0;
+  box-shadow: none;
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger {
+  background: transparent;
+  color: var(--portal-text-2);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger:hover,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger:hover {
+  background: var(--portal-surface-2);
+  color: var(--portal-text-1);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger.is-active,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection {
+  background: var(--composer-ref-skill-bg);
+  color: var(--composer-ref-skill-fg);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger.is-active:hover,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection:hover {
+  background: var(--composer-ref-skill-bg-hover);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection > svg:first-child {
+  color: var(--workbench-accent);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.is-offline {
+  border: 0;
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-running-composer-actions .portal-running-action {
+  background: var(--portal-surface-2);
+  color: var(--portal-text-1);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-running-composer-actions .portal-running-action:hover:not(:disabled) {
+  background: var(--portal-surface-3);
+  color: var(--portal-text-1);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-running-composer-actions .portal-running-action.is-primary {
+  background: var(--workbench-accent);
+  color: #ffffff;
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-running-composer-actions .portal-running-action.is-primary:hover:not(:disabled) {
+  background: var(--workbench-accent-strong);
+  color: #ffffff;
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-file-chip {
+  border: 0;
+  background: var(--portal-surface-2);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-file-chip:hover {
+  background: var(--portal-surface-3);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-skill-chip,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-message-text .inline-skill-chip {
+  background: var(--composer-ref-skill-bg);
+  color: var(--composer-ref-skill-fg);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-skill-chip:hover,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-message-text .inline-skill-chip:hover {
+  background: var(--composer-ref-skill-bg-hover);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-skill-chip > svg,
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-message-text .inline-skill-chip > svg {
+  color: var(--workbench-accent);
+}
+:root[data-portal-theme="dark"] .portal-workbench-root .portal-inline-editor .inline-file-chip.is-failed {
+  border: 1px dashed currentColor;
 }
 
 /* ---- features/portal/workbench/local-workspace.css ---- */

@@ -32,25 +32,32 @@
 .inline-file-actions button { display: inline-flex; gap: 6px; align-items: center; border: 0; background: transparent; color: inherit; padding: 6px; font: inherit; font-size: 13px; cursor: pointer; min-height: 32px; }
 .portal-inline-draft-notice { color: var(--workbench-muted, #778091); font-size: 12px; }
 .portal-inline-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Sent-message chips sit on the tinted user bubble: a light label, no border,
+   sized to the text line so the question still reads as one sentence. */
 .portal-inline-message-text .inline-file-chip {
   max-width: min(440px, 95%);
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  border-color: color-mix(in srgb, currentColor 22%, transparent);
-  color: inherit;
-  font-size: inherit;
-  line-height: 1.5;
-  vertical-align: baseline;
+  min-height: 0;
+  margin: 0 2px;
+  padding: 1px 8px;
+  gap: 5px;
+  border: 0;
   border-radius: 7px;
+  background: color-mix(in srgb, var(--portal-surface-1) 72%, transparent);
+  color: inherit;
+  font-size: 0.875em;
+  font-weight: 500;
+  line-height: 22px;
+  vertical-align: middle;
 }
-.portal-inline-message-text .inline-file-chip:hover { background: color-mix(in srgb, currentColor 19%, transparent); }
+.portal-inline-message-text .inline-file-chip:hover { background: var(--portal-surface-1); }
 .portal-inline-message-text .inline-file-chip:focus-visible { outline-color: currentColor; }
-.portal-inline-message-text .inline-file-chip > svg { color: inherit; }
-.portal-inline-message-text .inline-file-chip:not(.inline-skill-chip) .inline-file-name {
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
-  text-underline-offset: 3px;
-}
-.portal-inline-message-text .inline-file-chip.is-failed { border-style: dashed; }
+.portal-inline-message-text .inline-file-chip > svg { width: 15px; height: 15px; }
+.portal-inline-message-text .inline-file-chip .inline-file-thumb { width: 18px; height: 18px; border-radius: 4px; }
+.portal-inline-message-text .inline-file-chip.is-failed { border: 1px dashed currentColor; }
+/* Chips the message starts with get their own row above the question text. */
+.portal-inline-message-refs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* The bubble sizes itself to a lone chip, so a percentage cap would always clip it. */
+.portal-inline-message-refs .inline-file-chip { max-width: min(440px, 100%); margin: 0; }
 .portal-workbench-root .portal-composer-tools-left { flex-wrap: nowrap; min-width: 0; }
 .portal-workbench-root .portal-composer-tools-left .local-workspace-controls { margin: 0; padding: 0; max-width: min(320px, 45vw); flex-shrink: 1; }
 .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger { min-height: 40px; font-family: inherit; font-size: 14px; max-width: 100%; }
@@ -64,7 +71,8 @@
 .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger { border-radius: 10px; font-family: inherit; font-weight: 500; font-size: 14px; }
 .portal-workbench-root .portal-composer-skill-trigger-text { font: inherit; }
 .portal-workbench-root .thread-wrap .portal-composer-tools-row .aui-composer-attach,
-.portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-upload-send { width: 40px !important; min-width: 40px !important; height: 40px !important; min-height: 40px !important; flex-basis: 40px !important; }
+.portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-upload-send,
+.portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-stop-btn { width: var(--composer-control-h) !important; min-width: var(--composer-control-h) !important; height: var(--composer-control-h) !important; min-height: var(--composer-control-h) !important; flex-basis: var(--composer-control-h) !important; }
 @media (max-width: 760px) {
   .portal-inline-editor { min-height: 52px; max-height: min(224px, 30dvh); padding: 6px 4px; line-height: 46px; }
   .portal-inline-placeholder { left: 4px; font-size: 16px; }
@@ -80,6 +88,111 @@
   .portal-workbench-root .thread-wrap .portal-composer-tools-row .aui-composer-attach,
   .portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-upload-send,
   .portal-workbench-root .thread-wrap .portal-composer-tools-row .portal-stop-btn { width: 44px !important; min-width: 44px !important; height: 44px !important; min-height: 44px !important; flex-basis: 44px !important; }
-  .portal-workbench-root .portal-composer-tools-row:has(.portal-running-composer-actions) { flex-wrap: wrap; }
+  .portal-workbench-root .portal-composer-tools-row:has(.portal-running-composer-actions) { flex-wrap: wrap; row-gap: 6px; }
+  /* Wrapped below the tools, the run controls stay where the send button was. */
+  .portal-workbench-root .portal-composer-tools-row .portal-running-composer-actions { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .inline-file-spinner { animation: none; } }
+
+/* ---- One control language for the composer (design.md 交互手感) ----
+   Every tool-row control shares one height and radius; idle controls are quiet
+   (no fill, no border), anything "on" uses the brand-soft fill, and Skills use
+   the same brand accent everywhere (button, editor chip, sent-message chip). */
+.portal-workbench-root {
+  --composer-control-h: 36px;
+  --composer-control-radius: 10px;
+  --composer-ref-skill-bg: color-mix(in srgb, var(--workbench-accent) 10%, var(--portal-surface-1));
+  --composer-ref-skill-bg-hover: color-mix(in srgb, var(--workbench-accent) 16%, var(--portal-surface-1));
+  --composer-ref-skill-fg: color-mix(in srgb, var(--workbench-accent) 78%, var(--portal-text-1));
+}
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger,
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger,
+.portal-workbench-root .portal-running-composer-actions .portal-running-action {
+  height: var(--composer-control-h);
+  min-height: var(--composer-control-h);
+  padding: 0 10px;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--composer-control-radius);
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+}
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger,
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger {
+  background: transparent;
+  color: var(--portal-text-2);
+}
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger:hover,
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger:hover {
+  background: var(--portal-surface-2);
+  color: var(--portal-text-1);
+}
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger.is-active,
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection {
+  background: var(--composer-ref-skill-bg);
+  color: var(--composer-ref-skill-fg);
+}
+.portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger.is-active:hover,
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection:hover {
+  background: var(--composer-ref-skill-bg-hover);
+}
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.has-selection > svg:first-child { color: var(--workbench-accent); }
+.portal-workbench-root .portal-composer-tools-left .local-workspace-trigger.is-offline { border: 0; }
+.portal-workbench-root .portal-composer-skill-trigger-text { font: inherit; }
+.portal-workbench-root .portal-running-composer-actions .portal-running-action {
+  background: var(--portal-surface-2);
+  color: var(--portal-text-1);
+}
+.portal-workbench-root .portal-running-composer-actions .portal-running-action:hover:not(:disabled) {
+  background: var(--portal-surface-3);
+  color: var(--portal-text-1);
+}
+.portal-workbench-root .portal-running-composer-actions .portal-running-action.is-primary {
+  background: var(--workbench-accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+.portal-workbench-root .portal-running-composer-actions .portal-running-action.is-primary:hover:not(:disabled) {
+  background: var(--workbench-accent-strong);
+  color: #ffffff;
+}
+
+/* Editor chips: no border, one line tall, centred on the typed text (an
+   inline-flex box otherwise sits on its icon's bottom edge and floats high). */
+.portal-workbench-root .portal-inline-editor .inline-file-chip {
+  height: 28px;
+  min-height: 28px;
+  margin: 0 2px;
+  padding: 0 8px;
+  gap: 5px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--portal-surface-2);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 28px;
+  vertical-align: middle;
+}
+.portal-workbench-root .portal-inline-editor .inline-file-chip:hover { background: var(--portal-surface-3); }
+.portal-workbench-root .portal-inline-editor .inline-file-chip > svg { width: 16px; height: 16px; }
+.portal-workbench-root .portal-inline-editor .inline-skill-chip,
+.portal-workbench-root .portal-inline-message-text .inline-skill-chip {
+  background: var(--composer-ref-skill-bg);
+  color: var(--composer-ref-skill-fg);
+}
+.portal-workbench-root .portal-inline-editor .inline-skill-chip:hover,
+.portal-workbench-root .portal-inline-message-text .inline-skill-chip:hover { background: var(--composer-ref-skill-bg-hover); }
+.portal-workbench-root .portal-inline-editor .inline-skill-chip > svg,
+.portal-workbench-root .portal-inline-message-text .inline-skill-chip > svg { color: var(--workbench-accent); }
+.portal-workbench-root .portal-inline-editor .inline-file-chip.is-failed { border: 1px dashed currentColor; }
+
+
+@media (max-width: 760px) {
+  .portal-workbench-root { --composer-control-h: 44px; }
+  .portal-workbench-root .portal-composer-tools-left .portal-composer-skill-trigger,
+  .portal-workbench-root .portal-composer-tools-left .local-workspace-trigger { padding: 0 8px; gap: 4px; }
+  .portal-workbench-root .portal-inline-editor .inline-file-chip { height: 32px; min-height: 32px; line-height: 32px; }
+}

@@ -154,8 +154,12 @@ function semanticToken(color, hsl, role) {
   return null;
 }
 
-/** role: "surface" | "text" | "line" */
-function mapColor(token, role) {
+/**
+ * role: "surface" | "text" | "line". `avoidToken` is the custom property being
+ * declared: `--portal-line: #ecebe8` must not become `var(--portal-line)`, a
+ * self-reference that invalidates the variable for the whole subtree.
+ */
+function mapColor(token, role, avoidToken) {
   const color = parseColor(token);
   if (!color) return token;
   const hsl = toHsl(color);
@@ -165,7 +169,7 @@ function mapColor(token, role) {
     return format([255, 255, 255], Math.min(0.24, color.a * 1.4 + 0.02));
   }
   const semantic = vivid ? null : semanticToken(color, hsl, role);
-  if (semantic) return tokenRef(semantic, color.a);
+  if (semantic && semantic !== avoidToken) return tokenRef(semantic, color.a);
   if (role === "text") {
     if (hsl.l >= 0.55) return token; // already light (text on coloured fills)
     if (vivid) return format(fromHsl({ ...hsl, l: Math.max(hsl.l, 0.62) }), color.a);
@@ -192,8 +196,8 @@ function mapColor(token, role) {
 
 const COLOR_TOKEN = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|\b(?:white|black)\b/g;
 
-function mapValue(value, role) {
-  return value.replace(COLOR_TOKEN, (token) => mapColor(token, role));
+function mapValue(value, role, avoidToken) {
+  return value.replace(COLOR_TOKEN, (token) => mapColor(token, role, avoidToken));
 }
 
 function roleFor(prop) {
@@ -218,7 +222,7 @@ function transformDeclaration(prop, value) {
     if (!COLOR_TOKEN.test(value)) return null;
     COLOR_TOKEN.lastIndex = 0;
     const role = roleForCustomProperty(prop, value);
-    return role ? mapValue(value, role) : null;
+    return role ? mapValue(value, role, prop) : null;
   }
   if (!COLOR_PROPS.has(prop)) return null;
   const role = roleFor(prop);
@@ -327,6 +331,14 @@ for (const source of SOURCES) {
   if (!fs.existsSync(file)) continue;
   const css = stripComments(fs.readFileSync(file, "utf8"));
   output += `\n/* ---- ${source} ---- */\n${walk(css)}`;
+}
+// A custom property that refers to itself is invalid and silently breaks every
+// rule using it in dark mode; refuse to write such output.
+const selfReferences = [...output.matchAll(/(--[\w-]+)\s*:\s*([^;{}]*)/g)].filter(([, name, value]) =>
+  new RegExp(`var\\(\\s*${name}\\s*[,)]`).test(value)
+);
+if (selfReferences.length > 0) {
+  throw new Error(`self-referencing custom properties: ${selfReferences.map(([match]) => match).join("; ")}`);
 }
 fs.writeFileSync(path.join(root, OUTPUT), output);
 console.log(`wrote ${OUTPUT} (${(output.length / 1024).toFixed(1)} KB)`);

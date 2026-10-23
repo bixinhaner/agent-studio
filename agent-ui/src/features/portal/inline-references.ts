@@ -39,3 +39,27 @@ export function hasInlineComposerRequest(text: string, attachmentCount = 0): boo
   return attachmentCount > 0 || parseInlineReferences(text).some(part =>
     part.type === "attachment" || (part.type === "text" && !!part.text.trim()));
 }
+
+// Chips a message starts with (skills, files) read as context for the question,
+// so they are shown on their own row; whitespace between them is dropped and the
+// question text starts cleanly below. Messages without other content stay inline.
+export function splitLeadingReferences(parts: readonly InlineReference[]): {
+  leading: InlineReference[];
+  rest: InlineReference[];
+} {
+  let index = 0;
+  const leading: InlineReference[] = [];
+  while (index < parts.length) {
+    const part = parts[index];
+    if (part.type !== "text") leading.push(part);
+    else if (part.text.trim()) break;
+    index += 1;
+  }
+  const rest = parts.slice(index);
+  if (leading.length === 0 || rest.length === 0) return { leading: [], rest: [...parts] };
+  const [first, ...others] = rest;
+  return {
+    leading,
+    rest: first.type === "text" ? [{ type: "text", text: first.text.replace(/^\s+/, "") }, ...others] : rest
+  };
+}
