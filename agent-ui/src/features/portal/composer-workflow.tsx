@@ -35,6 +35,7 @@ import {
 } from "./composer-workflow-state";
 import { usePortalI18n } from "./i18n";
 import { inlineReferencePlainText } from "./inline-references";
+import { takeTextKeptForReload } from "../../lib/build-version-refresh";
 
 type QueueState = Pick<PortalComposerStoredState, "queue" | "pausedReason">;
 
@@ -655,7 +656,10 @@ export function usePortalComposerDraftPersistence(input: {
     // is newer than storage, especially before the first remote draft is saved.
     const liveDraftOnMount = !previous && text !== "";
     const sameScope = previous?.threadId === threadId && previous.runtimeThreadId === runtimeThreadId;
-    const savedDraft = promoted || liveDraftOnMount || sameScope ? text : readDraft();
+    // A send interrupted by a version reload comes back here once, on the first composer mount.
+    const keptForReload = previous ? "" : takeTextKeptForReload();
+    const savedDraft = promoted || liveDraftOnMount || sameScope ? text : readDraft() || keptForReload;
+    if (keptForReload && savedDraft === keptForReload) writeDraft(savedDraft);
     if (promoted) { previous.writeDraft(""); writeDraft(savedDraft); }
     else if (liveDraftOnMount) writeDraft(savedDraft);
     previousScope.current = { runtimeThreadId, threadId, writeDraft };

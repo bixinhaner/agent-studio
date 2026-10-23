@@ -41,6 +41,10 @@ const STAGE_COPY: Record<string, { label: string; reason: string }> = {
   chat_stream_recovered: {
     label: "发送重试后成功",
     reason: "第一次发送因网络问题没送达，浏览器自动重试后成功，用户无感知；仅用于观察网络质量。"
+  },
+  page_outdated: {
+    label: "页面版本过旧，已自动刷新",
+    reason: "用户打开的是旧版本页面，服务器不再接受它的发送请求；页面已自动刷新到新版本，并把文字放回输入框，用户需再点一次发送。"
   }
 };
 

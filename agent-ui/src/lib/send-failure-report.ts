@@ -17,7 +17,9 @@ export type SendFailureStage =
   /** A single-request send that never reached the server after the silent retries. */
   | "chat_stream"
   /** A single-request send that reached the server only after a retry (network quality signal). */
-  | "chat_stream_recovered";
+  | "chat_stream_recovered"
+  /** The server rejected a send from an old release of the page, which then reloaded itself. */
+  | "page_outdated";
 
 export type SendFailureAttachment = {
   name: string;

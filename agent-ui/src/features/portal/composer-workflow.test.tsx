@@ -263,4 +263,22 @@ describe("portal composer workflow controller", () => {
     act(() => window.dispatchEvent(new Event("pagehide")));
     expect(drafts["thread-b"]).toBe("draft before closing");
   });
+
+  it("puts the text of a send interrupted by a version reload back into the message box once", () => {
+    window.sessionStorage.setItem("agent-studio:text-kept-for-reload", "10月11那周的周报");
+    const drafts: Record<string, string> = {};
+    const restoreText = vi.fn();
+    const { unmount } = renderHook(() => {
+      const readDraft = useCallback(() => drafts["thread-a"] ?? "", []);
+      const writeDraft = useCallback((value: string) => {
+        drafts["thread-a"] = value;
+      }, []);
+      usePortalComposerDraftPersistence({ text: "", threadId: "thread-a", readDraft, writeDraft, restoreText });
+    });
+
+    expect(restoreText).toHaveBeenCalledWith("10月11那周的周报");
+    expect(drafts["thread-a"]).toBe("10月11那周的周报");
+    expect(window.sessionStorage.getItem("agent-studio:text-kept-for-reload")).toBeNull();
+    unmount();
+  });
 });

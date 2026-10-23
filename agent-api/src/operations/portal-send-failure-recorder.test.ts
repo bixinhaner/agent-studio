@@ -106,7 +106,12 @@ describe("portal send failure router", () => {
       .set("x-test-user", "user-1")
       .send({ stage: "chat_stream_recovered", error_code: "recovered_after_retry", detail: "attempts=2", client_run_id: "run-2" })
       .expect(202);
-    expect(recorded.map((item) => item.stage)).toEqual(["chat_stream", "chat_stream_recovered"]);
+    await request(app)
+      .post("/api/send-failures")
+      .set("x-test-user", "user-1")
+      .send({ stage: "page_outdated", error_code: "http_404", detail: "SSE request failed (404)", client_run_id: "run-3" })
+      .expect(202);
+    expect(recorded.map((item) => item.stage)).toEqual(["chat_stream", "chat_stream_recovered", "page_outdated"]);
   });
 
   it("rejects unknown stages and malformed bodies", async () => {

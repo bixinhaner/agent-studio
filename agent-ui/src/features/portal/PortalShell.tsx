@@ -55,6 +55,7 @@ import { LocalWorkspaceContext, LocalWorkspaceDialogs, useLocalWorkspace } from 
 import { PortalThread, PortalThreadSwitchingPlaceholder } from "./PortalThread";
 import { reportClientError } from "../../lib/client-error-report";
 import { reportSendFailure } from "../../lib/send-failure-report";
+import { isRejectedAsOutdatedRequest, reloadIfOutdatedAfterRejectedSend } from "../../lib/build-version-refresh";
 import { PortalThreadErrorBoundary } from "./PortalThreadErrorBoundary";
 import { resolvePortalChatRecoveryActive } from "./chat-recovery";
 import { completedAssistantContentForParent, isPortalTransportDisconnect } from "./background-run-recovery";
@@ -3895,6 +3896,26 @@ export function PortalShell(props: {
               updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
               // The empty-answer view turns this error into the "not sent" notice with a resend button.
               throw new Error("portal_send_not_delivered");
+            }
+            const rejectedStatus = /SSE request failed \((\d+)\)/.exec(error instanceof Error ? error.message : "");
+            if (
+              !options.abortSignal.aborted &&
+              rejectedStatus &&
+              isRejectedAsOutdatedRequest(Number(rejectedStatus[1])) &&
+              await reloadIfOutdatedAfterRejectedSend(prompt)
+            ) {
+              // An old release of this page: it reloads now and puts the text back in the message box.
+              portalRunFailed = true;
+              reportSendFailure({
+                stage: "page_outdated",
+                threadId,
+                error,
+                errorCode: `http_${rejectedStatus[1]}`,
+                clientRunId,
+                ...sendFailureContext
+              });
+              setErrorText("");
+              throw error;
             }
             if (options.abortSignal.aborted || portalRunFailed || !isPortalTransportDisconnect(error)) {
               throw error;

@@ -98,7 +98,9 @@ const CLIENT_STAGES = [
   "session_start",
   // Single-request sends: never accepted after the silent retries, or accepted only after a retry.
   "chat_stream",
-  "chat_stream_recovered"
+  "chat_stream_recovered",
+  // An old release of the page sent a request the server no longer accepts; the page reloaded.
+  "page_outdated"
 ] as const;
 
 const clientSendFailureSchema = z.object({

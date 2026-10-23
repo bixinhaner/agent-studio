@@ -13,6 +13,7 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const VISIBLE_IDLE_REFRESH_MS = 5 * 60 * 1000;
 const RUN_FINISHED_GRACE_MS = 60 * 1000;
 const PENDING_RETRY_MAX_MS = 60 * 1000;
+const TEXT_KEPT_FOR_RELOAD_KEY = "agent-studio:text-kept-for-reload";
 const USER_ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "scroll", "touchstart", "focusin", "input"];
 
 let installed = false;
@@ -25,18 +26,25 @@ let activityState: RefreshActivityState = {
 let pendingBuildId = "";
 let retryTimer: number | undefined;
 
-function activeElementIsEditable(): boolean {
+/**
+ * Typing into a focused field holds the reload back. A focused but empty field does not: the
+ * portal keeps its message box focused, so a visible tab would otherwise stay on an old release
+ * for days and keep calling endpoints that no longer exist.
+ */
+export function activeElementHasTypedText(): boolean {
   const element = document.activeElement;
   if (!(element instanceof HTMLElement)) return false;
-  if (element.isContentEditable) return true;
-
-  const tagName = element.tagName.toLowerCase();
-  if (tagName === "textarea" || tagName === "select") return true;
-  if (element.getAttribute("role") === "textbox") return true;
-
-  if (!(element instanceof HTMLInputElement)) return false;
-  const type = element.type.toLowerCase();
-  return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(type);
+  if (element instanceof HTMLTextAreaElement) return element.value.trim() !== "";
+  if (element instanceof HTMLSelectElement) return true;
+  if (element instanceof HTMLInputElement) {
+    const type = element.type.toLowerCase();
+    if (["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(type)) return false;
+    return element.value.trim() !== "";
+  }
+  if (element.isContentEditable || element.getAttribute("role") === "textbox") {
+    return (element.textContent ?? "").trim() !== "";
+  }
+  return false;
 }
 
 function userIsSelectingText(): boolean {
@@ -81,7 +89,7 @@ function maybeRefreshForPendingVersion(): void {
     return;
   }
 
-  if (activeElementIsEditable() || userIsSelectingText()) {
+  if (activeElementHasTypedText() || userIsSelectingText()) {
     schedulePendingRetry();
     return;
   }
@@ -95,23 +103,70 @@ function maybeRefreshForPendingVersion(): void {
   reloadForNewVersion();
 }
 
-async function checkBuildVersion(): Promise<void> {
-  if (!CURRENT_BUILD_ID || pendingBuildId) return;
-
+async function fetchServerBuildId(): Promise<string> {
   try {
     const response = await fetch(`${VERSION_URL}?t=${Date.now()}`, {
       cache: "no-store",
       credentials: "same-origin"
     });
-    if (!response.ok) return;
+    if (!response.ok) return "";
     const data = (await response.json()) as ServerVersion;
-    const serverBuildId = typeof data.buildId === "string" ? data.buildId.trim() : "";
-    if (!serverBuildId || serverBuildId === CURRENT_BUILD_ID) return;
-
-    pendingBuildId = serverBuildId;
-    maybeRefreshForPendingVersion();
+    return typeof data.buildId === "string" ? data.buildId.trim() : "";
   } catch {
     // Version checks should never interrupt the app.
+    return "";
+  }
+}
+
+async function checkBuildVersion(): Promise<void> {
+  if (!CURRENT_BUILD_ID || pendingBuildId) return;
+  const serverBuildId = await fetchServerBuildId();
+  if (!serverBuildId || serverBuildId === CURRENT_BUILD_ID) return;
+  pendingBuildId = serverBuildId;
+  maybeRefreshForPendingVersion();
+}
+
+/** HTTP statuses a newer release gives a request it no longer knows (removed route, changed body). */
+const OUTDATED_PAGE_STATUSES = new Set([400, 404, 405, 410, 422]);
+
+export function isRejectedAsOutdatedRequest(status: number): boolean {
+  return OUTDATED_PAGE_STATUSES.has(status);
+}
+
+/**
+ * A send the server rejected may come from a page that is an old release. When the server runs
+ * a newer build, the unsent text is kept for the message box and the page reloads right away,
+ * since the user is waiting on this send. Returns true when the reload has started.
+ */
+export async function reloadIfOutdatedAfterRejectedSend(
+  unsentText: string,
+  reload: () => void = reloadForNewVersion
+): Promise<boolean> {
+  if (!CURRENT_BUILD_ID || typeof window === "undefined") return false;
+  const serverBuildId = await fetchServerBuildId();
+  if (!serverBuildId || serverBuildId === CURRENT_BUILD_ID) return false;
+  keepTextForReload(unsentText);
+  reload();
+  return true;
+}
+
+function keepTextForReload(text: string): void {
+  if (!text.trim()) return;
+  try {
+    window.sessionStorage.setItem(TEXT_KEPT_FOR_RELOAD_KEY, text);
+  } catch {
+    // Without storage the text is lost, the reload still fixes sending.
+  }
+}
+
+/** The text of a send that was interrupted by a version reload, returned once. */
+export function takeTextKeptForReload(): string {
+  try {
+    const text = window.sessionStorage.getItem(TEXT_KEPT_FOR_RELOAD_KEY) ?? "";
+    window.sessionStorage.removeItem(TEXT_KEPT_FOR_RELOAD_KEY);
+    return text;
+  } catch {
+    return "";
   }
 }
 
