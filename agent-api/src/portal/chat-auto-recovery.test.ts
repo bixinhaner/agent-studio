@@ -6,6 +6,7 @@ import {
   portalAutoRecoveryPrompt,
   portalRuntimeEventHasNonResumableSideEffect,
   portalRuntimeEventIndicatesTurnStarted,
+  planPortalChatRetry,
   portalRuntimeEventStartsFinalAnswer,
   shouldAutoRecoverPortalChat
 } from "./chat-auto-recovery.js";
@@ -96,4 +97,34 @@ describe("portal chat automatic recovery", () => {
     expect(message.metadata.custom.runId).toBe("run-1");
   });
 
+});
+
+describe("planPortalChatRetry", () => {
+  const busy = new Error("exceeded retry limit, last status: 429 Too Many Requests");
+  const base = {
+    upstreamRetries: 0,
+    connectionRecoveryAttempted: false,
+    finalAnswerStarted: false,
+    nonResumableSideEffectStarted: false,
+    aborted: false
+  };
+
+  it("retries a busy model service twice, slowly, then gives up", () => {
+    expect(planPortalChatRetry({ ...base, error: busy })).toEqual({ reason: "upstream_busy", delayMs: 10_000, upstreamKind: "rate_limited" });
+    expect(planPortalChatRetry({ ...base, error: busy, upstreamRetries: 1 })).toEqual({ reason: "upstream_busy", delayMs: 30_000, upstreamKind: "rate_limited" });
+    expect(planPortalChatRetry({ ...base, error: busy, upstreamRetries: 2 })).toBeUndefined();
+  });
+
+  it("does not retry once the answer is streaming, a non-resumable tool ran, or the run was stopped", () => {
+    expect(planPortalChatRetry({ ...base, error: busy, finalAnswerStarted: true })).toBeUndefined();
+    expect(planPortalChatRetry({ ...base, error: busy, nonResumableSideEffectStarted: true })).toBeUndefined();
+    expect(planPortalChatRetry({ ...base, error: busy, aborted: true })).toBeUndefined();
+  });
+
+  it("keeps the single quick retry for a dropped connection, independent of busy retries", () => {
+    const dropped = new Error("socket hang up");
+    expect(planPortalChatRetry({ ...base, error: dropped, upstreamRetries: 2 })).toEqual({ reason: "connection", delayMs: 250 });
+    expect(planPortalChatRetry({ ...base, error: dropped, connectionRecoveryAttempted: true })).toBeUndefined();
+    expect(planPortalChatRetry({ ...base, error: new Error("You've hit your usage limit") })).toBeUndefined();
+  });
 });

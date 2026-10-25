@@ -235,7 +235,7 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       cachedInputTokens: 600,
       outputTokens: 40,
       kind: "cumulative_snapshot"
-    }), "failed");
+    }), "failed", expect.objectContaining({ message: "runtime failed" }));
   });
 
   it("retains the usage of both turns when a service retry starts another turn", async () => {

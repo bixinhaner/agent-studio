@@ -2,20 +2,43 @@ import { AlertCircleIcon, RefreshCcwIcon } from "lucide-react";
 
 import { usePortalI18n } from "./i18n";
 
+export type PortalChatRecoveryDetail = {
+  reason?: "upstream_busy" | "connection";
+  attempt?: number;
+  maxAttempts?: number;
+};
+
+/** Reads the `codex_connection_recovery` data part written by the chat stream. */
+export function recoveryNoticeDetail(data: unknown): PortalChatRecoveryDetail {
+  const record = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined);
+  return {
+    reason: record.reason === "upstream_busy" ? "upstream_busy" : "connection",
+    attempt: count(record.attempt),
+    maxAttempts: count(record.maxAttempts)
+  };
+}
+
 type PortalChatRecoveryNoticeProps =
-  | { state: "recovering" }
+  | { state: "recovering"; detail?: PortalChatRecoveryDetail }
   | { state: "failed"; canRerun: boolean; onRerun: () => void; reason?: "send_not_delivered" };
 
 export function PortalChatRecoveryNotice(props: PortalChatRecoveryNoticeProps) {
   const { t } = usePortalI18n();
 
   if (props.state === "recovering") {
+    const { reason, attempt, maxAttempts } = props.detail ?? {};
+    const upstreamBusy = reason === "upstream_busy" && attempt && maxAttempts;
     return (
       <div className="assistant-recovery-card" role="status" aria-live="polite">
         <span className="assistant-running-spinner" aria-hidden="true" />
         <div>
-          <strong>{t("thread.connectionRecovering")}</strong>
-          <p>{t("thread.connectionRecoveringHelp")}</p>
+          <strong>
+            {upstreamBusy
+              ? t("thread.upstreamBusyRetrying", { attempt, count: maxAttempts })
+              : t("thread.connectionRecovering")}
+          </strong>
+          <p>{t(upstreamBusy ? "thread.upstreamBusyRetryingHelp" : "thread.connectionRecoveringHelp")}</p>
         </div>
       </div>
     );

@@ -5,7 +5,7 @@ import { apiBase } from "../../lib/api";
 import { artifactFileName, collectCodexFileChanges } from "../artifacts/codex-file-changes";
 import { isLocalToolPart } from "./workbench/local-tool-parts";
 import { usePortalThreadUserSendIntent } from "./PortalThread";
-import { PortalChatRecoveryNotice } from "./PortalChatRecoveryNotice";
+import { PortalChatRecoveryNotice, recoveryNoticeDetail } from "./PortalChatRecoveryNotice";
 import { createProcessDataFallback } from "./process-data-part-dispatch";
 import {
   managedSkillInstallConflictFromError,
@@ -582,7 +582,7 @@ export const ProcessDataPart: FC<{
 export const ProcessDataFallback = createProcessDataFallback({
   memoryContext: MemoryContextChip,
   userInputRequest: UserInputRequestCard,
-  connectionRecovery: () => <PortalChatRecoveryNotice state="recovering" />,
+  connectionRecovery: ({ data }) => <PortalChatRecoveryNotice state="recovering" detail={recoveryNoticeDetail(data)} />,
   recoveryFailure: RecoveryFailurePart,
   generic: ProcessDataPart
 });

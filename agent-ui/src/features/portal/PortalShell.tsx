@@ -3237,11 +3237,25 @@ export function PortalShell(props: {
               }
               setErrorText("");
               setPortalChatRecoveryActive((current) => resolvePortalChatRecoveryActive(current, "automatic-retry"));
-              updateRunningStage(t("thread.connectionRecovering"), { fallback: false, kind: "text" });
+              const recoveryReason = payload?.reason === "upstream_busy" ? "upstream_busy" : "connection";
+              const recoveryAttempt = typeof payload?.attempt === "number" ? payload.attempt : 2;
+              const recoveryMaxAttempts = typeof payload?.max_attempts === "number" ? payload.max_attempts : 2;
+              updateRunningStage(
+                recoveryReason === "upstream_busy"
+                  ? t("thread.upstreamBusyRetrying", { attempt: recoveryAttempt, count: recoveryMaxAttempts })
+                  : t("thread.connectionRecovering"),
+                { fallback: false, kind: "text" }
+              );
+              for (let index = orderedParts.length - 1; index >= 0; index -= 1) {
+                const part = asRecord(orderedParts[index]);
+                if (part?.type === "data" && part.name === "codex_connection_recovery") {
+                  orderedParts.splice(index, 1);
+                }
+              }
               const changed = appendDisplayDataParts([{
                 type: "data",
                 name: "codex_connection_recovery",
-                data: { attempt: 2, maxAttempts: 2 }
+                data: { reason: recoveryReason, attempt: recoveryAttempt, maxAttempts: recoveryMaxAttempts }
               }]);
               if (changed) {
                 yield { content: snapshotContent() };

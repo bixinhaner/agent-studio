@@ -7,7 +7,7 @@ export type ProcessDataPartProps = { name?: string; data?: unknown };
 export type ProcessDataPartComponents = {
   memoryContext: FC<{ data: unknown }>;
   userInputRequest: FC<{ data: unknown }>;
-  connectionRecovery: FC;
+  connectionRecovery: FC<{ data: unknown }>;
   recoveryFailure: FC;
   /** Every other data part; remounted whenever the part name at a position changes. */
   generic: FC<ProcessDataPartProps>;
@@ -33,7 +33,7 @@ export function createProcessDataFallback(components: ProcessDataPartComponents)
     const partName = typeof name === "string" ? name : "";
     if (partName === MEMORY_CONTEXT_PART_NAME) return <MemoryContext data={data} />;
     if (partName === USER_INPUT_REQUEST_PART_NAME) return <UserInputRequest data={data} />;
-    if (partName === "codex_connection_recovery") return <ConnectionRecovery />;
+    if (partName === "codex_connection_recovery") return <ConnectionRecovery data={data} />;
     if (partName === "codex_recovery_failure") return <RecoveryFailure />;
     return <Generic key={partName} name={name} data={data} />;
   };

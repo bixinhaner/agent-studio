@@ -249,8 +249,14 @@ import {
   portalRuntimeEventHasNonResumableSideEffect,
   portalRuntimeEventIndicatesTurnStarted,
   portalRuntimeEventStartsFinalAnswer,
-  shouldAutoRecoverPortalChat
+  planPortalChatRetry
 } from "./portal/chat-auto-recovery.js";
+import {
+  classifyUpstreamTransientError,
+  UPSTREAM_RETRY_DELAYS_MS,
+  waitUnlessAborted,
+  type UpstreamTransientErrorKind
+} from "./operations/upstream-transient-error.js";
 import {
   preserveCompletedPortalAssistantMessage,
   repairPortalAssistantCompletionStatus
@@ -4401,6 +4407,8 @@ type CodexChannelTurnInput = {
   onArtifactError?: (error: unknown) => void;
   onDone?: (input: CodexChannelTurnResult) => Promise<void> | void;
   onRetry?: (input: { error: unknown; session: SessionRecord }) => Promise<void> | void;
+  /** The model service was busy; the turn runs again after `delayMs`. */
+  onUpstreamRetry?: (input: { kind: UpstreamTransientErrorKind; attempt: number; maxAttempts: number; delayMs: number }) => Promise<void> | void;
   onTelemetryError?: (error: unknown) => void;
 };
 
@@ -4415,9 +4423,17 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   let artifactContentPart: Record<string, unknown> | undefined;
   let finalizedProcess: CodexRunProjectionFinalized = runProjection.finalize();
   let turnUsageRecorded = false;
+  let runtimeOutputStarted = false;
+  let runtimeTurnStarted = false;
+  let upstreamRetryPrompt: string | undefined;
 
-  const recordTurnUsage = async (usage: RuntimeUsageSnapshot, runtimeResultStatus: "success" | "failed" = "success") => {
+  const recordTurnUsage = async (
+    usage: RuntimeUsageSnapshot,
+    runtimeResultStatus: "success" | "failed" = "success",
+    error?: unknown
+  ) => {
     turnUsageRecorded = true;
+    const failureKind = runtimeResultStatus === "failed" ? classifyUpstreamTransientError(error) : undefined;
     const resultStatus = usageResultStatusForTurn(runtimeResultStatus, input.userCancelSignal);
     const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
     const extraMetadata =
@@ -4437,7 +4453,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
       resultStatus,
       metadata: {
         source: input.usageSource,
-        ...extraMetadata
+        ...extraMetadata,
+        ...(failureKind ? { upstreamFailureKind: failureKind } : {})
       }
     });
   };
@@ -4446,6 +4463,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
     runProjection = new CodexRunProjection(input.projectionOptions);
     runtimeFileChanges = [];
     runtimeSideEffectStarted = false;
+    runtimeOutputStarted = false;
+    runtimeTurnStarted = false;
     answerText = "";
     generatedArtifacts = [];
     artifactContentPart = undefined;
@@ -4453,7 +4472,7 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   };
 
   const runOnce = async () => {
-    const runtimeMessage = withSkillActivationPrompts(input.prompt, currentSession.codexRunConfig);
+    const runtimeMessage = upstreamRetryPrompt ?? withSkillActivationPrompts(input.prompt, currentSession.codexRunConfig);
     const enterpriseRunContext = await enterpriseContext.resolveForRun({
       channel: input.channel,
       userId: input.currentUser.id,
@@ -4486,6 +4505,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
         if (runtimeEventHasTurnSideEffect(event)) {
           runtimeSideEffectStarted = true;
         }
+        if (event.delta || event.text) runtimeOutputStarted = true;
+        if (portalRuntimeEventIndicatesTurnStarted(event)) runtimeTurnStarted = true;
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
@@ -4554,10 +4575,47 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   };
 
   try {
-    await runOnceWithResumeRecovery();
+    for (let upstreamRetries = 0; ; upstreamRetries += 1) {
+      try {
+        await runOnceWithResumeRecovery();
+        break;
+      } catch (error) {
+        const kind = classifyUpstreamTransientError(error);
+        const delayMs = UPSTREAM_RETRY_DELAYS_MS[upstreamRetries];
+        // Only a turn that has not shown text or touched anything yet is safe to run again.
+        if (
+          !kind ||
+          delayMs === undefined ||
+          runtimeSideEffectStarted ||
+          runtimeOutputStarted ||
+          input.signal?.aborted ||
+          input.shouldSkipRetry?.()
+        ) {
+          throw error;
+        }
+        const attempt = upstreamRetries + 2;
+        const maxAttempts = UPSTREAM_RETRY_DELAYS_MS.length + 1;
+        console.warn(`${input.logLabel} upstream busy, retrying`, {
+          threadId: input.thread.id,
+          sessionId: currentSession.sessionId,
+          kind,
+          attempt,
+          delayMs,
+          detail: runtimeErrorDetail(error).slice(0, 300)
+        });
+        await input.onUpstreamRetry?.({ kind, attempt, maxAttempts, delayMs });
+        if (!(await waitUnlessAborted(delayMs, [input.signal])) || input.shouldSkipRetry?.()) throw error;
+        // Codex records the user message when the turn starts, so a started turn is resumed, not re-asked.
+        upstreamRetryPrompt = portalAutoRecoveryPrompt({
+          originalPrompt: withSkillActivationPrompts(input.prompt, currentSession.codexRunConfig),
+          firstAttemptRuntimeEventSeen: runtimeTurnStarted
+        });
+        resetAttemptState();
+      }
+    }
   } catch (error) {
     if (!turnUsageRecorded) {
-      await recordTurnUsage(noModelUsageSnapshot(currentSession.codexThreadId), "failed").catch((telemetryError) => {
+      await recordTurnUsage(noModelUsageSnapshot(currentSession.codexThreadId), "failed", error).catch((telemetryError) => {
         if (input.onTelemetryError) input.onTelemetryError(telemetryError);
         else console.warn(`${input.logLabel} usage telemetry failed`, {
           threadId: input.thread.id,
@@ -4608,6 +4666,7 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
       currentSession = replacement.session;
       liveThread = replacement.liveThread;
       resetAttemptState();
+      upstreamRetryPrompt = undefined;
       await runOnce();
     }
   }
@@ -6265,6 +6324,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       onRetry() {
         sendSSE(res, "thought", {
           text: "检测到底层运行时会话已过期，正在重建运行环境并重试本轮请求。"
+        });
+      },
+      onUpstreamRetry({ attempt, maxAttempts, delayMs }) {
+        sendSSE(res, "thought", {
+          text: `模型服务繁忙，${Math.round(delayMs / 1000)} 秒后自动重试（第 ${attempt}/${maxAttempts} 次）。`
         });
       },
       onTelemetryError(error) {
@@ -9969,6 +10033,11 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
       onRetry() {
         if (streamingCardReply) {
           void streamingCardReply.update("正在重建运行环境并重试本轮请求。");
+        }
+      },
+      onUpstreamRetry({ attempt, maxAttempts, delayMs }) {
+        if (streamingCardReply) {
+          void streamingCardReply.update(`模型服务繁忙，${Math.round(delayMs / 1000)} 秒后自动重试（第 ${attempt}/${maxAttempts} 次）。`);
         }
       },
       onTelemetryError(error) {
@@ -14262,7 +14331,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
   let portalTurnUsageRecorded = false;
-  let recordPortalTurnUsage: ((usage: RuntimeUsageSnapshot, runtimeResultStatus?: "success" | "failed") => Promise<void>) | undefined;
+  let recordPortalTurnUsage:
+    | ((usage: RuntimeUsageSnapshot, runtimeResultStatus?: "success" | "failed", error?: unknown) => Promise<void>)
+    | undefined;
   let portalRuntimeFailure: string | undefined;
   let portalTurnFailure: string | undefined;
   let portalFailurePresentation: PortalFailurePresentation | undefined;
@@ -14271,7 +14342,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalNonResumableSideEffectStarted = false;
   let portalFirstAttemptTurnStarted = false;
   let portalRecoveryCompletedEventSent = false;
-  let portalLastRunAttempt: 1 | 2 = 1;
+  let portalLastRunAttempt = 1;
+  let portalMaxRunAttempts = 2;
   let portalPartialSnapshot: (() => PortalPartialAssistantSnapshot) | undefined;
   const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
     logPortalStreamLifecycle(stage, {
@@ -14848,8 +14920,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       hasCodexThreadId: Boolean(currentSession.codexThreadId)
     });
     portalRuntimeStarted = true;
-    recordPortalTurnUsage = async (usage, runtimeResultStatus = "success") => {
+    recordPortalTurnUsage = async (usage, runtimeResultStatus = "success", error) => {
       portalTurnUsageRecorded = true;
+      const failureKind = runtimeResultStatus === "failed" ? classifyUpstreamTransientError(error) : undefined;
       const resultStatus = usageResultStatusForTurn(runtimeResultStatus, explicitCancel.signal);
       const departmentIdSnapshot =
         trimOrUndefined(currentUser.organizationType) === "internal"
@@ -14869,14 +14942,15 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         resultStatus,
         metadata: {
           source: "chat_stream",
-          autoRecoveryAttempt: portalLastRunAttempt
+          autoRecoveryAttempt: portalLastRunAttempt,
+          ...(failureKind ? { upstreamFailureKind: failureKind } : {})
         }
       });
     };
-    const runPortalRuntimeAttempt = async (attempt: 1 | 2): Promise<void> => {
+    const runPortalRuntimeAttempt = async (attempt: number): Promise<void> => {
       portalLastRunAttempt = attempt;
       const attemptThread = liveRuntimeThreads.get(currentSession.sessionId) ?? ensuredLiveThread;
-      const attemptPrompt = attempt === 2
+      const attemptPrompt = attempt > 1
         ? portalAutoRecoveryPrompt({
             originalPrompt: runtimeMessage,
             firstAttemptRuntimeEventSeen: portalFirstAttemptTurnStarted
@@ -14927,15 +15001,15 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
               lifecycle: streamAbort.snapshot()
             });
           }
-          if (attempt === 1 && portalRuntimeEventIndicatesTurnStarted(event)) {
+          if (portalRuntimeEventIndicatesTurnStarted(event)) {
             portalFirstAttemptTurnStarted = true;
           }
-          if (attempt === 2 && !portalRecoveryCompletedEventSent) {
+          if (attempt > 1 && !portalRecoveryCompletedEventSent) {
             portalRecoveryCompletedEventSent = true;
             sendTrackedSSE("recovery", {
               status: "recovered",
-              attempt: 2,
-              max_attempts: 2
+              attempt,
+              max_attempts: portalMaxRunAttempts
             });
           }
           if (portalRuntimeEventStartsFinalAnswer(event)) {
@@ -15080,7 +15154,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           timing.mark("chat_stream.done_sent");
           finishTiming("success", { firstCodexEventSeen });
         },
-        recordUsage: (usage, runtimeResultStatus) => recordPortalTurnUsage!(usage, runtimeResultStatus),
+        recordUsage: (usage, runtimeResultStatus, error) => recordPortalTurnUsage!(usage, runtimeResultStatus, error),
         onTelemetryError(error) {
           const detail = error instanceof Error ? error.message : String(error);
           console.warn("usage telemetry ingestion failed", {
@@ -15091,40 +15165,62 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       });
     };
 
-    try {
-      await runPortalRuntimeAttempt(1);
-    } catch (error) {
-      const shouldRecover = shouldAutoRecoverPortalChat({
-        error,
-        attempted: portalAutoRecoveryAttempted,
-        finalAnswerStarted: portalFinalAnswerStarted,
-        nonResumableSideEffectStarted: portalNonResumableSideEffectStarted,
-        aborted: explicitCancel.signal.aborted || systemInterrupt.signal.aborted
-      });
-      if (!shouldRecover) throw error;
+    let portalConnectionRecoveryAttempted = false;
+    let portalUpstreamRetries = 0;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await runPortalRuntimeAttempt(attempt);
+        if (attempt > 1) {
+          portalRuntimeFailure = undefined;
+          portalTurnFailure = undefined;
+          logPortalStream("auto_recovery_completed", {
+            attempt,
+            lifecycle: streamAbort.snapshot()
+          });
+        }
+        break;
+      } catch (error) {
+        const plan = planPortalChatRetry({
+          error,
+          upstreamRetries: portalUpstreamRetries,
+          connectionRecoveryAttempted: portalConnectionRecoveryAttempted,
+          finalAnswerStarted: portalFinalAnswerStarted,
+          nonResumableSideEffectStarted: portalNonResumableSideEffectStarted,
+          aborted: explicitCancel.signal.aborted || systemInterrupt.signal.aborted
+        });
+        if (!plan) throw error;
+        const { reason, delayMs, upstreamKind } = plan;
+        if (reason === "upstream_busy") {
+          // Codex's own retries for these are back-to-back; give the model service time to recover.
+          portalUpstreamRetries += 1;
+          portalMaxRunAttempts = Math.max(portalMaxRunAttempts, 1 + UPSTREAM_RETRY_DELAYS_MS.length);
+        } else {
+          portalConnectionRecoveryAttempted = true;
+          portalMaxRunAttempts = Math.max(portalMaxRunAttempts, attempt + 1);
+        }
 
-      portalAutoRecoveryAttempted = true;
-      portalRunProjection.reset();
-      portalPartialAnswer.reset();
-      runtimeFileChanges.length = 0;
-      logPortalStream("auto_recovery_started", {
-        attempt: 2,
-        detail: runtimeErrorDetail(error).slice(0, 500),
-        lifecycle: streamAbort.snapshot()
-      });
-      sendTrackedSSE("recovery", {
-        status: "retrying",
-        attempt: 2,
-        max_attempts: 2
-      });
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      await runPortalRuntimeAttempt(2);
-      portalRuntimeFailure = undefined;
-      portalTurnFailure = undefined;
-      logPortalStream("auto_recovery_completed", {
-        attempt: 2,
-        lifecycle: streamAbort.snapshot()
-      });
+        portalAutoRecoveryAttempted = true;
+        portalRecoveryCompletedEventSent = false;
+        portalRunProjection.reset();
+        portalPartialAnswer.reset();
+        runtimeFileChanges.length = 0;
+        logPortalStream("auto_recovery_started", {
+          attempt: attempt + 1,
+          reason,
+          upstream_kind: upstreamKind,
+          delay_ms: delayMs,
+          detail: runtimeErrorDetail(error).slice(0, 500),
+          lifecycle: streamAbort.snapshot()
+        });
+        sendTrackedSSE("recovery", {
+          status: "retrying",
+          reason,
+          attempt: attempt + 1,
+          max_attempts: portalMaxRunAttempts,
+          retry_in_ms: delayMs
+        });
+        if (!(await waitUnlessAborted(delayMs, [explicitCancel.signal, systemInterrupt.signal]))) throw error;
+      }
     }
   } catch (error) {
     const interruptedBySystemUpdate = systemInterrupt.signal.aborted && !explicitCancel.signal.aborted;
@@ -15189,7 +15285,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       });
     }
     if (recordPortalTurnUsage && !portalTurnUsageRecorded) {
-      void recordPortalTurnUsage(noModelUsageSnapshot(portalRuntimeSession?.codexThreadId), "failed").catch((telemetryError) => {
+      void recordPortalTurnUsage(noModelUsageSnapshot(portalRuntimeSession?.codexThreadId), "failed", error).catch((telemetryError) => {
         console.warn("usage telemetry ingestion failed", {
           sessionId: portalRuntimeSession?.sessionId,
           detail: telemetryError instanceof Error ? telemetryError.message : String(telemetryError)

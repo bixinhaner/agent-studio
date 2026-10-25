@@ -1,4 +1,9 @@
 import type { PortalPartialAssistantSnapshot } from "./chat-partial-answer.js";
+import {
+  classifyUpstreamTransientError,
+  UPSTREAM_RETRY_DELAYS_MS,
+  type UpstreamTransientErrorKind
+} from "../operations/upstream-transient-error.js";
 
 type PortalChatAutoRecoveryInput = {
   error: unknown;
@@ -63,6 +68,42 @@ export function shouldAutoRecoverPortalChat(input: PortalChatAutoRecoveryInput):
     return false;
   }
   return isRetryablePortalNetworkError(input.error);
+}
+
+export type PortalChatRetryPlan = {
+  reason: "upstream_busy" | "connection";
+  delayMs: number;
+  upstreamKind?: UpstreamTransientErrorKind;
+};
+
+/**
+ * Decides whether a failed portal attempt runs again. A busy model service (429, overloaded, 5xx) gets
+ * up to two slow retries; a dropped connection keeps its single quick retry. Neither runs once the final
+ * answer is streaming or a non-resumable tool has run, or after the user or a system update stopped it.
+ */
+export function planPortalChatRetry(input: {
+  error: unknown;
+  upstreamRetries: number;
+  connectionRecoveryAttempted: boolean;
+  finalAnswerStarted: boolean;
+  nonResumableSideEffectStarted: boolean;
+  aborted: boolean;
+}): PortalChatRetryPlan | undefined {
+  if (input.aborted || input.finalAnswerStarted || input.nonResumableSideEffectStarted) return undefined;
+  const upstreamKind = classifyUpstreamTransientError(input.error);
+  if (upstreamKind) {
+    const delayMs = UPSTREAM_RETRY_DELAYS_MS[input.upstreamRetries];
+    return delayMs === undefined ? undefined : { reason: "upstream_busy", delayMs, upstreamKind };
+  }
+  return shouldAutoRecoverPortalChat({
+    error: input.error,
+    attempted: input.connectionRecoveryAttempted,
+    finalAnswerStarted: input.finalAnswerStarted,
+    nonResumableSideEffectStarted: input.nonResumableSideEffectStarted,
+    aborted: input.aborted
+  })
+    ? { reason: "connection", delayMs: 250 }
+    : undefined;
 }
 
 export function portalAutoRecoveryPrompt(input: { originalPrompt: string; firstAttemptRuntimeEventSeen: boolean }): string {

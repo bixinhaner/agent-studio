@@ -381,7 +381,8 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   signal?: AbortSignal;
   onEvent(event: RuntimeStreamEvent): void;
   onDone(payload: { answer: string; usage?: RuntimeUsageSnapshot }): void | Promise<void>;
-  recordUsage?(usage: RuntimeUsageSnapshot, resultStatus?: "success" | "failed"): Promise<void>;
+  /** `error` is the turn failure when `resultStatus` is "failed". */
+  recordUsage?(usage: RuntimeUsageSnapshot, resultStatus?: "success" | "failed", error?: unknown): Promise<void>;
   onTelemetryError?(error: unknown): void;
 }): Promise<void> {
   let latestUsage: RuntimeUsageSnapshot | undefined;
@@ -400,7 +401,7 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
     const failedUsage = latestUsage;
     if (failedUsage && input.recordUsage) {
       await Promise.resolve()
-        .then(() => input.recordUsage?.(failedUsage, "failed"))
+        .then(() => input.recordUsage?.(failedUsage, "failed", error))
         .catch((telemetryError) => {
           input.onTelemetryError?.(telemetryError);
         });
