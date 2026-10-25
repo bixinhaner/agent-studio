@@ -17,7 +17,7 @@ export type RuntimeUsageSnapshot = {
   modelInvocations?: RuntimeModelInvocationUsage[];
   codexTurnId?: string;
   codexTurnIds?: string[];
-  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation";
+  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation" | "no_model_usage";
 };
 
 export type RuntimeModelInvocationUsage = {
@@ -357,6 +357,22 @@ export async function collectRuntimeCompletion(input: {
   return {
     answer: finalAgentAnswer ?? fallbackAnswer,
     usage: latestUsage
+  };
+}
+
+/**
+ * A turn that failed before the runtime reported any token usage (for example the provider
+ * rejected every retry with 429). It consumed nothing, but it is still a failed answer the
+ * user saw, so it is recorded with zero tokens to keep the success rate honest.
+ */
+export function noModelUsageSnapshot(codexThreadId?: string): RuntimeUsageSnapshot {
+  return {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    kind: "turn_delta",
+    ...(codexThreadId ? { codexThreadId } : {}),
+    accountingSource: "no_model_usage"
   };
 }
 

@@ -31,7 +31,7 @@ export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "in
   codexThreadId?: string;
   codexTurnId?: string;
   codexTurnIds?: string[];
-  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation";
+  accountingSource?: "response_id" | "legacy_token_count" | "pending_reconciliation" | "no_model_usage";
 };
 
 const CODEX_RUNTIME_USAGE_METADATA_KEY = "_codexRuntimeUsage";

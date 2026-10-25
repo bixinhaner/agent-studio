@@ -207,6 +207,7 @@ import type {
 } from "./integrations/zendesk/types.js";
 import {
   ensureThreadUploadInRunConfig,
+  noModelUsageSnapshot,
   replaceLiveRuntimeSession,
   stripInternalRunConfigMetadata,
   startLiveRuntimeSession,
@@ -4413,6 +4414,33 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   let generatedArtifacts: ThreadArtifactRecord[] = [];
   let artifactContentPart: Record<string, unknown> | undefined;
   let finalizedProcess: CodexRunProjectionFinalized = runProjection.finalize();
+  let turnUsageRecorded = false;
+
+  const recordTurnUsage = async (usage: RuntimeUsageSnapshot, runtimeResultStatus: "success" | "failed" = "success") => {
+    turnUsageRecorded = true;
+    const resultStatus = usageResultStatusForTurn(runtimeResultStatus, input.userCancelSignal);
+    const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
+    const extraMetadata =
+      typeof input.usageMetadata === "function"
+        ? await input.usageMetadata({ session: currentSession, usage, resultStatus })
+        : input.usageMetadata ?? {};
+    await usageRecorder.recordCodexUsage({
+      organizationId: input.currentUser.organizationId,
+      userId: input.currentUser.id,
+      departmentIdSnapshot: input.departmentIdSnapshot ? await input.departmentIdSnapshot() : undefined,
+      threadId: input.thread.id,
+      sessionId: currentSession.sessionId,
+      model: currentSession.model,
+      featureType: "chat",
+      usage,
+      codexThreadId,
+      resultStatus,
+      metadata: {
+        source: input.usageSource,
+        ...extraMetadata
+      }
+    });
+  };
 
   const resetAttemptState = () => {
     runProjection = new CodexRunProjection(input.projectionOptions);
@@ -4511,30 +4539,7 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
           finalizedProcess
         });
       },
-      async recordUsage(usage, runtimeResultStatus = "success") {
-        const resultStatus = usageResultStatusForTurn(runtimeResultStatus, input.userCancelSignal);
-        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-        const extraMetadata =
-          typeof input.usageMetadata === "function"
-            ? await input.usageMetadata({ session: currentSession, usage, resultStatus })
-            : input.usageMetadata ?? {};
-        await usageRecorder.recordCodexUsage({
-          organizationId: input.currentUser.organizationId,
-          userId: input.currentUser.id,
-          departmentIdSnapshot: input.departmentIdSnapshot ? await input.departmentIdSnapshot() : undefined,
-          threadId: input.thread.id,
-          sessionId: currentSession.sessionId,
-          model: currentSession.model,
-          featureType: "chat",
-          usage,
-          codexThreadId,
-          resultStatus,
-          metadata: {
-            source: input.usageSource,
-            ...extraMetadata
-          }
-        });
-      },
+      recordUsage: recordTurnUsage,
       onTelemetryError(error) {
         if (input.onTelemetryError) {
           input.onTelemetryError(error);
@@ -4549,36 +4554,18 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   };
 
   try {
-    await runOnce();
+    await runOnceWithResumeRecovery();
   } catch (error) {
-    if (input.signal?.aborted || input.shouldSkipRetry?.()) {
-      throw error;
+    if (!turnUsageRecorded) {
+      await recordTurnUsage(noModelUsageSnapshot(currentSession.codexThreadId), "failed").catch((telemetryError) => {
+        if (input.onTelemetryError) input.onTelemetryError(telemetryError);
+        else console.warn(`${input.logLabel} usage telemetry failed`, {
+          threadId: input.thread.id,
+          detail: telemetryError instanceof Error ? telemetryError.message : String(telemetryError)
+        });
+      });
     }
-    const recoverable = isRecoverableCodexResumeError(error);
-    console.warn(`${input.logLabel} runtime failed`, {
-      threadId: input.thread.id,
-      sessionId: currentSession.sessionId,
-      codexThreadId: currentSession.codexThreadId,
-      recoverable,
-      runtimeSideEffectStarted,
-      detail: runtimeErrorDetail(error)
-    });
-    if (!recoverable || runtimeSideEffectStarted) {
-      throw error;
-    }
-    await input.onRetry?.({ error, session: currentSession });
-    const replacement = await replaceUserAgentLiveRuntimeSession({
-      currentUser: input.currentUser,
-      session: currentSession,
-      threadId: input.thread.id,
-      failedCodexThreadId: currentSession.codexThreadId,
-      error,
-      logLabel: input.logLabel
-    });
-    currentSession = replacement.session;
-    liveThread = replacement.liveThread;
-    resetAttemptState();
-    await runOnce();
+    throw error;
   }
 
   return {
@@ -4589,6 +4576,41 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
     artifactContentPart,
     finalizedProcess
   };
+
+  async function runOnceWithResumeRecovery(): Promise<void> {
+    try {
+      await runOnce();
+    } catch (error) {
+      if (input.signal?.aborted || input.shouldSkipRetry?.()) {
+        throw error;
+      }
+      const recoverable = isRecoverableCodexResumeError(error);
+      console.warn(`${input.logLabel} runtime failed`, {
+        threadId: input.thread.id,
+        sessionId: currentSession.sessionId,
+        codexThreadId: currentSession.codexThreadId,
+        recoverable,
+        runtimeSideEffectStarted,
+        detail: runtimeErrorDetail(error)
+      });
+      if (!recoverable || runtimeSideEffectStarted) {
+        throw error;
+      }
+      await input.onRetry?.({ error, session: currentSession });
+      const replacement = await replaceUserAgentLiveRuntimeSession({
+        currentUser: input.currentUser,
+        session: currentSession,
+        threadId: input.thread.id,
+        failedCodexThreadId: currentSession.codexThreadId,
+        error,
+        logLabel: input.logLabel
+      });
+      currentSession = replacement.session;
+      liveThread = replacement.liveThread;
+      resetAttemptState();
+      await runOnce();
+    }
+  }
 }
 
 async function ensureCrestChatThread(input: {
@@ -14239,6 +14261,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalLocale: string | undefined;
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
+  let portalTurnUsageRecorded = false;
+  let recordPortalTurnUsage: ((usage: RuntimeUsageSnapshot, runtimeResultStatus?: "success" | "failed") => Promise<void>) | undefined;
   let portalRuntimeFailure: string | undefined;
   let portalTurnFailure: string | undefined;
   let portalFailurePresentation: PortalFailurePresentation | undefined;
@@ -14824,6 +14848,31 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       hasCodexThreadId: Boolean(currentSession.codexThreadId)
     });
     portalRuntimeStarted = true;
+    recordPortalTurnUsage = async (usage, runtimeResultStatus = "success") => {
+      portalTurnUsageRecorded = true;
+      const resultStatus = usageResultStatusForTurn(runtimeResultStatus, explicitCancel.signal);
+      const departmentIdSnapshot =
+        trimOrUndefined(currentUser.organizationType) === "internal"
+          ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
+          : undefined;
+      const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
+      await usageRecorder.recordCodexUsage({
+        organizationId: currentUser.organizationId,
+        userId: currentUser.id,
+        departmentIdSnapshot,
+        threadId: currentSession.threadId ?? undefined,
+        sessionId: currentSession.sessionId,
+        model: currentSession.model,
+        featureType: "chat",
+        usage,
+        codexThreadId,
+        resultStatus,
+        metadata: {
+          source: "chat_stream",
+          autoRecoveryAttempt: portalLastRunAttempt
+        }
+      });
+    };
     const runPortalRuntimeAttempt = async (attempt: 1 | 2): Promise<void> => {
       portalLastRunAttempt = attempt;
       const attemptThread = liveRuntimeThreads.get(currentSession.sessionId) ?? ensuredLiveThread;
@@ -15031,30 +15080,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           timing.mark("chat_stream.done_sent");
           finishTiming("success", { firstCodexEventSeen });
         },
-        async recordUsage(usage, runtimeResultStatus = "success") {
-          const resultStatus = usageResultStatusForTurn(runtimeResultStatus, explicitCancel.signal);
-          const departmentIdSnapshot =
-            trimOrUndefined(currentUser.organizationType) === "internal"
-              ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
-              : undefined;
-          const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-          await usageRecorder.recordCodexUsage({
-            organizationId: currentUser.organizationId,
-            userId: currentUser.id,
-            departmentIdSnapshot,
-            threadId: currentSession.threadId ?? undefined,
-            sessionId: currentSession.sessionId,
-            model: currentSession.model,
-            featureType: "chat",
-            usage,
-            codexThreadId,
-            resultStatus,
-            metadata: {
-              source: "chat_stream",
-              autoRecoveryAttempt: attempt
-            }
-          });
-        },
+        recordUsage: (usage, runtimeResultStatus) => recordPortalTurnUsage!(usage, runtimeResultStatus),
         onTelemetryError(error) {
           const detail = error instanceof Error ? error.message : String(error);
           console.warn("usage telemetry ingestion failed", {
@@ -15160,6 +15186,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           assistantMessageWritten: portalAssistantMessageWritten,
           deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open"
         }
+      });
+    }
+    if (recordPortalTurnUsage && !portalTurnUsageRecorded) {
+      void recordPortalTurnUsage(noModelUsageSnapshot(portalRuntimeSession?.codexThreadId), "failed").catch((telemetryError) => {
+        console.warn("usage telemetry ingestion failed", {
+          sessionId: portalRuntimeSession?.sessionId,
+          detail: telemetryError instanceof Error ? telemetryError.message : String(telemetryError)
+        });
       });
     }
     if (explicitCancel.signal.aborted) {

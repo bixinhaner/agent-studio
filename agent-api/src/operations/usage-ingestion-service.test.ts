@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { calculateEstimatedCost, UsageIngestionService } from "./usage-ingestion-service.js";
 import type { CostProfileRecord } from "../persistence/cost-profile-repository.js";
 import type { CreateUsageEventInput } from "../persistence/usage-event-repository.js";
+import { noModelUsageSnapshot } from "../live-runtime-session.js";
+import { UsageRecorder } from "./usage-recorder.js";
 
 const profile: CostProfileRecord = {
   id: "profile-gpt-54",
@@ -947,3 +949,45 @@ describe("UsageIngestionService", () => {
   });
 });
 
+
+describe("UsageIngestionService zero-usage failed turns", () => {
+  it("records a failed answer without tokens as a complete zero-cost row that leaves the thread cursor alone", async () => {
+    const created: any[] = [];
+    const cumulative: any[] = [];
+    let rolledUp: any;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return profile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          created.push(input);
+          return { ...input, id: "usage-zero", createdAt: "2026-10-25T14:42:21.000Z" } as any;
+        },
+        async createCodexCumulative({ codexThreadId, buildInput }) {
+          const previous = cumulative.filter((event) => event.metadata.codexThreadId === codexThreadId).at(-1);
+          const built = { ...buildInput(previous), createdAt: "2026-10-25T14:44:00.000Z" };
+          cumulative.push(built);
+          return built as any;
+        }
+      },
+      async afterRecord(event) { rolledUp = event; }
+    });
+    const recorder = new UsageRecorder({ usageIngestion: service });
+
+    await recorder.recordCodexUsage({ model: "gpt-5.4", featureType: "chat", userId: "user-1", threadId: "thread-1",
+      usage: noModelUsageSnapshot("codex-thread"), resultStatus: "failed", metadata: { source: "chat_stream" } });
+
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+      estimatedCost: "0.000000", internalCost: "0.000000", resultStatus: "failed",
+      metadata: { source: "chat_stream", codexThreadId: "codex-thread",
+        _usageAccounting: { status: "complete", source: "no_model_usage" } } });
+    expect(rolledUp).toMatchObject({ id: "usage-zero", resultStatus: "failed", inputTokens: 0 });
+    expect(cumulative).toHaveLength(0);
+
+    // The next real snapshot on the same Codex thread is still billed in full.
+    await recorder.recordCodexUsage({ model: "gpt-5.4", featureType: "chat", codexThreadId: "codex-thread",
+      usage: { inputTokens: 1_000, cachedInputTokens: 400, outputTokens: 50, kind: "cumulative_snapshot" }, resultStatus: "success" });
+    expect(cumulative.map((event) => [event.inputTokens, event.cachedInputTokens, event.outputTokens])).toEqual([[1_000, 400, 50]]);
+  });
+});
