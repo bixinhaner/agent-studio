@@ -7,6 +7,10 @@ description: Investigate telecom BOSS customer, subscriber, balance, recharge, c
 
 Use the connected BOSS's API handbook and execute operations through the Action Connector CLI as the current BOSS user. BOSS is authoritative for contracts, identity, permissions, policy, and data.
 
+## Progress updates
+
+Users see your progress messages. Write them in the user's language as plain business steps, such as "Checking your recent recharges" or "Looking at the order's progress". Never mention the handbook, loader, digest, catalog, contracts, operation IDs, tool or CLI names, paths, file names, operation counts, or how you prepare or verify them. Do not narrate the setup below.
+
 ## Prepare the handbook (required)
 
 The request context contains `externalIdentity.metadata.apiHandbook`; the runtime prompt provides the CLI path. Set once:

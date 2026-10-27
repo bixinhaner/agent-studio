@@ -86,6 +86,8 @@ describe("bundled BOSS handbook loader", () => {
     expect(skill).toContain("scripts/ensure-handbook.mjs");
     expect(skill).toContain("unknown, never zero");
     expect(skill).toContain("Investigations are read-only");
+    expect(skill).toContain("## Progress updates");
+    expect(skill).toMatch(/Never mention the handbook, loader, digest/);
     expect(skill.match(/\S+/g)?.length ?? 0).toBeLessThanOrEqual(1_000);
     for (const text of [skill, loader]) expect(text).not.toMatch(/OMC|omc-|\/api\/v1\//);
   });
