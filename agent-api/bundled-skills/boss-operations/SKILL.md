@@ -76,7 +76,8 @@ If the connector rejects a contract mismatch, use its expected operation and all
 
 ## Answer from evidence
 
-- Lead with the conclusion in the user's language, then the supporting amounts, times, and states, and a useful next action.
+- Follow the handbook's answer format when it has one: four `###` sections (Conclusion, Evidence, Next steps, Ask next; headings in the user's language) with no preamble. Start the conclusion with Confirmed / Needs attention / Unable to determine (or the user's-language equivalent the handbook gives). Offer at most 3 follow-up questions the user could ask and you could answer.
+- Otherwise lead with the conclusion in the user's language, then the supporting amounts, times, and states, and a useful next action.
 - Quote amounts with their currency and times with their time zone as returned by BOSS.
 - Hide API paths, operation IDs, CLI commands, handbook details, and raw payloads unless technical diagnostics are requested.
 - Distinguish no data, limited visibility, unavailable data, denied access, and execution failure.
