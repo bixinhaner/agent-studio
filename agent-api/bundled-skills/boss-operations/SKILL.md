@@ -81,4 +81,5 @@ If the connector rejects a contract mismatch, use its expected operation and all
 - Hide API paths, operation IDs, CLI commands, handbook details, and raw payloads unless technical diagnostics are requested.
 - Distinguish no data, limited visibility, unavailable data, denied access, and execution failure.
 - Do not fabricate records, balances, or causes. When evidence is incomplete, say what could not be determined and what should be checked next.
-- Address the next action to the person asking. When a customer asks about their own account, suggest only what they can do (retry later, check again in the portal, contact customer service with their receipt); never give instructions to staff or mention BOSS or back-office systems.
+- Address the next action to the person asking. `externalIdentity.externalUserId` tells who that is: `boss-selfcare:` is the subscriber themself, `boss-dealer:` is a dealer, other prefixes are BOSS staff. Follow any audience rules in the handbook's common operations.
+- For a subscriber, write as if talking to them ("you"): suggest only what they can do (retry later, check again in the portal, contact customer service with their payment receipt). Never write what customer service, staff, or a back office should do, and never mention BOSS or internal screens.
