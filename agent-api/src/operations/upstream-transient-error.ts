@@ -14,7 +14,9 @@ export const UPSTREAM_RETRY_DELAYS_MS = [10_000, 30_000] as const;
 const QUOTA_EXHAUSTED_PATTERN = /usage[ _-]?limit|usageLimitExceeded|insufficient[_ ]quota|quota (?:exceeded|exhausted)/i;
 const RATE_LIMITED_PATTERN = /last status:\s*429\b|429 Too Many Requests|responseTooManyFailedAttempts[^]*?429|rate[ _-]?limit(?:ed)?\b/i;
 const OVERLOADED_PATTERN = /serverOverloaded|model is at capacity|server(?: is)? overloaded/i;
-const SERVER_ERROR_PATTERN = /last status:\s*5\d\d\b/i;
+// OpenAI's generic server-side failure, reported after Codex's own stream retries (10-28: failed repeatedly on
+// requests carrying screenshots, then cleared up).
+const SERVER_ERROR_PATTERN = /last status:\s*5\d\d\b|An error occurred while processing your request/i;
 
 function errorTexts(error: unknown): string[] {
   const texts: string[] = [];

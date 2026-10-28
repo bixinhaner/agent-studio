@@ -12,6 +12,13 @@ describe("classifyUpstreamTransientError", () => {
       )
     ).toBe("overloaded");
     expect(classifyUpstreamTransientError(new Error("exceeded retry limit, last status: 503 Service Unavailable"))).toBe("server_error");
+    expect(
+      classifyUpstreamTransientError(
+        new Error(
+          "stream disconnected before completion: An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID a7640879-7ff8-4185-83a5-2876f429387d in your message. (codexErrorInfo=other)"
+        )
+      )
+    ).toBe("server_error");
     expect(classifyUpstreamTransientError({ message: "wrapped", cause: new Error("last status: 429") })).toBe("rate_limited");
   });
 
