@@ -20,6 +20,7 @@ import {
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createTrainingCatalogAdminRouter } from "./admin/training-catalog-admin-router.js";
 import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
+import { createPortalPresenceRouter } from "./admin/portal-presence.js";
 import { createAdminRouter } from "./admin/router.js";
 import { SecurityDomainAccessControl } from "./security-domains/access-control.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
@@ -12201,6 +12202,7 @@ registerCommonApiRoutes(app, {
   skillCatalogAdminRouter: createSkillCatalogAdminRouter(skillCatalog),
   dwsRouter: dwsIntegrationRouter,
   clientErrorReportRouter: createClientErrorReportRouter(),
+  portalPresenceRouter: createPortalPresenceRouter({ getDb: () => db as never, logger: console }),
   sendFailureRouter: createPortalSendFailureRouter({
     record: recordPortalSendFailure,
     resolveOwnedThreadId: async (rawThreadId, req) => {

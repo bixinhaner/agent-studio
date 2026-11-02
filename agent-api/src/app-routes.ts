@@ -35,6 +35,7 @@ export function registerCommonApiRoutes(
     actionConnectorRuntimeRouter?: Router;
     clientErrorReportRouter?: Router;
     sendFailureRouter?: Router;
+    portalPresenceRouter?: Router;
   }
 ): void {
   const systemSettingsMount = Router();
@@ -87,6 +88,7 @@ export function registerCommonApiRoutes(
   // Outside /api/portal so Caddy routes it to the admin process instead of the chat slots.
   app.use("/api/client-errors", requireCurrentUser, options.clientErrorReportRouter ?? Router());
   app.use("/api/send-failures", requireCurrentUser, options.sendFailureRouter ?? Router());
+  app.use("/api/portal-presence", requireCurrentUser, options.portalPresenceRouter ?? Router());
   app.use(
     "/api",
     requireCurrentUser,

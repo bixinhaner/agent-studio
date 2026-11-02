@@ -1,3 +1,4 @@
+import { PortalPresenceAuditView } from "./PortalPresenceAuditView";
 import { SendFailureAuditView } from "./SendFailureAuditView";
 import { Alert, Button, Empty, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs, Segmented } from "antd";
 import { createPortal } from "react-dom";
@@ -120,7 +121,7 @@ import {
   type TranscriptTimelineRow
 } from "./conversation-transcript-layout";
 
-type AuditMode = "send_failures" | "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
+type AuditMode = "send_failures" | "portal_presence" | "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
 type RecoveryEmailTemplateLanguage = "zh" | "en";
 
@@ -201,7 +202,7 @@ function readConversationAuditHashState(): ConversationAuditHashState {
   const conversationId = params.get("conversation")?.trim() ?? "";
   const rawMode = params.get("mode")?.trim();
   const mode: AuditMode =
-    rawMode === "send_failures" || rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" || rawMode === "customer_recovery"
+    rawMode === "send_failures" || rawMode === "portal_presence" || rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" || rawMode === "customer_recovery"
       ? rawMode
       : "conversations";
   return {
@@ -3542,6 +3543,7 @@ export function ConversationAuditView() {
           items={[
             { key: "conversations", label: "用户交互会话" },
             { key: "send_failures", label: "发送失败" },
+            { key: "portal_presence", label: "Portal 访问" },
             { key: "customer_recovery", label: "体验跟进" },
             { key: "ai_reviews", label: "Zendesk AI评分" },
             { key: "product_feedback", label: "系统反馈" },
@@ -3553,6 +3555,8 @@ export function ConversationAuditView() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {mode === "send_failures" ? (
           <SendFailureAuditView />
+        ) : mode === "portal_presence" ? (
+          <PortalPresenceAuditView />
         ) : mode === "conversations" ? (
           <ConversationWorkspace />
         ) : mode === "customer_recovery" ? (

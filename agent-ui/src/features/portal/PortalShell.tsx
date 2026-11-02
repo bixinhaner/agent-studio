@@ -8,6 +8,7 @@ import {
   useRef,
   useState
 } from "react";
+import { startPortalPresence } from "../../lib/portal-presence";
 import { flushSync } from "react-dom";
 import {
   AssistantRuntimeProvider,
@@ -402,6 +403,11 @@ export function PortalShell(props: {
   const { layoutState, setLayoutState, toggleRail } = useWorkbenchLayout(props.currentUser?.id);
   const isMobile = useIsNarrowScreen(768);
   const isCompactDesktop = useIsNarrowScreen(1279) && !isMobile;
+
+  useEffect(() => {
+    if (!props.currentUser?.id) return;
+    return startPortalPresence();
+  }, [props.currentUser?.id]);
 
   useEffect(() => {
     document.body.classList.add("portal-workbench-mode");

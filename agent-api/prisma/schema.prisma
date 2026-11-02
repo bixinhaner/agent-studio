@@ -1225,6 +1225,23 @@ model PortalSendFailure {
   @@map("portal_send_failures")
 }
 
+/// Who had the portal open, one row per user and 10-minute slot. Written by the
+/// admin service from page heartbeats, so it keeps working while chat is down.
+model PortalPresenceSlot {
+  userId         String   @map("user_id")
+  slotStart      DateTime @map("slot_start")
+  organizationId String?  @map("organization_id")
+  firstSeenAt    DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at")
+  hits           Int      @default(1)
+  buildId        String?  @map("build_id")
+  userAgent      String?  @map("user_agent")
+
+  @@id([userId, slotStart])
+  @@index([slotStart])
+  @@map("portal_presence_slots")
+}
+
 model ThreadReadState {
   id         String   @id @default(cuid())
   threadId   String   @map("thread_id")

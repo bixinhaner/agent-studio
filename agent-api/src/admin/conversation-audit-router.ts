@@ -1,3 +1,4 @@
+import { createPortalPresenceAuditRouter } from "./portal-presence.js";
 import { createSendFailureAuditRouter } from "./send-failure-audit-router.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -2467,6 +2468,7 @@ export function createConversationAuditRouter(options: {
   });
 
   router.use(createSendFailureAuditRouter(() => getDb() as never));
+  router.use(createPortalPresenceAuditRouter(() => getDb() as never));
 
   router.get("/conversations", async (req: Request, res: Response) => {
     try {
