@@ -1,0 +1,21 @@
+[Unit]
+Description=Restart the active agent-studio chat slot when it stops answering, with DingTalk alerts
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_GROUP__
+Environment=HOME=__APP_HOME__
+Environment=DEPLOY_STATE_DIR=__DEPLOY_STATE_DIR__
+Environment=CHAT_WATCHDOG_STATE_DIR=__STATE_ROOT__
+Environment=AGENT_STUDIO_DEPLOY_LOCK_FILE=__DEPLOY_LOCK_FILE__
+Environment=PM2_ECOSYSTEM_FILE=__PM2_ECOSYSTEM_FILE__
+Environment=CHAT_WATCHDOG_HOST=__LOCAL_API_HOST__
+Environment=CHAT_API_PORT=__CHAT_API_PORT__
+Environment=CHAT_B_API_PORT=__CHAT_B_API_PORT__
+Environment=PM2_CHAT_APP_NAME=__PM2_CHAT_APP_NAME__
+Environment=PM2_CHAT_B_APP_NAME=__PM2_CHAT_B_APP_NAME__
+Environment=CHAT_WATCHDOG_ADMIN_URL=http://__LOCAL_API_HOST__:__ADMIN_API_PORT__
+ExecStart=/usr/local/sbin/agent-studio-chat-watchdog
+# Covers a restart that waits up to 180s for the slot to become ready.
+TimeoutStartSec=300

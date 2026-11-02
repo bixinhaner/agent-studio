@@ -50,8 +50,10 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       max_restarts: 10,
-      // A retired slot exits with 0 once its runs finish; PM2 leaves it stopped.
-      stop_exit_codes: [0],
+      // A retired slot exits with 75 (CHAT_SLOT_RETIRED_EXIT_CODE) once its runs
+      // finish and PM2 leaves it stopped; any other exit, including a crash that
+      // PM2 reports as code 0, is restarted.
+      stop_exit_codes: [75],
       // Time to mark interrupted runs as "system update" before SIGKILL.
       kill_timeout: 30000,
       env: {
@@ -83,8 +85,10 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       max_restarts: 10,
-      // A retired slot exits with 0 once its runs finish; PM2 leaves it stopped.
-      stop_exit_codes: [0],
+      // A retired slot exits with 75 (CHAT_SLOT_RETIRED_EXIT_CODE) once its runs
+      // finish and PM2 leaves it stopped; any other exit, including a crash that
+      // PM2 reports as code 0, is restarted.
+      stop_exit_codes: [75],
       // Time to mark interrupted runs as "system update" before SIGKILL.
       kill_timeout: 30000,
       env: {

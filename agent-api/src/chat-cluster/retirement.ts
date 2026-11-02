@@ -3,6 +3,13 @@ import { inFlightForwardCount } from "./forwarding.js";
 
 export type ChatRetirementPhase = "active" | "retiring" | "exiting";
 
+/**
+ * Exit code of a slot that retired after a blue-green switch. PM2 lists only this
+ * code in stop_exit_codes, so every other exit (crash, V8 out-of-memory abort,
+ * stray SIGTERM) is restarted instead of leaving the slot stopped.
+ */
+export const CHAT_SLOT_RETIRED_EXIT_CODE = 75;
+
 /** Polls a down or not-ready peer must stay that way before retirement is cancelled. */
 const PEER_LOST_POLLS = 3;
 /** Polls an unanswering peer is tolerated (about a minute at the 2s poll). */
@@ -11,9 +18,10 @@ const PEER_UNREACHABLE_POLLS = 30;
 /**
  * A blue-green chat slot retires when the deploy writes its slot drain file
  * while a peer is ready to take over. Retiring keeps every in-flight run on
- * this release, stops taking new work, and exits once idle so PM2 leaves the
- * slot stopped. Runs still active after the limit are interrupted with a
- * "system update" result the user can retry.
+ * this release, stops taking new work, and exits once idle with
+ * CHAT_SLOT_RETIRED_EXIT_CODE so PM2 leaves the slot stopped. Runs still
+ * active after the limit are interrupted with a "system update" result the
+ * user can retry.
  *
  * Without a ready peer a drain file keeps the single-instance behavior: new
  * work is rejected and the process never exits by itself.

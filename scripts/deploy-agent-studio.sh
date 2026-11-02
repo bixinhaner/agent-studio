@@ -1419,10 +1419,11 @@ install_shared_runtime_maintenance() {
   install_if_changed "$shared_runtime_dir/gap-scan.py" /usr/local/lib/agent-studio/runtime-gap-scan.py 755
   install_if_changed "$shared_runtime_dir/codex-home-dedupe.py" /usr/local/lib/agent-studio/codex-home-dedupe.py 755
   install_if_changed "$shared_runtime_dir/disk-usage-snapshot.py" /usr/local/lib/agent-studio/disk-usage-snapshot.py 755
+  install_if_changed "$shared_runtime_dir/chat-watchdog.sh" /usr/local/sbin/agent-studio-chat-watchdog 755
 
   local unit rendered
   local timers=(agent-studio-thread-tmp-cleanup agent-studio-runtime-gap-scan agent-studio-codex-home-dedupe
-    agent-studio-disk-usage-snapshot agent-studio-thread-file-offload)
+    agent-studio-disk-usage-snapshot agent-studio-thread-file-offload agent-studio-chat-watchdog)
   for unit in "${timers[@]/%/.service}" "${timers[@]/%/.timer}"; do
     rendered="$(mktemp)"
     sed \
@@ -1435,6 +1436,15 @@ install_shared_runtime_maintenance() {
       -e "s#__APP_HOME__#$APP_HOME#g" \
       -e "s#__APP_USER__#$APP_USER#g" \
       -e "s#__APP_GROUP__#$APP_GROUP#g" \
+      -e "s#__DEPLOY_STATE_DIR__#$DEPLOY_STATE_DIR#g" \
+      -e "s#__DEPLOY_LOCK_FILE__#$DEPLOY_LOCK_FILE#g" \
+      -e "s#__PM2_ECOSYSTEM_FILE__#$PM2_ECOSYSTEM_FILE#g" \
+      -e "s#__LOCAL_API_HOST__#$(local_api_host)#g" \
+      -e "s#__ADMIN_API_PORT__#$ADMIN_API_PORT#g" \
+      -e "s#__CHAT_API_PORT__#$CHAT_API_PORT#g" \
+      -e "s#__CHAT_B_API_PORT__#$CHAT_B_API_PORT#g" \
+      -e "s#__PM2_CHAT_APP_NAME__#$PM2_CHAT_APP_NAME#g" \
+      -e "s#__PM2_CHAT_B_APP_NAME__#$PM2_CHAT_B_APP_NAME#g" \
       "$template_dir/$unit.template" > "$rendered"
     install_if_changed "$rendered" "/etc/systemd/system/$unit" 644
     rm -f "$rendered"

@@ -1,4 +1,5 @@
 import express from "express";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,7 @@ import {
   type ChatPeerStatus
 } from "./cluster.js";
 import { createChatClusterRoutingMiddleware, inFlightForwardCount, resolveChatRunKey } from "./forwarding.js";
-import { ChatRetirementController } from "./retirement.js";
+import { CHAT_SLOT_RETIRED_EXIT_CODE, ChatRetirementController } from "./retirement.js";
 
 const servers: http.Server[] = [];
 
@@ -466,5 +467,15 @@ describe("chat retirement", () => {
     await paused.retirement.poll();
     // A fresh lone drain rejects work again instead of staying silently paused.
     expect(paused.retirement.userFacingDrainReason()).toBe("updating");
+  });
+});
+
+describe("chat slot exit code", () => {
+  it("lets PM2 leave only retired slots stopped and restart every other exit", () => {
+    const template = readFileSync(new URL("../../../templates/pm2-ecosystem.config.cjs.template", import.meta.url), "utf8");
+    const stopExitCodes = [...template.matchAll(/stop_exit_codes:\s*\[([^\]]*)\]/g)].map((match) => match[1].trim());
+    // Both chat slots; 0 must not be listed because PM2 reports a V8 abort as code 0.
+    expect(stopExitCodes).toEqual([String(CHAT_SLOT_RETIRED_EXIT_CODE), String(CHAT_SLOT_RETIRED_EXIT_CODE)]);
+    expect(CHAT_SLOT_RETIRED_EXIT_CODE).not.toBe(0);
   });
 });

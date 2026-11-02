@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 
 import {
+  StructuredPreviewError,
   detectPreviewFile,
+  runStructuredPreview,
   sendStructuredPreview
 } from "./structured-preview-service.js";
 
@@ -197,5 +199,39 @@ describe("structured preview service", () => {
       content: Buffer.from(`<mxfile><diagram>${compressed}</diagram></mxfile>`)
     });
     expect(String(capture.state.body)).toContain("Compressed");
+  });
+
+  it("fails only the preview when parsing runs out of memory, and keeps serving", async () => {
+    // Every cell of a workbook becomes a heap object; 2.4M of them cannot fit a 32 MB preview heap.
+    const huge = Buffer.from("a,b,c,d,e,f\n".repeat(400_000));
+    const failure = runStructuredPreview(
+      { input: { fileName: "huge.csv", content: huge }, mode: "table", query: {} },
+      { maxOldSpaceMb: 32 }
+    );
+    await expect(failure).rejects.toBeInstanceOf(StructuredPreviewError);
+    await expect(failure).rejects.toThrow("too large or complex to preview");
+
+    const capture = responseCapture();
+    await sendStructuredPreview(capture.response, {
+      requested: "text",
+      fileName: "small.log",
+      content: Buffer.from("still here")
+    });
+    expect(capture.state.body).toMatchObject({ kind: "text", lines: [{ number: 1, text: "still here" }] });
+  }, 60_000);
+
+  it("stops previews that run past the time limit", async () => {
+    await expect(
+      runStructuredPreview(
+        { input: { fileName: "slow.log", content: Buffer.from("line\n") }, mode: "text", query: {} },
+        { timeoutMs: 1 }
+      )
+    ).rejects.toThrow("File preview timed out");
+  });
+
+  it("returns parse errors from the preview process as preview errors", async () => {
+    await expect(
+      runStructuredPreview({ input: { fileName: "broken.drawio", content: Buffer.from("<mxfile></mxfile>") }, mode: "diagram", query: {} })
+    ).rejects.toThrow("does not contain a readable diagram");
   });
 });

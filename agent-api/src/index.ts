@@ -32,7 +32,8 @@ import {
   inFlightForwardCount,
   resolveChatRunKey
 } from "./chat-cluster/forwarding.js";
-import { ChatRetirementController } from "./chat-cluster/retirement.js";
+import { CHAT_SLOT_RETIRED_EXIT_CODE, ChatRetirementController } from "./chat-cluster/retirement.js";
+import { ServiceHealthAlertReporter, serviceHealthAlertSchema } from "./operations/service-health-alert-reporter.js";
 import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
@@ -1118,6 +1119,12 @@ const customerExperienceIssues = new CustomerExperienceIssueReporter({
       email: user.email
     };
   },
+  logger: console
+});
+const serviceHealthAlerts = new ServiceHealthAlertReporter({
+  notifications: notificationRecords,
+  sendWorkNotice: sendActiveDingTalkWorkNotice,
+  listSuperAdminDingTalkUserIds,
   logger: console
 });
 const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
@@ -11917,6 +11924,26 @@ app.get("/internal/ready", (req: Request, res: Response) => {
   res.status(ready ? 200 : 503).json({ ready, instance_id: chatInstanceId, slot: chatSlot });
 });
 
+// The chat watchdog timer (agent-studio-chat-watchdog) reports outages and recoveries here
+// so they reach super admins over the DingTalk work notice used by other operations alerts.
+app.post("/internal/ops/service-health-alert", async (req: Request, res: Response) => {
+  if (!isLocalDeployStatusRequest(req)) {
+    res.status(404).json({ detail: "Not found" });
+    return;
+  }
+  const parsed = serviceHealthAlertSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ detail: "Invalid service health alert" });
+    return;
+  }
+  try {
+    const result = await serviceHealthAlerts.report(parsed.data);
+    res.status(result.status === "sent" ? 200 : 502).json(result);
+  } catch (error) {
+    res.status(500).json({ detail: error instanceof Error ? error.message : "service health alert failed" });
+  }
+});
+
 app.get("/public-api/branding", async (req: Request, res: Response) => {
   try {
     if (!req.publicBrand && !isLocalHostHeader(req.header("host"))) {
@@ -15573,7 +15600,7 @@ async function bootstrap() {
       exit: async (input) => {
         // A retired slot leaves no drain behind, so a later start (reboot) serves normally.
         await clearOwnChatSlotDrainFile();
-        await shutdownChatInstance({ ...input, exitCode: 0 });
+        await shutdownChatInstance({ ...input, exitCode: CHAT_SLOT_RETIRED_EXIT_CODE });
       },
       logger: console
     });
