@@ -3,6 +3,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const MAX_FALLBACK_TOKENS = 5;
 
@@ -76,7 +78,17 @@ export async function searchCatalog({ cliPath, query }) {
   return { ...fullResult, requestedQuery: query, resolvedQuery: null, attempts };
 }
 
-const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+// Node 以真实路径加载入口模块；会话里的 Skill 目录常是符号链接，必须比较真实路径，
+// 否则经链接启动时会静默退出 0。
+function realPath(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+const invokedDirectly = Boolean(process.argv[1]) && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url));
 if (invokedDirectly) {
   searchCatalog({
     cliPath: path.resolve(required(argument("--cli"), "--cli")),

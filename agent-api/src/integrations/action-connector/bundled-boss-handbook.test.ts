@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,9 +13,9 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(testDirectory, "../../../bundled-skills/boss-operations");
 const loaderPath = path.join(skillRoot, "scripts/ensure-handbook.mjs");
 
-function runLoader(workspace: string, cliPath: string, fixturePath: string, logPath: string) {
+function runLoader(workspace: string, cliPath: string, fixturePath: string, logPath: string, loader = loaderPath) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [loaderPath, "--cli", cliPath], {
+    const child = spawn(process.execPath, [loader, "--cli", cliPath], {
       cwd: workspace,
       env: { ...process.env, HANDBOOK_FIXTURE: fixturePath, HANDBOOK_LOG: logPath },
       stdio: ["ignore", "pipe", "pipe"]
@@ -109,6 +109,18 @@ describe("bundled BOSS handbook loader", () => {
     const second = await runLoader(fixture.workspace, fixture.cliPath, fixture.fixturePath, fixture.logPath);
     expect(JSON.parse(second.stdout)).toMatchObject({ status: "cached", handbookDigest: fixture.digest });
     expect((await readFile(fixture.logPath, "utf8")).trim().split("\n")).toHaveLength(3);
+  }, 15_000);
+
+  it("runs when the Skill directory is reached through a symlink", async () => {
+    // 会话目录里的 skills/boss-operations 是指向 bundled-skills 的符号链接；
+    // 经该路径启动时不得静默退出（否则模型拿不到手册，调查直接失败）。
+    const fixture = await fixtureWorkspace();
+    const linkedSkillRoot = path.join(fixture.workspace, "linked-skill");
+    await symlink(skillRoot, linkedSkillRoot, "dir");
+    const linkedLoader = path.join(linkedSkillRoot, "scripts/ensure-handbook.mjs");
+    const result = await runLoader(fixture.workspace, fixture.cliPath, fixture.fixturePath, fixture.logPath, linkedLoader);
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "downloaded", handbookDigest: fixture.digest });
   }, 15_000);
 
   it.each([

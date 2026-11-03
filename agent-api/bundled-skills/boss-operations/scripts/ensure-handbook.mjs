@@ -2,9 +2,11 @@
 
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
@@ -348,7 +350,17 @@ function cliArgument(argv, name) {
   return index >= 0 ? argv[index + 1] : undefined;
 }
 
-const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+// Node 以真实路径加载入口模块；会话里的 Skill 目录常是符号链接，必须比较真实路径，
+// 否则经链接启动时会静默退出 0，调用方拿不到手册也看不到错误。
+function realPath(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+const invokedDirectly = Boolean(process.argv[1]) && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url));
 if (invokedDirectly) {
   ensureHandbook({ cliPath: cliArgument(process.argv.slice(2), "--cli") })
     .then((result) => console.log(JSON.stringify(result)))
