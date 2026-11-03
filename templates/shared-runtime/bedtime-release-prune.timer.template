@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily cleanup of old Bedtime app releases
+
+[Timer]
+OnCalendar=*-*-* 19:45:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -657,7 +657,7 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     injectRuntimeHint: true,
     preferSharedPackages: true,
     sessionTmpEnabled: true,
-    cleanupSessionArtifactsOlderThanDays: 14
+    cleanupSessionArtifactsOlderThanDays: 7
   },
   adminEmailNotifications: {
     enabled: true,

@@ -1420,10 +1420,12 @@ install_shared_runtime_maintenance() {
   install_if_changed "$shared_runtime_dir/codex-home-dedupe.py" /usr/local/lib/agent-studio/codex-home-dedupe.py 755
   install_if_changed "$shared_runtime_dir/disk-usage-snapshot.py" /usr/local/lib/agent-studio/disk-usage-snapshot.py 755
   install_if_changed "$shared_runtime_dir/chat-watchdog.sh" /usr/local/sbin/agent-studio-chat-watchdog 755
+  install_if_changed "$shared_runtime_dir/bedtime-release-prune.sh" /usr/local/sbin/bedtime-release-prune 755
 
   local unit rendered
   local timers=(agent-studio-thread-tmp-cleanup agent-studio-runtime-gap-scan agent-studio-codex-home-dedupe
-    agent-studio-disk-usage-snapshot agent-studio-thread-file-offload agent-studio-chat-watchdog)
+    agent-studio-disk-usage-snapshot agent-studio-thread-file-offload agent-studio-chat-watchdog
+    bedtime-release-prune)
   for unit in "${timers[@]/%/.service}" "${timers[@]/%/.timer}"; do
     rendered="$(mktemp)"
     sed \

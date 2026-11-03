@@ -5,7 +5,7 @@
 #    folder that the app deletes and re-copies at the start of every turn.
 #  - <thread>/.agent-studio/tmp    idle TMP_IDLE_DAYS: home/cache/config; the app recreates it
 #    (plus runtime symlinks) on the next request. Defaults to the "临时目录保留天数" published
-#    in the admin console (STATE_DIR/cleanup-policy.json), clamped to 3-90, else 14.
+#    in the admin console (STATE_DIR/cleanup-policy.json), clamped to 3-90, else 7.
 #  - <thread>/{tmp,temp,.tmp,scratch,extracted,unpacked,unzipped}   idle TMP_IDLE_DAYS: scratch
 #    folders agents create at the workspace root (runtime guidance now points them at $TMPDIR).
 #  - node_modules, virtualenvs, __pycache__, .gradle, .m2, .nuget, .npm, .cache, .tools and similar
@@ -34,7 +34,7 @@ except Exception:
 print(min(90, max(3, days)))
 PY
 }
-TMP_IDLE_DAYS="${TMP_IDLE_DAYS:-$(policy_days || echo 14)}"
+TMP_IDLE_DAYS="${TMP_IDLE_DAYS:-$(policy_days || echo 7)}"
 
 OPEN=$(mktemp); trap 'rm -f "$OPEN"' EXIT
 lsof -nP -Fn 2>/dev/null | sed -n 's/^n//p' | grep "^$ROOT/" > "$OPEN"

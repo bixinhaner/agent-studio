@@ -130,7 +130,7 @@ describe("shared runtime", () => {
     expect(tmpRetentionDays(enabledSettings)).toBe(14);
     expect(tmpRetentionDays({ ...enabledSettings, cleanupSessionArtifactsOlderThanDays: 1 })).toBe(3);
     expect(tmpRetentionDays({ ...enabledSettings, cleanupSessionArtifactsOlderThanDays: 3650 })).toBe(90);
-    expect(tmpRetentionDays(undefined)).toBe(14);
+    expect(tmpRetentionDays(undefined)).toBe(7);
   });
 
   it("writes the cleanup policy file only when retention changes", async () => {

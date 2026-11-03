@@ -140,7 +140,7 @@ const DEFAULT_PYTHON_RUNTIME_SETTINGS: PythonRuntimeSettings = {
   injectRuntimeHint: true,
   preferSharedPackages: true,
   sessionTmpEnabled: true,
-  cleanupSessionArtifactsOlderThanDays: 14
+  cleanupSessionArtifactsOlderThanDays: 7
 };
 
 const ENTERPRISE_CHANNEL_LABELS: Record<EnterpriseContextChannel, string> = {

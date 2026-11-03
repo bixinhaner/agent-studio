@@ -1,0 +1,8 @@
+[Unit]
+Description=Remove old Bedtime app releases (keeps the active one and one rollback target)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bedtime-release-prune
+Nice=19
+IOSchedulingClass=idle

@@ -321,7 +321,7 @@ export function defaultPythonRuntimeSettings(): SystemSettingsPythonRuntime {
     injectRuntimeHint: true,
     preferSharedPackages: true,
     sessionTmpEnabled: true,
-    cleanupSessionArtifactsOlderThanDays: 14
+    cleanupSessionArtifactsOlderThanDays: 7
   };
 }
 
