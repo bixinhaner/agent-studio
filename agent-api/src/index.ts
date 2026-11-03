@@ -245,6 +245,7 @@ import {
   type PortalActiveChatRun
 } from "./portal/portal-run-registry.js";
 import { portalStoppedAssistantMessage } from "./portal/chat-stopped-message.js";
+import { portalLiveAssistantMessage, portalLiveAssistantMessageId } from "./portal/chat-live-answer.js";
 import {
   portalAutoRecoveryPrompt,
   portalRuntimeEventHasAnySideEffect,
@@ -5010,12 +5011,14 @@ function attachPortalActiveChatRun(input: {
   userMessageId?: string;
   assistantMessageId?: string;
   partialSnapshot?: () => PortalPartialAssistantSnapshot;
+  onSteerAccepted?: (event: unknown) => void;
 }): void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return;
   const entry = portalActiveChatRuns.get(sessionId);
   if (!entry || entry.userId !== input.userId) return;
   entry.partialSnapshot = input.partialSnapshot ?? entry.partialSnapshot;
+  entry.onSteerAccepted = input.onSteerAccepted ?? entry.onSteerAccepted;
   entry.session = input.session ?? entry.session;
   entry.threadId = trimOrUndefined(input.threadId) ?? entry.threadId;
   entry.userMessageId = trimOrUndefined(input.userMessageId) ?? entry.userMessageId;
@@ -13862,6 +13865,67 @@ app.get("/api/threads/:threadId/steer-events", async (req: Request, res: Respons
   }
 });
 
+/**
+ * What a response running on this task has produced so far. A device or tab that does
+ * not stream the run (the same user on another device, a reloaded page) polls it to
+ * show the progress and the directions sent to it; the finished answer comes from the
+ * history once the run ends.
+ */
+app.get("/api/threads/:threadId/live", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const thread = await getPortalOwnedThread(threadId, currentUser);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    gcPortalActiveChatRuns();
+    const sessionId = findPortalActiveChatRunSessionIdForThread(threadId, currentUser.id);
+    const run = sessionId ? portalActiveChatRuns.get(sessionId) : undefined;
+    const preflight = run
+      ? undefined
+      : [...portalPreflightChatRuns.values()].find(
+          (candidate) =>
+            candidate.threadId === threadId && candidate.userId === currentUser.id && !candidate.controller.signal.aborted
+        );
+    const local = run ?? preflight;
+    if (!local) {
+      const ownerPeer = await portalThreadRunOwnerPeer(req, threadId, currentUser.id);
+      if (ownerPeer) {
+        await forwardRequestToPeer(req, res, ownerPeer.url, chatInstanceId);
+        return;
+      }
+      res.json({ running: false });
+      return;
+    }
+    const userMessageId = trimOrUndefined(local.userMessageId);
+    const [portalBrand, steerEvents] = await Promise.all([
+      publicBrands.getForOrganization(currentUser.organizationId),
+      userMessageId ? portalSteerEvents.listForThread(threadId) : Promise.resolve([])
+    ]);
+    const message = portalLiveAssistantMessage({
+      id: portalLiveAssistantMessageId(local),
+      runId: local.runId,
+      acceptedAt: local.acceptedAt,
+      partial: run ? safePortalPartialSnapshot(run.partialSnapshot) : undefined
+    });
+    res.json({
+      running: true,
+      run_id: local.runId,
+      user_message_id: userMessageId ?? null,
+      message: portalBrand ? applyBrandPolicyToUnknown(message, portalBrand) : message,
+      steer_events: steerEvents
+        .filter((event) => event.sourceUserMessageId === userMessageId)
+        .map(portalSteerEventOut)
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read the running response";
+    res.status(400).json({ detail });
+  }
+});
+
 app.get("/api/threads/:threadId/public-share", requireInternalOrganizationMember, async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
@@ -14317,6 +14381,11 @@ app.post("/api/chat/steer", async (req: Request, res: Response) => {
       };
     }
     pendingEventId = "";
+    try {
+      activeRun.onSteerAccepted?.(portalSteerEventOut(acceptedEvent));
+    } catch {
+      // The streaming client reads the direction from the history instead.
+    }
     logPortalStreamLifecycle("active_turn_steered", {
       trace_id: activeRun.traceId,
       session_id: session.sessionId,
@@ -14804,7 +14873,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       userId: currentUser.id,
       session: currentSession,
       threadId: portalThreadId,
-      assistantMessageId: portalAssistantMessageId
+      assistantMessageId: portalAssistantMessageId,
+      // A direction sent from another device or tab shows up here too.
+      onSteerAccepted: (event) => {
+        sendTrackedSSE("steer_event", { steer_event: event });
+      }
     });
 
     // Each streamed turn is a new costly action. Gate it before execution without

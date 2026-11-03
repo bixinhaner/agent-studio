@@ -40,6 +40,7 @@ import {
   ThreadPublicShareSelectionContext
 } from "./portal-contexts";
 import { AssistantMarkdownText } from "./AssistantMarkdown";
+import { PortalLiveAnswerView } from "./live-answer";
 import { UPLOAD_AWARE_ATTACHMENT_COMPONENTS, UploadAwareAttachment } from "./UploadAwareAttachment";
 import { ReasoningPart, SourcePart, useNowTicker } from "./AssistantProcessSummary";
 import { AssistantMessageEmpty } from "./AssistantRunningState";
@@ -567,11 +568,28 @@ export const AgentAssistantMessage: FC = () => {
 
 export const PortalSteerEventsFooter: FC = () => {
   const workflow = usePortalComposerWorkflow();
-  const unanchoredEvents = useMemo(
-    () => workflow.steerEvents.filter((event) => !event.sourceUserMessageId && !event.userInputRequestId),
-    [workflow.steerEvents]
+  // A question still being answered has no assistant message to list its directions under yet.
+  const pendingQuestionId = useAuiState((state) => {
+    const last = state.thread.messages.at(-1);
+    return last?.role === "user" ? last.id : "";
+  });
+  const events = useMemo(
+    () => workflow.steerEvents.filter(
+      (event) =>
+        !event.userInputRequestId &&
+        (!event.sourceUserMessageId || (pendingQuestionId !== "" && event.sourceUserMessageId === pendingQuestionId))
+    ),
+    [pendingQuestionId, workflow.steerEvents]
   );
-  return <PortalSteerEventsView events={unanchoredEvents} />;
+  return <PortalSteerEventsView events={events} />;
 };
+
+/** Below the timeline: the answer running on another device or tab, then the directions sent to it. */
+export const PortalMessagesFooter: FC = () => (
+  <>
+    <PortalLiveAnswerView AssistantMessage={AgentAssistantMessage} />
+    <PortalSteerEventsFooter />
+  </>
+);
 
 export const ReadOnlyComposer: FC = () => null;

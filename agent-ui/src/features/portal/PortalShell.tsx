@@ -149,6 +149,7 @@ import {
   portalSteerEventFromOut,
   type PortalSteerEventListOut,
   type PortalSteerEventOut,
+  type ThreadLiveOut,
   type RunningThreadsOut,
   type ThreadCreateOut,
   type ThreadListOut,
@@ -157,6 +158,7 @@ import {
   type ThreadOut
 } from "./portal-api-types";
 import { type ActiveThreadHead, shouldReloadTimeline, timelineReloadKey } from "./timeline-sync";
+import { PortalLiveAnswerContext, portalLiveAnswerFromOut, type PortalLiveAnswer } from "./live-answer";
 import {
   type AppliedConfig,
   type ApprovalPolicy,
@@ -310,7 +312,7 @@ import {
   AgentAssistantMessage,
   AgentUserMessage,
   InlineEditComposer,
-  PortalSteerEventsFooter,
+  PortalMessagesFooter,
   ReadOnlyComposer
 } from "./PortalMessages";
 import { MobileAwareComposer, sendFailureContextFromMessages, UploadAwareComposer } from "./PortalComposer";
@@ -3148,6 +3150,17 @@ export function PortalShell(props: {
               continue;
             }
 
+            if (event === "steer_event") {
+              // A direction for this response, possibly sent from another device or tab.
+              const steerEvent = asRecord(payload?.steer_event);
+              if (steerEvent) {
+                composerWorkflowController.mergeServerSteerEvents(threadId, [
+                  portalSteerEventFromOut(steerEvent as unknown as PortalSteerEventOut)
+                ]);
+              }
+              continue;
+            }
+
             if (event === "session") {
               const startedSessionId = asString(payload?.session_id);
               if (startedSessionId) activeRun.sessionId = startedSessionId;
@@ -4149,6 +4162,54 @@ export function PortalShell(props: {
     }
   }, [activeRemoteThreadId, activeRunThreadIds, activeThreadBackgroundRunning, reloadThreadHistory]);
 
+  // While the response runs elsewhere, follow what it has produced so far (and the
+  // directions sent to it) so this page shows the progress, not only "still running".
+  const [liveAnswer, setLiveAnswer] = useState<PortalLiveAnswer | undefined>(undefined);
+  const liveAnswerThreadId = activeThreadBackgroundRunning ? activeRemoteThreadId : "";
+  const mergeServerSteerEvents = composerWorkflowController.mergeServerSteerEvents;
+  useEffect(() => {
+    if (!liveAnswerThreadId || typeof window === "undefined") return undefined;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastSnapshot = "";
+    const poll = async () => {
+      if (document.visibilityState !== "hidden") {
+        try {
+          const out = await api<ThreadLiveOut>(`/api/threads/${encodeURIComponent(liveAnswerThreadId)}/live`);
+          if (cancelled) return;
+          const next = portalLiveAnswerFromOut(liveAnswerThreadId, out);
+          const snapshot = next ? JSON.stringify(next) : "";
+          if (next && snapshot !== lastSnapshot) {
+            lastSnapshot = snapshot;
+            setLiveAnswer(next);
+          }
+          if (out.running && out.steer_events?.length) {
+            mergeServerSteerEvents(liveAnswerThreadId, out.steer_events.map(portalSteerEventFromOut));
+          }
+          // The run just ended: notice it now instead of at the next status poll.
+          if (!out.running) void refreshServerRunningThreadIds();
+        } catch {
+          // Keep the last progress during a transient failure.
+        }
+      }
+      if (!cancelled) timer = setTimeout(() => void poll(), 1500);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [liveAnswerThreadId, mergeServerSteerEvents, refreshServerRunningThreadIds]);
+  // Kept until the finished answer is loaded, so the answer does not blink out in between.
+  const liveAnswerSettling = Boolean(activeRemoteThreadId && backgroundHistorySyncThreadId === activeRemoteThreadId);
+  useEffect(() => {
+    if (!liveAnswer) return;
+    if (liveAnswer.threadId !== activeRemoteThreadId || (!activeThreadBackgroundRunning && !liveAnswerSettling)) {
+      setLiveAnswer(undefined);
+    }
+  }, [activeRemoteThreadId, activeThreadBackgroundRunning, liveAnswer, liveAnswerSettling]);
+  const activeLiveAnswer = liveAnswer?.threadId === activeRemoteThreadId ? liveAnswer : undefined;
+
   const pendingComposerAttachmentsRef = useRef(0);
   const setPendingComposerAttachments = useCallback((count: number) => {
     pendingComposerAttachmentsRef.current = count;
@@ -4494,6 +4555,7 @@ export function PortalShell(props: {
       )}
       <RunningThreadIdsContext.Provider value={runningThreadIds}>
         <PortalBackgroundRunContext.Provider value={backgroundRunContextValue}>
+        <PortalLiveAnswerContext.Provider value={activeLiveAnswer}>
         <UserInputReadOnlyContext.Provider value={threadReadOnly}>
         <ThreadPublicShareControls
           threadId={activeRemoteThreadId}
@@ -4595,7 +4657,7 @@ export function PortalShell(props: {
                 UserMessage: AgentUserMessage,
                 EditComposer: InlineEditComposer,
                 AssistantMessage: AgentAssistantMessage,
-                MessagesFooter: PortalSteerEventsFooter,
+                MessagesFooter: PortalMessagesFooter,
                 ThreadWelcome: DraftOnlyThreadWelcome
               }}
               assistantMessage={{
@@ -4620,6 +4682,7 @@ export function PortalShell(props: {
         </ActiveThreadIdContext.Provider>
         </ThreadPublicShareControls>
         </UserInputReadOnlyContext.Provider>
+        </PortalLiveAnswerContext.Provider>
         </PortalBackgroundRunContext.Provider>
       </RunningThreadIdsContext.Provider>
       {sharedThreadReadonly && !trainingReadOnly ? (

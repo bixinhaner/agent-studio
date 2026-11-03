@@ -41,6 +41,17 @@ export type RunningThreadsOut = {
   active_thread?: { id: string; head_id: string | null };
 };
 
+/** What a response running elsewhere (another device or tab) has produced so far. */
+export type ThreadLiveOut =
+  | { running: false }
+  | {
+      running: true;
+      run_id: string;
+      user_message_id: string | null;
+      message: unknown;
+      steer_events?: PortalSteerEventOut[];
+    };
+
 export type ThreadOneOut = {
   thread: ThreadOut;
 };

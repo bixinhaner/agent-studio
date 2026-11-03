@@ -23,6 +23,8 @@ export type PortalActiveChatRun = {
   assistantMessageWritten?: boolean;
   /** Snapshot of what the run has produced so far, kept by a stop so the partial answer survives a refresh. */
   partialSnapshot?: () => PortalPartialAssistantSnapshot;
+  /** Tells the streaming client about a direction another device or tab gave this run. */
+  onSteerAccepted?: (event: unknown) => void;
   /** Aborted when a retiring chat instance reaches its limit; the turn ends as "interrupted by a system update". */
   systemInterrupt?: AbortController;
   acceptedAt: string;

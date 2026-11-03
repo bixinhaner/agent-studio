@@ -63,6 +63,24 @@ describe("portal composer workflow controller", () => {
     expect(result.current.contextValue.queue.map((item) => item.text)).toEqual(["second", "edited first"]);
   });
 
+  it("shows directions another device sent to the running response", () => {
+    const { result } = renderHook(() =>
+      usePortalComposerWorkflowController({
+        userId: "user-1",
+        activeThreadId: "thread-1",
+        onSteer: unusedSteer
+      })
+    );
+    const fromPhone = acceptedSteerEvent("先看一下进度", "portal-steer-phone");
+
+    act(() => result.current.mergeServerSteerEvents("thread-1", [fromPhone]));
+    expect(result.current.contextValue.steerEvents.map((event) => event.message)).toEqual(["先看一下进度"]);
+
+    // The live poll and the stream report the same direction again: it is listed once.
+    act(() => result.current.mergeServerSteerEvents("thread-1", [fromPhone]));
+    expect(result.current.contextValue.steerEvents).toHaveLength(1);
+  });
+
   it("steers the active turn and removes the steered queued instruction", async () => {
     const onSteer = vi.fn(async (message: string, id: string) => acceptedSteerEvent(message, id));
     const { result } = renderHook(() =>

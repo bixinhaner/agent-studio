@@ -245,6 +245,16 @@ export function usePortalComposerWorkflowController(input: {
     };
   }, [activeThreadId, loadSteerEvents, userId]);
 
+  /** Directions the server reports for a thread, e.g. sent from another device or tab. */
+  const mergeServerSteerEvents = useCallback((threadId: string, events: PortalSteerEvent[]) => {
+    if (!threadId || events.length === 0) return;
+    setSteerEventsByThread((current) => {
+      const next = { ...current, [threadId]: mergeSteerEvents(current[threadId] ?? [], events) };
+      steerEventsRef.current = next;
+      return next;
+    });
+  }, []);
+
   const activeState = useMemo(
     () => states[activeThreadId] ?? queueStateFromStored(readStored(activeThreadId)),
     [activeThreadId, readStored, states]
@@ -596,7 +606,8 @@ export function usePortalComposerWorkflowController(input: {
     markRunCompleted,
     markRunFailed,
     markInterrupted,
-    requeueRejectedSend
+    requeueRejectedSend,
+    mergeServerSteerEvents
   };
 }
 
