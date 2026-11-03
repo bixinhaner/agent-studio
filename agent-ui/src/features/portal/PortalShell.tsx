@@ -4125,7 +4125,7 @@ export function PortalShell(props: {
   const timelineReloadKeyRef = useRef("");
   const activeRunThreadIdsRef = useRef(activeRunThreadIds);
   activeRunThreadIdsRef.current = activeRunThreadIds;
-  syncActiveTimelineRef.current = (server, serverRunning) => {
+  syncActiveTimelineRef.current = (server) => {
     if (trainingReadOnly) return;
     const threadId = activeRemoteThreadIdRef.current;
     const state = runtime.thread.getState();
@@ -4135,7 +4135,6 @@ export function PortalShell(props: {
       server,
       localHeadId,
       localBusy: state.isRunning || state.isLoading || Boolean(activeRunThreadIdsRef.current[threadId]),
-      serverRunning: Boolean(serverRunning[threadId]),
       lastReloadKey: timelineReloadKeyRef.current
     })) return;
     const key = timelineReloadKey(threadId, String(server?.head_id || ""));

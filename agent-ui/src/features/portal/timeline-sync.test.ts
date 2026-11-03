@@ -7,7 +7,6 @@ const base = {
   server: { id: "t1", head_id: "phone-answer" },
   localHeadId: "desktop-answer",
   localBusy: false,
-  serverRunning: false,
   lastReloadKey: ""
 };
 
@@ -20,9 +19,8 @@ describe("timeline sync", () => {
     expect(shouldReloadTimeline({ ...base, localHeadId: "phone-answer" })).toBe(false);
   });
 
-  it("waits while this page is sending or loading, or a run is going on elsewhere", () => {
+  it("waits while this page is sending or loading", () => {
     expect(shouldReloadTimeline({ ...base, localBusy: true })).toBe(false);
-    expect(shouldReloadTimeline({ ...base, serverRunning: true })).toBe(false);
   });
 
   it("ignores another task's head and an unknown head", () => {

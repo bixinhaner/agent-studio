@@ -9,16 +9,18 @@ export function shouldReloadTimeline(input: {
   activeThreadId: string;
   server: ActiveThreadHead | undefined;
   localHeadId: string;
-  /** This page is streaming, sending or settling a run in this task. */
+  /**
+   * This page is streaming, sending or settling a run in this task. A run going on
+   * elsewhere does not hold the reload back: its question must be shown so the answer's
+   * live progress can follow it.
+   */
   localBusy: boolean;
-  /** A run is going on elsewhere; its end already triggers a reload. */
-  serverRunning: boolean;
   /** `${threadId}:${headId}` of the last reload, so one server state is loaded once. */
   lastReloadKey: string;
 }): boolean {
   const serverHeadId = input.server?.head_id?.trim() ?? "";
   if (!input.activeThreadId || input.server?.id !== input.activeThreadId || !serverHeadId) return false;
-  if (input.localBusy || input.serverRunning) return false;
+  if (input.localBusy) return false;
   if (serverHeadId === input.localHeadId.trim()) return false;
   return timelineReloadKey(input.activeThreadId, serverHeadId) !== input.lastReloadKey;
 }
