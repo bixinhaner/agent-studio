@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import { normalizeAssistantMessageContentOrder } from "../messages/assistant-content-order.js";
 import type { ReasoningEffort } from "../model-config.js";
+import {
+  REQUESTED_PARENT_RUN_CONFIG_KEY,
+  replyToMessageId,
+  requestedParentIdOf,
+  runConfigWithRequestedParent,
+  timelineTailId
+} from "./message-timeline.js";
 import { sanitizeJsonForPostgres } from "./postgres-json-sanitizer.js";
 
 export type ThreadStatus = "regular" | "archived";
@@ -359,6 +366,33 @@ function messageDate(message: unknown, key: "createdAt" | "updatedAt"): Date | u
   return parsed;
 }
 
+/** Stored order becomes the timeline: each message follows the previous one (see message-timeline.ts). */
+function linearizedMessageItems(items: StoredMessageItem[]): StoredMessageItem[] {
+  let previousId: string | null = null;
+  return items.map((item) => {
+    const id = messageIdOf(item.message);
+    if (!id) return { ...item, parentId: null };
+    const parentId = previousId;
+    previousId = id;
+    const runConfig = timelineRunConfig(item.runConfig, item.parentId, parentId);
+    return { ...item, parentId, ...(runConfig ? { runConfig } : {}) };
+  });
+}
+
+/** Run config for a message placed after `actual`, keeping the parent its writer asked for (see message-timeline.ts). */
+function timelineRunConfig(
+  runConfig: unknown,
+  requested: string | null | undefined,
+  actual: string | null,
+  previous?: unknown
+): Record<string, unknown> | null {
+  const base = asRecord(runConfig);
+  const next = asRecord(runConfigWithRequestedParent(base, requested, actual));
+  if (requestedParentIdOf(next)) return next;
+  const kept = requestedParentIdOf(previous);
+  return kept ? { ...(next ?? {}), [REQUESTED_PARENT_RUN_CONFIG_KEY]: kept } : next;
+}
+
 function resolvedMessageCreatedAt(item: StoredMessageItem, fallback?: Date): Date {
   return toDate(item.createdAt) ?? messageDate(item.message, "createdAt") ?? fallback ?? new Date();
 }
@@ -667,6 +701,21 @@ export class ThreadRepository {
     return this.loadThreadRecord(this.db, row);
   }
 
+  /** The thread's last message without loading the messages; polled by open portal pages. */
+  async getOwnedHead(
+    threadId: string,
+    userId: string,
+    organizationId?: string
+  ): Promise<{ id: string; headId: string | null; securityDomainId: string | null } | undefined> {
+    const row = await this.db.thread.findUnique({ where: { id: threadId } });
+    if (!row || trimOrUndefined(row.userId ?? undefined) !== userId) return undefined;
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
+    if (normalizedOrganizationId && trimOrUndefined(row.organizationId ?? undefined) !== normalizedOrganizationId) {
+      return undefined;
+    }
+    return { id: row.id, headId: row.headId ?? null, securityDomainId: row.securityDomainId ?? null };
+  }
+
   async getOwned(threadId: string, userId: string, organizationId?: string): Promise<ThreadRecord | undefined> {
     const thread = await this.get(threadId, organizationId);
     if (!thread || thread.userId !== userId) {
@@ -858,10 +907,13 @@ export class ThreadRepository {
           runId: input.runId
         }
       );
+      // Matched by id or run, not by parent: a rerun or a late answer sits further down the
+      // timeline than its question (see message-timeline.ts).
       const existingAssistant = messages.find((message) => {
-        if (message.parentId !== input.userMessageId || normalizeMessageRole(message.content) !== "assistant") return false;
+        if (normalizeMessageRole(message.content) !== "assistant") return false;
+        if (message.externalId === assistantMessageId) return true;
         const existingDelivery = storedTurnDelivery(message.runConfig);
-        return existingDelivery?.runId === input.runId || message.externalId === assistantMessageId;
+        return existingDelivery?.runId === input.runId && replyToMessageId(message) === input.userMessageId;
       });
 
       if (existingAssistant) {
@@ -870,14 +922,14 @@ export class ThreadRepository {
           data: {
             role: normalizeMessageRole(normalizedAssistant.message),
             content: normalizedAssistant.message,
-            parentId: input.userMessageId,
-            runConfig: assistantRunConfig,
+            runConfig: timelineRunConfig(assistantRunConfig, input.userMessageId, existingAssistant.parentId, existingAssistant.runConfig),
             updatedAt: new Date()
           }
         });
       } else {
         const position = messages.reduce((maximum, message) => Math.max(maximum, message.position), -1) + 1;
         const createdAt = resolvedMessageCreatedAt(normalizedAssistant);
+        const parentId = timelineTailId(messages);
         await tx.message.create({
           data: {
             id: randomUUID(),
@@ -885,8 +937,8 @@ export class ThreadRepository {
             externalId: assistantMessageId,
             role: normalizeMessageRole(normalizedAssistant.message),
             content: normalizedAssistant.message,
-            parentId: input.userMessageId,
-            runConfig: assistantRunConfig,
+            parentId,
+            runConfig: timelineRunConfig(assistantRunConfig, input.userMessageId, parentId),
             position,
             createdAt,
             updatedAt: resolvedMessageUpdatedAt(normalizedAssistant, createdAt)
@@ -909,15 +961,11 @@ export class ThreadRepository {
         }
       });
       const existingAssistantId = existingAssistant?.externalId ?? assistantMessageId;
-      const currentHead = messages.find((message) => message.externalId === thread.headId);
-      const headIsAssistantForSameTurn =
-        currentHead?.parentId === input.userMessageId && normalizeMessageRole(currentHead.content) === "assistant";
-      const shouldAdvanceHead =
-        thread.headId === input.userMessageId || thread.headId === existingAssistantId || headIsAssistantForSameTurn;
+      const headId = existingAssistant ? timelineTailId(messages) : assistantMessageId;
       await tx.thread.update({
         where: { id: input.threadId },
         data: {
-          ...(shouldAdvanceHead ? { headId: existingAssistantId } : {}),
+          ...(headId && headId !== thread.headId ? { headId } : {}),
           updatedAt: new Date()
         }
       });
@@ -953,22 +1001,24 @@ export class ThreadRepository {
       });
       const incomingId = messageIdOf(normalizedItem.message);
       const position = messages.reduce((maximum, message) => Math.max(maximum, message.position), -1) + 1;
-      assertIncomingMessageGraph(messages, normalizedItem);
 
       if (incomingId) {
         const existing = messages.find((message) => message.externalId === incomingId);
         if (existing) {
+          // An update never moves a message: its place in the timeline was fixed when it was added.
           await tx.message.update({
             where: { id: existing.id },
             data: {
               role: normalizeMessageRole(normalizedItem.message),
               content: normalizedItem.message,
-              parentId: normalizedItem.parentId,
-              runConfig: normalizedItem.runConfig ?? null,
+              runConfig: timelineRunConfig(normalizedItem.runConfig, normalizedItem.parentId, existing.parentId, existing.runConfig),
               updatedAt: new Date()
             }
           });
         } else {
+          // New messages always attach after the last one, whatever view the writer had.
+          const parentId = timelineTailId(messages);
+          assertIncomingMessageGraph(messages, { ...normalizedItem, parentId });
           const createdAt = resolvedMessageCreatedAt(normalizedItem);
           await tx.message.create({
             data: {
@@ -977,22 +1027,24 @@ export class ThreadRepository {
               externalId: incomingId,
               role: normalizeMessageRole(normalizedItem.message),
               content: normalizedItem.message,
-              parentId: normalizedItem.parentId,
-              runConfig: normalizedItem.runConfig ?? null,
+              parentId,
+              runConfig: timelineRunConfig(normalizedItem.runConfig, normalizedItem.parentId, parentId),
               position,
               createdAt,
               updatedAt: resolvedMessageUpdatedAt(normalizedItem, createdAt)
             }
           });
         }
+        const headId = existing ? timelineTailId(messages) : incomingId;
         await tx.thread.update({
           where: { id: threadId },
           data: {
-            headId: incomingId,
+            ...(headId && headId !== thread.headId ? { headId } : {}),
             updatedAt: new Date()
           }
         });
       } else {
+        assertIncomingMessageGraph(messages, normalizedItem);
         const createdAt = resolvedMessageCreatedAt(normalizedItem);
         await tx.message.create({
           data: {
@@ -1001,7 +1053,7 @@ export class ThreadRepository {
             externalId: null,
             role: normalizeMessageRole(normalizedItem.message),
             content: normalizedItem.message,
-            parentId: normalizedItem.parentId,
+            parentId: null,
             runConfig: normalizedItem.runConfig ?? null,
             position,
             createdAt,
@@ -1042,9 +1094,10 @@ export class ThreadRepository {
         )
       );
       assertMessageGraphForPersistence(normalizedMessages);
+      const linearMessages = linearizedMessageItems(normalizedMessages);
       await tx.message.deleteMany({ where: { threadId } });
-      const externalIds = persistedExternalIds(normalizedMessages);
-      for (const [index, item] of normalizedMessages.entries()) {
+      const externalIds = persistedExternalIds(linearMessages);
+      for (const [index, item] of linearMessages.entries()) {
         const createdAt = resolvedMessageCreatedAt(item);
         await tx.message.create({
           data: {
@@ -1065,7 +1118,7 @@ export class ThreadRepository {
       await tx.thread.update({
         where: { id: threadId },
         data: {
-          headId: repository.headId ?? null,
+          headId: [...linearMessages].reverse().map((item) => messageIdOf(item.message)).find(Boolean) ?? null,
           updatedAt: new Date()
         }
       });

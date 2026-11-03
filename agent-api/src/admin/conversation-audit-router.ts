@@ -72,6 +72,7 @@ import { decodeStoredJson } from "../local-bridge-result.js";
 import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
 import { isUsageFailure } from "../operations/usage-result-status.js";
+import { replyToMessageId } from "../persistence/message-timeline.js";
 import { ConversationSummaryIndex, type SummaryIndexRawDb } from "./conversation-summary-index.js";
 import {
   PRODUCT_FEEDBACK_REPLY_IMAGE_MIME_TYPES,
@@ -268,6 +269,7 @@ type ConversationTranscriptMessage = {
   /** Assistant turns: what ran on the user's computer (portal local tool cards). */
   localOperations?: TranscriptLocalOperation[];
   parentId: string | null;
+  replyToId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
 };
@@ -1517,6 +1519,7 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
       : {}),
     ...(memoryUsed ? { memoryUsed: true } : {}),
     parentId: item.parentId ?? null,
+    replyToId: replyToMessageId(item),
     createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(normalizedMessage),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
   };

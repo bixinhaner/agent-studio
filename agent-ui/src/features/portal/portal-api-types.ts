@@ -37,6 +37,8 @@ export type ThreadListOut = {
 
 export type RunningThreadsOut = {
   thread_ids: string[];
+  /** The open task's last message, when its id was passed as `thread_id`. */
+  active_thread?: { id: string; head_id: string | null };
 };
 
 export type ThreadOneOut = {

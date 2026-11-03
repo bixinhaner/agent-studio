@@ -5,12 +5,15 @@ import { createDbClient } from "../db/client.js";
 import {
   assertRecoveredMessageGraph,
   messageGraphSnapshotSignature,
+  planMessageGraphLinearization,
   planMessageGraphRecovery,
   type RecoverableMessage
 } from "../persistence/message-graph-recovery.js";
+import { REQUESTED_PARENT_RUN_CONFIG_KEY, requestedParentIdOf } from "../persistence/message-timeline.js";
 
 type CliOptions = {
   apply: boolean;
+  linearize: boolean;
   outputDir: string;
   threadIds: Set<string>;
   expectedThreads?: number;
@@ -24,20 +27,22 @@ function usage(): never {
     "  --output-dir <path>     Required private directory for backup and preview files",
     "  --thread-id <id>        Restrict to one thread; may be repeated",
     "  --expected-threads <n>  Refuse apply if the affected count differs",
+    "  --linearize             Make every thread one timeline in stored order (shows hidden branches)",
     "",
     "Dry-run is the default. Apply always writes and fsyncs a complete before-state backup first.",
-    "Only missing parents, cycles, duplicate positions, and missing heads are repaired."
+    "Without --linearize only missing parents, cycles, duplicate positions, and missing heads are repaired."
   ].join("\n"));
   process.exit(2);
 }
 
 function parseArgs(argv: string[]): CliOptions {
   let outputDir = "";
-  const options: CliOptions = { apply: false, outputDir, threadIds: new Set() };
+  const options: CliOptions = { apply: false, linearize: false, outputDir, threadIds: new Set() };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") options.apply = false;
     else if (arg === "--apply") options.apply = true;
+    else if (arg === "--linearize") options.linearize = true;
     else if (arg === "--output-dir") {
       const value = argv[index + 1];
       if (!value) usage();
@@ -106,6 +111,26 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const db = createDbClient();
   try {
+    if (options.linearize && !options.threadIds.size) {
+      // Only threads whose stored chain is not already "each message follows the previous one"
+      // are loaded, so the scan does not pull every message body into memory.
+      const rows = await db.$queryRawUnsafe<Array<{ thread_id: string }>>(`
+        SELECT thread_id FROM (
+          SELECT thread_id, parent_id,
+                 lag(external_id) OVER (PARTITION BY thread_id ORDER BY position) AS previous_id
+          FROM messages
+        ) chain
+        WHERE parent_id IS DISTINCT FROM previous_id
+        UNION
+        SELECT t.id FROM threads t
+        JOIN LATERAL (
+          SELECT external_id FROM messages m WHERE m.thread_id = t.id ORDER BY position DESC LIMIT 1
+        ) last_message ON true
+        WHERE t.head_id IS DISTINCT FROM last_message.external_id
+      `);
+      for (const row of rows) options.threadIds.add(row.thread_id);
+      if (!options.threadIds.size) options.threadIds.add("__none__");
+    }
     const threads = await db.thread.findMany({
       where: options.threadIds.size ? { id: { in: [...options.threadIds] } } : undefined,
       include: {
@@ -131,7 +156,7 @@ async function main(): Promise<void> {
 
     const affected = threads.flatMap((thread) => {
       const messages = recoverableMessages(thread.messages);
-      const plan = planMessageGraphRecovery({ messages, headId: thread.headId });
+      const plan = (options.linearize ? planMessageGraphLinearization : planMessageGraphRecovery)({ messages, headId: thread.headId });
       if (!plan.affected) return [];
       assertRecoveredMessageGraph(plan);
       return [{ thread, messages, plan, signature: messageGraphSnapshotSignature(messages) }];
@@ -168,8 +193,10 @@ async function main(): Promise<void> {
         missingParent: affected.filter(({ plan }) => plan.reasons.includes("missing_parent")).length,
         cycle: affected.filter(({ plan }) => plan.reasons.includes("cycle")).length,
         duplicatePosition: affected.filter(({ plan }) => plan.reasons.includes("duplicate_position")).length,
-        missingHead: affected.filter(({ plan }) => plan.reasons.includes("missing_head")).length
+        missingHead: affected.filter(({ plan }) => plan.reasons.includes("missing_head")).length,
+        branch: affected.filter(({ plan }) => plan.reasons.includes("branch")).length
       },
+      linearize: options.linearize,
       rootedHeadsAfter: preview.filter((item) => item.rootedHeadAfter).length,
       totalArtifacts: affected.reduce((sum, { thread }) => sum + thread.artifacts.length, 0),
       generatedAt: new Date().toISOString()
@@ -216,13 +243,26 @@ async function main(): Promise<void> {
             messageGraphSnapshotSignature(currentMessages) !== candidate.signature
           ) return "concurrent" as const;
 
+          const runConfigs = new Map(current.messages.map((message) => [message.id, message.runConfig]));
           for (const planned of candidate.plan.messages) {
             if (planned.parentId === planned.nextParentId && planned.position === planned.nextPosition) continue;
+            // A moved message keeps the parent it had (an answer's question), as live writes do.
+            const runConfig = runConfigs.get(planned.id);
+            const keepParent = options.linearize && planned.parentId && planned.parentId !== planned.nextParentId &&
+              !requestedParentIdOf(runConfig);
             await tx.message.update({
               where: { id: planned.id },
               data: {
                 parentId: planned.nextParentId,
                 position: planned.nextPosition,
+                ...(keepParent
+                  ? {
+                      runConfig: {
+                        ...(runConfig && typeof runConfig === "object" && !Array.isArray(runConfig) ? runConfig : {}),
+                        [REQUESTED_PARENT_RUN_CONFIG_KEY]: planned.parentId
+                      }
+                    }
+                  : {}),
                 updatedAt: planned.updatedAt ? new Date(planned.updatedAt) : undefined
               }
             });

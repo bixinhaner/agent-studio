@@ -323,7 +323,7 @@ describe("thread turn delivery", () => {
     expect(state.thread.headId).toBe("assistant-new");
   });
 
-  it("survives repository recreation and does not rewind a later conversation head", async () => {
+  it("appends a late answer after the newer message instead of branching from its question", async () => {
     const state = createFakeDb({ withLaterHead: true });
     await new ThreadRepository(state.db).claimTurnDelivery({
       threadId: "thread-1",
@@ -344,7 +344,71 @@ describe("thread turn delivery", () => {
     });
 
     expect(result.outcome).toBe("persisted");
-    expect(state.thread.headId).toBe("user-2");
-    expect(state.messages.find((item) => item.externalId === "assistant-failed")?.parentId).toBe("user-1");
+    const late = state.messages.find((item) => item.externalId === "assistant-failed");
+    expect(late?.parentId).toBe("user-2");
+    expect(late?.runConfig).toMatchObject({ _agentStudioRequestedParentId: "user-1" });
+    expect(state.thread.headId).toBe("assistant-failed");
+
+    // Finalizing the same run again updates that answer in place.
+    const again = await new ThreadRepository(state.db).finalizeTurnDelivery({
+      threadId: "thread-1",
+      userMessageId: "user-1",
+      runId: "run-1",
+      channel: "portal",
+      acceptedAt: "2026-08-20T00:00:01.000Z",
+      status: "failed",
+      assistant: assistant("assistant-failed", "failed again")
+    });
+    expect(again.outcome).toBe("already_persisted");
+    expect(state.messages.filter((item) => item.role === "assistant")).toHaveLength(1);
+    expect(late?.runConfig).toMatchObject({ _agentStudioRequestedParentId: "user-1" });
+  });
+
+  it("keeps a rerun of the same question on the timeline after the earlier answer", async () => {
+    const state = createFakeDb();
+    const repository = new ThreadRepository(state.db);
+    for (const [runId, id, at] of [["run-a", "assistant-a", "2026-08-20T00:00:01.000Z"], ["run-b", "assistant-b", "2026-08-20T00:00:02.000Z"]] as const) {
+      await repository.claimTurnDelivery({ threadId: "thread-1", userMessageId: "user-1", runId, channel: "portal", acceptedAt: at });
+      await repository.finalizeTurnDelivery({
+        threadId: "thread-1",
+        userMessageId: "user-1",
+        runId,
+        channel: "portal",
+        acceptedAt: at,
+        status: "completed",
+        assistant: assistant(id)
+      });
+    }
+    expect(state.messages.map((item) => [item.externalId, item.parentId])).toEqual([
+      ["user-1", null],
+      ["assistant-a", "user-1"],
+      ["assistant-b", "assistant-a"]
+    ]);
+    expect(state.thread.headId).toBe("assistant-b");
+  });
+
+  it("attaches messages written from a stale view after the last message", async () => {
+    const state = createFakeDb({ withLaterHead: true });
+    const repository = new ThreadRepository(state.db);
+    // A phone that still shows only user-1 sends its next question.
+    await repository.appendMessage("thread-1", {
+      parentId: "user-1",
+      message: { id: "user-3", role: "user", content: [{ type: "text", text: "from the phone" }] },
+      runConfig: { channel: "portal" }
+    });
+    const stale = state.messages.find((item) => item.externalId === "user-3");
+    expect(stale?.parentId).toBe("user-2");
+    expect(stale?.position).toBe(2);
+    expect(stale?.runConfig).toMatchObject({ channel: "portal", _agentStudioRequestedParentId: "user-1" });
+    expect(state.thread.headId).toBe("user-3");
+
+    // Rewriting an earlier message keeps it in place and does not move the head back.
+    await repository.appendMessage("thread-1", {
+      parentId: null,
+      message: { id: "user-1", role: "user", content: [{ type: "text", text: "edited" }] },
+      runConfig: { channel: "portal" }
+    });
+    expect(state.messages.find((item) => item.externalId === "user-1")?.parentId).toBeNull();
+    expect(state.thread.headId).toBe("user-3");
   });
 });

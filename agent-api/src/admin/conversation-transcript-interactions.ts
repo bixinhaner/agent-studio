@@ -43,6 +43,8 @@ type TranscriptMessageLike = {
   role: "user" | "assistant" | "system" | "tool";
   text: string;
   parentId: string | null;
+  /** The question an assistant answers when the timeline placed it after a newer message. */
+  replyToId?: string | null;
   createdAt: string | null;
   steerEvents?: TranscriptSteerEvent[];
   userInputRequests?: TranscriptUserInputRequest[];
@@ -70,8 +72,9 @@ export function attachTranscriptInteractions<T extends TranscriptMessageLike>(
 ): T[] {
   const assistantIndexByParent = new Map<string, number>();
   transcript.forEach((message, index) => {
-    if (message.role === "assistant" && message.parentId && !assistantIndexByParent.has(message.parentId)) {
-      assistantIndexByParent.set(message.parentId, index);
+    const question = message.replyToId ?? message.parentId;
+    if (message.role === "assistant" && question && !assistantIndexByParent.has(question)) {
+      assistantIndexByParent.set(question, index);
     }
   });
   const lastAssistantIndex = transcript.map((message) => message.role).lastIndexOf("assistant");

@@ -26,7 +26,9 @@ export function completedAssistantContentForParent(
   if (!normalizedParentId) return null;
   for (let index = (payload.messages || []).length - 1; index >= 0; index -= 1) {
     const item = payload.messages?.[index];
-    if (String(item?.parent_id || "").trim() !== normalizedParentId) continue;
+    // The server keeps the question in the run config when the answer sits further down the timeline.
+    const repliesTo = String(item?.run_config?._agentStudioRequestedParentId || item?.parent_id || "").trim();
+    if (repliesTo !== normalizedParentId) continue;
     const message = asRecord(item?.message);
     if (message?.role !== "assistant") continue;
     if (normalizedRunId) {

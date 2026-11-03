@@ -10,7 +10,7 @@ export type RecoverableMessage = {
 
 export type MessageGraphRecoveryPlan = {
   affected: boolean;
-  reasons: Array<"missing_parent" | "cycle" | "duplicate_position" | "missing_head">;
+  reasons: Array<"missing_parent" | "cycle" | "duplicate_position" | "missing_head" | "branch">;
   headId: string | null;
   messages: Array<RecoverableMessage & { nextParentId: string | null; nextPosition: number }>;
 };
@@ -247,6 +247,33 @@ export function planMessageGraphSuffixRebuild(input: {
       nextPosition: index
     }))
   };
+}
+
+/**
+ * Makes a thread one timeline in stored order (see message-timeline.ts): each message
+ * follows the previous one and the head is the last message, so answers hidden on
+ * side branches (another device's turns, reruns, "continue") show up again. Positions
+ * are already unique and stay as they are.
+ */
+export function planMessageGraphLinearization(input: {
+  messages: RecoverableMessage[];
+  headId?: string | null;
+}): MessageGraphRecoveryPlan {
+  const ordered = orderedMessages(input.messages);
+  const positions = new Set(ordered.map((message) => message.position));
+  const keepPositions = positions.size === ordered.length;
+  let previousId: string | null = null;
+  const messages = ordered.map((message, index) => {
+    const id = normalized(message.externalId);
+    const nextParentId = id ? previousId : null;
+    if (id) previousId = id;
+    return { ...message, nextParentId, nextPosition: keepPositions ? message.position : index };
+  });
+  const reasons = new Set<MessageGraphRecoveryPlan["reasons"][number]>();
+  if (!keepPositions) reasons.add("duplicate_position");
+  if (messages.some((message) => normalized(message.parentId) !== message.nextParentId)) reasons.add("branch");
+  if (normalized(input.headId) !== previousId) reasons.add("missing_head");
+  return { affected: reasons.size > 0, reasons: [...reasons].sort(), headId: previousId, messages };
 }
 
 export function messageGraphSnapshotSignature(messages: RecoverableMessage[]): string {

@@ -20,6 +20,20 @@ describe("portal background run recovery", () => {
     expect(content).toEqual([{ type: "text", text: "answer" }]);
   });
 
+  it("finds a rerun answer that the timeline placed after the earlier answer", () => {
+    const content = completedAssistantContentForParent({
+      messages: [
+        { parent_id: "user-1", message: { role: "assistant", status: { type: "incomplete" }, content: [] } },
+        {
+          parent_id: "assistant-failed",
+          message: { role: "assistant", status: { type: "complete" }, content: [{ type: "text", text: "rerun" }] },
+          run_config: { _agentStudioRequestedParentId: "user-1" }
+        }
+      ]
+    }, "user-1");
+    expect(content).toEqual([{ type: "text", text: "rerun" }]);
+  });
+
   it("does not recover a completed answer from a different run of the same user message", () => {
     const payload = {
       messages: [

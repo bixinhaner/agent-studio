@@ -7,8 +7,8 @@ import {
   useAui,
   useMessagePartText
 } from "@assistant-ui/react";
-import { AssistantActionBar, AssistantMessage, BranchPicker, UserMessage } from "@assistant-ui/react-ui";
-import { CheckIcon, CopyIcon, ThumbsDownIcon, XIcon } from "lucide-react";
+import { AssistantActionBar, AssistantMessage, UserMessage } from "@assistant-ui/react-ui";
+import { CheckIcon, CopyIcon, PencilLineIcon, ThumbsDownIcon, XIcon } from "lucide-react";
 import { useAuiState } from "@assistant-ui/store";
 import { Input, Modal } from "antd";
 import { api } from "../../lib/api";
@@ -109,6 +109,42 @@ export const MessageTimestamp: FC = () => {
 };
 
 /** User message footer: time + copy, right aligned under the bubble. */
+/**
+ * A task is one timeline shared by every device and the model cannot forget a turn, so a
+ * sent message is not edited in place (that would fork the conversation). Its text goes
+ * back into the composer and is sent again as the next message.
+ */
+const EditAndResendButton: FC = () => {
+  const { t } = usePortalI18n();
+  const aui = useAui();
+  const mutationReadOnly = useContext(ThreadMutationReadOnlyContext);
+  const text = useAuiState((s) =>
+    s.message.content
+      .map((part) => (part.type === "text" ? part.text : ""))
+      .filter(Boolean)
+      .join("\n\n")
+  );
+  if (mutationReadOnly || !text.trim()) return null;
+  return (
+    <button
+      type="button"
+      className="portal-message-action-btn"
+      aria-label={t("message.editAndResend")}
+      title={t("message.editAndResend")}
+      onClick={() => {
+        aui.thread().composer().setText(text);
+        window.requestAnimationFrame(() => {
+          const input = document.querySelector<HTMLTextAreaElement>(".portal-composer-input-row textarea");
+          input?.focus();
+          input?.setSelectionRange(input.value.length, input.value.length);
+        });
+      }}
+    >
+      <PencilLineIcon size={15} aria-hidden="true" />
+    </button>
+  );
+};
+
 export const UserMessageFooter: FC = () => {
   const { t } = usePortalI18n();
   return (
@@ -119,6 +155,7 @@ export const UserMessageFooter: FC = () => {
           <CopyIcon className="portal-copy-icon" size={15} aria-hidden="true" />
           <CheckIcon className="portal-copied-icon" size={15} aria-hidden="true" />
         </ActionBarPrimitive.Copy>
+        <EditAndResendButton />
       </ActionBarPrimitive.Root>
     </div>
   );
@@ -186,7 +223,7 @@ export const UnreferencedMessageAttachment: FC = () => {
 };
 export const AgentUserMessage: FC = () => {
   const inline = useAuiState(state => state.message.content.some(part => part.type === "text" && inlineAttachmentIds(part.text).size > 0));
-  if (inline) return <ThreadPublicShareMessageShell tone="user"><UserMessage.Root><MessagePrimitive.Attachments components={{ Attachment: UnreferencedMessageAttachment }} /><UserMessage.Content components={{ Text: InlineUserMessageText }} /><BranchPicker /></UserMessage.Root><UserMessageFooter /></ThreadPublicShareMessageShell>;
+  if (inline) return <ThreadPublicShareMessageShell tone="user"><UserMessage.Root><MessagePrimitive.Attachments components={{ Attachment: UnreferencedMessageAttachment }} /><UserMessage.Content components={{ Text: InlineUserMessageText }} /></UserMessage.Root><UserMessageFooter /></ThreadPublicShareMessageShell>;
   return (
     <ThreadPublicShareMessageShell tone="user">
       <MessagePrimitive.If hasAttachments>
@@ -197,7 +234,6 @@ export const AgentUserMessage: FC = () => {
       <div className="portal-user-message-default-with-hidden-attachments">
         <UserMessage.Root>
           <UserMessage.Content />
-          <BranchPicker />
         </UserMessage.Root>
       </div>
       <UserMessageFooter />
@@ -520,7 +556,6 @@ export const AgentAssistantMessage: FC = () => {
         />
         <div className="portal-assistant-message-footer">
           <AgentAssistantActionBar />
-          <BranchPicker />
           <MessageTimestamp />
         </div>
         <AgentAssistantAnswerFeedback />

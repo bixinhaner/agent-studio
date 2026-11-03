@@ -156,6 +156,7 @@ import {
   type ThreadOneOut,
   type ThreadOut
 } from "./portal-api-types";
+import { type ActiveThreadHead, shouldReloadTimeline, timelineReloadKey } from "./timeline-sync";
 import {
   type AppliedConfig,
   type ApprovalPolicy,
@@ -516,7 +517,10 @@ export function PortalShell(props: {
       return;
     }
     try {
-      const out = await api<RunningThreadsOut>("/api/threads/running");
+      const activeThreadId = activeRemoteThreadIdRef.current;
+      const out = await api<RunningThreadsOut>(
+        activeThreadId ? `/api/threads/running?thread_id=${encodeURIComponent(activeThreadId)}` : "/api/threads/running"
+      );
       const next: RunningThreadIdsContextValue = {};
       for (const threadId of Array.isArray(out.thread_ids) ? out.thread_ids : []) {
         const normalized = String(threadId || "").trim();
@@ -524,6 +528,7 @@ export function PortalShell(props: {
       }
       setServerRunningSnapshotReady(true);
       setServerRunningThreadIds((previous) => (areRunningThreadMapsEqual(previous, next) ? previous : next));
+      syncActiveTimelineRef.current?.(out.active_thread, next);
     } catch {
       // Keep the last successful snapshot during a transient status request failure.
     }
@@ -540,11 +545,17 @@ export function PortalShell(props: {
     };
     refreshIfVisible();
     const interval = window.setInterval(refreshIfVisible, 3500);
+    // Coming back to the page (tab switch, phone unlock, back/forward cache, network back)
+    // checks at once whether another device moved the open task on.
     window.addEventListener("focus", refreshIfVisible);
+    window.addEventListener("pageshow", refreshIfVisible);
+    window.addEventListener("online", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshIfVisible);
+      window.removeEventListener("pageshow", refreshIfVisible);
+      window.removeEventListener("online", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [props.currentUser, refreshServerRunningThreadIds]);
@@ -647,6 +658,9 @@ export function PortalShell(props: {
   // Bumped when a new task reaches the server, so per-task data loads that skipped it run again.
   const [serverThreadRevision, setServerThreadRevision] = useState(0);
   const reloadThreadHistoryRef = useRef<((threadId: string) => Promise<void>) | null>(null);
+  const syncActiveTimelineRef = useRef<
+    ((server: ActiveThreadHead | undefined, serverRunning: RunningThreadIdsContextValue) => void) | null
+  >(null);
   const getSteerSourceUserMessageId = useCallback(
     () => activePortalRunRef.current?.userMessageId,
     []
@@ -4095,6 +4109,28 @@ export function PortalShell(props: {
     runtime.thread.import(threadMessagesOutToRepository(out));
   }, [runtime, trainingReadOnly]);
   reloadThreadHistoryRef.current = reloadThreadHistory;
+  const timelineReloadKeyRef = useRef("");
+  const activeRunThreadIdsRef = useRef(activeRunThreadIds);
+  activeRunThreadIdsRef.current = activeRunThreadIds;
+  syncActiveTimelineRef.current = (server, serverRunning) => {
+    if (trainingReadOnly) return;
+    const threadId = activeRemoteThreadIdRef.current;
+    const state = runtime.thread.getState();
+    const localHeadId = String(state.messages.at(-1)?.id || "");
+    if (!shouldReloadTimeline({
+      activeThreadId: threadId,
+      server,
+      localHeadId,
+      localBusy: state.isRunning || state.isLoading || Boolean(activeRunThreadIdsRef.current[threadId]),
+      serverRunning: Boolean(serverRunning[threadId]),
+      lastReloadKey: timelineReloadKeyRef.current
+    })) return;
+    const key = timelineReloadKey(threadId, String(server?.head_id || ""));
+    timelineReloadKeyRef.current = key;
+    void reloadThreadHistory(threadId).catch(() => {
+      if (timelineReloadKeyRef.current === key) timelineReloadKeyRef.current = "";
+    });
+  };
   const previousBackgroundRunRef = useRef({ threadId: "", running: false });
   useEffect(() => {
     const previous = previousBackgroundRunRef.current;
@@ -4145,8 +4181,11 @@ export function PortalShell(props: {
       },
       remountThreadView: () => setThreadSwitchPending(false),
       reportError: (error) => setErrorText(error instanceof Error ? error.message : options.errorFallback)
+    }).finally(() => {
+      // Opening the task that is already open still picks up what other devices added.
+      void refreshServerRunningThreadIds();
     });
-  }, [runtime]);
+  }, [refreshServerRunningThreadIds, runtime]);
 
   const openWorkspaceTask = useCallback(async (task: PortalWorkspaceTask | { id: string; folder_id?: string | null }) => {
     if (!confirmLeavingPendingAttachments(task.id)) return;
@@ -4568,7 +4607,8 @@ export function PortalShell(props: {
                   ToolFallback: HiddenToolFallback as any
                 }
               }}
-              userMessage={{ allowEdit: !threadReadOnly }}
+              // No in-place edit: it would fork the shared timeline (see EditAndResendButton).
+              userMessage={{ allowEdit: false }}
             />
             )}
             </PortalThreadErrorBoundary>

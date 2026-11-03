@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertRecoveredMessageGraph,
+  planMessageGraphLinearization,
   planMessageGraphRecovery,
   planMessageGraphSuffixRebuild
 } from "./message-graph-recovery.js";
@@ -140,5 +141,41 @@ describe("message graph recovery", () => {
       "user-new"
     ]);
     expect(plan.headId).toBe("assistant-new");
+  });
+
+  it("linearizes a desktop/phone fork in stored order and shows both sides", () => {
+    // Desktop asked twice after a-1; the phone, still showing a-1, then asked from there.
+    const messages = [
+      message({ externalId: "u-1", position: 0 }),
+      message({ externalId: "a-1", role: "assistant", parentId: "u-1", position: 1 }),
+      message({ externalId: "u-desk", parentId: "a-1", position: 2 }),
+      message({ externalId: "a-desk", role: "assistant", parentId: "u-desk", position: 3 }),
+      message({ externalId: "u-phone", parentId: "a-1", position: 4, createdAt: "2026-08-11T16:00:00.000Z" }),
+      message({ externalId: "a-phone", role: "assistant", parentId: "u-phone", position: 5 })
+    ];
+    const plan = planMessageGraphLinearization({ messages, headId: "a-phone" });
+    expect(plan.affected).toBe(true);
+    expect(plan.reasons).toEqual(["branch"]);
+    expect(plan.headId).toBe("a-phone");
+    expect(plan.messages.map((item) => [item.externalId, item.nextParentId, item.nextPosition])).toEqual([
+      ["u-1", null, 0],
+      ["a-1", "u-1", 1],
+      ["u-desk", "a-1", 2],
+      ["a-desk", "u-desk", 3],
+      ["u-phone", "a-desk", 4],
+      ["a-phone", "u-phone", 5]
+    ]);
+    assertRecoveredMessageGraph(plan);
+  });
+
+  it("leaves an already linear thread alone", () => {
+    const plan = planMessageGraphLinearization({
+      headId: "a-1",
+      messages: [
+        message({ externalId: "u-1", position: 0 }),
+        message({ externalId: "a-1", role: "assistant", parentId: "u-1", position: 1 })
+      ]
+    });
+    expect(plan.affected).toBe(false);
   });
 });

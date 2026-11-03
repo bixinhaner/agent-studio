@@ -206,12 +206,14 @@ export class ThreadStore {
     const incomingId = messageIdOf(item.message);
     if (incomingId) {
       const index = record.messages.findIndex((m) => messageIdOf(m.message) === incomingId);
+      // Same linear timeline as ThreadRepository: updates stay in place, new messages go last.
       if (index >= 0) {
-        record.messages[index] = item;
+        record.messages[index] = { ...item, parentId: record.messages[index].parentId };
       } else {
-        record.messages.push(item);
+        const lastId = [...record.messages].reverse().map((m) => messageIdOf(m.message)).find(Boolean) ?? null;
+        record.messages.push({ ...item, parentId: lastId });
+        record.headId = incomingId;
       }
-      record.headId = incomingId;
     } else {
       record.messages.push(item);
     }

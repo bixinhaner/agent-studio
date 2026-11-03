@@ -285,6 +285,7 @@ import {
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
+import { REQUESTED_PARENT_RUN_CONFIG_KEY, replyToMessageId } from "./persistence/message-timeline.js";
 import {
   ThreadArtifactRepository,
   type ThreadArtifactRecord,
@@ -9550,7 +9551,12 @@ async function dingtalkMessageProcessingState(threadId: string, messageId: strin
   const table = (db as unknown as {
     message: {
       findFirst(args: {
-        where: { threadId: string; externalId?: string; parentId?: string; role?: "assistant" | "user" | "system" };
+        where: {
+          threadId: string;
+          externalId?: string;
+          role?: "assistant" | "user" | "system";
+          OR?: Array<{ parentId: string } | { runConfig: { path: string[]; equals: string } }>;
+        };
         orderBy?: { createdAt?: "asc" | "desc" };
       }): Promise<{ id: string } | null>;
     };
@@ -9561,7 +9567,15 @@ async function dingtalkMessageProcessingState(threadId: string, messageId: strin
       orderBy: { createdAt: "asc" }
     }),
     table.findFirst({
-      where: { threadId: normalizedThreadId, parentId: normalizedMessageId, role: "assistant" },
+      // A reply that the timeline placed after a newer message keeps its question in the run config.
+      where: {
+        threadId: normalizedThreadId,
+        role: "assistant",
+        OR: [
+          { parentId: normalizedMessageId },
+          { runConfig: { path: [REQUESTED_PARENT_RUN_CONFIG_KEY], equals: normalizedMessageId } }
+        ]
+      },
       orderBy: { createdAt: "asc" }
     })
   ]);
@@ -10148,7 +10162,7 @@ async function normalizePortalAssistantMessageAppend(input: {
     }))
   });
   const existingAssistant = repository.messages.find((item) => {
-    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+    return replyToMessageId(item) === parentId && storedMessageRole(item.message) === "assistant";
   });
   const existingId = existingAssistant ? storedMessageId(existingAssistant.message) : undefined;
   if (!existingId || !existingAssistant) return input.message;
@@ -10203,6 +10217,8 @@ function portalUserMessage(input: {
   message: unknown;
   displayText: string;
   sessionId?: string;
+  /** Re-saving a stored message keeps its time; a new message gets the server's time (device clocks drift). */
+  keepCreatedAt?: boolean;
 }) {
   const payload = asRecord(input.message);
   const now = new Date().toISOString();
@@ -10213,7 +10229,7 @@ function portalUserMessage(input: {
       ...payload,
       id: input.id,
       role: "user",
-      createdAt: typeof payload.createdAt === "string" ? payload.createdAt : now,
+      createdAt: input.keepCreatedAt && typeof payload.createdAt === "string" ? payload.createdAt : now,
       status: {
         type: "in_progress",
         at: now
@@ -10315,7 +10331,8 @@ async function ensurePortalStreamUserMessage(input: {
             id: userMessageId,
             message: existingUserMessage.message,
             displayText,
-            sessionId: input.sessionId
+            sessionId: input.sessionId,
+            keepCreatedAt: true
           }),
           runConfig: {
             ...(existingUserMessage.runConfig ?? {}),
@@ -13408,9 +13425,26 @@ app.get("/api/threads/running", async (req: Request, res: Response) => {
     return;
   }
   res.setHeader("Cache-Control", "no-store");
+  // The open task's last message, so a page notices what another device or tab added and
+  // reloads the timeline (it is the same conversation everywhere).
+  const activeThreadId = typeof req.query.thread_id === "string" ? req.query.thread_id.trim() : "";
+  const activeThread = activeThreadId
+    ? await Promise.all([
+        threads.getOwnedHead(activeThreadId, currentUser.id, currentUser.organizationId),
+        portalSecurityDomainIdForActor(currentUser)
+      ])
+        .then(([head, securityDomainId]) =>
+          head && trimOrUndefined(head.securityDomainId ?? undefined) === trimOrUndefined(securityDomainId) ? head : undefined
+        )
+        .catch(() => undefined)
+    : undefined;
   // send_protocol keeps tabs still running a pre-53a0a882 bundle on the single-request send;
   // without it they fall back to the removed 3-step endpoints until they auto-reload.
-  res.json({ thread_ids: Array.from(result.threadIds), send_protocol: 2 });
+  res.json({
+    thread_ids: Array.from(result.threadIds),
+    send_protocol: 2,
+    ...(activeThread ? { active_thread: { id: activeThread.id, head_id: activeThread.headId ?? null } } : {})
+  });
 });
 
 /** A thread the caller already created with this client-chosen id; another owner's id is a conflict. */
