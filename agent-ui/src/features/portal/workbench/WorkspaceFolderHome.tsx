@@ -726,7 +726,10 @@ export function WorkspaceFolderHome(props: {
                         <MessageSquare size={18} />
                         <span>
                           <strong>{task.title}</strong>
-                          <small>{formatLocalDate(task.updated_at, locale)}</small>
+                          <small>
+                            {formatLocalDate(task.updated_at, locale)}
+                            {trashView && task.delete_at ? ` · ${t("workspace.trashDeleteAt", { date: formatLocalDate(task.delete_at, locale) })}` : ""}
+                          </small>
                         </span>
                         <span className="workspace-task-file-count" data-empty={task.file_count > 0 ? undefined : "true"}>
                           {task.file_count > 0

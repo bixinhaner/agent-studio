@@ -1130,6 +1130,8 @@ model Thread {
   channel         String?
   title           String?
   status          ThreadStatus      @default(active)
+  archivedAt      DateTime?         @map("archived_at")
+  archivedDataPurgedAt DateTime?    @map("archived_data_purged_at")
   model           String?
   reasoningEffort String?           @map("reasoning_effort")
   workspace       String?
@@ -1166,6 +1168,7 @@ model Thread {
 
   auditSummary    ThreadAuditSummary?
 
+  @@index([status, archivedAt])
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
   @@index([securityDomainId, createdAt])

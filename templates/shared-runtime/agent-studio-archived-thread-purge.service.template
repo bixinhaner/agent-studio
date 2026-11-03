@@ -1,0 +1,14 @@
+[Unit]
+Description=Remove disk data of portal tasks that have been in the trash for more than 7 days
+
+[Service]
+Type=oneshot
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__APP_REPO_DIR__/agent-api
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/env node __APP_REPO_DIR__/agent-api/dist/ops/purge-archived-thread-data.js --apply
+Nice=19
+IOSchedulingClass=idle
+MemoryHigh=512M
+MemoryMax=1G

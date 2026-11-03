@@ -68,7 +68,8 @@ function taskOut(task: WorkspaceTaskSummary) {
     folder_id: task.folderId ?? null,
     file_count: task.fileCount,
     created_at: task.createdAt,
-    updated_at: task.updatedAt
+    updated_at: task.updatedAt,
+    ...(task.deleteAt ? { delete_at: task.deleteAt } : {})
   };
 }
 

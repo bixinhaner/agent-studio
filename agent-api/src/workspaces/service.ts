@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
 
+import { archivedThreadDeleteAt } from "../archived-thread-retention.js";
 import { LocalFsWorkspaceStorage, workspaceObjectChecksum } from "./storage.js";
 
 export type WorkspaceActor = {
@@ -62,6 +63,8 @@ export type WorkspaceTaskSummary = {
   fileCount: number;
   createdAt: string;
   updatedAt: string;
+  // Trash only: when the archived task and its data are removed for good.
+  deleteAt?: string;
 };
 
 export type WorkspaceFolderTaskSummary = {
@@ -1315,7 +1318,9 @@ export class PortalWorkspaceService {
           userId: input.actor.userId,
           userWorkspaceId: workspace.id,
           status: "archived",
-          workspaceTrashBatchId: null
+          workspaceTrashBatchId: null,
+          // Purged tasks have no files or conversation state left to restore.
+          archivedDataPurgedAt: null
         },
         select: {
           id: true,
@@ -1323,7 +1328,8 @@ export class PortalWorkspaceService {
           status: true,
           workspaceFolderId: true,
           createdAt: true,
-          updatedAt: true
+          updatedAt: true,
+          archivedAt: true
         },
         orderBy: { updatedAt: "desc" },
         take
@@ -1358,7 +1364,7 @@ export class PortalWorkspaceService {
     }
     return {
       nodes: nodes.map((node) => mapWorkspaceNode(node, node.trashBatchId ? summaries.get(node.trashBatchId) : undefined)),
-      tasks: tasks.map(mapTask)
+      tasks: tasks.map((task) => ({ ...mapTask(task), deleteAt: archivedThreadDeleteAt(task.archivedAt ?? task.updatedAt) }))
     };
   }
 

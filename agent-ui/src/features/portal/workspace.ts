@@ -54,6 +54,8 @@ export type PortalWorkspaceTask = {
   file_count: number;
   created_at: string;
   updated_at: string;
+  // Trash only: when the task is permanently deleted.
+  delete_at?: string | null;
 };
 
 export type PortalWorkspaceFolderTaskSummary = {
