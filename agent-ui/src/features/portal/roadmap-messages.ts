@@ -184,7 +184,7 @@ export const ROADMAP_EN_MESSAGES = {
 
   "notify.completedTitle": "✓ Done · {title}",
   "notify.unreadTitle": "({count}) {title}",
-  "notify.desktopTitle": "Bailey finished",
+  "notify.desktopTitle": "{name} finished",
   "notify.desktopBody": "{title} is ready.",
   "notify.failedBody": "{title} needs your attention.",
   "notify.enable": "Notify me when long tasks finish",
@@ -494,7 +494,7 @@ export const ROADMAP_ZH_MESSAGES: Record<RoadmapMessageKey, string> = {
 
   "notify.completedTitle": "✓ 已完成 · {title}",
   "notify.unreadTitle": "({count}) {title}",
-  "notify.desktopTitle": "Bailey 已完成",
+  "notify.desktopTitle": "{name} 已完成",
   "notify.desktopBody": "「{title}」已经完成。",
   "notify.failedBody": "「{title}」需要你处理。",
   "notify.enable": "长任务完成时提醒我",

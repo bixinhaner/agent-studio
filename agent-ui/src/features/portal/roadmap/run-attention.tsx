@@ -60,6 +60,8 @@ function markPromptHandled() {
  */
 export function useRunCompletionAttention(options: {
   enabled: boolean;
+  /** Brand assistant name; external brands must never see another brand's name here. */
+  assistantName: string;
   resolveThreadTitle(threadId: string): string | undefined;
   onOpenThread(threadId: string): void;
 }) {
@@ -121,7 +123,8 @@ export function useRunCompletionAttention(options: {
         return;
       }
       const translate = tRef.current;
-      const threadTitle = optionsRef.current.resolveThreadTitle(detail.threadId)?.trim() || "Bailey";
+      const assistantName = optionsRef.current.assistantName.trim() || document.title;
+      const threadTitle = optionsRef.current.resolveThreadTitle(detail.threadId)?.trim() || assistantName;
       if (baseTitleRef.current === null) baseTitleRef.current = document.title;
       unreadRef.current += 1;
       const base = baseTitleRef.current;
@@ -132,7 +135,7 @@ export function useRunCompletionAttention(options: {
 
       if (notificationsSupported() && Notification.permission === "granted" && !readDesktopNotifyMuted()) {
         try {
-          const desktop = new Notification(translate("notify.desktopTitle"), {
+          const desktop = new Notification(translate("notify.desktopTitle", { name: assistantName }), {
             body:
               detail.status === "failed"
                 ? translate("notify.failedBody", { title: threadTitle })

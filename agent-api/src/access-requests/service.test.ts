@@ -478,6 +478,40 @@ describe("createAccessRequestService", () => {
     expect(result.request.status).toBe("approved_pending_provision");
   });
 
+  it("links a Ranley applicant back to the Ranley domain when more information is needed", async () => {
+    const { service, requests, emailSender } = createServiceHarness();
+    requests.set("request_1", buildRequest({ publicBrandId: "brand_ranley", status: "submitted" }));
+
+    await service.markNeedsInfo(
+      "request_1",
+      { message: "Please upload the invoice." },
+      { actorType: "admin", actorUserId: "admin_1", actorEmail: "admin@baicells.com" }
+    );
+
+    const sent = emailSender.send.mock.calls.at(-1)?.[0];
+    expect(sent).toMatchObject({
+      to: "applicant@example.com",
+      publicBrandId: "brand_ranley",
+      from: "ranley <ranley@cloud-ran.ai>",
+      debugLabel: "access-request-needs-info"
+    });
+    expect(sent?.text).toContain("https://ranley.cloud-ran.ai/access/apply/public-token-1");
+    expect(sent?.text).not.toContain("https://example.com");
+  });
+
+  it("keeps the platform domain in the more-information link for requests without a brand", async () => {
+    const { service, requests, emailSender } = createServiceHarness();
+    requests.set("request_1", buildRequest({ status: "submitted" }));
+
+    await service.markNeedsInfo(
+      "request_1",
+      { message: "Please upload the invoice." },
+      { actorType: "admin", actorUserId: "admin_1", actorEmail: "admin@baicells.com" }
+    );
+
+    expect(emailSender.send.mock.calls.at(-1)?.[0]?.text).toContain("https://example.com/access/apply/public-token-1");
+  });
+
   it("reads and updates access request policy", async () => {
     const { service } = createServiceHarness();
 

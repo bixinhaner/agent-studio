@@ -4261,6 +4261,7 @@ export function PortalShell(props: {
   attentionThreadsRef.current = workspaceThreads;
   const runAttentionHolder = useRunCompletionAttention({
     enabled: !trainingReadOnly,
+    assistantName: branding.assistantName.trim() || branding.platformName.trim(),
     resolveThreadTitle: (threadId) =>
       attentionThreadsRef.current.find((thread) => thread.id === threadId || thread.external_id === threadId)?.title ?? undefined,
     onOpenThread: (threadId) => void openWorkspaceTask({ id: threadId })

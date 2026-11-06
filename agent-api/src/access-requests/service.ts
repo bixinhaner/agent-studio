@@ -1606,7 +1606,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         reviewSummary: message,
         rejectionReason: null
       });
-      const publicLink = buildUrl(options.appBaseUrl, `/access/apply/${existing.publicToken}`);
+      const publicLink = buildUrl(await requestBaseUrl(existing), `/access/apply/${existing.publicToken}`);
       await options.emailSender.send({
         to: updated.applicantEmail,
         ...await requestEmailEnvelope(updated),
