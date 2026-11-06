@@ -40,6 +40,7 @@ import {
   requestStatusLabel,
   requestStatusTone,
   reviewModeLabel,
+  reviewerCandidateMatches,
   reviewerDecisionLabel,
   reviewerDecisionTone
 } from "./presentation";
@@ -771,9 +772,9 @@ export function AccessRequestsWorkspace() {
                         <span />
                       </div>
                       {reviewDraft.reviewers.map((reviewer, index) => (
-                        <div className="access-admin-edit-row" key={`${reviewer.reviewerEmail}-${index}`}>
+                        // Keyed by position only: keying by the typed email remounted the input on every keystroke.
+                        <div className="access-admin-edit-row" key={index}>
                           <AutoComplete
-                            showSearch
                             value={reviewer.reviewerEmail || undefined}
                             onChange={(value) => setReviewDraft((current) => ({
                               ...current,
@@ -781,8 +782,11 @@ export function AccessRequestsWorkspace() {
                             }))}
                             options={lookups.reviewerCandidates.map((candidate) => ({
                               value: candidate.email,
-                              label: `${candidate.displayName} · ${candidate.email}`
+                              label: `${candidate.displayName} · ${candidate.email}`,
+                              candidate
                             }))}
+                            // AutoComplete does not filter on its own; without this every account is listed for any input.
+                            filterOption={(input, option) => reviewerCandidateMatches(input, option?.candidate)}
                             placeholder="内部账号或品牌邮箱"
                           />
                           <Select

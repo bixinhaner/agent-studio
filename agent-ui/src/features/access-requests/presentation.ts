@@ -125,3 +125,14 @@ export function deliveryTypeLabel(value: string): string {
 export function membershipTypeLabel(value: string | null | undefined): string {
   return value === "customer_member" ? "User" : "Admin";
 }
+
+/** Reviewer search matches name or email by substring, case-insensitively; an empty query lists everyone. */
+export function reviewerCandidateMatches(
+  query: string,
+  candidate: { email: string; displayName: string } | undefined
+): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  if (!candidate) return false;
+  return candidate.email.toLowerCase().includes(normalized) || candidate.displayName.toLowerCase().includes(normalized);
+}
