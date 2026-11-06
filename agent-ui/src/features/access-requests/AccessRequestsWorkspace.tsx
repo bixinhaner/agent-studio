@@ -41,6 +41,7 @@ import {
   requestStatusTone,
   reviewModeLabel,
   reviewerCandidateMatches,
+  reviewerCandidatesForBrand,
   reviewerDecisionLabel,
   reviewerDecisionTone
 } from "./presentation";
@@ -210,6 +211,10 @@ export function AccessRequestsWorkspace() {
   const [rejectReason, setRejectReason] = useState("");
   const [postingNeedsInfo, setPostingNeedsInfo] = useState(false);
   const [postingReject, setPostingReject] = useState(false);
+  const requestReviewerCandidates = useMemo(
+    () => reviewerCandidatesForBrand(lookups.reviewerCandidates, selectedRequest?.publicBrand?.id),
+    [lookups.reviewerCandidates, selectedRequest?.publicBrand?.id]
+  );
 
   async function loadWorkspace(silent = false) {
     if (!silent) setLoading(true);
@@ -666,7 +671,7 @@ export function AccessRequestsWorkspace() {
                           allowClear
                           value={requestDraft.ownerUserId ?? undefined}
                           onChange={(value) => setRequestDraft((current) => ({ ...current, ownerUserId: value ?? null }))}
-                          options={lookups.reviewerCandidates.map((candidate) => ({
+                          options={reviewerCandidatesForBrand(lookups.reviewerCandidates, null).map((candidate) => ({
                             value: candidate.id,
                             label: `${candidate.displayName} · ${candidate.email}`
                           }))}
@@ -778,9 +783,9 @@ export function AccessRequestsWorkspace() {
                             value={reviewer.reviewerEmail || undefined}
                             onChange={(value) => setReviewDraft((current) => ({
                               ...current,
-                              reviewers: current.reviewers.map((item, itemIndex) => itemIndex === index ? { ...item, reviewerEmail: value, reviewerUserId: lookups.reviewerCandidates.find((candidate) => candidate.email === value)?.id ?? null } : item)
+                              reviewers: current.reviewers.map((item, itemIndex) => itemIndex === index ? { ...item, reviewerEmail: value, reviewerUserId: requestReviewerCandidates.find((candidate) => candidate.email === value)?.id ?? null } : item)
                             }))}
-                            options={lookups.reviewerCandidates.map((candidate) => ({
+                            options={requestReviewerCandidates.map((candidate) => ({
                               value: candidate.email,
                               label: `${candidate.displayName} · ${candidate.email}`,
                               candidate

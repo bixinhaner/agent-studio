@@ -362,6 +362,24 @@ function createServiceHarness() {
         role: "employee",
         userType: "internal_employee"
       }
+    ]),
+    findBrandEmployees: vi.fn(async () => [
+      {
+        id: "ranley_reviewer",
+        email: "Lion.Li@cloud-ran.ai",
+        displayName: "Lion Li",
+        role: "employee",
+        userType: "external_user",
+        publicBrandId: "brand_ranley"
+      },
+      {
+        id: "ranley_personal",
+        email: "lion@gmail.com",
+        displayName: "Lion personal",
+        role: "employee",
+        userType: "external_user",
+        publicBrandId: "brand_ranley"
+      }
     ])
   });
 
@@ -510,6 +528,18 @@ describe("createAccessRequestService", () => {
     );
 
     expect(emailSender.send.mock.calls.at(-1)?.[0]?.text).toContain("https://example.com/access/apply/public-token-1");
+  });
+
+  it("suggests brand employees on the brand's own reviewer domain alongside internal reviewers", async () => {
+    const { service } = createServiceHarness();
+
+    const workspace = await service.listAdminWorkspace();
+
+    expect(workspace.lookups.reviewerCandidates).toEqual([
+      { id: "admin_1", email: "admin@baicells.com", displayName: "Admin", role: "admin" },
+      { id: "ranley_reviewer", email: "lion.li@cloud-ran.ai", displayName: "Lion Li", role: "employee", publicBrandId: "brand_ranley" },
+      { id: "reviewer_user", email: "reviewer@baicells.com", displayName: "Reviewer", role: "employee" }
+    ]);
   });
 
   it("reads and updates access request policy", async () => {

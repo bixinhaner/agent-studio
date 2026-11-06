@@ -180,7 +180,8 @@ export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
 };
 
 export type AdminAccessRequestLookups = {
-  reviewerCandidates: Array<{ id: string; email: string; displayName: string; role: string }>;
+  /** `publicBrandId` is set for brand employees; they are only offered on requests from that brand. */
+  reviewerCandidates: Array<{ id: string; email: string; displayName: string; role: string; publicBrandId?: string }>;
   organizations: Array<{ id: string; slug: string; name: string; status: string }>;
   plans: Array<{ id: string; slug: string; name: string; status: string }>;
 };
@@ -252,6 +253,8 @@ type AccessRequestServiceOptions = {
     defaultTrialDays: number;
   };
   findInternalUsers: () => Promise<InternalAccessUser[]>;
+  /** Active brand-employee members of brand organizations, used as reviewer suggestions for that brand. */
+  findBrandEmployees?: () => Promise<Array<InternalAccessUser & { publicBrandId: string }>>;
 };
 
 const PUBLIC_EMAIL_DOMAINS = new Set([
@@ -827,6 +830,34 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     });
   }
 
+  /** Only brand employees whose email domain the brand already accepts as a reviewer domain are suggested. */
+  async function brandReviewerCandidates(
+    brandEmployees: Array<InternalAccessUser & { publicBrandId: string }>,
+    internalEmails: Set<string>
+  ): Promise<AdminAccessRequestLookups["reviewerCandidates"]> {
+    const domainsByBrandId = new Map<string, string[]>();
+    for (const brandId of new Set(brandEmployees.map((user) => user.publicBrandId))) {
+      domainsByBrandId.set(brandId, brandReviewerDomains(await options.publicBrands?.getById(brandId)));
+    }
+    const candidates: AdminAccessRequestLookups["reviewerCandidates"] = [];
+    const seen = new Set<string>();
+    for (const user of brandEmployees) {
+      const email = user.email.trim().toLowerCase();
+      const key = `${user.publicBrandId}:${email}`;
+      if (!email || internalEmails.has(email) || seen.has(key)) continue;
+      if (!domainsByBrandId.get(user.publicBrandId)?.includes(emailDomain(email).toLowerCase())) continue;
+      seen.add(key);
+      candidates.push({
+        id: user.id,
+        email,
+        displayName: user.displayName ?? email,
+        role: user.role,
+        publicBrandId: user.publicBrandId
+      });
+    }
+    return candidates;
+  }
+
   async function loadInternalDirectory(): Promise<Map<string, InternalAccessUser>> {
     const users = await options.findInternalUsers();
     return new Map(users.map((user) => [user.id, user] as const));
@@ -1334,9 +1365,10 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       lookups: AdminAccessRequestLookups;
       policy: AccessRequestPolicyView;
     }> {
-      const [requests, internalUsers, plans, organizations, policy] = await Promise.all([
+      const [requests, internalUsers, brandEmployees, plans, organizations, policy] = await Promise.all([
         options.requests.list({ status: trimOrUndefined(input?.status) }),
         options.findInternalUsers(),
+        options.findBrandEmployees?.() ?? Promise.resolve([]),
         options.subscriptionPlans.list(),
         options.organizations.list({ type: "customer" }),
         loadPolicy()
@@ -1373,15 +1405,17 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           )
         ),
         lookups: {
-          reviewerCandidates: internalUsers
-            .filter((user) => user.email)
-            .map((user) => ({
-              id: user.id,
-              email: user.email,
-              displayName: user.displayName ?? user.email,
-              role: user.role
-            }))
-            .sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN")),
+          reviewerCandidates: [
+            ...internalUsers
+              .filter((user) => user.email)
+              .map((user) => ({
+                id: user.id,
+                email: user.email,
+                displayName: user.displayName ?? user.email,
+                role: user.role
+              })),
+            ...(await brandReviewerCandidates(brandEmployees, new Set(internalUsers.map((user) => user.email.toLowerCase()))))
+          ].sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN")),
           organizations: organizations
             .filter((organization) => organization.status === "active")
             .map((organization) => ({

@@ -135,7 +135,8 @@ export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
 };
 
 export type AccessRequestWorkspaceLookups = {
-  reviewerCandidates: Array<{ id: string; email: string; displayName: string; role: string }>;
+  /** Brand employees carry their brand id and are only offered on that brand's requests. */
+  reviewerCandidates: Array<{ id: string; email: string; displayName: string; role: string; publicBrandId?: string }>;
   organizations: Array<{ id: string; slug: string; name: string; status: string }>;
   plans: Array<{ id: string; slug: string; name: string; status: string }>;
 };

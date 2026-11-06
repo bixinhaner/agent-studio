@@ -48,7 +48,7 @@ import {
 } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
-import { isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
+import { BRAND_EMPLOYEE_MEMBERSHIP_TYPE, isExternalPortalActor, isInternalPortalActor } from "./auth/portal-audience.js";
 import { classifyPortalRole } from "./portal/role-profile.js";
 import { createTeamUsageService, TeamUsageAccessError } from "./portal/team-usage-service.js";
 import { createPersonalUsageService } from "./portal/personal-usage-service.js";
@@ -1063,6 +1063,27 @@ async function findActiveInternalUsersForNotifications() {
       userType: typeof row.userType === "string" ? row.userType : "internal_employee"
     }));
 }
+async function findActiveBrandEmployeesForAccessReview() {
+  const rows = await db.organizationMembership.findMany({
+    where: {
+      membershipType: BRAND_EMPLOYEE_MEMBERSHIP_TYPE,
+      status: "active",
+      organization: { status: "active", publicBrandId: { not: null } },
+      user: { status: "active", email: { not: null } }
+    },
+    include: { user: true, organization: true }
+  });
+  return rows
+    .filter((row) => row.user.email && row.organization.publicBrandId)
+    .map((row) => ({
+      id: row.user.id,
+      email: String(row.user.email).trim().toLowerCase(),
+      displayName: typeof row.user.displayName === "string" ? row.user.displayName.trim() || undefined : undefined,
+      role: typeof row.user.role === "string" ? row.user.role : "employee",
+      userType: typeof row.user.userType === "string" ? row.user.userType : "external_user",
+      publicBrandId: String(row.organization.publicBrandId)
+    }));
+}
 const adminEmailNotifications = new AdminEmailNotificationService({
   settings: systemSettings,
   notifications: notificationRecords,
@@ -1152,7 +1173,8 @@ const accessRequestService = createAccessRequestService({
   appBaseUrl: appConfig.appBaseUrl,
   accessRequestConfig: appConfig.accessRequests,
   publicBrands,
-  findInternalUsers: findActiveInternalUsersForNotifications
+  findInternalUsers: findActiveInternalUsersForNotifications,
+  findBrandEmployees: findActiveBrandEmployeesForAccessReview
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 publicBrands.setProjectionService(new PublicBrandKnowledgeProjectionService(db, knowledgeSetStorage));

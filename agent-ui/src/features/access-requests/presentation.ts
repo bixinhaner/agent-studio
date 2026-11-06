@@ -136,3 +136,11 @@ export function reviewerCandidateMatches(
   if (!candidate) return false;
   return candidate.email.toLowerCase().includes(normalized) || candidate.displayName.toLowerCase().includes(normalized);
 }
+
+/** Internal reviewers fit every request; brand employees only fit requests from their own brand. */
+export function reviewerCandidatesForBrand<T extends { publicBrandId?: string }>(
+  candidates: readonly T[],
+  publicBrandId: string | null | undefined
+): T[] {
+  return candidates.filter((candidate) => !candidate.publicBrandId || candidate.publicBrandId === publicBrandId);
+}
