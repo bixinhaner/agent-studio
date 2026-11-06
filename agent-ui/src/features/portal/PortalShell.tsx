@@ -173,6 +173,7 @@ import {
   type ProductFeedbackSeverity,
   type ProductFeedbackType,
   type RunningThreadIdsContextValue,
+  type RuntimeSkillOption,
   type SandboxMode,
   type SessionGroupLabelContextValue,
   type ThreadCompletionNoticeContextValue,
@@ -305,7 +306,12 @@ import {
 } from "./PortalBanners";
 import { ThreadPublicShareControls } from "./ThreadPublicShareControls";
 import { StableThreadListItems } from "./PortalThreadList";
-import { buildSkillCreatorReviewPrompt, isSkillCreationIntent } from "./SkillDraftStatusBlock";
+import {
+  buildExternalSkillCreatorPrompt,
+  buildSkillCreatorReviewPrompt,
+  isSkillCreationIntent,
+  toExternalSkillFileChangeData
+} from "./SkillDraftStatusBlock";
 import { HiddenToolFallback } from "./AssistantRunningState";
 import { extractTimelineRows } from "./ProcessDataPart";
 import {
@@ -326,6 +332,9 @@ import {
   threadMessagesOutToRepository,
   ThreadRuntimeSubscriptionBridge
 } from "./PortalRuntimeAdapter";
+
+const EMPTY_RUNTIME_SKILLS: RuntimeSkillOption[] = [];
+const SKILL_CREATOR_SKILL_ID = "skill-creator";
 
 export function PortalShell(props: {
   currentUser?: AuthUser;
@@ -1172,12 +1181,6 @@ export function PortalShell(props: {
   }, [activeThreadIdentity.remoteId, runtimeMode, runtimeOptions, workspaceThreads]);
 
   useEffect(() => {
-    if (isExternalPortalUser) {
-      enabledSkillIdsRef.current = [];
-      hydratedSkillThreadIdRef.current = "";
-      setEnabledSkillIds([]);
-      return;
-    }
     const activeRemoteId = String(activeThreadIdentity.remoteId || "").trim();
     const activeThread = workspaceThreads.find(
       (thread) => thread.id === activeRemoteId || thread.external_id === activeRemoteId
@@ -1196,11 +1199,11 @@ export function PortalShell(props: {
       enabledSkillIdsRef.current = next;
       return next;
     });
-  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions, workspaceThreads]);
+  }, [activeThreadIdentity.remoteId, runtimeMode, runtimeOptions, workspaceThreads]);
 
   useEffect(() => {
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
-    if (!shouldHydratePortalThreadSkills({ threadId, isExternalPortalUser, trainingReadOnly })) {
+    if (!shouldHydratePortalThreadSkills({ threadId, trainingReadOnly })) {
       enabledSkillIdsRef.current = [];
       hydratedSkillThreadIdRef.current = "";
       skillHydrationRef.current = null;
@@ -1264,7 +1267,7 @@ export function PortalShell(props: {
         skillHydrationRef.current = null;
       }
     };
-  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions, trainingReadOnly]);
+  }, [activeThreadIdentity.remoteId, runtimeMode, runtimeOptions, trainingReadOnly]);
 
   useEffect(() => {
     let active = true;
@@ -1768,10 +1771,10 @@ export function PortalShell(props: {
   const selectedMode = findRuntimeMode(runtimeOptions, effectiveRuntimeMode);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], effectiveRuntimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], effectiveRuntimeMode);
-  const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
-  const automaticModeSkills = isExternalPortalUser ? [] : (selectedMode?.automaticSkills ?? []);
+  // The server already narrows external users to the curated generic Skills and their own SOP Skills.
+  const availableModeSkills = selectedMode?.availableSkills ?? EMPTY_RUNTIME_SKILLS;
+  const automaticModeSkills = selectedMode?.automaticSkills ?? EMPTY_RUNTIME_SKILLS;
   const setEnabledSkills = useCallback(async (skillIds: string[]) => {
-    if (isExternalPortalUser) return;
     const availableIds = new Set(availableModeSkills.map((skill) => skill.id));
     const normalizedIds = Array.from(new Set(skillIds.filter((skillId) => availableIds.has(skillId))));
     const previousIds = enabledSkillIdsRef.current;
@@ -1803,7 +1806,7 @@ export function PortalShell(props: {
     } finally {
       setSkillSelectionPendingCount(count => Math.max(0, count - 1));
     }
-  }, [activeThreadIdentity.remoteId, availableModeSkills, effectiveRuntimeMode, isExternalPortalUser]);
+  }, [activeThreadIdentity.remoteId, availableModeSkills, effectiveRuntimeMode]);
   const skillComposerContext = useMemo(
     () => ({
       availableSkills: availableModeSkills,
@@ -2466,8 +2469,14 @@ export function PortalShell(props: {
         const latestUserMessageForPersistence = latestUserMessage
           ? sanitizeMessageForPersistence(latestUserMessage.message)
           : undefined;
-        const isSkillCreationRequest = !isExternalPortalUser && isSkillCreationIntent(prompt);
-        const runtimePrompt = isSkillCreationRequest ? buildSkillCreatorReviewPrompt(prompt) : prompt;
+        const isSkillCreationRequest =
+          isSkillCreationIntent(prompt) ||
+          (isExternalPortalUser && enabledSkillIdsRef.current.includes(SKILL_CREATOR_SKILL_ID));
+        const runtimePrompt = !isSkillCreationRequest
+          ? prompt
+          : isExternalPortalUser
+            ? buildExternalSkillCreatorPrompt(prompt)
+            : buildSkillCreatorReviewPrompt(prompt);
 
         const threadId = await resolveRunThreadId({
           unstableThreadId: String(options.unstable_threadId || "").trim(),
@@ -2941,10 +2950,14 @@ export function PortalShell(props: {
               name !== "codex_recovery_failure" &&
               name !== USER_INPUT_REQUEST_PART_NAME
             ) continue;
+            let partData = partObj.data;
             if (isExternalPortalUser && name === "codex_file_change") {
               const dataObj = asRecord(partObj.data);
-              if (dataObj?.artifact_only !== true) {
-                continue;
+              if (dataObj?.artifact_only !== true && dataObj?.skill_only !== true) {
+                // Raw file changes stay hidden; only generated Skill files surface, for the install card.
+                const skillOnly = toExternalSkillFileChangeData(partObj.data);
+                if (!skillOnly) continue;
+                partData = skillOnly;
               }
             }
             activeTextPart = null;
@@ -2953,7 +2966,7 @@ export function PortalShell(props: {
             const displayPart = {
               type: "data",
               name,
-              data: partObj.data
+              data: partData
             };
             if (name === "codex_file_change") {
               const consolidated = consolidateCodexFileChangeParts([...orderedParts, displayPart]);

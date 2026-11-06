@@ -3,7 +3,7 @@ import multer, { MulterError } from "multer";
 import { z } from "zod";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
-import { isInternalPortalActor } from "../auth/portal-audience.js";
+import { isExternalPortalActor, isInternalPortalActor } from "../auth/portal-audience.js";
 import type { CustomerExperienceIssueReporter } from "../operations/customer-experience-issue-reporter.js";
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
 import type { ProductFeedbackRepository } from "../persistence/product-feedback-repository.js";
@@ -137,7 +137,14 @@ export function createPortalRouter(options: {
           roleIds,
           departmentIds,
           membershipType: req.currentMembership?.membershipType,
-          locale: req.headers["accept-language"]
+          locale: req.headers["accept-language"],
+          audience: isExternalPortalActor({
+            userType: currentUser.userType,
+            organizationType: req.currentOrganization?.type,
+            membershipType: req.currentMembership?.membershipType
+          })
+            ? "external"
+            : "internal"
         }),
         options.modelCatalog.getCatalog({ maxWaitMs: 100 })
       ]);

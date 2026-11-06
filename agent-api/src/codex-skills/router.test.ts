@@ -3,13 +3,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
 import { ManagedSkillNameConflictError, type CodexSkillService } from "./codex-skill-service.js";
-import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./router.js";
+import { createAdminCodexSkillRouter, createPortalCodexSkillRouter, EXTERNAL_PRIVATE_SKILL_LIMIT } from "./router.js";
 
 function appFor(router: express.Router) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.currentOrganization = { id: "org-1" } as Request["currentOrganization"];
+    req.currentOrganization = { id: "org-1", type: "internal" } as Request["currentOrganization"];
     req.currentUser = { id: "owner-1", displayName: "Owner" } as Request["currentUser"];
     next();
   });
@@ -93,5 +93,51 @@ describe("managed Codex Skill install conflict route", () => {
       .send({ thread_id: "thread-1", path: "tp-generator", conflict_action: "fork" })
       .expect(201);
     expect(installSkillFromDirectory).toHaveBeenLastCalledWith(expect.objectContaining({ conflictAction: "fork" }));
+  });
+});
+
+describe("external portal Skill routes", () => {
+  function externalApp(router: express.Router) {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.currentOrganization = { id: "org-ext", type: "external" } as Request["currentOrganization"];
+      req.currentUser = { id: "ext-1", displayName: "Guest", userType: "external_user" } as Request["currentUser"];
+      next();
+    });
+    app.use(router);
+    return app;
+  }
+
+  it("blocks the internal draft review workflow and caps direct installs", async () => {
+    const createDraft = vi.fn();
+    const installSkillFromDirectory = vi.fn(async () => ({ id: "personal-1" }));
+    const service = { createDraft, installSkillFromDirectory } as unknown as CodexSkillService;
+    const app = externalApp(createPortalCodexSkillRouter(service));
+    app.locals.resolveCodexSkillThreadPath = vi.fn(async () => "/threads/thread-1/my-sop");
+
+    await request(app).post("/skill-drafts").send({ prompt: "make a skill" }).expect(403);
+    await request(app).post("/skill-drafts/from-thread-path").send({ thread_id: "thread-1", path: "my-sop" }).expect(403);
+    await request(app).post("/skill-drafts/draft-1/revise").send({ instruction: "x" }).expect(403);
+    await request(app).post("/skill-drafts/draft-1/new-version").send({ instruction: "x" }).expect(403);
+    expect(createDraft).not.toHaveBeenCalled();
+
+    await request(app)
+      .post("/codex-managed-skills/install-from-thread-path")
+      .send({ thread_id: "thread-1", path: "my-sop" })
+      .expect(201);
+    expect(installSkillFromDirectory).toHaveBeenCalledWith(expect.objectContaining({
+      actor: expect.objectContaining({ id: "ext-1", organizationId: "org-ext" }),
+      privateSkillLimit: EXTERNAL_PRIVATE_SKILL_LIMIT
+    }));
+  });
+
+  it("does not cap internal installs", async () => {
+    const installSkillFromDirectory = vi.fn(async () => ({ id: "personal-1" }));
+    const app = appFor(createPortalCodexSkillRouter({ installSkillFromDirectory } as unknown as CodexSkillService));
+    app.locals.resolveCodexSkillThreadPath = vi.fn(async () => "/threads/thread-1/my-sop");
+
+    await request(app).post("/codex-managed-skills/install-from-thread-path").send({ thread_id: "t", path: "my-sop" }).expect(201);
+    expect(installSkillFromDirectory).toHaveBeenCalledWith(expect.objectContaining({ privateSkillLimit: undefined }));
   });
 });

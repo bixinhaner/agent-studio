@@ -1,7 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
+import { isExternalPortalActor } from "../auth/portal-audience.js";
 import { ManagedSkillNameConflictError, type CodexSkillService } from "./codex-skill-service.js";
+
+/** External users can create and install their own Skills, but each account keeps a bounded personal library. */
+export const EXTERNAL_PRIVATE_SKILL_LIMIT = 20;
 
 const createDraftSchema = z.object({
   prompt: z.string().trim().min(1).max(8000),
@@ -66,6 +70,21 @@ function actorFromRequest(req: Request) {
   };
 }
 
+function isExternalRequest(req: Request): boolean {
+  return isExternalPortalActor({
+    userType: req.currentUser?.userType,
+    organizationType: req.currentOrganization?.type,
+    membershipType: req.currentMembership?.membershipType
+  });
+}
+
+/** Draft review/publish is an internal admin workflow; external users install straight into their own library. */
+function rejectExternalDraftWorkflow(req: Request, res: Response): boolean {
+  if (!isExternalRequest(req)) return false;
+  res.status(403).json({ detail: "Skill drafts are not available for this account" });
+  return true;
+}
+
 function sendValidationError(res: Response, error: z.ZodError): void {
   res.status(400).json({ detail: error.issues[0]?.message ?? "Invalid request" });
 }
@@ -94,6 +113,7 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
   });
 
   router.post("/skill-drafts", async (req: Request, res: Response) => {
+    if (rejectExternalDraftWorkflow(req, res)) return;
     const parsed = createDraftSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       sendValidationError(res, parsed.error);
@@ -113,6 +133,7 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
   });
 
   router.post("/skill-drafts/from-thread-path", async (req: Request, res: Response) => {
+    if (rejectExternalDraftWorkflow(req, res)) return;
     const parsed = createDraftFromThreadPathSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       sendValidationError(res, parsed.error);
@@ -164,7 +185,8 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
         requestedPrompt: parsed.data.prompt || undefined,
         sourceThreadId: parsed.data.thread_id,
         modeId: parsed.data.mode_id || undefined,
-        conflictAction: parsed.data.conflict_action
+        conflictAction: parsed.data.conflict_action,
+        privateSkillLimit: isExternalRequest(req) ? EXTERNAL_PRIVATE_SKILL_LIMIT : undefined
       });
       res.status(201).json({ skill });
     } catch (error) {
@@ -235,6 +257,7 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
   });
 
   router.post("/skill-drafts/:id/revise", async (req: Request, res: Response) => {
+    if (rejectExternalDraftWorkflow(req, res)) return;
     const parsed = reviseDraftSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       sendValidationError(res, parsed.error);
@@ -253,6 +276,7 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
   });
 
   router.post("/skill-drafts/:id/new-version", async (req: Request, res: Response) => {
+    if (rejectExternalDraftWorkflow(req, res)) return;
     const parsed = reviseDraftSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       sendValidationError(res, parsed.error);

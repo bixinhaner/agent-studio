@@ -350,4 +350,40 @@ describe("CodexSkillService shared Skill update conflicts", () => {
     expect(listAll).not.toHaveBeenCalled();
     expect(replacePoliciesForResource).not.toHaveBeenCalled();
   });
+  it("enforces the personal Skill limit for new installs but not for updating an owned Skill", async () => {
+    const root = await createTemporaryDirectory();
+    const skillDirectory = path.join(root, "quota-skill");
+    await fs.mkdir(skillDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDirectory, "SKILL.md"),
+      "---\nname: quota-skill\ndescription: Quota workflow.\n---\n\n# Quota Skill\n"
+    );
+    const owned = { id: "owned-1", status: "active", scope: "private", ownerUserId: "owner-1", skillName: "quota-skill", version: "1.0.0" };
+    const findManagedSkillByName = vi.fn();
+    const listManagedSkills = vi.fn(async () => [owned, { ...owned, id: "owned-2", skillName: "other" }]);
+    const upsertManagedSkill = vi.fn(async (input: Record<string, unknown>) => ({ ...input, id: "owned-1" }));
+    const service = new CodexSkillService({
+      repository: { findManagedSkillByName, listManagedSkills, upsertManagedSkill },
+      skillPackages: {} as never,
+      agentModes: {} as never
+    } as never, {
+      draftRoot: path.join(root, "drafts"),
+      publishedSkillsRoot: path.join(root, "published")
+    });
+    const input = { actor: { id: "owner-1", organizationId: "org-1" }, sourceDirectoryPath: skillDirectory, privateSkillLimit: 2 };
+
+    findManagedSkillByName.mockResolvedValue(undefined);
+    await expect(service.installSkillFromDirectory(input)).rejects.toThrow("最多可安装 2 个个人 Skill");
+    expect(upsertManagedSkill).not.toHaveBeenCalled();
+    expect(listManagedSkills).toHaveBeenCalledWith({ organizationId: "org-1", ownerUserId: "owner-1", scope: "private", status: "active" });
+
+    findManagedSkillByName.mockResolvedValue({ ...owned, status: "archived" });
+    await expect(service.installSkillFromDirectory(input)).rejects.toThrow("最多可安装 2 个个人 Skill");
+
+    findManagedSkillByName.mockResolvedValue(owned);
+    listManagedSkills.mockClear();
+    await service.installSkillFromDirectory(input);
+    expect(listManagedSkills).not.toHaveBeenCalled();
+    expect(upsertManagedSkill).toHaveBeenCalledTimes(1);
+  });
 });

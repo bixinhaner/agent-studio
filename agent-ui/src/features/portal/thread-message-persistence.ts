@@ -275,10 +275,9 @@ export function reviveMessage(message: unknown, persistedCreatedAt?: string | nu
 
 export function shouldHydratePortalThreadSkills(input: {
   threadId: string;
-  isExternalPortalUser: boolean;
   trainingReadOnly: boolean;
 }): boolean {
-  return Boolean(input.threadId) && !input.isExternalPortalUser && !input.trainingReadOnly;
+  return Boolean(input.threadId) && !input.trainingReadOnly;
 }
 
 export function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | undefined): unknown {

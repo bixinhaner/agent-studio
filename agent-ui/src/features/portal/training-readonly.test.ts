@@ -6,15 +6,13 @@ describe("training read-only thread isolation", () => {
   it("does not load ordinary workspace thread details for a training conversation", () => {
     expect(shouldHydratePortalThreadSkills({
       threadId: "training-thread-1",
-      isExternalPortalUser: false,
       trainingReadOnly: true
     })).toBe(false);
   });
 
-  it("keeps skill hydration for an editable internal workspace conversation", () => {
+  it("hydrates skills for editable conversations of internal and external users alike", () => {
     expect(shouldHydratePortalThreadSkills({
       threadId: "workspace-thread-1",
-      isExternalPortalUser: false,
       trainingReadOnly: false
     })).toBe(true);
   });

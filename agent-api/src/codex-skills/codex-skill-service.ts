@@ -42,6 +42,8 @@ type InstallSkillFromDirectoryInput = {
   sourceThreadId?: string;
   modeId?: string;
   conflictAction?: "fork";
+  /** Maximum active personal Skills the actor may own; updating an existing Skill never counts as new. */
+  privateSkillLimit?: number;
 };
 
 export type ManagedSkillNameConflict = {
@@ -656,6 +658,17 @@ export class CodexSkillService {
           scope: "private",
           skillName
         });
+      }
+    }
+    if (existing?.status !== "active" && input.privateSkillLimit !== undefined) {
+      const owned = await this.dependencies.repository.listManagedSkills({
+        organizationId: input.actor.organizationId,
+        ownerUserId: input.actor.id,
+        scope: "private",
+        status: "active"
+      });
+      if (owned.length >= input.privateSkillLimit) {
+        throw new Error(`最多可安装 ${input.privateSkillLimit} 个个人 Skill，请先卸载不再使用的 Skill`);
       }
     }
     const slug = slugify(skillName);

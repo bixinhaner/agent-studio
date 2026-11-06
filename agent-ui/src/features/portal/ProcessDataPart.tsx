@@ -139,7 +139,6 @@ export const ProcessDataPart: FC<{
 
   useEffect(() => {
     if (name !== "codex_file_change") return;
-    if (isExternalPortalUser) return;
     const threadId = activeThreadId.trim();
     if (!threadId) return;
     let active = true;
@@ -162,7 +161,7 @@ export const ProcessDataPart: FC<{
     return () => {
       active = false;
     };
-  }, [activeThreadId, isExternalPortalUser, name]);
+  }, [activeThreadId, name]);
 
   if (name === "codex_process_audit") return null;
 
@@ -345,7 +344,7 @@ export const ProcessDataPart: FC<{
   if (name === "codex_file_change") {
     const changes = collectCodexFileChanges(data);
     const artifactChanges = changes.filter((item) => item.canPreview || item.canDownload);
-    const skillRootPaths = isExternalPortalUser ? [] : collectSkillRootPathsFromChanges(changes);
+    const skillRootPaths = collectSkillRootPathsFromChanges(changes);
     if (artifactChanges.length === 0 && skillRootPaths.length === 0) return null;
     const activeThreadRunning = Boolean(activeThreadId.trim() && runningThreadIds[activeThreadId.trim()]);
     const installSkillPath = async (skillPath: string, conflictAction?: "fork"): Promise<boolean> => {
@@ -439,13 +438,16 @@ export const ProcessDataPart: FC<{
                         {installLabel}
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="assistant-file-change-btn"
-                      onClick={() => requestPreview(skillPath === "." ? "SKILL.md" : `${skillPath}/SKILL.md`)}
-                    >
-                      {t("skill.preview")}
-                    </button>
+                    {/* External users review the summary in the reply; workspace files are not previewable for them. */}
+                    {!isExternalPortalUser ? (
+                      <button
+                        type="button"
+                        className="assistant-file-change-btn"
+                        onClick={() => requestPreview(skillPath === "." ? "SKILL.md" : `${skillPath}/SKILL.md`)}
+                      >
+                        {t("skill.preview")}
+                      </button>
+                    ) : null}
                   </div>
                   {installedSkill ? (
                     <section

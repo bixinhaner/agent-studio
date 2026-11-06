@@ -35,10 +35,63 @@ Platform skill install workflow:
 - When the skill files are ready, stop at the generated files. The platform will offer an Install skill action that installs the skill through the backend and makes it available in new chats.`;
 }
 
+/** Folder (relative to the task workspace) where external users' generated Skills are written. */
+export const EXTERNAL_SKILL_DRAFT_DIR = "skill-drafts";
+
+/**
+ * External users only see the outcome: no runtime names, server paths or install internals,
+ * so brand output stays clean and the generated files land where the install card can find them.
+ */
+export function buildExternalSkillCreatorPrompt(prompt: string): string {
+  return `${prompt}
+
+Skill (SOP) creation workflow:
+- Use the skill-creator workflow to turn the request into a reusable Skill with a valid SKILL.md (name and description in front matter, clear numbered steps, inputs and expected outputs).
+- Write the Skill files only under ./${EXTERNAL_SKILL_DRAFT_DIR}/<skill-name>/ in the current working directory. Do not install, copy or register it anywhere else.
+- Keep SKILL.md under 500 lines and do not include secrets, credentials or personal data.
+- When the files are ready, reply with a short summary of what the Skill does and its steps so the user can review it. Tell the user to click "Install Skill" below to use it in new chats.
+- In the reply, call it a Skill or SOP. Do not mention file system paths, directories, internal tool names, runtimes or model providers.`;
+}
+
+/**
+ * External users never see raw file changes. Only SKILL.md files under the draft folder pass through,
+ * re-rooted to a workspace-relative path so the install card works without exposing server paths.
+ */
+export function toExternalSkillFileChangeData(data: unknown): { at: string; skill_only: true; changes: Array<{ path: string; kind: string }> } | undefined {
+  const record = data && typeof data === "object" ? (data as Record<string, unknown>) : undefined;
+  const rawChanges = Array.isArray(record?.changes) ? record.changes : [];
+  const marker = `/${EXTERNAL_SKILL_DRAFT_DIR}/`;
+  const changes: Array<{ path: string; kind: string }> = [];
+  const seen = new Set<string>();
+  for (const item of rawChanges) {
+    const change = item && typeof item === "object" ? (item as Record<string, unknown>) : undefined;
+    if (!change || change.kind === "delete") continue;
+    const normalizedPath = normalizePreviewFilePath(typeof change.path === "string" ? change.path : "");
+    const prefixed = normalizedPath.startsWith(`${EXTERNAL_SKILL_DRAFT_DIR}/`) || normalizedPath.startsWith(`./${EXTERNAL_SKILL_DRAFT_DIR}/`)
+      ? `/${normalizedPath.replace(/^\.\//, "")}`
+      : normalizedPath;
+    const markerIndex = prefixed.lastIndexOf(marker);
+    if (markerIndex < 0) continue;
+    const relativePath = prefixed.slice(markerIndex + 1);
+    const segments = relativePath.split("/");
+    // skill-drafts/<skill-name>/SKILL.md only; nested helper files are installed with their Skill folder.
+    if (segments.length !== 3 || segments[2] !== "SKILL.md" || !segments[1] || segments[1] === "." || segments[1] === "..") continue;
+    if (seen.has(relativePath)) continue;
+    seen.add(relativePath);
+    changes.push({ path: relativePath, kind: typeof change.kind === "string" ? change.kind : "update" });
+  }
+  if (changes.length === 0) return undefined;
+  return {
+    at: typeof record?.at === "string" ? record.at : new Date().toISOString(),
+    skill_only: true,
+    changes
+  };
+}
+
 export function isSkillCreationIntent(prompt: string): boolean {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) return false;
-  const hasSkillWord = /\bskill\b|技能|能力/.test(normalized);
+  const hasSkillWord = /\bskills?\b|\bsop\b|技能|能力/.test(normalized);
   const hasCreateWord = /创建|生成|做成|固化|保存|沉淀|封装|复用|create|make|build|turn.+into/.test(normalized);
   return hasSkillWord && hasCreateWord;
 }

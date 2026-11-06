@@ -126,7 +126,23 @@ type RuntimeOptionRequest = {
   departmentIds: string[];
   membershipType?: string;
   locale?: string;
+  /**
+   * External portal users only get the curated skill set below. Omitted means internal
+   * so admin/internal callers keep the full mode bindings.
+   */
+  audience?: "internal" | "external";
 };
+
+/** Native Codex skills external users may pick: image generation and SOP/Skill authoring. */
+export const EXTERNAL_PORTAL_NATIVE_SKILLS: ReadonlySet<string> = new Set(["imagegen", "skill-creator"]);
+/** Plugins external users see as automatically available. */
+export const EXTERNAL_PORTAL_PLUGIN_SKILLS: ReadonlySet<string> = new Set([
+  "pdf",
+  "documents",
+  "spreadsheets",
+  "presentations",
+  "visualize"
+]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -386,6 +402,7 @@ export class PortalRuntimeOptionService {
         Promise.resolve([]),
       this.deps.skillCatalog?.listPublished({ organizationId: input.organizationId }) ?? Promise.resolve([])
     ]);
+    const isExternalAudience = input.audience === "external";
     const brandManagesResources = brand?.resourceBindingMode === "brand_managed" && !isBrandEmployeeMembership(input.membershipType);
 
     const activeVisibleModeRows = modeRows.filter(
@@ -443,11 +460,12 @@ export class PortalRuntimeOptionService {
     const activePrivateSkillNames = new Set(activePrivateSkills.map((skill) => skillNameKey(skill.skillName)));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
     const automaticPluginSkills = installedPlugins
+      .filter((plugin) => !isExternalAudience || EXTERNAL_PORTAL_PLUGIN_SKILLS.has(plugin.name))
       .map((plugin) => toAutomaticPluginRuntimeSkill(plugin, catalogEntries, input.locale))
       .filter((skill): skill is PortalRuntimeOptionSkill => Boolean(skill));
     const automaticSkills = Array.from(
       new Map(
-        [...automaticPluginSkills, ...automaticCapabilityRows].map((skill) => [
+        [...automaticPluginSkills, ...(isExternalAudience ? [] : automaticCapabilityRows)].map((skill) => [
           skill.id,
           { ...skill, automatic: true as const }
         ])
@@ -521,6 +539,8 @@ export class PortalRuntimeOptionService {
             const managedSkill = managedSkillMap.get(skillBinding.managedSkillId);
             if (!managedSkill || managedSkill.status !== "active") continue;
             if (managedSkill.scope === "private" && !accessiblePrivateSkillIds.has(managedSkill.id)) continue;
+            // Platform/team managed skills are internal SOPs; external users only see their own or shared private skills.
+            if (isExternalAudience && managedSkill.scope !== "private") continue;
             const nameKey = skillNameKey(managedSkill.skillName);
             if (managedSkill.scope !== "private" && activePrivateSkillNames.has(nameKey)) {
               continue;
@@ -543,12 +563,24 @@ export class PortalRuntimeOptionService {
 
           const nativeSkill = nativeSkillMap.get(skillBinding.name);
           if (!nativeSkill) continue;
+          if (isExternalAudience && !EXTERNAL_PORTAL_NATIVE_SKILLS.has(nativeSkill.name)) continue;
           const runtimeSkill = toNativeRuntimeSkill(nativeSkill, catalogEntries, input.locale, skillBinding.activationPrompt);
           if (!availableSkillIds.has(runtimeSkill.id)) {
             availableSkillIds.add(runtimeSkill.id);
             availableSkillNames.add(skillNameKey(runtimeSkill.name));
             availableSkills.push(runtimeSkill);
           }
+        }
+      }
+
+      if (isExternalAudience) {
+        for (const skillName of EXTERNAL_PORTAL_NATIVE_SKILLS) {
+          const nativeSkill = nativeSkillMap.get(skillName);
+          if (!nativeSkill || availableSkillIds.has(nativeSkill.name)) continue;
+          const runtimeSkill = toNativeRuntimeSkill(nativeSkill, catalogEntries, input.locale);
+          availableSkillIds.add(runtimeSkill.id);
+          availableSkillNames.add(skillNameKey(runtimeSkill.name));
+          availableSkills.push(runtimeSkill);
         }
       }
 

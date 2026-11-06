@@ -6842,7 +6842,8 @@ async function resolveModeSelection(input: {
     userId: input.currentUser.id,
     roleIds,
     departmentIds,
-    membershipType: input.currentUser.membershipType
+    membershipType: input.currentUser.membershipType,
+    audience: isExternalActor(input.currentUser) ? "external" : "internal"
   });
   if (!runtimeOptions.modes.length) {
     throw new Error("No available agent mode for the current account");
@@ -6890,7 +6891,8 @@ async function resolveSelectedSkillIdsForMode(input: {
     userId: input.currentUser.id,
     roleIds: roleIdsForActor(input.currentUser),
     departmentIds: await listDepartmentIdsForActor(input.currentUser),
-    membershipType: input.currentUser.membershipType
+    membershipType: input.currentUser.membershipType,
+    audience: isExternalActor(input.currentUser) ? "external" : "internal"
   });
   const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.modeId);
   const availableById = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.id, skill] as const));
@@ -13732,7 +13734,8 @@ app.put("/api/threads/:threadId/skills", async (req: Request, res: Response) => 
       userId: currentUser.id,
       roleIds: roleIdsForActor(currentUser),
       departmentIds: await listDepartmentIdsForActor(currentUser),
-      membershipType: currentUser.membershipType
+      membershipType: currentUser.membershipType,
+      audience: isExternalActor(currentUser) ? "external" : "internal"
     });
     const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.mode_id);
     if (!selectedMode) {

@@ -637,6 +637,75 @@ describe("PortalRuntimeOptionService", () => {
     expect(result.modes).toEqual([]);
   });
 
+  it("limits external users to the curated generic Skills, plugins and their own private Skills", async () => {
+    const plugin = (name: string): InstalledPluginRecord => ({
+      name,
+      pluginRef: `${name}@office`,
+      marketplace: "office",
+      version: "1.0.0",
+      sourcePath: `/plugins/${name}`,
+      displayName: name,
+      capabilities: [],
+      defaultPrompts: [],
+      skillNames: [name],
+      enabled: true,
+      readiness: "ready",
+      visibleToUsers: true,
+      capabilityHealth: []
+    });
+    const common = {
+      modes: [agentMode({
+        skillPackages: [
+          { id: "binding-core", skillPackageId: "package-core", createdAt: now, updatedAt: now },
+          { id: "binding-team", skillPackageId: "package-team", createdAt: now, updatedAt: now }
+        ]
+      })],
+      skillPackages: [
+        {
+          ...skillPackage("package-core", "skill-installer"),
+          items: ["skill-installer", "imagegen", "openai-docs"].map((name) => ({
+            ...skillPackage("package-core", name).items[0]!,
+            id: `item-${name}`
+          }))
+        },
+        managedSkillPackage("package-team", "internal-sop", "managed-team")
+      ],
+      nativeSkills: ["skill-installer", "imagegen", "openai-docs", "skill-creator", "plugin-creator"].map(nativeSkill),
+      managedSkills: [managedSkill("managed-team", "internal-sop"), privateManagedSkill("managed-own", "my-sop", "user-external")],
+      installedPlugins: ["pdf", "documents", "product-design"].map(plugin),
+      catalogEntries: ["pdf", "documents", "product-design"].map((name) => catalogEntry({
+        id: `plugin-${name}`,
+        sourceType: "plugin",
+        sourceRef: name,
+        canonicalName: name,
+        published: true,
+        displayName: name,
+        summary: name
+      })),
+      automaticCapabilities: [automaticDingtalkCapability],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-core", "package-team"]
+      }
+    };
+    const request = { organizationId: "org_internal", userId: "user-external", roleIds: [], departmentIds: [] };
+
+    const external = await createService(common).resolve({ ...request, audience: "external" });
+    const internal = await createService(common).resolve(request);
+
+    expect(external.modes[0]?.availableSkills.map((skill) => skill.id).sort()).toEqual(
+      ["imagegen", "managed:managed-own", "skill-creator"]
+    );
+    expect(external.modes[0]?.automaticSkills.map((skill) => skill.id).sort()).toEqual(["plugin:documents", "plugin:pdf"]);
+    expect(internal.modes[0]?.availableSkills.map((skill) => skill.id).sort()).toEqual(
+      ["imagegen", "managed:managed-own", "managed:managed-team", "openai-docs", "skill-installer"]
+    );
+    expect(internal.modes[0]?.automaticSkills.map((skill) => skill.id).sort()).toEqual(
+      ["plugin:documents", "plugin:pdf", "plugin:product-design", "system:dingtalk"]
+    );
+  });
+
   it("exposes one private Skill to its owner and authorized members without duplicating it", async () => {
     const privateSkill = privateManagedSkill("managed-private", "private-report");
     const common = {
