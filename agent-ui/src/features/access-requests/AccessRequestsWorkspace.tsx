@@ -12,7 +12,10 @@ import {
   Spin,
   Table,
   Tabs,
-  Tag
+  Tag,
+  Tooltip,
+  Typography,
+  message
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Plus, RefreshCw, Search, Send } from "lucide-react";
@@ -31,11 +34,15 @@ import {
   updateAdminAccessRequestPolicy
 } from "./api";
 import {
+  ACCESS_REQUEST_STATUS_FILTERS,
+  accessRequestActionAvailability,
+  buildAccessRequestHash,
   deliveryTypeLabel,
   formatFileSize,
   formatLocalDate,
   formatLocalTime,
   membershipTypeLabel,
+  readAccessRequestHashState,
   rejectionModeLabel,
   requestStatusLabel,
   requestStatusTone,
@@ -43,7 +50,8 @@ import {
   reviewerCandidateMatches,
   reviewerCandidatesForBrand,
   reviewerDecisionLabel,
-  reviewerDecisionTone
+  reviewerDecisionTone,
+  reviewerRowsProblem
 } from "./presentation";
 import type {
   AdminAccessRequestDetail,
@@ -179,10 +187,11 @@ export function AccessRequestsWorkspace() {
   const isNarrowScreen = useIsNarrowScreen(1180);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const initialHashState = useMemo(() => readAccessRequestHashState(window.location.hash), []);
+  const [messageApi, messageHolder] = message.useMessage();
   const [errorText, setErrorText] = useState("");
-  const [successText, setSuccessText] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState(initialHashState.status);
+  const [query, setQuery] = useState(initialHashState.query);
   const [requests, setRequests] = useState<AdminAccessRequestSummary[]>([]);
   const [lookups, setLookups] = useState<AccessRequestWorkspaceLookups>({
     reviewerCandidates: [],
@@ -216,6 +225,60 @@ export function AccessRequestsWorkspace() {
     [lookups.reviewerCandidates, selectedRequest?.publicBrand?.id]
   );
 
+  // Errors appear on the surface the admin is looking at; page-level alerts were hidden behind the drawer and modals.
+  const feedbackSurface: "page" | "policy" | "drawer" | "modal" =
+    needsInfoOpen || rejectOpen ? "modal" : policyDrawerOpen ? "policy" : drawerOpen ? "drawer" : "page";
+  const errorAlert = errorText ? <Alert type="error" showIcon message={errorText} className="access-admin-feedback" /> : null;
+
+  const reviewDraftDirty = Boolean(
+    selectedRequest && JSON.stringify(reviewDraft) !== JSON.stringify(createReviewDraft(selectedRequest))
+  );
+  const requestDraftDirty = Boolean(
+    selectedRequest && JSON.stringify(requestDraft) !== JSON.stringify(createRequestDraft(selectedRequest))
+  );
+  const actionAvailability = accessRequestActionAvailability(selectedRequest?.status ?? "");
+  const reviewRowsProblem = reviewerRowsProblem(reviewDraft.reviewers, { requireTo: false });
+
+  /** Unsaved request settings or review routing are easy to lose when switching requests, so ask first. */
+  function confirmDiscardDrafts(onDiscard: () => void) {
+    if (!reviewDraftDirty && !requestDraftDirty) {
+      onDiscard();
+      return;
+    }
+    Modal.confirm({
+      title: "放弃未保存的修改？",
+      content: [requestDraftDirty ? "申请配置" : "", reviewDraftDirty ? "审核路由" : ""].filter(Boolean).join("、") + "有未保存的修改，离开后会丢失。",
+      okText: "放弃修改",
+      okButtonProps: { danger: true },
+      cancelText: "继续编辑",
+      onOk: onDiscard
+    });
+  }
+
+  function closeRequestDrawer() {
+    confirmDiscardDrafts(() => {
+      setDrawerOpen(false);
+      setSelectedRequestId(null);
+      setErrorText("");
+    });
+  }
+
+  useEffect(() => {
+    const next = buildAccessRequestHash(window.location.hash, {
+      requestId: drawerOpen ? selectedRequestId ?? "" : "",
+      status: statusFilter,
+      query
+    });
+    if (next !== window.location.hash) {
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${next}`);
+    }
+  }, [drawerOpen, query, selectedRequestId, statusFilter]);
+
+  useEffect(() => {
+    // A shared link (`#admin/access-requests?request=…`) opens that request directly.
+    if (initialHashState.requestId) void openRequest(initialHashState.requestId);
+  }, []);
+
   async function loadWorkspace(silent = false) {
     if (!silent) setLoading(true);
     setRefreshing(silent);
@@ -241,12 +304,10 @@ export function AccessRequestsWorkspace() {
     const internalEmailDomains = parsePolicyList(policyDraft.internalEmailDomainsText);
     if (!internalEmailDomains.length) {
       setErrorText("至少保留一个内部邮箱域名。");
-      setSuccessText("");
       return;
     }
     setSavingPolicy(true);
     setErrorText("");
-    setSuccessText("");
     try {
       const nextPolicy = await updateAdminAccessRequestPolicy({
         internalEmailDomains,
@@ -256,9 +317,9 @@ export function AccessRequestsWorkspace() {
       setPolicy(nextPolicy);
       setPolicyDraft(createPolicyDraft(nextPolicy));
       setPolicyDrawerOpen(false);
-      setSuccessText("访问申请规则已保存。");
+      void messageApi.success("访问申请规则已保存");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to save access request policy");
+      setErrorText(error instanceof Error ? error.message : "访问申请规则保存失败，请重试");
     } finally {
       setSavingPolicy(false);
     }
@@ -275,7 +336,13 @@ export function AccessRequestsWorkspace() {
     return () => window.clearTimeout(timer);
   }, [statusFilter, query]);
 
+  function selectRequest(requestId: string) {
+    if (drawerOpen && requestId === selectedRequestId) return;
+    confirmDiscardDrafts(() => void openRequest(requestId));
+  }
+
   async function openRequest(requestId: string) {
+    setActiveTab("request");
     setDrawerOpen(true);
     setSelectedRequestId(requestId);
     setDetailLoading(true);
@@ -287,7 +354,7 @@ export function AccessRequestsWorkspace() {
       setReviewDraft(createReviewDraft(detail));
       setProvisionDraft(createProvisionDraft(detail));
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to load request detail");
+      setErrorText(error instanceof Error ? error.message : "申请详情加载失败，请重试");
     } finally {
       setDetailLoading(false);
     }
@@ -301,14 +368,13 @@ export function AccessRequestsWorkspace() {
     setRequests((current) =>
       current.map((item) => (item.id === nextDetail.id ? summarizeDetail(nextDetail) : item))
     );
-    if (successMessage) setSuccessText(successMessage);
+    if (successMessage) void messageApi.success(successMessage);
   }
 
   async function handleSaveRequestDraft() {
     if (!selectedRequest) return;
     setSavingRequest(true);
     setErrorText("");
-    setSuccessText("");
     try {
       const detail = await patchAdminAccessRequest(selectedRequest.id, {
         ownerUserId: requestDraft.ownerUserId ?? null,
@@ -316,9 +382,9 @@ export function AccessRequestsWorkspace() {
         requestedPlanId: requestDraft.requestedPlanId ?? null,
         approvedPlanId: requestDraft.approvedPlanId ?? null
       });
-      applyDetail(detail, "申请配置已保存。");
+      applyDetail(detail, "申请配置已保存");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to save request settings");
+      setErrorText(error instanceof Error ? error.message : "申请配置保存失败，请重试");
     } finally {
       setSavingRequest(false);
     }
@@ -326,9 +392,13 @@ export function AccessRequestsWorkspace() {
 
   async function handleSaveReviewDraft() {
     if (!selectedRequest) return;
+    const problem = reviewerRowsProblem(reviewDraft.reviewers, { requireTo: false });
+    if (problem) {
+      setErrorText(problem);
+      return;
+    }
     setSavingReview(true);
     setErrorText("");
-    setSuccessText("");
     try {
       const detail = await patchAdminAccessRequest(selectedRequest.id, {
         reviewMode: reviewDraft.reviewMode,
@@ -336,9 +406,9 @@ export function AccessRequestsWorkspace() {
         rejectionMode: reviewDraft.rejectionMode,
         reviewers: reviewDraft.reviewers
       });
-      applyDetail(detail, "审核路由已保存。");
+      applyDetail(detail, "审核路由已保存");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to save review settings");
+      setErrorText(error instanceof Error ? error.message : "审核路由保存失败，请重试");
     } finally {
       setSavingReview(false);
     }
@@ -346,9 +416,13 @@ export function AccessRequestsWorkspace() {
 
   async function handleSendReview() {
     if (!selectedRequest) return;
+    const problem = reviewerRowsProblem(reviewDraft.reviewers, { requireTo: true });
+    if (problem) {
+      setErrorText(problem);
+      return;
+    }
     setSendingReview(true);
     setErrorText("");
-    setSuccessText("");
     try {
       const savedDetail = await patchAdminAccessRequest(selectedRequest.id, {
         reviewMode: reviewDraft.reviewMode,
@@ -358,9 +432,9 @@ export function AccessRequestsWorkspace() {
       });
       applyDetail(savedDetail);
       const detail = await sendAdminAccessRequestReview(selectedRequest.id);
-      applyDetail(detail, "审核邮件已发送。");
+      applyDetail(detail, "审核邮件已发送");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to send review request");
+      setErrorText(error instanceof Error ? error.message : "审核邮件发送失败，请重试");
     } finally {
       setSendingReview(false);
     }
@@ -370,7 +444,6 @@ export function AccessRequestsWorkspace() {
     if (!selectedRequest) return;
     setProvisioning(true);
     setErrorText("");
-    setSuccessText("");
     try {
       const detail = await provisionAdminAccessRequest(selectedRequest.id, {
         ...provisionDraft,
@@ -378,10 +451,10 @@ export function AccessRequestsWorkspace() {
         expiresAt: normalizeIsoOrNull(provisionDraft.expiresAt),
         cycleAnchorAt: normalizeIsoOrNull(provisionDraft.cycleAnchorAt)
       });
-      applyDetail(detail, "套餐已开通，邀请已发送。");
+      applyDetail(detail, "套餐已开通，邀请已发送");
       setActiveTab("activity");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to provision access request");
+      setErrorText(error instanceof Error ? error.message : "开通失败，请重试");
     } finally {
       setProvisioning(false);
     }
@@ -393,11 +466,11 @@ export function AccessRequestsWorkspace() {
     setErrorText("");
     try {
       const detail = await requestAdminAccessRequestNeedsInfo(selectedRequest.id, needsInfoMessage);
-      applyDetail(detail, "已发送补资料通知。");
+      applyDetail(detail, "补资料通知已发送给申请人");
       setNeedsInfoOpen(false);
       setNeedsInfoMessage("");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to request more information");
+      setErrorText(error instanceof Error ? error.message : "补资料通知发送失败，请重试");
     } finally {
       setPostingNeedsInfo(false);
     }
@@ -409,11 +482,11 @@ export function AccessRequestsWorkspace() {
     setErrorText("");
     try {
       const detail = await rejectAdminAccessRequest(selectedRequest.id, rejectReason);
-      applyDetail(detail, "申请已拒绝。");
+      applyDetail(detail, "申请已拒绝，已通知申请人");
       setRejectOpen(false);
       setRejectReason("");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to reject access request");
+      setErrorText(error instanceof Error ? error.message : "拒绝申请失败，请重试");
     } finally {
       setPostingReject(false);
     }
@@ -452,12 +525,22 @@ export function AccessRequestsWorkspace() {
         title: "审核",
         key: "reviewers",
         width: 180,
-        render: (_, record) => (
-          <div className="access-admin-cell-subtitle">
-            <div>待审 {record.reviewers.pendingCount}</div>
-            <div>已通过 {record.reviewers.approvedCount}</div>
-          </div>
-        )
+        render: (_, record) =>
+          record.reviewers.total ? (
+            <div className="access-admin-cell-subtitle access-admin-tabular">
+              <div>通过 {record.reviewers.approvedCount} / 待审 {record.reviewers.pendingCount}</div>
+              {record.reviewers.rejectedCount || record.reviewers.needsInfoCount ? (
+                <div>
+                  {[
+                    record.reviewers.rejectedCount ? `拒绝 ${record.reviewers.rejectedCount}` : "",
+                    record.reviewers.needsInfoCount ? `要补资料 ${record.reviewers.needsInfoCount}` : ""
+                  ].filter(Boolean).join(" / ")}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <span className="access-admin-cell-subtitle">未设置审核人</span>
+          )
       },
       {
         title: "目标组织 / 套餐",
@@ -493,28 +576,20 @@ export function AccessRequestsWorkspace() {
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
-            options={[
-              { value: "all", label: "全部状态" },
-              { value: "submitted", label: "已提交" },
-              { value: "under_review", label: "审核中" },
-              { value: "needs_info", label: "待补资料" },
-              { value: "approved_pending_provision", label: "待开通" },
-              { value: "invited", label: "已发邀请" },
-              { value: "activated", label: "已激活" },
-              { value: "rejected", label: "已拒绝" }
-            ]}
+            options={ACCESS_REQUEST_STATUS_FILTERS}
+            aria-label="按状态筛选"
             style={{ minWidth: 160 }}
           />
           <Input
             allowClear
             prefix={<Search size={16} aria-hidden="true" style={{ color: "var(--admin-color-subtle)" }} />}
-            placeholder="搜索公司、邮箱或 PO"
+            placeholder="搜索公司、邮箱、PO 或 SN"
             aria-label="搜索访问申请"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             style={{ width: 280 }}
           />
-          <Button icon={<RefreshCw size={16} />} onClick={() => void loadWorkspace(true)} loading={refreshing}>
+          <Button icon={<RefreshCw size={16} aria-hidden="true" />} onClick={() => void loadWorkspace(true)} loading={refreshing}>
             刷新
           </Button>
         </Space>
@@ -522,6 +597,7 @@ export function AccessRequestsWorkspace() {
           <Button
             onClick={() => {
               setPolicyDraft(createPolicyDraft(policy));
+              setErrorText("");
               setPolicyDrawerOpen(true);
             }}
           >
@@ -530,8 +606,8 @@ export function AccessRequestsWorkspace() {
         </Space>
       </div>
 
-      {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
-      {successText ? <Alert type="success" showIcon message={successText} /> : null}
+      {messageHolder}
+      {feedbackSurface === "page" && errorText ? <Alert type="error" showIcon message={errorText} /> : null}
 
       <div className="access-admin-table-shell">
         {loading ? (
@@ -544,33 +620,61 @@ export function AccessRequestsWorkspace() {
             columns={columns}
             dataSource={requests}
             pagination={{ pageSize: 12 }}
+            rowClassName={(record) =>
+              `access-admin-row${drawerOpen && record.id === selectedRequestId ? " access-admin-row-selected" : ""}`
+            }
             onRow={(record) => ({
-              onClick: () => void openRequest(record.id)
+              tabIndex: 0,
+              "aria-label": `打开 ${record.companyName} 的申请`,
+              onClick: () => selectRequest(record.id),
+              onKeyDown: (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  selectRequest(record.id);
+                }
+              }
             })}
             size="small"
           />
         ) : (
           <div className="access-admin-empty">
-            <Empty description="暂无申请单" />
+            <Empty
+              description={
+                statusFilter !== "all" || query.trim()
+                  ? "没有符合筛选条件的申请，换个状态或关键词试试"
+                  : "暂无申请单。客户在公开申请页提交后会出现在这里"
+              }
+            />
           </div>
         )}
       </div>
 
       <Drawer
         open={policyDrawerOpen}
-        onClose={() => setPolicyDrawerOpen(false)}
+        onClose={() => {
+          setPolicyDrawerOpen(false);
+          setErrorText("");
+        }}
         width={isNarrowScreen ? "100%" : 460}
         title="访问申请规则"
         extra={
           <Space>
-            <Button onClick={() => setPolicyDrawerOpen(false)}>取消</Button>
+            <Button
+              onClick={() => {
+                setPolicyDrawerOpen(false);
+                setErrorText("");
+              }}
+            >
+              取消
+            </Button>
             <Button type="primary" loading={savingPolicy} onClick={() => void handleSavePolicy()}>
-              保存
+              保存规则
             </Button>
           </Space>
         }
       >
         <div className="access-admin-tab">
+          {feedbackSurface === "policy" ? errorAlert : null}
           <label className="access-admin-field">
             <span>内部邮箱域名</span>
             <textarea
@@ -614,15 +718,16 @@ export function AccessRequestsWorkspace() {
 
       <Drawer
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={closeRequestDrawer}
         width={isNarrowScreen ? "100%" : 860}
-        title={selectedRequest ? `${selectedRequest.companyName} · ${selectedRequest.applicantEmail}` : "Access Request"}
+        title={selectedRequest ? `${selectedRequest.companyName} · ${selectedRequest.applicantEmail}` : "访问申请"}
         extra={
           selectedRequest ? (
             <Tag color={requestStatusTone(selectedRequest.status)}>{requestStatusLabel(selectedRequest.status)}</Tag>
           ) : undefined
         }
       >
+        {feedbackSurface === "drawer" ? errorAlert : null}
         {detailLoading ? (
           <div className="access-admin-empty">
             <Spin />
@@ -634,7 +739,7 @@ export function AccessRequestsWorkspace() {
             items={[
               {
                 key: "request",
-                label: "申请",
+                label: requestDraftDirty ? "申请 ·未保存" : "申请",
                 children: (
                   <div className="access-admin-tab">
                     <div className="access-admin-kv-grid">
@@ -643,11 +748,20 @@ export function AccessRequestsWorkspace() {
                       <div><span>申请邮箱</span><strong>{selectedRequest.applicantEmail}</strong></div>
                       <div><span>联系人</span><strong>{selectedRequest.contactName ?? "—"}</strong></div>
                       <div><span>国家 / 地区</span><strong>{selectedRequest.countryRegion ?? "—"}</strong></div>
-                      <div><span>历史 SN 号</span><strong>{selectedRequest.snNumber ?? "—"}</strong></div>
+                      <div><span>SN 号</span><strong>{selectedRequest.snNumber ?? "—"}</strong></div>
                       <div><span>销售联系人</span><strong>{selectedRequest.salesContactEmail}</strong></div>
-                      {selectedRequest.purchaseDate ? <div><span>历史购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div> : null}
-                      {selectedRequest.poNumber ? <div><span>历史 PO 号</span><strong>{selectedRequest.poNumber}</strong></div> : null}
-                      <div><span>公开链接</span><strong>{selectedRequest.publicAccessUrl ?? "—"}</strong></div>
+                      {selectedRequest.purchaseDate ? <div><span>购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div> : null}
+                      {selectedRequest.poNumber ? <div><span>PO 号</span><strong>{selectedRequest.poNumber}</strong></div> : null}
+                      <div>
+                        <span>申请人状态页</span>
+                        {selectedRequest.publicAccessUrl ? (
+                          <Typography.Text className="access-admin-mono" copyable={{ text: selectedRequest.publicAccessUrl, tooltips: ["复制链接", "已复制"] }}>
+                            {selectedRequest.publicAccessUrl}
+                          </Typography.Text>
+                        ) : (
+                          <strong>—</strong>
+                        )}
+                      </div>
                     </div>
                     <div className="access-admin-field">
                       <span>采购凭证</span>
@@ -666,7 +780,7 @@ export function AccessRequestsWorkspace() {
                     </div>
                     <div className="access-admin-form-grid">
                       <label className="access-admin-field">
-                        <span>Owner</span>
+                        <span>负责人</span>
                         <Select
                           allowClear
                           value={requestDraft.ownerUserId ?? undefined}
@@ -678,7 +792,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Requested Plan</span>
+                        <span>申请套餐</span>
                         <Select
                           allowClear
                           value={requestDraft.requestedPlanId ?? undefined}
@@ -687,7 +801,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Approved Plan</span>
+                        <span>批准套餐</span>
                         <Select
                           allowClear
                           value={requestDraft.approvedPlanId ?? undefined}
@@ -698,7 +812,7 @@ export function AccessRequestsWorkspace() {
                       <div />
                     </div>
                     <label className="access-admin-field">
-                      <span>Admin Note</span>
+                      <span>内部备注（仅管理员可见）</span>
                       <textarea
                         className="access-admin-textarea"
                         value={requestDraft.adminNote ?? ""}
@@ -706,25 +820,44 @@ export function AccessRequestsWorkspace() {
                       />
                     </label>
                     <div className="access-admin-action-row">
-                      <Button loading={savingRequest} type="primary" onClick={() => void handleSaveRequestDraft()}>
+                      <Button loading={savingRequest} type="primary" disabled={!requestDraftDirty} onClick={() => void handleSaveRequestDraft()}>
                         保存申请配置
                       </Button>
-                      <Button onClick={() => setNeedsInfoOpen(true)}>要求补资料</Button>
-                      <Button danger onClick={() => setRejectOpen(true)}>
-                        拒绝申请
-                      </Button>
+                      <Tooltip title={actionAvailability.closeBlockedReason}>
+                        <Button
+                          disabled={Boolean(actionAvailability.closeBlockedReason)}
+                          onClick={() => {
+                            setErrorText("");
+                            setNeedsInfoOpen(true);
+                          }}
+                        >
+                          要求补资料
+                        </Button>
+                      </Tooltip>
+                      <Tooltip title={actionAvailability.closeBlockedReason}>
+                        <Button
+                          danger
+                          disabled={Boolean(actionAvailability.closeBlockedReason)}
+                          onClick={() => {
+                            setErrorText("");
+                            setRejectOpen(true);
+                          }}
+                        >
+                          拒绝申请
+                        </Button>
+                      </Tooltip>
                     </div>
                   </div>
                 )
               },
               {
                 key: "review",
-                label: "审核",
+                label: reviewDraftDirty ? "审核 ·未保存" : "审核",
                 children: (
                   <div className="access-admin-tab">
                     <div className="access-admin-form-grid">
                       <label className="access-admin-field">
-                        <span>Approval Mode</span>
+                        <span>通过规则</span>
                         <Select
                           value={reviewDraft.reviewMode}
                           onChange={(value) => setReviewDraft((current) => ({ ...current, reviewMode: value }))}
@@ -736,7 +869,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Minimum Approvals</span>
+                        <span>最少通过人数</span>
                         <InputNumber
                           min={1}
                           disabled={reviewDraft.reviewMode !== "minimum_approvals"}
@@ -746,7 +879,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Reject Mode</span>
+                        <span>拒绝规则</span>
                         <Select
                           value={reviewDraft.rejectionMode}
                           onChange={(value) => setReviewDraft((current) => ({ ...current, rejectionMode: value }))}
@@ -759,27 +892,27 @@ export function AccessRequestsWorkspace() {
                     </div>
 
                     <div className="access-admin-section-head">
-                      <strong>Recipients</strong>
-                      <Button icon={<Plus size={14} />} onClick={() => setReviewDraft((current) => ({
+                      <strong>审核人</strong>
+                      <Button icon={<Plus size={14} aria-hidden="true" />} onClick={() => setReviewDraft((current) => ({
                         ...current,
-                        reviewers: [
-                          ...current.reviewers,
-                          { reviewerEmail: lookups.reviewerCandidates[0]?.email ?? "", reviewerUserId: lookups.reviewerCandidates[0]?.id ?? null, deliveryType: "to" }
-                        ]
+                        // Start empty: pre-filling the first directory entry sent reviews to whoever sorted first.
+                        reviewers: [...current.reviewers, { reviewerEmail: "", reviewerUserId: null, deliveryType: "to" }]
                       }))}>
-                        Add
+                        添加审核人
                       </Button>
                     </div>
                     <div className="access-admin-edit-table">
                       <div className="access-admin-edit-head">
-                        <span>Email</span>
-                        <span>Delivery</span>
+                        <span>邮箱</span>
+                        <span>送达方式</span>
                         <span />
                       </div>
                       {reviewDraft.reviewers.map((reviewer, index) => (
                         // Keyed by position only: keying by the typed email remounted the input on every keystroke.
                         <div className="access-admin-edit-row" key={index}>
                           <AutoComplete
+                            aria-label={`第 ${index + 1} 位审核人邮箱`}
+                            status={reviewRowsProblem.startsWith(`第 ${index + 1} 行`) ? "error" : undefined}
                             value={reviewer.reviewerEmail || undefined}
                             onChange={(value) => setReviewDraft((current) => ({
                               ...current,
@@ -795,6 +928,7 @@ export function AccessRequestsWorkspace() {
                             placeholder="内部账号或品牌邮箱"
                           />
                           <Select
+                            aria-label={`第 ${index + 1} 位审核人送达方式`}
                             value={reviewer.deliveryType}
                             onChange={(value) => setReviewDraft((current) => ({
                               ...current,
@@ -805,11 +939,15 @@ export function AccessRequestsWorkspace() {
                               { value: "cc", label: "Cc" }
                             ]}
                           />
-                          <Button danger onClick={() => setReviewDraft((current) => ({
-                            ...current,
-                            reviewers: current.reviewers.filter((_, itemIndex) => itemIndex !== index)
-                          }))}>
-                            删除
+                          <Button
+                            danger
+                            aria-label={`移除第 ${index + 1} 位审核人`}
+                            onClick={() => setReviewDraft((current) => ({
+                              ...current,
+                              reviewers: current.reviewers.filter((_, itemIndex) => itemIndex !== index)
+                            }))}
+                          >
+                            移除
                           </Button>
                         </div>
                       ))}
@@ -817,7 +955,7 @@ export function AccessRequestsWorkspace() {
                     <p className="access-admin-muted">品牌邮箱审核人会收到仅限当前申请、7 天有效的安全审核链接，无需管理后台账号。</p>
 
                     <div className="access-admin-section-head">
-                      <strong>Decision Feed</strong>
+                      <strong>审核结果</strong>
                       <span className="access-admin-muted">{reviewModeLabel(selectedRequest.reviewMode)} / {rejectionModeLabel(selectedRequest.rejectionMode)}</span>
                     </div>
                     <div className="access-admin-decision-table">
@@ -840,12 +978,20 @@ export function AccessRequestsWorkspace() {
                     </div>
 
                     <div className="access-admin-action-row">
-                      <Button loading={savingReview} onClick={() => void handleSaveReviewDraft()}>
+                      <Button loading={savingReview} disabled={!reviewDraftDirty} onClick={() => void handleSaveReviewDraft()}>
                         保存审核路由
                       </Button>
-                      <Button type="primary" icon={<Send size={14} />} loading={sendingReview} onClick={() => void handleSendReview()}>
-                        发送审核
-                      </Button>
+                      <Tooltip title={actionAvailability.sendReviewBlockedReason}>
+                        <Button
+                          type="primary"
+                          icon={<Send size={14} aria-hidden="true" />}
+                          loading={sendingReview}
+                          disabled={Boolean(actionAvailability.sendReviewBlockedReason)}
+                          onClick={() => void handleSendReview()}
+                        >
+                          {reviewDraftDirty ? "保存并发送审核" : "发送审核"}
+                        </Button>
+                      </Tooltip>
                     </div>
                   </div>
                 )
@@ -857,7 +1003,7 @@ export function AccessRequestsWorkspace() {
                   <div className="access-admin-tab">
                     <div className="access-admin-form-grid">
                       <label className="access-admin-field">
-                        <span>Target</span>
+                        <span>开通对象</span>
                         <Select
                           value={provisionDraft.targetMode}
                           onChange={(value) => setProvisionDraft((current) => ({ ...current, targetMode: value }))}
@@ -869,7 +1015,7 @@ export function AccessRequestsWorkspace() {
                       </label>
                       {provisionDraft.targetMode === "new_organization" ? (
                         <label className="access-admin-field">
-                          <span>Organization Name</span>
+                          <span>新组织名称</span>
                           <Input
                             value={provisionDraft.organizationName}
                             onChange={(event) => setProvisionDraft((current) => ({ ...current, organizationName: event.target.value }))}
@@ -877,7 +1023,7 @@ export function AccessRequestsWorkspace() {
                         </label>
                       ) : (
                         <label className="access-admin-field">
-                          <span>Organization</span>
+                          <span>已有组织</span>
                           <Select
                             value={provisionDraft.organizationId}
                             onChange={(value) => setProvisionDraft((current) => ({ ...current, organizationId: value }))}
@@ -889,18 +1035,18 @@ export function AccessRequestsWorkspace() {
                         </label>
                       )}
                       <label className="access-admin-field">
-                        <span>Membership</span>
+                        <span>申请人角色</span>
                         <Select
                           value={provisionDraft.membershipType}
                           onChange={(value) => setProvisionDraft((current) => ({ ...current, membershipType: value }))}
                           options={[
-                            { value: "customer_admin", label: "Admin" },
-                            { value: "customer_member", label: "User" }
+                            { value: "customer_admin", label: "组织管理员" },
+                            { value: "customer_member", label: "普通成员" }
                           ]}
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Plan</span>
+                        <span>套餐</span>
                         <Select
                           value={provisionDraft.planId}
                           onChange={(value) => setProvisionDraft((current) => ({ ...current, planId: value }))}
@@ -908,7 +1054,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Starts At</span>
+                        <span>开始时间</span>
                         <input
                           className="access-admin-native-input"
                           type="datetime-local"
@@ -917,7 +1063,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Expires At</span>
+                        <span>到期时间（留空按默认试用天数）</span>
                         <input
                           className="access-admin-native-input"
                           type="datetime-local"
@@ -926,7 +1072,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Cycle Anchor</span>
+                        <span>计费周期起点</span>
                         <input
                           className="access-admin-native-input"
                           type="datetime-local"
@@ -935,7 +1081,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>AI Request Override</span>
+                        <span>AI 请求额度覆盖</span>
                         <InputNumber
                           min={0}
                           value={provisionDraft.completedTurnLimitOverride ?? undefined}
@@ -944,7 +1090,7 @@ export function AccessRequestsWorkspace() {
                         />
                       </label>
                       <label className="access-admin-field">
-                        <span>Token Override</span>
+                        <span>Token 额度覆盖</span>
                         <InputNumber
                           min={0}
                           value={provisionDraft.tokenLimitOverride ?? undefined}
@@ -954,7 +1100,7 @@ export function AccessRequestsWorkspace() {
                       </label>
                     </div>
                     <label className="access-admin-field">
-                      <span>Provision Note</span>
+                      <span>开通备注</span>
                       <textarea
                         className="access-admin-textarea"
                         value={provisionDraft.note ?? ""}
@@ -962,7 +1108,23 @@ export function AccessRequestsWorkspace() {
                       />
                     </label>
                     <div className="access-admin-action-row">
-                      <Button type="primary" loading={provisioning} onClick={() => void handleProvision()}>
+                      <Button
+                        type="primary"
+                        loading={provisioning}
+                        onClick={() => {
+                          if (!actionAvailability.provisionWarning) {
+                            void handleProvision();
+                            return;
+                          }
+                          Modal.confirm({
+                            title: "确认开通？",
+                            content: actionAvailability.provisionWarning,
+                            okText: "开通并发送邀请",
+                            cancelText: "取消",
+                            onOk: () => handleProvision()
+                          });
+                        }}
+                      >
                         开通套餐并发送邀请
                       </Button>
                     </div>
@@ -1003,22 +1165,53 @@ export function AccessRequestsWorkspace() {
 
       <Modal
         open={needsInfoOpen}
-        onCancel={() => setNeedsInfoOpen(false)}
+        onCancel={() => {
+          setNeedsInfoOpen(false);
+          setErrorText("");
+        }}
         onOk={() => void handleNeedsInfoSubmit()}
+        okText="发送补资料通知"
+        cancelText="取消"
+        okButtonProps={{ disabled: !needsInfoMessage.trim() }}
         confirmLoading={postingNeedsInfo}
         title="要求补资料"
       >
-        <Input.TextArea rows={6} value={needsInfoMessage} onChange={(event) => setNeedsInfoMessage(event.target.value)} />
+        {feedbackSurface === "modal" ? errorAlert : null}
+        <label className="access-admin-field">
+          <span>需要申请人补充的内容</span>
+          <Input.TextArea
+            rows={6}
+            value={needsInfoMessage}
+            placeholder="例如：Please upload the invoice for the purchased devices."
+            onChange={(event) => setNeedsInfoMessage(event.target.value)}
+          />
+        </label>
+        <p className="access-admin-muted">
+          这段文字会原样通过邮件发给 {selectedRequest?.applicantEmail ?? "申请人"}，邮件为英文，建议用英文填写。
+        </p>
       </Modal>
 
       <Modal
         open={rejectOpen}
-        onCancel={() => setRejectOpen(false)}
+        onCancel={() => {
+          setRejectOpen(false);
+          setErrorText("");
+        }}
         onOk={() => void handleRejectSubmit()}
+        okText="拒绝并通知申请人"
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: !rejectReason.trim() }}
         confirmLoading={postingReject}
         title="拒绝申请"
       >
-        <Input.TextArea rows={6} value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} />
+        {feedbackSurface === "modal" ? errorAlert : null}
+        <label className="access-admin-field">
+          <span>拒绝原因</span>
+          <Input.TextArea rows={6} value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} />
+        </label>
+        <p className="access-admin-muted">
+          拒绝原因会通过邮件发给 {selectedRequest?.applicantEmail ?? "申请人"}，并显示在申请人状态页上。拒绝后不能再要求补资料。
+        </p>
       </Modal>
     </section>
   );

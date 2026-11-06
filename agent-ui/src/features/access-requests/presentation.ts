@@ -144,3 +144,85 @@ export function reviewerCandidatesForBrand<T extends { publicBrandId?: string }>
 ): T[] {
   return candidates.filter((candidate) => !candidate.publicBrandId || candidate.publicBrandId === publicBrandId);
 }
+
+export const ACCESS_REQUEST_STATUS_FILTERS: Array<{ value: string; label: string }> = [
+  { value: "all", label: "全部状态" },
+  ...[
+    "submitted",
+    "under_review",
+    "needs_info",
+    "review_conflict",
+    "approved_pending_provision",
+    "provisioned",
+    "invited",
+    "activated",
+    "rejected",
+    "closed"
+  ].map((value) => ({ value, label: requestStatusLabel(value) }))
+];
+
+const OPEN_REQUEST_STATUSES = new Set(["submitted", "under_review", "needs_info", "review_conflict", "approved_pending_provision"]);
+const REVIEWABLE_REQUEST_STATUSES = new Set(["submitted", "under_review", "needs_info", "review_conflict"]);
+
+export type AccessRequestActionAvailability = {
+  /** Why "request info" / "reject" are unavailable; empty when they are allowed. */
+  closeBlockedReason: string;
+  /** Why sending review mail is unavailable; empty when it is allowed. */
+  sendReviewBlockedReason: string;
+  /** Shown as a confirmation before provisioning anything that has not been approved yet; empty when approved. */
+  provisionWarning: string;
+};
+
+/** The server accepts these actions in any status, so the console guards against the ones that would surprise the applicant. */
+export function accessRequestActionAvailability(status: string): AccessRequestActionAvailability {
+  const closed = !OPEN_REQUEST_STATUSES.has(status);
+  return {
+    closeBlockedReason: closed ? `申请已${requestStatusLabel(status)}，不能再要求补资料或拒绝` : "",
+    sendReviewBlockedReason: REVIEWABLE_REQUEST_STATUSES.has(status) ? "" : `申请已${requestStatusLabel(status)}，无需再发送审核`,
+    provisionWarning:
+      status === "approved_pending_provision"
+        ? ""
+        : status === "rejected"
+          ? "这条申请已被拒绝。确定仍要开通套餐并给申请人发送邀请吗？"
+          : ["provisioned", "invited", "activated"].includes(status)
+            ? `这条申请已${requestStatusLabel(status)}。再次开通会覆盖目标组织的套餐并重新发送邀请，确定继续吗？`
+            : "这条申请还没有审核通过。确定跳过审核，直接开通套餐并发送邀请吗？"
+  };
+}
+
+/** Returns the first problem with the reviewer rows, or an empty string when they can be saved. */
+export function reviewerRowsProblem(rows: Array<{ reviewerEmail: string; deliveryType: string }>, options: { requireTo: boolean }): string {
+  const seen = new Set<string>();
+  for (const [index, row] of rows.entries()) {
+    const email = row.reviewerEmail.trim().toLowerCase();
+    if (!email) return `第 ${index + 1} 行审核人邮箱为空`;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return `第 ${index + 1} 行不是有效邮箱：${row.reviewerEmail.trim()}`;
+    if (seen.has(email)) return `审核人重复：${email}`;
+    seen.add(email);
+  }
+  if (options.requireTo && !rows.some((row) => row.deliveryType === "to")) return "至少需要一位 To 审核人";
+  return "";
+}
+
+export type AccessRequestHashState = { requestId: string; status: string; query: string };
+
+/** Admin sections live in the hash (`#admin/access-requests?request=…&status=…&q=…`), so view state is kept there too. */
+export function readAccessRequestHashState(hash: string): AccessRequestHashState {
+  const params = new URLSearchParams(hash.split("?")[1] ?? "");
+  const status = params.get("status")?.trim() ?? "";
+  return {
+    requestId: params.get("request")?.trim() ?? "",
+    status: ACCESS_REQUEST_STATUS_FILTERS.some((item) => item.value === status) ? status : "all",
+    query: params.get("q") ?? ""
+  };
+}
+
+export function buildAccessRequestHash(hash: string, state: AccessRequestHashState): string {
+  const base = hash.split("?")[0] || "#admin/access-requests";
+  const params = new URLSearchParams();
+  if (state.requestId) params.set("request", state.requestId);
+  if (state.status && state.status !== "all") params.set("status", state.status);
+  if (state.query.trim()) params.set("q", state.query);
+  const search = params.toString();
+  return search ? `${base}?${search}` : base;
+}

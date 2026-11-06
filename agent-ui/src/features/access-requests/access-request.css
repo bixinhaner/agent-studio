@@ -601,3 +601,30 @@ body.access-request-route #root {
     grid-template-columns: 1fr;
   }
 }
+
+.access-admin-feedback {
+  margin-bottom: 12px;
+}
+
+.access-admin-row {
+  cursor: pointer;
+}
+
+.access-admin-row:focus-visible {
+  outline: 2px solid var(--admin-color-accent, #1677ff);
+  outline-offset: -2px;
+}
+
+.access-admin-row-selected > td {
+  background: var(--admin-color-accent-soft, #e6f4ff) !important;
+}
+
+.access-admin-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.access-admin-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
