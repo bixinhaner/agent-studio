@@ -25,6 +25,7 @@
     "usage:backfill-cumulative": "tsx src/ops/backfill-codex-cumulative-usage.ts",
     "threads:archive-legacy-proactive": "tsx src/ops/archive-legacy-proactive-threads.ts",
     "workspace:migrate": "node dist/ops/migrate-portal-user-workspaces.js",
+    "connector-apps:register": "node dist/ops/register-connector-apps.js",
     "workspace:migrate:dry-run": "tsx src/ops/migrate-portal-user-workspaces.ts --dry-run",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",

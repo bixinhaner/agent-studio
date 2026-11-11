@@ -5,6 +5,7 @@
 **/node_modules/
 **/dist/
 **/dist-cli/
+**/dist-agent-host/
 **/*.tsbuildinfo
 
 # local env

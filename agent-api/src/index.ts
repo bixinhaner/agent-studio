@@ -518,7 +518,7 @@ import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
 import { createLocalBridgeRouter, localBridgeBodyErrorHandler } from "./local-bridge-router.js";
-import { bindConnectorRoot, bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace, pairConnectorDevice } from "./local-bridge-service.js";
+import { bindConnectorRoot, bindLocalRoot, buildLocalRuntime, cancelLocalTask, connectorHostAccess, createHostKey, localBindingForWorkspace, pairConnectorDevice, revokeConnectorDevice, revokeHostKey } from "./local-bridge-service.js";
 import { localWorkspaceSnapshot } from "./local-bridge-audit.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
@@ -5515,7 +5515,10 @@ async function applyActionConnectorLocalComputerRequest(
     context: input.request.context,
     runtime: runtime as ActionConnectorRuntimeOptions
   })).thread;
-  await bindConnectorRoot(db, input.connector.id, thread.id, rootId);
+  await bindConnectorRoot(db, input.connector.id, thread.id, rootId, {
+    value: typeof (requested as Record<string, unknown>).proof === "string" ? String((requested as Record<string, unknown>).proof) : undefined,
+    conversationId: input.request.conversationId ?? context.conversationId
+  });
 }
 
 async function findActionConnectorThread(input: {
@@ -12240,6 +12243,12 @@ registerCommonApiRoutes(app, {
       getStatus: (instanceId) => dingtalkBotStream.getStatuses(instanceId),
       restart: (instanceId) => dingtalkBotStream.restart(instanceId),
       listRecentConversations: (instanceId, take) => conversationRecords.listRecentExternalConversations(instanceId, take)
+    },
+    hostAccess: {
+      list: (instanceId) => connectorHostAccess(db, instanceId),
+      createKey: (instanceId, input) => createHostKey(db, instanceId, input),
+      revokeKey: (instanceId, keyId) => revokeHostKey(db, instanceId, keyId),
+      revokeDevice: (instanceId, deviceId) => revokeConnectorDevice(db, instanceId, deviceId)
     }
   }),
   monitoringAdminRouter: createMonitoringRouter({
@@ -12351,7 +12360,8 @@ registerCommonApiRoutes(app, {
     getConversationMessages: getActionConnectorConversationMessages,
     cancelRun: cancelActionConnectorRun,
     sendArtifact: sendActionConnectorArtifact,
-    pairLocalDevice: (input) => pairConnectorDevice(db, input.connectorId, { name: input.name, platform: input.platform }, input.presentedToken)
+    pairLocalDevice: (input) => pairConnectorDevice(db, input.connectorId, { name: input.name, platform: input.platform }, input.presentedToken),
+    createHostKey: (input) => createHostKey(db, input.connectorId, { label: input.label })
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
     db: db as unknown as IntegrationInstanceRepositoryDb,

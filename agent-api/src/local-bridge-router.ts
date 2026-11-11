@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { authenticateBinding, bindLocalRoot, bindingOut, bridgeHash, bridgeOnline, clientUpdateMessage, clientUpdateRequired, clientVersionOutdated, enqueueLocalCommand, localBridgeBinding, recoverLocalRequest, runLocalTool, waitLocalCommand } from './local-bridge-service.js';
+import { authenticateBinding, bindLocalRoot, enrollHost, unpairServiceDevice, bindingOut, bridgeHash, bridgeOnline, clientUpdateMessage, clientUpdateRequired, clientVersionOutdated, enqueueLocalCommand, localBridgeBinding, recoverLocalRequest, runLocalTool, waitLocalCommand } from './local-bridge-service.js';
 import { localBridgeTools } from './local-bridge-tools.js';
 import { cancelLocalOperations, completeLocalOperation } from './local-bridge-audit.js';
 import { decodeStoredJson, deliveryFailedResult, encodeStoredJson, isDeterministicStorageError, presentLocalResult } from './local-bridge-result.js';
@@ -130,6 +130,23 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
       return { device_id: device.id, token: bearer(req) && device.tokenHash === bridgeHash(bearer(req)) ? bearer(req) : token, connection_id: c.id, return_url: c.returnUrl ? (() => { const url = new URL(c.returnUrl); url.searchParams.set("local_connection", c.id); return url.toString(); })() : undefined };
     });
     res.status(201).json(result);
+  }));
+  // A business system's agent-host exchanges the connector access key its administrator entered
+  // for a service-device token. The key itself is never stored on the host.
+  router.post('/hosts/enroll', wrap(async (req, res) => {
+    const input = z.object({ name: z.string().min(1).max(120), platform: z.string().max(80).optional(), token: z.string().max(200).optional() }).parse(req.body);
+    const key = bearer(req);
+    if (!key) return fail('Missing access key', 401);
+    const enrolled = await enrollHost(db, key, { name: input.name, platform: input.platform ?? 'linux-service' }, input.token);
+    if (!enrolled) return fail('接入密钥无效、已撤销，或对应的连接器未启用。', 401);
+    res.status(201).json(enrolled);
+  }));
+  // The host's administrator disconnected it; the device token stops working immediately.
+  router.post('/agent/unpair', wrap(async (req, res) => {
+    const d = await agent(req);
+    if (!d.integrationInstanceId) return fail('Only service devices can unpair themselves', 400);
+    await unpairServiceDevice(db, d);
+    res.json({ ok: true });
   }));
   router.post('/agent/roots', wrap(async (req, res) => {
     const d = await currentClient(req); const input = z.object({ path: z.string().min(1).max(4096), label: z.string().max(120).optional() }).parse(req.body);

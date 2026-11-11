@@ -358,6 +358,22 @@ model LocalBridgeDevice {
   @@map("local_bridge_devices")
 }
 
+/// Access key an Action Connector administrator hands to a business system so its host can
+/// enroll a service device. Only the hash is stored; a key is shown once when created.
+model LocalBridgeHostKey {
+  id                    String    @id @default(cuid())
+  integrationInstanceId String    @map("integration_instance_id")
+  label                 String
+  keyHash               String    @unique @map("key_hash")
+  keyPrefix             String    @map("key_prefix")
+  createdByUserId       String?   @map("created_by_user_id")
+  lastUsedAt            DateTime? @map("last_used_at")
+  revokedAt             DateTime? @map("revoked_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  @@index([integrationInstanceId])
+  @@map("local_bridge_host_keys")
+}
+
 model LocalBridgeRoot {
   id        String   @id @default(cuid())
   deviceId  String   @map("device_id")

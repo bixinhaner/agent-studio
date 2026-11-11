@@ -81,10 +81,10 @@ test('handbook: one registry yields a verifiable package, chunks, catalog and re
   assert.throws(() => buildHandbook({ operations: [{ ...MANIFEST.operations[0], path: '/api/v1/agent/x' }] }), /outside/);
 });
 
-test('agent host: pairs, registers a session directory, relays a turn and executes tool requests through the application', async () => {
+test('agent host: connects with an access key, registers a session directory, relays a turn and executes tool requests through the application', async () => {
   const dir = path.join(work, 'host'); const sessions = path.join(dir, 'sessions'); await fs.mkdir(path.join(sessions, 's1'), { recursive: true });
   await fs.writeFile(path.join(dir, 'secret'), 'local-secret\n');
-  const seen = { appCalls: [], toolResults: [], chat: null, roots: [], removed: [] };
+  const seen = { appCalls: [], toolResults: [], chat: null, roots: [], removed: [], enroll: [], unpaired: 0 };
   const appUrl = await listen((req, res, body) => {
     if (req.headers.authorization !== 'Bearer local-secret') return json(res, 401, {});
     if (req.url === '/api/ai/capabilities') return json(res, 200, MANIFEST);
@@ -95,7 +95,8 @@ test('agent host: pairs, registers a session directory, relays a turn and execut
   let resultsDone;
   const allResults = new Promise(resolve => { resultsDone = resolve; });
   const studioUrl = await listen(async (req, res, body) => {
-    if (req.url === '/api/integrations/action-connectors/c1/local-bridge/devices') return req.headers.authorization === 'Bearer service-token' ? json(res, 201, { device_id: 'dev1', token: 'asb_device' }) : json(res, 401, {});
+    if (req.url === '/api/local-bridge/hosts/enroll') { seen.enroll.push(body); return req.headers.authorization === 'Bearer bly_key' ? json(res, 201, { connector: { id: 'c1', name: 'Demo connector' }, device_id: 'dev1', token: 'asb_device', created: !body.token }) : json(res, 401, { detail: '接入密钥无效或已撤销' }); }
+    if (req.url === '/api/local-bridge/agent/unpair') { if (req.headers.authorization === 'Bearer asb_device') seen.unpaired += 1; return json(res, 200, { ok: true }); }
     if (req.url.startsWith('/api/local-bridge/agent/') && req.headers.authorization !== 'Bearer asb_device') return json(res, 401, {});
     if (req.url === '/api/local-bridge/agent/roots') { seen.roots.push(body); return json(res, 201, { root: { id: 'root1', path: body.path, label: body.label } }); }
     if (req.method === 'DELETE' && req.url === '/api/local-bridge/agent/roots/root1') { seen.removed.push('root1'); res.writeHead(204); return res.end(); }
@@ -116,14 +117,24 @@ test('agent host: pairs, registers a session directory, relays a turn and execut
     }
     json(res, 404, {});
   });
-  const config = { instanceId: 'inst', instanceName: 'Demo', sourceSystem: 'demo', studio: { baseUrl: studioUrl, connectorId: 'c1' }, listen: { host: '127.0.0.1', port: 0 }, secretFile: path.join(dir, 'secret'), stateDir: path.join(dir, 'state'), sessionsRoot: sessions, app: { baseUrl: appUrl, capabilitiesPath: '/api/ai/capabilities', operationsPath: '/api/ai/operations', timeoutMs: 5000 }, sandbox: { mode: 'none' } };
+  const config = { instanceId: 'inst', instanceName: 'Demo', sourceSystem: 'demo', listen: { host: '127.0.0.1', port: 0 }, secretFile: path.join(dir, 'secret'), stateDir: path.join(dir, 'state'), sessionsRoot: sessions, app: { baseUrl: appUrl, capabilitiesPath: '/api/ai/capabilities', operationsPath: '/api/ai/operations', timeoutMs: 5000 }, sandbox: { mode: 'none' } };
   const logs = [];
   const host = await createHost(config, { log: line => logs.push(line) });
-  await assert.rejects(host.pair('wrong'), /pairing failed/);
-  assert.equal(await host.pair('service-token'), 'dev1');
   await host.start(); after(() => host.stop());
   const base = `http://127.0.0.1:${host.port()}`; const auth = { authorization: 'Bearer local-secret', 'content-type': 'application/json' };
   assert.equal((await fetch(base + '/health')).status, 401);
+  // Not connected yet: the application's administrator enters Bailey's address and a key.
+  assert.equal((await (await fetch(base + '/health', { headers: auth })).json()).bailey, null);
+  assert.equal((await fetch(base + '/chat', { method: 'POST', headers: auth, body: JSON.stringify({ message: 'x', user: { id: 'u1' } }) })).status, 409);
+  const connect = body => fetch(base + '/connection', { method: 'PUT', headers: auth, body: JSON.stringify(body) });
+  assert.equal((await connect({ baseUrl: 'http://bailey.example.com', accessKey: 'bly_key' })).status, 400);
+  const refused = await connect({ baseUrl: studioUrl, accessKey: 'bly_wrong' });
+  assert.equal(refused.status, 401); assert.match((await refused.json()).detail, /接入密钥无效/);
+  const linked = await (await connect({ baseUrl: studioUrl + '/some/path', accessKey: 'bly_key' })).json();
+  assert.deepEqual(linked.bailey, { baseUrl: studioUrl, connectorId: 'c1', connectorName: 'Demo connector' });
+  assert.equal(linked.device, 'dev1');
+  const saved = await fs.readFile(path.join(dir, 'state', 'device.json'), 'utf8');
+  assert.ok(!saved.includes('bly_key'), 'the access key is not kept');
   await assert.rejects(host.openSession({ path: dir }), /inside sessionsRoot/);
   const opened = await (await fetch(base + '/sessions', { method: 'POST', headers: auth, body: JSON.stringify({ path: path.join(sessions, 's1'), label: 'batch 1' }) })).json();
   assert.equal(opened.rootId, 'root1');
@@ -133,7 +144,8 @@ test('agent host: pairs, registers a session directory, relays a turn and execut
   assert.equal(events.find(e => e.type === 'delta').text, '结论');
   assert.deepEqual(events.filter(e => e.type === 'host_tool' && e.state !== 'running').map(e => [e.toolCallId, e.state]).sort(), [['t1', 'done'], ['t2', 'failed'], ['t3', 'failed']]);
   assert.equal(seen.chat.body.conversationId, 'inst:u1:conv1');
-  assert.deepEqual(seen.chat.body.context.localComputer, { rootId: 'root1' });
+  const sha = value => require('node:crypto').createHash('sha256').update(value).digest('hex');
+  assert.deepEqual(seen.chat.body.context.localComputer, { rootId: 'root1', proof: sha(`connector-root-v1:${sha('asb_device')}:root1:inst:u1:conv1`) });
   assert.equal(seen.chat.body.context.scenario, 'overview');
   assert.equal(seen.chat.body.context.externalIdentity.externalUserId, 'inst:u1');
   assert.match(seen.chat.body.context.externalIdentity.metadata.apiHandbook.handbookDigest, /^sha256:[a-f0-9]{64}$/);
@@ -150,4 +162,10 @@ test('agent host: pairs, registers a session directory, relays a turn and execut
   assert.equal((await fetch(base + '/sessions/root1', { method: 'DELETE', headers: auth })).status, 200);
   assert.deepEqual(seen.removed, ['root1']);
   assert.equal((await (await fetch(base + '/health', { headers: auth })).json()).sessions, 0);
+  // Reconnecting presents the current device token so Bailey keeps the same device.
+  await connect({ baseUrl: studioUrl, accessKey: 'bly_key' });
+  assert.equal(seen.enroll.at(-1).token, 'asb_device');
+  const left = await (await fetch(base + '/connection', { method: 'DELETE', headers: auth })).json();
+  assert.equal(left.bailey, null); assert.equal(seen.unpaired, 1);
+  assert.ok(!(await fs.readFile(path.join(dir, 'state', 'device.json'), 'utf8')).includes('asb_device'));
 });

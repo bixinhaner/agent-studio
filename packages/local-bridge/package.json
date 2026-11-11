@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test tests/*.test.cjs",
-    "build:cli": "node scripts/build-cli.mjs"
+    "build:cli": "node scripts/build-cli.mjs",
+    "build:agent-host": "node scripts/build-agent-host.mjs"
   },
   "dependencies": {
     "@types/node": "^22.0.0",

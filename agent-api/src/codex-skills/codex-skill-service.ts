@@ -376,7 +376,7 @@ function managedSkillBindingMatches(binding: {
   return payload.managedSkillId === managedSkill.id || payload.skillName === managedSkill.skillName;
 }
 
-async function hashSkillDirectory(rootPath: string): Promise<string> {
+export async function hashSkillDirectory(rootPath: string): Promise<string> {
   const normalizedRoot = path.resolve(rootPath);
   const hash = createHash("sha1");
 

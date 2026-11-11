@@ -1782,6 +1782,15 @@ try {
 EOF"
 }
 
+# Keeps the Skills and Agent Modes of agent-api/connector-apps/ in step with this release.
+# Connectors themselves are created only on request (npm run connector-apps:register).
+sync_connector_apps() {
+  log_step "Syncing connector apps"
+  if ! run_as_app_user_shell "cd '$APP_API_DIR' && NODE_ENV=production npm run --silent connector-apps:register -- --all"; then
+    log_warn "Connector app sync failed; the release is active, rerun: npm run connector-apps:register -- --all"
+  fi
+}
+
 build_frontend() {
   log_step "Installing frontend dependencies"
   run_as_app_user_shell "cd '$APP_UI_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
@@ -1981,6 +1990,7 @@ main() {
   fi
   if deploy_restarts_admin; then
     seed_rbac
+    sync_connector_apps
   fi
   if deploy_builds_frontend; then
     build_frontend

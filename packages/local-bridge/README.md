@@ -28,4 +28,6 @@ Cloud Agent 通过任务绑定的 MCP 工具访问桌面执行端。桌面端主
 
 ## 服务设备（业务系统主机）
 
-除了用户的电脑，执行端还可以归属于一个 Action Connector，无人值守地运行在业务系统旁边：用连接器服务凭证配对（`POST /api/integrations/action-connectors/:connectorId/local-bridge/devices`），连接器会话通过 `context.localComputer.rootId` 绑定它登记的目录，智能体得到同一套 `local_computer` 工具。执行器的 `policy`（`authorize`、`wrapExec`）把它收窄为只读会话目录 + bubblewrap 沙箱。完整说明见 `service/README-agent-host.md`。
+除了用户的电脑，执行端还可以归属于一个 Action Connector，无人值守地运行在业务系统旁边（agent-host）。Bailey 管理员在连接器「主机接入」中生成接入密钥（`bly_…`），业务系统管理员在业务系统里填写 Bailey 地址和密钥，agent-host 用它注册（`POST /api/local-bridge/hosts/enroll`）并换得设备令牌，密钥本身不保存。连接器会话通过 `context.localComputer.{rootId, proof}` 绑定它登记的目录（`proof` 证明请求来自持有该设备令牌的主机），智能体得到同一套 `local_computer` 工具。执行器的 `policy`（`authorize`、`wrapExec`）把它收窄为只读会话目录 + bubblewrap 沙箱。
+
+构建 `npm run build:agent-host`，把 `dist-agent-host/` 中的安装包、`agent-host-install.sh` 与 `agent-host-SHA256SUMS` 发布到同一下载目录。完整说明见 `service/README-agent-host.md`，接入新业务系统见 `docs/connector-app-onboarding.md`。

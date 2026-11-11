@@ -35,7 +35,9 @@ export function buildActionConnectorRuntimePrompt(input: ActionConnectorRuntimeP
   const approvedAction = input.request.approvedAction
     ? JSON.stringify(input.request.approvedAction, null, 2)
     : "";
-  const context = JSON.stringify(input.request.context ?? {}, null, 2);
+  // The host's folder proof is transport, not something the agent should see or repeat.
+  const { localComputer: _localComputer, ...visibleContext } = (input.request.context ?? {}) as Record<string, unknown>;
+  const context = JSON.stringify(visibleContext, null, 2);
   const policy = JSON.stringify(input.config.policy, null, 2);
   const approvedActionBlock = approvedAction ? `用户已批准的动作：\n${approvedAction}` : "";
   const template = trimOrUndefined(input.config.runtimePrompt) ?? DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT;

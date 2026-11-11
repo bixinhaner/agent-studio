@@ -36,6 +36,13 @@ type IntegrationCenterRouterOptions = {
     restart(instanceId?: string): Promise<unknown>;
     listRecentConversations(instanceId: string, take?: number): Promise<unknown>;
   };
+  /** Action Connector host access: keys a business system enters, and the hosts that used them. */
+  hostAccess?: {
+    list(instanceId: string): Promise<unknown>;
+    createKey(instanceId: string, input: { label: string; userId?: string | null }): Promise<unknown>;
+    revokeKey(instanceId: string, keyId: string): Promise<boolean>;
+    revokeDevice(instanceId: string, deviceId: string): Promise<boolean>;
+  };
 };
 
 export function createIntegrationCenterRouter(options: IntegrationCenterRouterOptions): Router {
@@ -107,6 +114,35 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
+  });
+
+  async function actionConnectorFor(req: Request) {
+    const detail = (await options.service.getInstanceDetail({ currentUserId: req.currentUser!.id, instanceId: req.params.instanceId })) as { instance?: { type?: string } };
+    if (detail.instance?.type !== "action_connector") throw new Error("Integration instance not found");
+    if (!options.hostAccess) throw new Error("Host access is unavailable");
+    return options.hostAccess;
+  }
+  const hostAccessError = (res: Response, error: unknown) =>
+    res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+
+  router.get("/integrations/:instanceId/host-access", requireRead, async (req: Request, res: Response) => {
+    try { res.json(await (await actionConnectorFor(req)).list(req.params.instanceId)); }
+    catch (error) { hostAccessError(res, error); }
+  });
+  router.post("/integrations/:instanceId/host-access/keys", requireWrite, async (req: Request, res: Response) => {
+    try {
+      const label = typeof req.body?.label === "string" ? req.body.label.trim().slice(0, 120) : "";
+      if (!label) throw new Error("请填写用途，例如部署这台主机的业务系统名称");
+      res.status(201).json(await (await actionConnectorFor(req)).createKey(req.params.instanceId, { label, userId: req.currentUser!.id }));
+    } catch (error) { hostAccessError(res, error); }
+  });
+  router.delete("/integrations/:instanceId/host-access/keys/:keyId", requireWrite, async (req: Request, res: Response) => {
+    try { res.json({ revoked: await (await actionConnectorFor(req)).revokeKey(req.params.instanceId, req.params.keyId) }); }
+    catch (error) { hostAccessError(res, error); }
+  });
+  router.delete("/integrations/:instanceId/host-access/devices/:deviceId", requireWrite, async (req: Request, res: Response) => {
+    try { res.json({ revoked: await (await actionConnectorFor(req)).revokeDevice(req.params.instanceId, req.params.deviceId) }); }
+    catch (error) { hostAccessError(res, error); }
   });
 
   router.post("/integrations/:instanceId/zendesk/run", requireWrite, async (req: Request, res: Response) => {

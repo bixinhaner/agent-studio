@@ -141,6 +141,8 @@ export function createActionConnectorProvisionRouter(options: {
     platform?: string;
     presentedToken?: string;
   }) => Promise<{ device_id: string; token: string; created: boolean }>;
+  /** Issues an access key a business system's administrator enters to connect its host. */
+  createHostKey?: (input: { connectorId: string; label: string }) => Promise<{ id: string; key: string; prefix: string }>;
 }) {
   const router = express.Router();
   const repository = new IntegrationInstanceRepository(options.db);
@@ -258,6 +260,22 @@ export function createActionConnectorProvisionRouter(options: {
         presentedToken: typeof body.token === "string" && body.token.trim() ? body.token.trim() : undefined
       });
       res.status(result.created ? 201 : 200).json({ device_id: result.device_id, token: result.token });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/:connectorId/host-keys", async (req: Request, res: Response) => {
+    try {
+      if (!options.createHostKey) throw new Error("Host access keys are unavailable");
+      const connector = await repository.getInstance(req.params.connectorId);
+      if (!connector || connector.type !== "action_connector") {
+        res.status(404).json({ detail: "Action connector not found" });
+        return;
+      }
+      const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+      const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : "host";
+      res.status(201).json(await options.createHostKey({ connectorId: connector.id, label }));
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }

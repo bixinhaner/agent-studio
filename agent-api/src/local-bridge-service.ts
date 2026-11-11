@@ -65,13 +65,77 @@ export async function pairConnectorDevice(db: any, connectorId: string, input: {
   const device = await db.localBridgeDevice.create({ data: { integrationInstanceId: connectorId, name: input.name, platform: input.platform ?? null, status: 'active', tokenHash: bridgeHash(token), lastSeenAt: new Date() } });
   return { device_id: device.id, token, created: true };
 }
+// ---- Host access keys ---------------------------------------------------------------------------
+// An Action Connector administrator creates an access key in Bailey and pastes it, with Bailey's
+// address, into the business system. The system's agent-host exchanges it once for a service-device
+// token; the key never reaches the agent and can be revoked at any time.
+export const HOST_KEY_PREFIX = 'bly_';
+export function hostKeyOut(row: any) {
+  return { id: row.id, label: row.label, prefix: row.keyPrefix, created_at: row.createdAt, last_used_at: row.lastUsedAt ?? null, revoked_at: row.revokedAt ?? null };
+}
+export async function createHostKey(db: any, connectorId: string, input: { label: string; userId?: string | null }) {
+  const key = `${HOST_KEY_PREFIX}${randomBytes(32).toString('base64url')}`;
+  const row = await db.localBridgeHostKey.create({ data: { integrationInstanceId: connectorId, label: input.label.trim().slice(0, 120) || 'host', keyHash: bridgeHash(key), keyPrefix: key.slice(0, 10), createdByUserId: input.userId ?? null } });
+  return { ...hostKeyOut(row), key };
+}
+export async function revokeHostKey(db: any, connectorId: string, keyId: string) {
+  const { count } = await db.localBridgeHostKey.updateMany({ where: { id: keyId, integrationInstanceId: connectorId, revokedAt: null }, data: { revokedAt: new Date() } });
+  return count > 0;
+}
+/** Disconnects a host: its token stops working and its folders can no longer be bound. */
+export async function revokeConnectorDevice(db: any, connectorId: string, deviceId: string) {
+  const device = await db.localBridgeDevice.findFirst({ where: { id: deviceId, integrationInstanceId: connectorId, status: 'active' } });
+  if (!device) return false;
+  await db.localBridgeDevice.update({ where: { id: device.id }, data: { status: 'revoked', tokenHash: null } });
+  await db.localBridgeBinding.deleteMany({ where: { root: { deviceId: device.id } } });
+  return true;
+}
+export async function connectorHostAccess(db: any, connectorId: string) {
+  const [keys, devices] = await Promise.all([
+    db.localBridgeHostKey.findMany({ where: { integrationInstanceId: connectorId }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    db.localBridgeDevice.findMany({ where: { integrationInstanceId: connectorId, status: 'active' }, orderBy: { createdAt: 'desc' }, take: 100 })
+  ]);
+  return {
+    keys: keys.map(hostKeyOut),
+    devices: devices.map((d: any) => ({ id: d.id, name: d.name, platform: d.platform, client_version: d.clientVersion ?? null, last_seen_at: d.lastSeenAt ?? null, created_at: d.createdAt, online: Boolean(bridgeOnline(d)) }))
+  };
+}
+/** Exchanges an access key for a service device of the key's connector; null when the key is not valid. */
+export async function enrollHost(db: any, key: string, input: { name: string; platform?: string | null }, presentedToken?: string) {
+  if (!key.startsWith(HOST_KEY_PREFIX)) return null;
+  const row = await db.localBridgeHostKey.findUnique({ where: { keyHash: bridgeHash(key) } });
+  if (!row || row.revokedAt) return null;
+  const connector = await db.integrationInstance.findUnique({ where: { id: row.integrationInstanceId } });
+  if (!connector || connector.type !== 'action_connector' || connector.status !== 'active') return null;
+  await db.localBridgeHostKey.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } });
+  const device = await pairConnectorDevice(db, connector.id, input, presentedToken);
+  return { connector: { id: connector.id, name: connector.name }, ...device };
+}
+/** Retires the calling service device itself (the host was disconnected by its administrator). */
+export async function unpairServiceDevice(db: any, device: any) {
+  if (!device?.integrationInstanceId) return false;
+  return revokeConnectorDevice(db, device.integrationInstanceId, device.id);
+}
+/**
+ * A connector conversation may bind a folder only when the request proves it comes from the host
+ * that registered the folder: proof = sha256("connector-root-v1:" + sha256(device token) + ":" +
+ * rootId + ":" + conversationId). Knowing a connector id and a folder id is not enough.
+ */
+export function connectorRootProof(tokenHash: string, rootId: string, conversationId: string) {
+  return bridgeHash(`connector-root-v1:${tokenHash}:${rootId}:${conversationId}`);
+}
 /** Binds (or with null, unbinds) a connector conversation to a folder on that connector's service device. */
-export async function bindConnectorRoot(db: any, connectorId: string, threadId: string, rootId: string | null) {
+export async function bindConnectorRoot(db: any, connectorId: string, threadId: string, rootId: string | null, proof?: { value?: string; conversationId: string }) {
   const thread = await db.thread.findUnique({ where: { id: threadId } });
   if (!thread || thread.userId || thread.channel === 'portal' || connectorOfThread(thread) !== connectorId) throw new Error('Conversation does not belong to this connector');
   if (rootId) {
-    const root = await db.localBridgeRoot.findFirst({ where: { id: rootId, device: { integrationInstanceId: connectorId, status: 'active' } } });
+    const root = await db.localBridgeRoot.findFirst({ where: { id: rootId, device: { integrationInstanceId: connectorId, status: 'active' } }, include: { device: true } });
     if (!root) throw new Error('LOCAL_ROOT_NOT_FOUND: the folder is not registered by an active service device of this connector');
+    if (proof) {
+      const expected = Buffer.from(connectorRootProof(root.device.tokenHash || '', rootId, proof.conversationId));
+      const provided = Buffer.from(String(proof.value || ''));
+      if (!root.device.tokenHash || expected.length !== provided.length || !timingSafeEqual(expected, provided)) throw new Error('LOCAL_ROOT_PROOF_INVALID: the folder can only be attached by the host that registered it');
+    }
   }
   const old = await localBridgeBinding(db, threadId);
   if (rootId && old?.rootId === rootId) return old;

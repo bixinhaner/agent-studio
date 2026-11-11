@@ -1,0 +1,26 @@
+# One agent-host per business system instance: bailey-agent-host@<name>.service.
+# The installer adds a drop-in (bailey-agent-host@<name>.service.d/10-instance.conf) with the
+# service user and the directories it may write; the configuration is /etc/bailey-agent-host/<name>.json.
+[Unit]
+Description=Bailey agent host (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/bailey-agent-host/%i
+Environment=HOME=/var/lib/bailey-agent-host/%i
+ExecStart=/opt/bailey-agent-host/current/bin/node /opt/bailey-agent-host/current/service/agent-host.cjs run --config /etc/bailey-agent-host/%i.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bailey-agent-host/%i
+MemoryMax=8G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

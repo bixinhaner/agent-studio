@@ -4,7 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { createLocalBridgeRouter } from './local-bridge-router.js';
-import { bindConnectorRoot, bindLocalRoot, bindingToken, buildLocalRuntime, authenticateBinding, localBridgeBinding, pairConnectorDevice } from './local-bridge-service.js';
+import { bindConnectorRoot, bindLocalRoot, bindingToken, bridgeHash, buildLocalRuntime, authenticateBinding, connectorHostAccess, connectorRootProof, createHostKey, enrollHost, localBridgeBinding, pairConnectorDevice, revokeHostKey } from './local-bridge-service.js';
 
 const testUrl = process.env.LOCAL_BRIDGE_TEST_DATABASE_URL;
 const version = { 'x-local-bridge-version': '0.3.0' };
@@ -94,5 +94,62 @@ describe.skipIf(!testUrl)('Local Bridge service devices owned by an Action Conne
     expect(await db.localBridgeRoot.findUnique({ where: { id: userRootId } })).not.toBeNull();
     await request(server).delete('/api/local-bridge/agent/roots/' + rootId).set(version).auth(token, { type: 'bearer' }).expect(204);
     expect(await localBridgeBinding(db, connectorThread)).toBeNull();
+  });
+});
+
+describe.skipIf(!testUrl)('Connector host access keys (isolated PostgreSQL)', () => {
+  const db = new PrismaClient({ datasources: { db: { url: testUrl || 'postgresql://localhost/unused' } } });
+  const tag = randomUUID();
+  const server = express(); server.use(express.json());
+  server.use('/api/local-bridge', createLocalBridgeRouter(db));
+  let connectorId: string; let disabledId: string;
+  const thread = randomUUID();
+
+  beforeAll(async () => {
+    connectorId = (await db.integrationInstance.create({ data: { type: 'action_connector', slug: `hosts-${tag}`, name: 'Hosts', status: 'active' } })).id;
+    disabledId = (await db.integrationInstance.create({ data: { type: 'action_connector', slug: `hosts-off-${tag}`, name: 'Off', status: 'disabled' } })).id;
+    await db.thread.create({ data: { id: thread, workspace: `/cloud/hosts/${tag}`, codexRunConfig: { actionConnector: { integrationInstanceId: connectorId } } } });
+  });
+  afterAll(async () => {
+    await db.localBridgeBindingEvent.deleteMany({ where: { threadId: thread } });
+    await db.thread.deleteMany({ where: { id: thread } });
+    await db.localBridgeDevice.deleteMany({ where: { integrationInstanceId: { in: [connectorId, disabledId] } } });
+    await db.localBridgeHostKey.deleteMany({ where: { integrationInstanceId: { in: [connectorId, disabledId] } } });
+    await db.integrationInstance.deleteMany({ where: { id: { in: [connectorId, disabledId] } } });
+    await db.$disconnect();
+  });
+
+  it('enrolls a host with an access key, attaches folders only with the host proof, and stops working once revoked', async () => {
+    const issued = await createHostKey(db, connectorId, { label: 'netopt test' });
+    expect(issued.key.startsWith('bly_')).toBe(true);
+    expect(JSON.stringify(await connectorHostAccess(db, connectorId))).not.toContain(issued.key);
+
+    await request(server).post('/api/local-bridge/hosts/enroll').auth('bly_wrong', { type: 'bearer' }).send({ name: 'host' }).expect(401);
+    const enrolled = await request(server).post('/api/local-bridge/hosts/enroll').auth(issued.key, { type: 'bearer' }).send({ name: 'host', platform: 'linux-service' }).expect(201);
+    expect(enrolled.body.connector).toEqual({ id: connectorId, name: 'Hosts' });
+    const token = enrolled.body.token as string;
+    const again = await request(server).post('/api/local-bridge/hosts/enroll').auth(issued.key, { type: 'bearer' }).send({ name: 'host', token }).expect(201);
+    expect(again.body.device_id).toBe(enrolled.body.device_id);
+
+    const root = await request(server).post('/api/local-bridge/agent/roots').set(version).auth(token, { type: 'bearer' }).send({ path: '/srv/s/1' }).expect(201);
+    const rootId = root.body.root.id as string;
+    const conversationId = 'netopt:u1:c1';
+    await expect(bindConnectorRoot(db, connectorId, thread, rootId, { value: 'forged', conversationId })).rejects.toThrow(/LOCAL_ROOT_PROOF_INVALID/);
+    const proof = connectorRootProof(bridgeHash(token), rootId, conversationId);
+    await expect(bindConnectorRoot(db, connectorId, thread, rootId, { value: proof, conversationId: 'netopt:u1:other' })).rejects.toThrow(/LOCAL_ROOT_PROOF_INVALID/);
+    expect((await bindConnectorRoot(db, connectorId, thread, rootId, { value: proof, conversationId }))?.rootId).toBe(rootId);
+
+    expect(await revokeHostKey(db, connectorId, issued.id)).toBe(true);
+    await request(server).post('/api/local-bridge/hosts/enroll').auth(issued.key, { type: 'bearer' }).send({ name: 'host' }).expect(401);
+    // Revoking the key does not disconnect an enrolled host; unpairing does.
+    await request(server).post('/api/local-bridge/agent/heartbeat').set(version).auth(token, { type: 'bearer' }).expect(200);
+    await request(server).post('/api/local-bridge/agent/unpair').set(version).auth(token, { type: 'bearer' }).expect(200);
+    await request(server).post('/api/local-bridge/agent/heartbeat').set(version).auth(token, { type: 'bearer' }).expect(401);
+    expect(await localBridgeBinding(db, thread)).toBeNull();
+  });
+
+  it('refuses keys of a disabled connector', async () => {
+    const issued = await createHostKey(db, disabledId, { label: 'off' });
+    expect(await enrollHost(db, issued.key, { name: 'host' })).toBeNull();
   });
 });

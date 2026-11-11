@@ -1,0 +1,39 @@
+{
+  "slug": "netopt-operations",
+  "skill": {
+    "name": "netopt-operations",
+    "displayName": "Network Optimization",
+    "description": "在网规网优助手主机上分析源文件与应用结果，并记录整改跟进",
+    "version": "1.0.0",
+    "activationPrompt": "Apply the enabled netopt-operations Skill on every turn. The project's uploaded source files live in a session directory on the application's host: reach them only with the local_computer tools, compute next to the data with scripts in work/, and bring back summaries. Use the Action Connector CLI for the application's own results and for every change to application state; load its API handbook with the Skill loader before the first business operation and reuse it while the digest is unchanged. Never guess an operation or invent a figure; state which source each number came from. Documented writes need the user's confirmation in the application."
+  },
+  "package": {
+    "name": "Network Optimization",
+    "description": "网规网优项目源文件分析与应用结果解读",
+    "capabilityKey": "netopt.operations",
+    "capabilityDescription": "网规网优项目的体检解读、根因分析、数据核对与整改跟进"
+  },
+  "mode": {
+    "name": "Network Optimization",
+    "description": "Action Connector runtime for a connected Network Planning & Optimization Assistant.",
+    "runProfileId": "profile_external_operations_fast"
+  },
+  "connector": {
+    "slug": "netopt-operations",
+    "name": "网规网优助手",
+    "description": "网规网优助手的 AI 分析：在应用主机上读取源文件，并通过应用接口读取结果、记录整改跟进",
+    "config": {
+      "displayName": "网规网优助手",
+      "apiProfile": { "sourceName": "网规网优助手", "skillName": "netopt-operations" },
+      "policy": {
+        "allowReadActions": true,
+        "allowLowRiskActions": true,
+        "allowHighRiskActions": false,
+        "allowedMethods": ["GET", "POST"],
+        "blockedPathPrefixes": [],
+        "toolTimeoutSeconds": 120,
+        "maxResponseBytes": 4194304
+      }
+    }
+  }
+}
