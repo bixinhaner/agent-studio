@@ -25,3 +25,7 @@ Cloud Agent 通过任务绑定的 MCP 工具访问桌面执行端。桌面端主
 可用 `--code` 重新配对、`--server` 指定 HTTPS 站点。凭证保存在当前用户的 XDG state 目录（目录 0700、文件 0600）；运行包在 XDG data 目录，启动器在 `~/.local/bin/bailey-connect`。原有桌面客户端无需更改。
 
 构建 `npm run build:cli`：校验固定 Node.js 官方归档摘要，打包 x64/ARM64 执行器与启动器。发布 `dist-cli/` 中的两个 tar.gz、`connect.sh` 与 `cli-SHA256SUMS` 到独立下载目录。安装脚本对下载包做 SHA256 校验并保留原工作目录。
+
+## 服务设备（业务系统主机）
+
+除了用户的电脑，执行端还可以归属于一个 Action Connector，无人值守地运行在业务系统旁边：用连接器服务凭证配对（`POST /api/integrations/action-connectors/:connectorId/local-bridge/devices`），连接器会话通过 `context.localComputer.rootId` 绑定它登记的目录，智能体得到同一套 `local_computer` 工具。执行器的 `policy`（`authorize`、`wrapExec`）把它收窄为只读会话目录 + bubblewrap 沙箱。完整说明见 `service/README-agent-host.md`。

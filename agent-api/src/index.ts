@@ -518,7 +518,7 @@ import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import { createPortalWorkspaceRouter } from "./workspaces/router.js";
 import { createLocalBridgeRouter, localBridgeBodyErrorHandler } from "./local-bridge-router.js";
-import { bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace } from "./local-bridge-service.js";
+import { bindConnectorRoot, bindLocalRoot, buildLocalRuntime, cancelLocalTask, localBindingForWorkspace, pairConnectorDevice } from "./local-bridge-service.js";
 import { localWorkspaceSnapshot } from "./local-bridge-audit.js";
 import { PortalWorkspaceService } from "./workspaces/service.js";
 import { LocalFsWorkspaceStorage } from "./workspaces/storage.js";
@@ -3744,6 +3744,8 @@ async function buildDwsRuntimeConfigForUser(
 
 async function resolveRuntimeLaunchConfig(input: {
   userId?: string;
+  /** Action Connector conversations have no Portal user; their local tools come from the connector's service device. */
+  connectorId?: string;
   workspace?: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<RuntimeLaunchConfig> {
@@ -3751,7 +3753,7 @@ async function resolveRuntimeLaunchConfig(input: {
     input.userId ? buildCrestMcpRuntimeConfigForUser(input.userId, input.workspace) : undefined,
     input.userId ? buildDwsRuntimeConfigForUser(input.userId, input.workspace) : undefined,
     codexProviders.getPublishedSystemSettings(),
-    buildLocalRuntime(db, agentStudioInternalBaseUrl(), input.userId, input.workspace)
+    buildLocalRuntime(db, agentStudioInternalBaseUrl(), input.userId, input.workspace, input.connectorId)
   ]);
   const pythonRuntimeSettings =
     publishedSystemSettings?.payload.pythonRuntime ?? createDefaultSystemSettingsPayload().pythonRuntime;
@@ -5447,7 +5449,16 @@ async function resolveActionConnectorRuntimeOptions(
     codexHome: materializedCodexHome.codexHome,
     codexRunConfig: materializedCodexHome.codexRunConfig
   });
+  await applyActionConnectorLocalComputerRequest(input, context, {
+    agentModeId,
+    model: selectedModel,
+    reasoningEffort: selectedReasoningEffort,
+    workspace,
+    codexRunConfig: materializedCodexHome.codexRunConfig ?? {},
+    codexHome: materializedCodexHome.codexHome
+  });
   const runtimeLaunch = await resolveRuntimeLaunchConfig({
+    connectorId: input.connector.id,
     workspace,
     codexRunConfig: materializedCodexHome.codexRunConfig
   });
@@ -5468,6 +5479,61 @@ async function resolveActionConnectorRuntimeOptions(
     },
     ...files
   };
+}
+
+/**
+ * The host may ask, per turn, for the conversation to work in a folder on the connector's service
+ * device: `context.localComputer = { rootId }` binds it, `{ rootId: null }` releases it, and
+ * leaving the field out keeps whatever the conversation already has. The binding decides which
+ * MCP tools the runtime starts with, so it is applied before the launch config is resolved, which
+ * on a first turn means the conversation record has to exist already.
+ */
+async function applyActionConnectorLocalComputerRequest(
+  input: ActionConnectorCodexRunnerInput,
+  context: { conversationId: string; identity: ConnectorIdentity },
+  runtime: Pick<ActionConnectorRuntimeOptions, "agentModeId" | "model" | "reasoningEffort" | "workspace" | "codexRunConfig" | "codexHome">
+): Promise<void> {
+  const requested = input.request.context?.localComputer;
+  if (!requested || typeof requested !== "object" || Array.isArray(requested)) return;
+  const raw = (requested as Record<string, unknown>).rootId;
+  if (raw !== null && (typeof raw !== "string" || !raw.trim())) {
+    throw new Error("context.localComputer.rootId must be a registered folder id or null");
+  }
+  const rootId = raw === null ? null : (raw as string).trim();
+  const existing = await findActionConnectorThread({
+    connector: input.connector,
+    identity: context.identity,
+    conversationId: context.conversationId
+  });
+  if (!existing && rootId === null) return;
+  const thread = existing ?? (await ensureActionConnectorThread({
+    connector: input.connector,
+    config: input.config,
+    identity: context.identity,
+    conversationId: context.conversationId,
+    message: input.request.message,
+    context: input.request.context,
+    runtime: runtime as ActionConnectorRuntimeOptions
+  })).thread;
+  await bindConnectorRoot(db, input.connector.id, thread.id, rootId);
+}
+
+async function findActionConnectorThread(input: {
+  connector: ActionConnectorCodexRunnerInput["connector"];
+  identity: ActionConnectorPreparedTurn["identity"];
+  conversationId: string;
+}): Promise<ThreadRecord | undefined> {
+  const organizationId = trimOrUndefined(input.connector.organizationId ?? undefined);
+  const externalConversationKey = actionConnectorConversationKey({
+    connectorId: input.connector.id,
+    externalUserKey: actionConnectorExternalUserKey(input.identity),
+    conversationId: input.conversationId
+  });
+  const binding = await conversationRecords.getExternalConversationBinding(externalConversationKey);
+  const thread = binding
+    ? await conversationRecords.getThread(binding.threadId, organizationId)
+    : await conversationRecords.getThreadByExternalId(actionConnectorThreadExternalId(externalConversationKey), organizationId);
+  return thread ?? undefined;
 }
 
 async function ensureActionConnectorThread(input: {
@@ -12284,7 +12350,8 @@ registerCommonApiRoutes(app, {
     attachments: actionConnectorAttachments,
     getConversationMessages: getActionConnectorConversationMessages,
     cancelRun: cancelActionConnectorRun,
-    sendArtifact: sendActionConnectorArtifact
+    sendArtifact: sendActionConnectorArtifact,
+    pairLocalDevice: (input) => pairConnectorDevice(db, input.connectorId, { name: input.name, platform: input.platform }, input.presentedToken)
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
     db: db as unknown as IntegrationInstanceRepositoryDb,

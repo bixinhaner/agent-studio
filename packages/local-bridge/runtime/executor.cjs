@@ -36,8 +36,15 @@ function completeUtf8Length(bytes) {
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-/** A trusted local-user executor. Roots select file-tool scope and Shell cwd, not an OS sandbox. */
-function createExecutor({ getRoots, journalDir, chooseRoot, openPath, version }) {
+/**
+ * A trusted local-user executor. Roots select file-tool scope and Shell cwd, not an OS sandbox.
+ * A host that runs it unattended for a business system narrows it with `policy`:
+ * - authorize({ op, root, target, destination }): throw to refuse a file change;
+ * - wrapExec({ root, cwd, command, env }): return { file, args, env, cwd } to start the command
+ *   inside the host's own sandbox instead of the user's login shell;
+ * - execution: the label reported by workspace_info.
+ */
+function createExecutor({ getRoots, journalDir, chooseRoot, openPath, version, policy = {} }) {
   const active = new Map();
   const processes = new Map();
   async function scoped(root, input = '.', creating = false, followLeaf = true) {
@@ -86,8 +93,9 @@ function createExecutor({ getRoots, journalDir, chooseRoot, openPath, version })
     if (command.op === 'exec') {
       if (typeof a.command !== 'string' || !a.command.trim() || a.command.length > 100000) throw new Error('COMMAND_REQUIRED');
       const cwd = a.cwd ? path.resolve(root.path, a.cwd) : root.path;
-      const shell = shellInvocation(a.command);
-      const child = spawn(shell.file, shell.args, { cwd, env: { ...process.env, ...(a.env || {}) }, detached: process.platform !== 'win32', windowsHide: true, windowsVerbatimArguments: shell.windowsVerbatimArguments, stdio: ['pipe', 'pipe', 'pipe'] });
+      const wrapped = policy.wrapExec ? await policy.wrapExec({ root, cwd, command: a.command, env: a.env || {} }) : null;
+      const shell = wrapped ? { file: wrapped.file, args: wrapped.args, windowsVerbatimArguments: false } : shellInvocation(a.command);
+      const child = spawn(shell.file, shell.args, { cwd: wrapped ? wrapped.cwd : cwd, env: wrapped ? wrapped.env : { ...process.env, ...(a.env || {}) }, detached: process.platform !== 'win32', windowsHide: true, windowsVerbatimArguments: shell.windowsVerbatimArguments, stdio: ['pipe', 'pipe', 'pipe'] });
       const p = { id: randomUUID(), child, session, rootId: root.id, running: true, output: Buffer.alloc(0), offset: 0, exitCode: null, timedOut: false };
       processes.set(p.id, p);
       const append = chunk => { p.output = Buffer.concat([p.output, Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))]); if (p.output.length > OUTPUT_LIMIT) { const n = p.output.length - OUTPUT_LIMIT; p.output = p.output.subarray(n); p.offset += n; } };
@@ -100,11 +108,14 @@ function createExecutor({ getRoots, journalDir, chooseRoot, openPath, version })
       return snapshot(p);
     }
     const target = await scoped(root, a.path, ['write', 'mkdir', 'move'].includes(command.op), !['delete', 'move'].includes(command.op));
+    if (policy.authorize && ['write', 'edit', 'mkdir', 'move', 'delete'].includes(command.op)) {
+      await policy.authorize({ op: command.op, root, target, destination: command.op === 'move' ? await scoped(root, a.destination, true, false) : undefined });
+    }
     switch (command.op) {
       case 'workspace_info': {
         let instructions = '';
         try { instructions = (await fs.readFile(await scoped(root, 'AGENTS.md'))).subarray(0, INSTRUCTIONS_LIMIT).toString('base64'); } catch {}
-        return { directory: root.path, platform: process.platform, home: os.homedir(), shell: process.env.SHELL || process.env.ComSpec, execution: 'trusted-local-user', instructions_base64: instructions, ...(version ? { client_version: version } : {}) };
+        return { directory: root.path, platform: process.platform, home: os.homedir(), shell: process.env.SHELL || process.env.ComSpec, execution: policy.execution || 'trusted-local-user', instructions_base64: instructions, ...(version ? { client_version: version } : {}) };
       }
       case 'list': return { path: target, entries: (await fs.readdir(target, { withFileTypes: true })).slice(0, 2000).map(e => ({ name: e.name, type: e.isDirectory() ? 'directory' : e.isSymbolicLink() ? 'symlink' : 'file' })) };
       case 'read': {

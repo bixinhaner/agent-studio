@@ -136,6 +136,12 @@ export function createLocalBridgeRouter(db: any, options: { isTaskRunning?: (thr
     const root = await db.localBridgeRoot.upsert({ where: { deviceId_path: { deviceId: d.id, path: input.path } }, update: { label: input.label }, create: { deviceId: d.id, ...input } });
     res.status(201).json({ root: { id: root.id, path: root.path, label: root.label } });
   }));
+  // A client withdraws a folder it no longer offers; conversations bound to it lose their local tools.
+  router.delete('/agent/roots/:id', wrap(async (req, res) => {
+    const d = await currentClient(req);
+    await db.localBridgeRoot.deleteMany({ where: { id: req.params.id, deviceId: d.id } });
+    res.status(204).end();
+  }));
   router.post('/agent/complete', wrap(async (req, res) => {
     const d = await currentClient(req); const input = z.object({ connection_id: z.string(), root_id: z.string().nullable() }).parse(req.body);
     if (input.root_id && !d.roots.some((r: any) => r.id === input.root_id)) return fail('Folder not found');

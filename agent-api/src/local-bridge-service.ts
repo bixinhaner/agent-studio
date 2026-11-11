@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cancelLocalOperations, completeLocalOperation, recordBindingEvent, recordLocalOperation } from './local-bridge-audit.js';
@@ -26,6 +26,65 @@ export async function localBindingForWorkspace(db: any, userId?: string, workspa
   if (!userId || !workspace) return null;
   return db.localBridgeBinding.findFirst({ where: { thread: { userId, workspace, channel: 'portal' } }, include });
 }
+/** The Action Connector a conversation thread runs for, from its stored run config. */
+export function connectorOfThread(thread: any): string | undefined {
+  const connector = thread?.codexRunConfig && typeof thread.codexRunConfig === 'object' ? (thread.codexRunConfig as any).actionConnector : undefined;
+  const id = connector && typeof connector === 'object' ? connector.integrationInstanceId : undefined;
+  return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+}
+/**
+ * A device serves either its Portal user's tasks or its Action Connector's conversations, never
+ * both: a service device cannot be reached from a Portal task and a user's computer cannot be
+ * reached from a connector conversation.
+ */
+export function bindingOwnerMatches(binding: any) {
+  const device = binding?.root?.device; const thread = binding?.thread;
+  if (!device || !thread) return false;
+  if (device.integrationInstanceId) return !device.userId && !thread.userId && thread.channel !== 'portal' && connectorOfThread(thread) === device.integrationInstanceId;
+  return Boolean(device.userId) && thread.userId === device.userId;
+}
+export async function connectorBindingForWorkspace(db: any, connectorId?: string, workspace?: string) {
+  if (!connectorId || !workspace) return null;
+  const binding = await db.localBridgeBinding.findFirst({ where: { thread: { workspace, userId: null }, root: { device: { integrationInstanceId: connectorId, status: 'active' } } }, include });
+  return binding && bindingOwnerMatches(binding) ? binding : null;
+}
+/**
+ * Registers (or re-identifies) a service device for an Action Connector. Called by the business
+ * system's host with the connector's service credentials; there is no Portal pairing dialog.
+ * Presenting the token of an existing device of the same connector keeps that device.
+ */
+export async function pairConnectorDevice(db: any, connectorId: string, input: { name: string; platform?: string | null }, presentedToken?: string) {
+  if (presentedToken) {
+    const existing = await db.localBridgeDevice.findFirst({ where: { tokenHash: bridgeHash(presentedToken), status: 'active', integrationInstanceId: connectorId } });
+    if (existing) {
+      await db.localBridgeDevice.update({ where: { id: existing.id }, data: { name: input.name, platform: input.platform ?? existing.platform, lastSeenAt: new Date() } });
+      return { device_id: existing.id, token: presentedToken, created: false };
+    }
+  }
+  const token = `asb_${randomBytes(32).toString('base64url')}`;
+  const device = await db.localBridgeDevice.create({ data: { integrationInstanceId: connectorId, name: input.name, platform: input.platform ?? null, status: 'active', tokenHash: bridgeHash(token), lastSeenAt: new Date() } });
+  return { device_id: device.id, token, created: true };
+}
+/** Binds (or with null, unbinds) a connector conversation to a folder on that connector's service device. */
+export async function bindConnectorRoot(db: any, connectorId: string, threadId: string, rootId: string | null) {
+  const thread = await db.thread.findUnique({ where: { id: threadId } });
+  if (!thread || thread.userId || thread.channel === 'portal' || connectorOfThread(thread) !== connectorId) throw new Error('Conversation does not belong to this connector');
+  if (rootId) {
+    const root = await db.localBridgeRoot.findFirst({ where: { id: rootId, device: { integrationInstanceId: connectorId, status: 'active' } } });
+    if (!root) throw new Error('LOCAL_ROOT_NOT_FOUND: the folder is not registered by an active service device of this connector');
+  }
+  const old = await localBridgeBinding(db, threadId);
+  if (rootId && old?.rootId === rootId) return old;
+  if (!rootId && !old) return null;
+  await cancelLocalTask(db, threadId);
+  await db.$transaction(async (tx: any) => {
+    await tx.localBridgeBinding.deleteMany({ where: { threadId } });
+    if (rootId) await tx.localBridgeBinding.create({ data: { threadId, rootId } });
+  });
+  const next = await localBridgeBinding(db, threadId);
+  await recordBindingEvent(db, { threadId, userId: null, from: old, to: next });
+  return next;
+}
 export function bindingOut(binding: any) {
   if (!binding) return null;
   const d = binding.root.device;
@@ -35,7 +94,7 @@ export function bindingToken(binding: any) { return `${binding.id}.${bridgeHash(
 export async function authenticateBinding(db: any, token: string) {
   const id = token.split('.')[0];
   const binding = await db.localBridgeBinding.findUnique({ where: { id }, include });
-  if (!binding || binding.root.device.status !== 'active' || binding.thread.userId !== binding.root.device.userId) return null;
+  if (!binding || binding.root.device.status !== 'active' || !bindingOwnerMatches(binding)) return null;
   const expected = Buffer.from(bindingToken(binding)); const provided = Buffer.from(token);
   return expected.length === provided.length && timingSafeEqual(expected, provided) ? binding : null;
 }
@@ -122,12 +181,13 @@ export async function cancelLocalTask(db: any, threadId: string) {
   await cancelLocalOperations(db, { threadId });
   await db.localBridgeCommand.create({ data: { id: randomUUID(), deviceId: binding.root.deviceId, threadId, rootId: binding.rootId, op: 'cancel_task', args: {}, deadline: new Date(Date.now() + 86400000) } });
 }
-export async function buildLocalRuntime(db: any, baseUrl: string, userId?: string, workspace?: string) {
-  const binding = await localBindingForWorkspace(db, userId, workspace);
+const SERVICE_HOST_HINT = (binding: any) => `This conversation is bound to the business system's host ${JSON.stringify(binding.root.device.name)} and its session directory ${JSON.stringify(binding.root.path)}. Use local_computer MCP tools for ALL work on the files in that directory and for commands that must run next to the data. Native shell/file tools run in the CLOUD and cannot see those files. Begin with local_workspace_info and follow the AGENTS.md it returns: it describes the directory layout, which parts are read-only source inputs and where results may be written. Process large or numerous files with scripts on the host and return only the summarized result instead of reading whole files back. The host enforces its own sandbox and write policy; when it refuses an operation, adjust or explain, never work around it. If the host is offline, say that the analysis host is unavailable and do not substitute cloud files. Pending requests must be checked with local_request_result before retries. Files meant for the user are written to the deliverables location named by AGENTS.md; report their relative paths.`;
+export async function buildLocalRuntime(db: any, baseUrl: string, userId?: string, workspace?: string, connectorId?: string) {
+  const binding = userId ? await localBindingForWorkspace(db, userId, workspace) : await connectorBindingForWorkspace(db, connectorId, workspace);
   if (!binding) return undefined;
   return {
     bindingId: binding.id,
-    hint: `This task is bound to the user's computer ${JSON.stringify(binding.root.device.name)} and local directory ${JSON.stringify(binding.root.path)}. Use local_computer MCP tools for ALL operations on these local files, commands, dependencies, git, builds and tests. Native shell/file tools run in the CLOUD and cannot access this computer. Begin with local_workspace_info and read applicable local AGENTS.md before edits. Shell runs as the signed-in local OS user; the selected folder is its default cwd, not an OS sandbox. No per-action approval is needed. Web research and cloud integrations remain cloud tools. If offline, keep this binding, tell the user to reopen the desktop client or rerun ~/.local/bin/bailey-connect on a Linux command-line device and do not silently fall back to cloud execution. Pending requests must be checked with local_request_result before retries. Local result files remain on the computer. Report actual local paths; do not create cloud copies or cloud download links unless the user requests an export. Portal provides open-file actions. Do not promise rollback or a file history.`,
+    hint: binding.root.device.integrationInstanceId ? SERVICE_HOST_HINT(binding) : `This task is bound to the user's computer ${JSON.stringify(binding.root.device.name)} and local directory ${JSON.stringify(binding.root.path)}. Use local_computer MCP tools for ALL operations on these local files, commands, dependencies, git, builds and tests. Native shell/file tools run in the CLOUD and cannot access this computer. Begin with local_workspace_info and read applicable local AGENTS.md before edits. Shell runs as the signed-in local OS user; the selected folder is its default cwd, not an OS sandbox. No per-action approval is needed. Web research and cloud integrations remain cloud tools. If offline, keep this binding, tell the user to reopen the desktop client or rerun ~/.local/bin/bailey-connect on a Linux command-line device and do not silently fall back to cloud execution. Pending requests must be checked with local_request_result before retries. Local result files remain on the computer. Report actual local paths; do not create cloud copies or cloud download links unless the user requests an export. Portal provides open-file actions. Do not promise rollback or a file history.`,
     server: { command: process.execPath, args: [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/local-bridge-mcp-proxy.mjs')], default_tools_approval_mode: 'approve', env: { AGENT_STUDIO_BASE_URL: baseUrl, AGENT_STUDIO_LOCAL_BRIDGE_TOKEN: bindingToken(binding) } }
   };
 }

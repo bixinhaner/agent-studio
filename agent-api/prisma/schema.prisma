@@ -338,7 +338,10 @@ model User {
 
 model LocalBridgeDevice {
   id           String   @id @default(cuid())
-  userId       String   @map("user_id")
+  // Exactly one owner: a Portal user (desktop / command-line client) or an
+  // Action Connector (service device running beside a business system).
+  userId       String?  @map("user_id")
+  integrationInstanceId String? @map("integration_instance_id")
   name         String
   platform     String?
   tokenHash    String?  @unique @map("token_hash")
@@ -347,10 +350,11 @@ model LocalBridgeDevice {
   clientVersion String? @map("client_version")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   roots        LocalBridgeRoot[]
   commands     LocalBridgeCommand[]
   @@index([userId, status])
+  @@index([integrationInstanceId, status])
   @@map("local_bridge_devices")
 }
 

@@ -82,7 +82,7 @@ export async function cancelLocalOperations(db: any, where: { id?: string; threa
   } catch (error) { warn('cancel', error); }
 }
 
-export async function recordBindingEvent(db: any, input: { threadId: string; userId: string; from: any; to: any }) {
+export async function recordBindingEvent(db: any, input: { threadId: string; userId: string | null; from: any; to: any }) {
   if (!db.localBridgeBindingEvent?.create) return;
   const from = localWorkspaceSnapshot(input.from);
   const to = localWorkspaceSnapshot(input.to);

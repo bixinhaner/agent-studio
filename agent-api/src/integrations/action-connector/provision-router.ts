@@ -134,6 +134,13 @@ export function createActionConnectorProvisionRouter(options: {
     request: Request;
     response: Response;
   }) => Promise<void>;
+  /** Registers a Local Bridge service device owned by the connector (the business system's host). */
+  pairLocalDevice?: (input: {
+    connectorId: string;
+    name: string;
+    platform?: string;
+    presentedToken?: string;
+  }) => Promise<{ device_id: string; token: string; created: boolean }>;
 }) {
   const router = express.Router();
   const repository = new IntegrationInstanceRepository(options.db);
@@ -228,6 +235,31 @@ export function createActionConnectorProvisionRouter(options: {
       });
     } catch (error) {
       if (!res.headersSent) res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  // The host's Local Bridge client calls this once with the service token to obtain its device
+  // token; after that it speaks the ordinary /api/local-bridge/agent/* protocol with that token.
+  router.post("/:connectorId/local-bridge/devices", express.json({ limit: "16kb" }), async (req: Request, res: Response) => {
+    try {
+      if (!options.pairLocalDevice) throw new Error("Local Bridge is unavailable");
+      const connector = await repository.getInstance(req.params.connectorId);
+      if (!connector || connector.type !== "action_connector" || connector.status !== "active") {
+        res.status(404).json({ detail: "Action connector not found" });
+        return;
+      }
+      const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
+      if (!name) throw new Error("name is required");
+      const result = await options.pairLocalDevice({
+        connectorId: connector.id,
+        name,
+        platform: typeof body.platform === "string" ? body.platform.trim().slice(0, 60) || undefined : undefined,
+        presentedToken: typeof body.token === "string" && body.token.trim() ? body.token.trim() : undefined
+      });
+      res.status(result.created ? 201 : 200).json({ device_id: result.device_id, token: result.token });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
     }
   });
 

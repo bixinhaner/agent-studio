@@ -1,0 +1,4 @@
+interface:
+  display_name: "Network Optimization"
+  short_description: "Analyze a radio network project's source files and the optimization assistant's results, and explain what to do next"
+  default_prompt: "Use $netopt-operations to complete the analysis. Read the session's AGENTS.md first, compute on the host next to the data, keep the application's official figures and your own findings from raw files clearly apart, and answer in the user's language with the conclusion, the evidence behind it, and the next action. Keep progress messages to plain business steps."
