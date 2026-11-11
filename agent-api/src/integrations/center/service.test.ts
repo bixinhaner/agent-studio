@@ -216,4 +216,20 @@ describe("IntegrationCenterService", () => {
       webhookSigningSecret: "new-secret"
     });
   });
+
+  it("lets platform administrators see every instance and keeps policies for everyone else", async () => {
+    const make = (isAdmin: boolean) => createIntegrationCenterService({
+      db: createIntegrationCenterDbMock().db,
+      policies: { listAll: vi.fn(async () => []), replacePoliciesForResource: vi.fn(async () => []) },
+      policyService: { filterAllowedResources: vi.fn(async () => []) },
+      usageLedger: { listExternalApiEvents: vi.fn(async () => []) },
+      accessResolver: {
+        getRoleIdsForUser: vi.fn(async () => []),
+        getDepartmentIdsForUser: vi.fn(async () => []),
+        isPlatformAdmin: vi.fn(async () => isAdmin)
+      }
+    });
+    expect((await make(true).listInstances({ currentUserId: "admin-1" })).items.map((item) => item.id)).toEqual(["zendesk-1"]);
+    expect((await make(false).listInstances({ currentUserId: "user-1" })).items).toEqual([]);
+  });
 });

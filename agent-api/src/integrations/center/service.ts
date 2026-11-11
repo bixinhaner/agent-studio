@@ -71,6 +71,8 @@ type IntegrationPolicyStore = {
 type AccessResolver = {
   getRoleIdsForUser(userId: string): Promise<string[]>;
   getDepartmentIdsForUser(userId: string): Promise<string[]>;
+  /** Platform administrators (admin, super_admin) see and manage every integration instance. */
+  isPlatformAdmin?(userId: string): Promise<boolean>;
 };
 
 type IntegrationCenterTx = IntegrationInstanceRepositoryDb & {
@@ -677,6 +679,7 @@ export function createIntegrationCenterService(options: {
   }
 
   async function filterAuthorizedInstanceIds(currentUserId: string, instanceIds: string[]): Promise<string[]> {
+    if (!instanceIds.length || (await options.accessResolver.isPlatformAdmin?.(currentUserId))) return instanceIds;
     const access = await getAccessContext(currentUserId);
     return await options.policyService.filterAllowedResources({
       userId: currentUserId,

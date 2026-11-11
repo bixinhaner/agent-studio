@@ -1934,7 +1934,11 @@ const integrationCenter = createIntegrationCenterService({
   zendesk,
   accessResolver: {
     getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
-    getDepartmentIdsForUser: async (userId) => listDepartmentSubjectIdsForUser(userId)
+    getDepartmentIdsForUser: async (userId) => listDepartmentSubjectIdsForUser(userId),
+    isPlatformAdmin: async (userId) => {
+      const user = await db.user.findUnique({ where: { id: userId }, select: { role: true } });
+      return user?.role === "admin" || user?.role === "super_admin";
+    }
   }
 });
 const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
