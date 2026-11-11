@@ -10,8 +10,9 @@ const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 const appsRoot = path.join(apiRoot, "connector-apps");
 const bundledSkillsDir = path.join(apiRoot, "bundled-skills");
 
-function stubDb() {
+function stubDb(existing: Array<Record<string, unknown>> = []) {
   const rows = new Map<string, Record<string, unknown>>();
+  const policies: Array<Record<string, string>> = [];
   const table = (name: string) => ({
     upsert: async ({ where, create, update }: { where: { id: string }; create: Record<string, unknown>; update: Record<string, unknown> }) => {
       const key = `${name}:${where.id}`;
@@ -27,9 +28,16 @@ function stubDb() {
     agentMode: table("mode"),
     agentModeSkillPackage: table("modeSkill"),
     agentModeInstructionSource: table("instructions"),
-    integrationInstance: { findMany: async () => [] }
+    integrationInstance: { findMany: async () => existing },
+    integrationInstanceConfig: { findUnique: async () => null },
+    integrationInstanceSecret: { findUnique: async () => null },
+    role: { findMany: async () => [{ id: "role_super" }, { id: "role_admin" }] },
+    resourcePolicy: {
+      findFirst: async ({ where }: { where: Record<string, string> }) => policies.find((p) => p.subjectId === where.subjectId && p.resourceId === where.resourceId) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => { policies.push(data as Record<string, string>); return data; }
+    }
   } as unknown as ConnectorAppDb;
-  return { db, rows };
+  return { db, rows, policies };
 }
 
 describe("connector apps", () => {
@@ -66,6 +74,17 @@ describe("connector apps", () => {
     // Running again (every deploy) only refreshes the same rows.
     await registerConnectorApp(db, app, { bundledSkillsDir });
     expect(rows.size).toBe(7);
+  });
+
+  it("lets the system administrator roles see an existing connector without overriding their policies", async () => {
+    const app = await loadConnectorApp(path.join(appsRoot, "netopt-operations"));
+    const { db, policies } = stubDb([{ id: "conn1", type: "action_connector", slug: "netopt-operations", name: "网规网优助手", status: "active" }]);
+    policies.push({ subjectType: "role", subjectId: "role_admin", resourceType: "integration_instance", resourceId: "conn1", effect: "deny" });
+    const result = await registerConnectorApp(db, app, { bundledSkillsDir });
+    expect(result.connector).toEqual({ id: "conn1", created: false });
+    expect(policies.map((p) => [p.subjectId, p.effect])).toEqual([["role_admin", "deny"], ["role_super", "allow"]]);
+    await registerConnectorApp(db, app, { bundledSkillsDir });
+    expect(policies).toHaveLength(2);
   });
 
   it("refuses an app whose skill is not bundled", async () => {

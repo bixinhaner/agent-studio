@@ -6,6 +6,10 @@ import { z } from "zod";
 import { hashSkillDirectory } from "../../codex-skills/codex-skill-service.js";
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
 import { actionConnectorConfigSchema } from "../center/action-connector-adapter.js";
+import { integrationPolicyResourceType } from "../center/types.js";
+
+/** System roles that always see an app's connector in the integration center. */
+const ADMIN_ROLE_SLUGS = ["super_admin", "admin"];
 
 /**
  * A connector app is everything Bailey needs to serve one kind of business system through an
@@ -15,7 +19,10 @@ import { actionConnectorConfigSchema } from "../center/action-connector-adapter.
  *
  * Registration is idempotent and owns rows with deterministic ids derived from the slug, so it
  * can run on every deploy to keep the Skill's published checksum and instructions current. An
- * existing connector is never modified: its policy and API profile belong to administrators.
+ * existing connector's configuration is never modified: its policy and API profile belong to
+ * administrators. Registration only makes sure the system administrator roles can see it (the
+ * integration center lists connectors through resource policies); a policy an administrator has
+ * already set for those roles, allow or deny, is left as it is.
  */
 const slug = z.string().trim().regex(/^[a-z][a-z0-9-]{1,60}$/, "must be lower-case letters, digits and dashes");
 
@@ -89,6 +96,11 @@ export type ConnectorAppDb = IntegrationInstanceRepositoryDb & {
   agentMode: Upsertable;
   agentModeSkillPackage: Upsertable;
   agentModeInstructionSource: Upsertable;
+  role: { findMany(args: { where: { slug: { in: string[] }; organizationId: null } }): Promise<Array<{ id: string }>> };
+  resourcePolicy: {
+    findFirst(args: { where: { subjectType: string; subjectId: string; resourceType: string; resourceId: string } }): Promise<unknown>;
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
+  };
 };
 
 export type RegisterResult = {
@@ -167,5 +179,14 @@ export async function registerConnectorApp(
     await repository.upsertConfig(created.id, config);
     connector = { id: created.id, created: true };
   }
+  if (connector) await grantAdminRoles(db, connector.id);
   return { slug: app.slug, agentModeId: ids.mode, checksum, connector };
+}
+
+async function grantAdminRoles(db: ConnectorAppDb, connectorId: string): Promise<void> {
+  const roles = await db.role.findMany({ where: { slug: { in: ADMIN_ROLE_SLUGS }, organizationId: null } });
+  for (const role of roles) {
+    const key = { subjectType: "role", subjectId: role.id, resourceType: integrationPolicyResourceType, resourceId: connectorId };
+    if (!(await db.resourcePolicy.findFirst({ where: key }))) await db.resourcePolicy.create({ data: { ...key, organizationId: null, effect: "allow" } });
+  }
 }
