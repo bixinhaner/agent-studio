@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Descriptions, Input, Segmented, Select, Space, Tag, Typography } from "antd";
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
@@ -21,6 +21,8 @@ import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { ActionConnectorConfigDraft, IntegrationDetail } from "./types";
 import { ProactivePushSubscriptionsPanel } from "./ProactivePushSubscriptionsPanel";
 import { resourceStatusLabel } from "../../lib/status-labels";
+import { fetchKnowledgeSets } from "../resources-center/api";
+import type { KnowledgeSetRecord } from "../resources-center/types";
 
 type ActionConnectorTab = "basic" | "hosts" | "bindings" | "policies" | "push" | "history";
 
@@ -43,11 +45,16 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim()))] : [];
+}
+
 function buildDraft(detail: IntegrationDetail): ActionConnectorConfigDraft {
   return {
     displayName: asString(detail.config.displayName) || detail.instance.name,
     runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
-    apiProfile: parseApiProfile(detail.config.apiProfile)
+    apiProfile: parseApiProfile(detail.config.apiProfile),
+    knowledgeSetIds: asStringArray(detail.config.knowledgeSetIds)
   };
 }
 
@@ -81,6 +88,23 @@ export function ActionConnectorIntegrationView(props: {
   const [successText, setSuccessText] = useState("");
   const [profileErrors, setProfileErrors] = useState<Partial<Record<ApiProfileFieldKey, string>>>({});
   const hasSavedProfile = Boolean(props.detail.config.apiProfile);
+  const [knowledgeSets, setKnowledgeSets] = useState<KnowledgeSetRecord[]>([]);
+  const [knowledgeSetsLoading, setKnowledgeSetsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchKnowledgeSets()
+      .then((response) => {
+        if (!cancelled) setKnowledgeSets(response.knowledgeSets.filter((item) => item.status === "active" && item.sourceType === "managed_upload"));
+      })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setKnowledgeSetsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  const knowledgeSetOptions = useMemo(
+    () => knowledgeSets.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
+    [knowledgeSets]
+  );
 
   useEffect(() => {
     setActiveTab("basic");
@@ -129,6 +153,7 @@ export function ActionConnectorIntegrationView(props: {
           ...baseConfig,
           displayName: draft.displayName.trim(),
           runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
+          knowledgeSetIds: draft.knowledgeSetIds,
           ...(keepUnset ? {} : { apiProfile })
         }
       });
@@ -213,6 +238,27 @@ export function ActionConnectorIntegrationView(props: {
                   <Typography.Text code>{asString(props.detail.config.agentModeId) || "default"}</Typography.Text>
                 </Descriptions.Item>
               </Descriptions>
+            </Card>
+
+            <Card size="small" title="资料集" className="antd-admin-card">
+              <Space direction="vertical" size={8} className="admin-full-width">
+                <label className="field">
+                  <span className="field-label">绑定资料集</span>
+                  <Select
+                    mode="multiple"
+                    showSearch
+                    allowClear
+                    value={draft.knowledgeSetIds}
+                    options={knowledgeSetOptions}
+                    loading={knowledgeSetsLoading}
+                    disabled={saving}
+                    optionFilterProp="label"
+                    placeholder="不绑定"
+                    onChange={(value: string[]) => setDraft((current) => ({ ...current, knowledgeSetIds: value }))}
+                  />
+                </label>
+                <span className="field-help">选中的资料集以只读方式提供给这个连接器的每次对话，智能体回答产品相关问题时会先检索这些文档。</span>
+              </Space>
             </Card>
 
             <Card

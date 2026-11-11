@@ -380,6 +380,7 @@ export type ActionConnectorConfigDraft = {
   displayName: string;
   runtimePrompt: string;
   apiProfile: ActionConnectorApiProfile;
+  knowledgeSetIds: string[];
 };
 
 export type ExternalApiUsageSummary = {

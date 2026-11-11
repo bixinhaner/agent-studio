@@ -8,6 +8,7 @@ describe("buildActionConnectorRuntimePrompt", () => {
       config: {
         displayName: "Operations System",
         agentModeId: "operations-agent",
+        knowledgeSetIds: [],
         runtimePrompt: [
           "Connector: {{displayName}}",
           "CLI: node {{cliPathJson}} catalog \"query text\"",

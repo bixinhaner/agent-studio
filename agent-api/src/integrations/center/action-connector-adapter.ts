@@ -10,6 +10,8 @@ export const actionConnectorConfigSchema = z.object({
   runtimePrompt: z.string().trim().max(24000).default(DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT),
   // Admin-managed per connector; absent means the original OMC contract (resolveApiProfile).
   apiProfile: apiProfileSchema.optional(),
+  // Knowledge sets (managed uploads) mounted read-only into every conversation of this connector.
+  knowledgeSetIds: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
   policy: z
     .object({
       allowReadActions: z.boolean().default(true),
