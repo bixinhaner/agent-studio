@@ -193,6 +193,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const [entryNotice, setEntryNotice] = useState<string | null>(null);
   const [codeRequested, setCodeRequested] = useState(false);
   const [accessHelpOpen, setAccessHelpOpen] = useState(false);
+  const [accessHelpInviteExpired, setAccessHelpInviteExpired] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [verifyPending, setVerifyPending] = useState(false);
 
@@ -287,6 +288,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
       } else {
         setCodeRequested(false);
         setCode("");
+        setAccessHelpInviteExpired(response.accessStatus === "invite_expired");
         setAccessHelpOpen(true);
       }
     } catch (error) {
@@ -437,7 +439,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             onClick={(event) => event.stopPropagation()}
           >
             <div className="auth-access-modal-head">
-              <h2 id="auth-access-modal-title">{L("accessNotReady")}</h2>
+              <h2 id="auth-access-modal-title">{L(accessHelpInviteExpired ? "inviteExpiredTitle" : "accessNotReady")}</h2>
               <button
                 type="button"
                 className="auth-access-modal-close"
@@ -448,10 +450,17 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               </button>
             </div>
             <p className="auth-access-modal-copy">
-              {L("accessNotReadyCopy")}
+              {accessHelpInviteExpired
+                ? L("inviteExpiredCopy", { contact: brand.supportEmail || L("inviteExpiredContactFallback") })
+                : L("accessNotReadyCopy")}
             </p>
             <div className="auth-access-modal-actions">
-              {brand.accessRequestEnabled ? (
+              {accessHelpInviteExpired && brand.supportEmail ? (
+                <a className="auth-modern-sso-btn auth-access-modal-primary" href={`mailto:${brand.supportEmail}`}>
+                  {L("contactSupport", { email: brand.supportEmail })}
+                </a>
+              ) : null}
+              {!accessHelpInviteExpired && brand.accessRequestEnabled ? (
                 <button
                   type="button"
                   className="auth-modern-sso-btn auth-access-modal-primary"

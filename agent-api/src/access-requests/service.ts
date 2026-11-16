@@ -10,7 +10,7 @@ import type { AccessRequestEventRecord, AccessRequestEventRepository } from "../
 import type { AccessRequestPolicyRepository } from "../persistence/access-request-policy-repository.js";
 import type { AccessRequestRecord, AccessRequestRepository } from "../persistence/access-request-repository.js";
 import type { AccessRequestReviewerRecord, AccessRequestReviewerRepository } from "../persistence/access-request-reviewer-repository.js";
-import type { OrganizationInviteRepository } from "../persistence/organization-invite-repository.js";
+import type { OrganizationInviteRecord, OrganizationInviteRepository } from "../persistence/organization-invite-repository.js";
 import type { OrganizationMembershipRepository } from "../persistence/organization-membership-repository.js";
 import type { OrganizationRecord, OrganizationRepository } from "../persistence/organization-repository.js";
 import type { SubscriptionGrantRepository } from "../persistence/subscription-grant-repository.js";
@@ -155,7 +155,33 @@ export type AdminAccessRequestSummary = {
   activatedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** The latest invitation sent for this request; "expired" means it was never used and can no longer sign the applicant in. */
+  invite: AccessRequestInviteView | null;
 };
+
+export type AccessRequestInviteView = {
+  status: "pending" | "expired" | "accepted" | "revoked";
+  expiresAt: string;
+};
+
+export function accessRequestInviteView(
+  invite: Pick<OrganizationInviteRecord, "status" | "expiresAt"> | undefined,
+  now = Date.now()
+): AccessRequestInviteView | null {
+  if (!invite) return null;
+  const status =
+    invite.status === "accepted" || invite.status === "revoked"
+      ? invite.status
+      : new Date(invite.expiresAt).getTime() > now
+        ? "pending"
+        : "expired";
+  return { status, expiresAt: invite.expiresAt };
+}
+
+const INVITE_VALID_DAYS = 7;
+
+/** Invites can only be re-sent after a package was provisioned and before the applicant has signed in. */
+const INVITE_RESENDABLE_STATUSES = new Set(["provisioned", "invited"]);
 
 export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
   deviceInfoText: string;
@@ -810,6 +836,61 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     };
   }
 
+  async function revokePendingInvite(inviteId: string | undefined): Promise<void> {
+    if (!inviteId) return;
+    const previous = await options.invites.getById(inviteId);
+    if (previous?.status === "pending") {
+      await options.invites.revoke(previous.id);
+    }
+  }
+
+  /**
+   * Emails a new invite for this request and then cancels the earlier one. Two usable invites for the
+   * same email would make the normal sign-in refuse with "multiple active invitations".
+   */
+  async function issueInvite(
+    request: AccessRequestRecord,
+    organization: OrganizationRecord,
+    plan: Pick<SubscriptionPlanRecord, "name">,
+    membershipType: string,
+    actor: AccessRequestActor
+  ): Promise<OrganizationInviteRecord> {
+    const envelope = await requestEmailEnvelope(request);
+    const rawInviteToken = randomUUID().replace(/-/g, "");
+    const invite = await options.invites.create({
+      organizationId: organization.id,
+      email: request.applicantEmail,
+      inviteTokenHash: hashToken(rawInviteToken),
+      intendedProvider: "email_magic_link",
+      roleTemplate: { membershipType },
+      expiresAt: new Date(Date.now() + INVITE_VALID_DAYS * 24 * 60 * 60 * 1000),
+      invitedByUserId: actor.actorUserId ?? null
+    });
+    const inviteUrl = buildUrl(await requestBaseUrl(request), `/invite/${rawInviteToken}`);
+    try {
+      await options.emailSender.send({
+        to: request.applicantEmail,
+        ...envelope,
+        subject: `${organization.name} access is ready`,
+        text: [
+          `${organization.name} access has been approved.`,
+          inviteUrl
+            ? `Open this invite link to finish sign in: ${inviteUrl}`
+            : `Use invite code ${rawInviteToken} on the sign-in page.`,
+          `You can also sign in with ${request.applicantEmail} on the sign-in page within ${INVITE_VALID_DAYS} days.`,
+          `Package: ${plan.name}`
+        ].join("\n"),
+        debugLabel: "access-request-invite"
+      });
+    } catch (error) {
+      // Keep the earlier invite usable when the new one never reached the applicant.
+      await options.invites.revoke(invite.id).catch(() => undefined);
+      throw error;
+    }
+    await revokePendingInvite(request.organizationInviteId);
+    return invite;
+  }
+
   async function addEvent(
     accessRequestId: string,
     eventType: string,
@@ -961,7 +1042,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     attachmentRoute: "admin" | "reviewer" = "admin",
     reviewToken?: string
   ): Promise<AdminAccessRequestDetail> {
-    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand] = await Promise.all([
+    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand, invite] = await Promise.all([
       options.reviewers.listForRequest(request.id),
       options.events.listForRequest(request.id),
       resolveRelatedUsers(options.users, [request.ownerUserId ?? "", request.targetUserId ?? ""]),
@@ -969,7 +1050,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       resolvePlanMap(options.subscriptionPlans, [request.requestedPlanId ?? "", request.approvedPlanId ?? ""]),
       loadInternalDirectory(),
       listPurchaseProofViews(request, attachmentRoute),
-      requestBrand(request)
+      requestBrand(request),
+      request.organizationInviteId ? options.invites.getById(request.organizationInviteId) : Promise.resolve(undefined)
     ]);
 
     const owner = request.ownerUserId ? ownerMap.get(request.ownerUserId) ?? null : null;
@@ -1032,6 +1114,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       activatedAt: request.activatedAt,
       createdAt: request.createdAt,
       updatedAt: request.updatedAt,
+      invite: accessRequestInviteView(invite),
       deviceInfoText: request.deviceInfoText,
       purchaseProofAttachments: reviewToken
         ? purchaseProofAttachments.map((attachment) => ({
@@ -1088,7 +1171,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     reviewers: AccessRequestReviewerRecord[],
     ownerMap: Map<string, AuthenticatedUser>,
     orgMap: Map<string, OrganizationRecord>,
-    planMap: Map<string, SubscriptionPlanRecord>
+    planMap: Map<string, SubscriptionPlanRecord>,
+    inviteMap: Map<string, OrganizationInviteRecord>
   ): Promise<AdminAccessRequestSummary> {
     const owner = request.ownerUserId ? ownerMap.get(request.ownerUserId) ?? null : null;
     const targetOrganization = request.targetOrganizationId ? orgMap.get(request.targetOrganizationId) ?? null : null;
@@ -1149,7 +1233,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       invitedAt: request.invitedAt,
       activatedAt: request.activatedAt,
       createdAt: request.createdAt,
-      updatedAt: request.updatedAt
+      updatedAt: request.updatedAt,
+      invite: accessRequestInviteView(request.organizationInviteId ? inviteMap.get(request.organizationInviteId) : undefined)
     };
   }
 
@@ -1398,10 +1483,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         filtered.flatMap((request) => [request.requestedPlanId ?? "", request.approvedPlanId ?? ""])
       );
 
+      const invites = await options.invites.listByIds(
+        filtered.map((request) => request.organizationInviteId ?? "").filter(Boolean)
+      );
+      const inviteMap = new Map(invites.map((invite) => [invite.id, invite]));
+
       return {
         requests: await Promise.all(
           filtered.map((request) =>
-            buildAdminSummary(request, reviewersByRequestId.get(request.id) ?? [], ownerMap, orgMap, planMap)
+            buildAdminSummary(request, reviewersByRequestId.get(request.id) ?? [], ownerMap, orgMap, planMap, inviteMap)
           )
         ),
         lookups: {
@@ -1846,32 +1936,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         createdByUserId: actor.actorUserId ?? null
       });
 
-      const rawInviteToken = randomUUID().replace(/-/g, "");
-      const invite = await options.invites.create({
-        organizationId: organization.id,
-        email: request.applicantEmail,
-        inviteTokenHash: hashToken(rawInviteToken),
-        intendedProvider: "email_magic_link",
-        roleTemplate: {
-          membershipType: defaultMembershipType(input.membershipType)
-        },
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        invitedByUserId: actor.actorUserId ?? null
-      });
-      const inviteUrl = buildUrl(await requestBaseUrl(request), `/invite/${rawInviteToken}`);
-      await options.emailSender.send({
-        to: request.applicantEmail,
-        ...await requestEmailEnvelope(request),
-        subject: `${organization.name} access is ready`,
-        text: [
-          `${organization.name} access has been approved.`,
-          inviteUrl
-            ? `Open this invite link to finish sign in: ${inviteUrl}`
-            : `Use invite code ${rawInviteToken} on the sign-in page.`,
-          `Package: ${plan.name}`
-        ].join("\n"),
-        debugLabel: "access-request-invite"
-      });
+      const invite = await issueInvite(request, organization, plan, defaultMembershipType(input.membershipType), actor);
 
       const updated = await options.requests.update(request.id, {
         status: "invited",
@@ -1896,6 +1961,46 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           organization_name: organization.name,
           plan_name: plan.name
         }
+      );
+      return buildAdminDetail(updated);
+    },
+
+    async resendInvite(requestId: string, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {
+      const request = await ensureRequestExists(requestId);
+      if (!INVITE_RESENDABLE_STATUSES.has(request.status)) {
+        throw new Error(
+          request.status === "activated"
+            ? "The applicant has already signed in; no invite is needed"
+            : "Provision a package before sending an invite"
+        );
+      }
+      const organizationId = trimOrUndefined(request.targetOrganizationId);
+      const organization = organizationId ? await options.organizations.getById(organizationId) : undefined;
+      if (!organization || organization.status !== "active") {
+        throw new Error("Target organization does not exist");
+      }
+      const planId = request.approvedPlanId ?? request.requestedPlanId;
+      const plan = planId ? await options.subscriptionPlans.getById(planId) : undefined;
+      const previous = request.organizationInviteId ? await options.invites.getById(request.organizationInviteId) : undefined;
+      const previousTemplate = previous?.roleTemplate as { membershipType?: string } | undefined;
+      const invite = await issueInvite(
+        request,
+        organization,
+        { name: plan?.name ?? "Trial" },
+        defaultMembershipType(previousTemplate?.membershipType),
+        actor
+      );
+      const updated = await options.requests.update(request.id, {
+        status: "invited",
+        organizationInviteId: invite.id,
+        invitedAt: new Date()
+      });
+      await addEvent(
+        updated.id,
+        "invite_resent",
+        actor,
+        "Invite re-sent",
+        `Sent a new invite to ${request.applicantEmail}, valid for ${INVITE_VALID_DAYS} days.`
       );
       return buildAdminDetail(updated);
     },

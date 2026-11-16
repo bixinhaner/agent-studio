@@ -409,3 +409,7 @@
     gap: 32px;
   }
 }
+
+a.auth-access-modal-primary {
+  text-decoration: none;
+}

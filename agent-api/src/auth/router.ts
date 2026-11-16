@@ -976,7 +976,8 @@ export function createAuthRouter(options: {
         return;
       }
       if (existingIdentities.length === 0 && activePendingInvites.length === 0 && !employeeOrganization) {
-        res.json({ ok: true });
+        // Tell the page why: an expired invite needs a new one, while an unknown email should apply for access.
+        res.json(pendingInvites.length > 0 ? { ok: true, access_status: "invite_expired" } : { ok: true });
         return;
       }
 

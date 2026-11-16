@@ -7,6 +7,7 @@ import type {
 } from "../persistence/access-request-attachment-repository.js";
 import type { AccessRequestRecord } from "../persistence/access-request-repository.js";
 import type { AccessRequestReviewerRecord } from "../persistence/access-request-reviewer-repository.js";
+import type { OrganizationInviteRecord } from "../persistence/organization-invite-repository.js";
 import type { PurchaseProofUploadFile } from "./purchase-proof-storage.js";
 
 function buildRequest(overrides: Partial<AccessRequestRecord> = {}): AccessRequestRecord {
@@ -97,6 +98,7 @@ function createServiceHarness() {
   const requests = new Map<string, AccessRequestRecord>();
   const reviewers = new Map<string, AccessRequestReviewerRecord[]>();
   const attachments = new Map<string, AccessRequestAttachmentRecord[]>();
+  const invites = new Map<string, OrganizationInviteRecord>();
   const emailSender = {
     send: vi.fn(async (_input: { text?: string; [key: string]: unknown }) => ({ delivered: true, mode: "smtp" as const }))
   };
@@ -291,7 +293,11 @@ function createServiceHarness() {
       )
     } as never,
     organizations: {
-      getById: vi.fn(async () => undefined),
+      getById: vi.fn(async (id: string) =>
+        id === "org_1"
+          ? { id: "org_1", slug: "example-corp", name: "Example Corp", type: "customer", status: "active", publicBrandId: "brand_ranley" }
+          : undefined
+      ),
       listByIds: vi.fn(async () => []),
       list: vi.fn(async () => []),
       create: vi.fn(),
@@ -299,7 +305,29 @@ function createServiceHarness() {
     } as never,
     memberships: {} as never,
     invites: {
-      create: vi.fn(),
+      create: vi.fn(async (input: Record<string, unknown>) => {
+        const invite: OrganizationInviteRecord = {
+          id: `invite_${invites.size + 1}`,
+          organizationId: String(input.organizationId),
+          email: String(input.email),
+          inviteTokenHash: String(input.inviteTokenHash),
+          intendedProvider: String(input.intendedProvider),
+          roleTemplate: input.roleTemplate,
+          status: "pending",
+          expiresAt: (input.expiresAt as Date).toISOString(),
+          createdAt: "2026-04-22T00:00:00.000Z",
+          updatedAt: "2026-04-22T00:00:00.000Z"
+        };
+        invites.set(invite.id, invite);
+        return invite;
+      }),
+      getById: vi.fn(async (id: string) => invites.get(id)),
+      listByIds: vi.fn(async (ids: string[]) => ids.flatMap((id) => (invites.has(id) ? [invites.get(id)!] : []))),
+      revoke: vi.fn(async (id: string) => {
+        const next = { ...invites.get(id)!, status: "revoked" };
+        invites.set(id, next);
+        return next;
+      }),
       getByTokenHash: vi.fn(),
       listPendingByEmail: vi.fn(),
       accept: vi.fn()
@@ -383,7 +411,7 @@ function createServiceHarness() {
     ])
   });
 
-  return { service, requests, reviewers, attachments, emailSender, adminNotifier };
+  return { service, requests, reviewers, attachments, invites, emailSender, adminNotifier };
 }
 
 function randomId(): string {
@@ -562,5 +590,79 @@ describe("createAccessRequestService", () => {
     expect(updated.defaultTrialDays).toBe(30);
     expect(updated.internalEmailDomains).toEqual(["baicells.com", "baicells.net"]);
     expect(updated.blockedApplicantEmailDomains).toEqual(["corp-mail.example", "examplemail.com"]);
+  });
+});
+
+describe("access request invites", () => {
+  function seedInvitedRequest(harness: ReturnType<typeof createServiceHarness>, overrides: Partial<AccessRequestRecord> = {}) {
+    harness.invites.set("invite_old", {
+      id: "invite_old",
+      organizationId: "org_1",
+      email: "applicant@example.com",
+      inviteTokenHash: "old-hash",
+      intendedProvider: "email_magic_link",
+      roleTemplate: { membershipType: "customer_member" },
+      status: "pending",
+      expiresAt: "2026-04-01T00:00:00.000Z",
+      createdAt: "2026-03-25T00:00:00.000Z",
+      updatedAt: "2026-03-25T00:00:00.000Z"
+    });
+    harness.requests.set("request_1", buildRequest({
+      status: "invited",
+      publicBrandId: "brand_ranley",
+      targetOrganizationId: "org_1",
+      organizationInviteId: "invite_old",
+      ...overrides
+    }));
+  }
+
+  it("shows an unused invite past its expiry as expired in the admin list", async () => {
+    const harness = createServiceHarness();
+    seedInvitedRequest(harness);
+
+    const workspace = await harness.service.listAdminWorkspace();
+
+    expect(workspace.requests[0]?.invite).toEqual({ status: "expired", expiresAt: "2026-04-01T00:00:00.000Z" });
+  });
+
+  it("re-sends an expired invite without touching the package and cancels the old one", async () => {
+    const harness = createServiceHarness();
+    seedInvitedRequest(harness);
+
+    const detail = await harness.service.resendInvite("request_1", { actorType: "admin", actorUserId: "admin_1" });
+
+    expect(harness.invites.get("invite_old")?.status).toBe("revoked");
+    const fresh = harness.invites.get(harness.requests.get("request_1")!.organizationInviteId!)!;
+    expect(fresh.id).not.toBe("invite_old");
+    expect(fresh.status).toBe("pending");
+    expect(fresh.roleTemplate).toEqual({ membershipType: "customer_member" });
+    expect(detail.invite?.status).toBe("pending");
+    expect(detail.status).toBe("invited");
+    const sent = harness.emailSender.send.mock.calls.at(-1)![0];
+    expect(sent).toMatchObject({ to: "applicant@example.com", publicBrandId: "brand_ranley", from: "ranley <ranley@cloud-ran.ai>" });
+    expect(sent.text).toContain("https://ranley.cloud-ran.ai/invite/");
+    expect(sent.text).toContain("sign in with applicant@example.com on the sign-in page within 7 days");
+  });
+
+  it("keeps the old invite when the new invite email cannot be sent", async () => {
+    const harness = createServiceHarness();
+    seedInvitedRequest(harness, { status: "provisioned" });
+    harness.emailSender.send.mockRejectedValueOnce(new Error("SMTP down"));
+
+    await expect(harness.service.resendInvite("request_1", { actorType: "admin" })).rejects.toThrow("SMTP down");
+
+    expect(harness.invites.get("invite_old")?.status).toBe("pending");
+    expect([...harness.invites.values()].filter((invite) => invite.status === "pending")).toHaveLength(1);
+    expect(harness.requests.get("request_1")?.organizationInviteId).toBe("invite_old");
+  });
+
+  it("refuses to re-send once the applicant has signed in or before a package exists", async () => {
+    const harness = createServiceHarness();
+    seedInvitedRequest(harness, { status: "activated" });
+    await expect(harness.service.resendInvite("request_1", { actorType: "admin" })).rejects.toThrow("already signed in");
+
+    harness.requests.set("request_1", buildRequest({ status: "approved_pending_provision" }));
+    await expect(harness.service.resendInvite("request_1", { actorType: "admin" })).rejects.toThrow("Provision a package");
+    expect(harness.emailSender.send).not.toHaveBeenCalled();
   });
 });

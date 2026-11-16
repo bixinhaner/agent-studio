@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   accessRequestActionAvailability,
   buildAccessRequestHash,
+  inviteNotice,
   readAccessRequestHashState,
   reviewerCandidateMatches,
   reviewerCandidatesForBrand,
@@ -79,5 +80,35 @@ describe("access request admin helpers", () => {
     expect(readAccessRequestHashState(hash)).toEqual({ requestId: "req1", status: "needs_info", query: "acme co" });
     expect(buildAccessRequestHash(hash, { requestId: "", status: "all", query: " " })).toBe("#admin/access-requests");
     expect(readAccessRequestHashState("#admin/access-requests?status=bogus")).toEqual({ requestId: "", status: "all", query: "" });
+  });
+});
+
+describe("inviteNotice", () => {
+  const format = (value: string) => value.slice(0, 10);
+
+  it("warns about an expired invite while the applicant still cannot sign in", () => {
+    const notice = inviteNotice(
+      { status: "invited", applicantEmail: "a@x.hr", invite: { status: "expired", expiresAt: "2026-11-13T05:51:34.956Z" } },
+      format
+    );
+    expect(notice?.tone).toBe("warning");
+    expect(notice?.message).toBe("邀请已于 2026-11-13 过期，申请人现在无法登录");
+    expect(notice?.description).toContain("a@x.hr");
+  });
+
+  it("explains the sign-in options for a valid invite", () => {
+    const notice = inviteNotice(
+      { status: "provisioned", applicantEmail: "a@x.hr", invite: { status: "pending", expiresAt: "2026-11-20T00:00:00.000Z" } },
+      format
+    );
+    expect(notice?.tone).toBe("info");
+    expect(notice?.description).toContain("登录页输入 a@x.hr");
+  });
+
+  it("stays quiet once the applicant signed in or when no invite data is available", () => {
+    const expired = { status: "expired", expiresAt: "2026-11-13T00:00:00.000Z" };
+    expect(inviteNotice({ status: "activated", applicantEmail: "a@x.hr", invite: expired })).toBeNull();
+    expect(inviteNotice({ status: "invited", applicantEmail: "a@x.hr" })).toBeNull();
+    expect(inviteNotice({ status: "invited", applicantEmail: "a@x.hr", invite: { ...expired, status: "revoked" } })).toBeNull();
   });
 });

@@ -126,6 +126,7 @@ type EmailRequestPayload = {
   email_hint?: string | null;
   auth_entry?: "external" | "internal" | null;
   redirect_path?: string | null;
+  access_status?: string | null;
 };
 
 export type EmailRequestResponse = {
@@ -134,6 +135,8 @@ export type EmailRequestResponse = {
   emailHint?: string;
   authEntry?: "external" | "internal";
   redirectPath?: string;
+  /** "invite_expired" when the email was invited but every invitation has expired. */
+  accessStatus?: "invite_expired";
 };
 
 type InvitePayload = {
@@ -278,7 +281,8 @@ function normalizeEmailRequest(payload: EmailRequestPayload): EmailRequestRespon
     challengeId: trimOrUndefined(payload.challenge_id),
     emailHint: trimOrUndefined(payload.email_hint),
     authEntry: payload.auth_entry === "internal" || payload.auth_entry === "external" ? payload.auth_entry : undefined,
-    redirectPath: trimOrUndefined(payload.redirect_path)
+    redirectPath: trimOrUndefined(payload.redirect_path),
+    accessStatus: payload.access_status === "invite_expired" ? "invite_expired" : undefined
   };
 }
 

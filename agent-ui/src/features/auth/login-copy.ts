@@ -28,7 +28,11 @@ const EN = {
   accessNotReady: "Access Not Ready",
   closeAccessHelp: "Close access help dialog",
   accessNotReadyCopy:
-    "This email does not have active access yet. Ask your administrator to resend the invite, or apply for trial access.",
+    "This email does not have access yet. Apply for trial access, or ask the person who manages your account to invite you.",
+  inviteExpiredTitle: "Invitation Expired",
+  inviteExpiredCopy: "Your invitation for this email has expired. Ask {contact} to send you a new invitation.",
+  inviteExpiredContactFallback: "the person who invited you",
+  contactSupport: "Email {email}",
   backToSignIn: "Back to Sign In"
 };
 
@@ -61,7 +65,11 @@ const ZH: Record<LoginCopyKey, string> = {
   verifyFailed: "验证失败",
   accessNotReady: "尚未开通访问",
   closeAccessHelp: "关闭访问帮助",
-  accessNotReadyCopy: "该邮箱尚未开通访问权限。请联系管理员重新发送邀请，或申请试用。",
+  accessNotReadyCopy: "该邮箱尚未开通访问权限。你可以申请试用，或请负责你账号的人邀请你。",
+  inviteExpiredTitle: "邀请已过期",
+  inviteExpiredCopy: "该邮箱收到的邀请已过期。请联系 {contact} 重新发送邀请。",
+  inviteExpiredContactFallback: "邀请你的人",
+  contactSupport: "发邮件给 {email}",
   backToSignIn: "返回登录"
 };
 

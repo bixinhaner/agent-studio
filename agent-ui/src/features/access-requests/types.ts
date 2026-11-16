@@ -95,6 +95,13 @@ export type AdminAccessRequestSummary = {
   activatedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** Latest invitation for this request; optional because older API releases do not send it. */
+  invite?: AccessRequestInvite | null;
+};
+
+export type AccessRequestInvite = {
+  status: "pending" | "expired" | "accepted" | "revoked";
+  expiresAt: string;
 };
 
 export type AccessRequestEvent = {

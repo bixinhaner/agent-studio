@@ -28,6 +28,7 @@ import {
   fetchAdminAccessRequestWorkspace,
   patchAdminAccessRequest,
   provisionAdminAccessRequest,
+  resendAdminAccessRequestInvite,
   rejectAdminAccessRequest,
   requestAdminAccessRequestNeedsInfo,
   sendAdminAccessRequestReview,
@@ -36,6 +37,7 @@ import {
 import {
   ACCESS_REQUEST_STATUS_FILTERS,
   accessRequestActionAvailability,
+  inviteNotice,
   buildAccessRequestHash,
   deliveryTypeLabel,
   formatFileSize,
@@ -214,6 +216,7 @@ export function AccessRequestsWorkspace() {
   const [savingReview, setSavingReview] = useState(false);
   const [sendingReview, setSendingReview] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
+  const [resendingInvite, setResendingInvite] = useState(false);
   const [needsInfoOpen, setNeedsInfoOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [needsInfoMessage, setNeedsInfoMessage] = useState("");
@@ -237,6 +240,7 @@ export function AccessRequestsWorkspace() {
     selectedRequest && JSON.stringify(requestDraft) !== JSON.stringify(createRequestDraft(selectedRequest))
   );
   const actionAvailability = accessRequestActionAvailability(selectedRequest?.status ?? "");
+  const selectedInviteNotice = selectedRequest ? inviteNotice(selectedRequest) : null;
   const reviewRowsProblem = reviewerRowsProblem(reviewDraft.reviewers, { requireTo: false });
 
   /** Unsaved request settings or review routing are easy to lose when switching requests, so ask first. */
@@ -460,6 +464,31 @@ export function AccessRequestsWorkspace() {
     }
   }
 
+  async function handleResendInvite() {
+    if (!selectedRequest) return;
+    setResendingInvite(true);
+    setErrorText("");
+    try {
+      const detail = await resendAdminAccessRequestInvite(selectedRequest.id);
+      applyDetail(detail, `新邀请已发送给 ${detail.applicantEmail}`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "重新发送邀请失败，请重试");
+    } finally {
+      setResendingInvite(false);
+    }
+  }
+
+  function confirmResendInvite() {
+    if (!selectedRequest) return;
+    Modal.confirm({
+      title: "重新发送邀请？",
+      content: `会给 ${selectedRequest.applicantEmail} 发送一封新的邀请邮件（有效期 7 天），旧邀请链接随即失效。套餐和组织不变。`,
+      okText: "发送新邀请",
+      cancelText: "取消",
+      onOk: () => handleResendInvite()
+    });
+  }
+
   async function handleNeedsInfoSubmit() {
     if (!selectedRequest) return;
     setPostingNeedsInfo(true);
@@ -498,7 +527,12 @@ export function AccessRequestsWorkspace() {
         title: "状态",
         dataIndex: "status",
         width: 110,
-        render: (value: string) => <Tag color={requestStatusTone(value)}>{requestStatusLabel(value)}</Tag>
+        render: (value: string, record) => (
+          <Space size={4} wrap>
+            <Tag color={requestStatusTone(value)}>{requestStatusLabel(value)}</Tag>
+            {inviteNotice(record)?.tone === "warning" ? <Tag color="warning">邀请已过期</Tag> : null}
+          </Space>
+        )
       },
       {
         title: "品牌入口",
@@ -728,6 +762,25 @@ export function AccessRequestsWorkspace() {
         }
       >
         {feedbackSurface === "drawer" ? errorAlert : null}
+        {!detailLoading && selectedInviteNotice ? (
+          <Alert
+            className="access-admin-feedback"
+            type={selectedInviteNotice.tone}
+            showIcon
+            message={selectedInviteNotice.message}
+            description={selectedInviteNotice.description}
+            action={
+              <Button
+                size="small"
+                type={selectedInviteNotice.tone === "warning" ? "primary" : "default"}
+                loading={resendingInvite}
+                onClick={confirmResendInvite}
+              >
+                重新发送邀请
+              </Button>
+            }
+          />
+        ) : null}
         {detailLoading ? (
           <div className="access-admin-empty">
             <Spin />

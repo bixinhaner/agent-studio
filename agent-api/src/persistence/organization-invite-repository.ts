@@ -34,7 +34,7 @@ type InviteTable = {
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<InviteRow | null>;
   findMany(args?: {
-    where?: { email?: string; organizationId?: string; status?: string };
+    where?: { id?: { in: string[] }; email?: string; organizationId?: string; status?: string };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<InviteRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<InviteRow>;
@@ -111,6 +111,31 @@ export class OrganizationInviteRepository {
       orderBy: { createdAt: "asc" }
     });
     return row ? mapInvite(row) : undefined;
+  }
+
+  async getById(id: string): Promise<OrganizationInviteRecord | undefined> {
+    const normalized = trimOrUndefined(id);
+    if (!normalized) return undefined;
+    const row = await this.db.organizationInvite.findFirst({ where: { id: normalized } });
+    return row ? mapInvite(row) : undefined;
+  }
+
+  async listByIds(ids: string[]): Promise<OrganizationInviteRecord[]> {
+    const normalized = [...new Set(ids.map((id) => trimOrUndefined(id)).filter((id): id is string => Boolean(id)))];
+    if (!normalized.length) return [];
+    const rows = await this.db.organizationInvite.findMany({ where: { id: { in: normalized } } });
+    return rows.map(mapInvite);
+  }
+
+  /** Cancels a pending invite so a replacement does not leave two usable invitations for the same email. */
+  async revoke(id: string): Promise<OrganizationInviteRecord> {
+    const normalizedId = trimOrUndefined(id);
+    if (!normalizedId) throw new Error("invite id is required");
+    const updated = await this.db.organizationInvite.update({
+      where: { id: normalizedId },
+      data: { status: "revoked", updatedAt: new Date() }
+    });
+    return mapInvite(updated);
   }
 
   async listPendingByEmail(email: string): Promise<OrganizationInviteRecord[]> {

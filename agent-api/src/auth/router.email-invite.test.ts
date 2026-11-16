@@ -466,7 +466,18 @@ describe("email invitation sign-in", () => {
 
     expect(requested.status).toBe(200);
     expect(requested.body.challenge_id).toBeUndefined();
+    expect(requested.body.access_status).toBe("invite_expired");
     expect(harness.state.challenges).toHaveLength(0);
     expect(harness.state.sentCode).toBe("");
+  });
+
+  it("does not report an expired invitation for an email that was never invited", async () => {
+    const harness = createEmailAuthHarness({ invites: [] });
+
+    const requested = await request(harness.app).post("/api/auth/email/request").send({ email: harness.email });
+
+    expect(requested.status).toBe(200);
+    expect(requested.body.challenge_id).toBeUndefined();
+    expect(requested.body.access_status).toBeUndefined();
   });
 });

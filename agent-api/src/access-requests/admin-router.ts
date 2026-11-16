@@ -157,6 +157,14 @@ export function createAdminAccessRequestRouter(service: AccessRequestService): R
     }
   });
 
+  router.post("/:requestId/resend-invite", async (req: Request, res: Response) => {
+    try {
+      res.json({ request: await service.resendInvite(String(req.params.requestId || ""), adminActor(req)) });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/:requestId/provision", async (req: Request, res: Response) => {
     try {
       const input = provisionSchema.parse(req.body ?? {});

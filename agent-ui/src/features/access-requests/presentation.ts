@@ -185,7 +185,7 @@ export function accessRequestActionAvailability(status: string): AccessRequestAc
         : status === "rejected"
           ? "这条申请已被拒绝。确定仍要开通套餐并给申请人发送邀请吗？"
           : ["provisioned", "invited", "activated"].includes(status)
-            ? `这条申请已${requestStatusLabel(status)}。再次开通会覆盖目标组织的套餐并重新发送邀请，确定继续吗？`
+            ? `这条申请已${requestStatusLabel(status)}。再次开通会覆盖目标组织的套餐并重新发送邀请，确定继续吗？如果只是申请人没收到或邀请过期，请改用“重新发送邀请”。`
             : "这条申请还没有审核通过。确定跳过审核，直接开通套餐并发送邀请吗？"
   };
 }
@@ -225,4 +225,35 @@ export function buildAccessRequestHash(hash: string, state: AccessRequestHashSta
   if (state.query.trim()) params.set("q", state.query);
   const search = params.toString();
   return search ? `${base}?${search}` : base;
+}
+
+/** Invites can be re-sent after provisioning and until the applicant signs in (mirrors the server rule). */
+export function canResendInvite(status: string): boolean {
+  return status === "provisioned" || status === "invited";
+}
+
+export type InviteNotice = { tone: "warning" | "info"; message: string; description: string };
+
+/** What the admin needs to know about the latest invite while the applicant has not signed in yet. */
+export function inviteNotice(
+  request: { status: string; applicantEmail: string; invite?: { status: string; expiresAt: string } | null },
+  formatTime: (value: string) => string = formatLocalTime
+): InviteNotice | null {
+  if (!canResendInvite(request.status) || !request.invite) return null;
+  const expiresAt = formatTime(request.invite.expiresAt);
+  if (request.invite.status === "expired") {
+    return {
+      tone: "warning",
+      message: `邀请已于 ${expiresAt} 过期，申请人现在无法登录`,
+      description: `套餐不受影响。重新发送邀请会给 ${request.applicantEmail} 发一封新邀请邮件，有效期 7 天。`
+    };
+  }
+  if (request.invite.status === "pending") {
+    return {
+      tone: "info",
+      message: `邀请有效至 ${expiresAt}，申请人尚未登录`,
+      description: `申请人可点击邀请邮件里的链接，也可以直接在登录页输入 ${request.applicantEmail} 收验证码登录。没收到邮件请让对方检查垃圾邮件或隔离区。`
+    };
+  }
+  return null;
 }
