@@ -130,6 +130,8 @@ export type AccessRequestReviewer = {
 };
 
 export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
+  /** Package period of the target organization; optional because older API releases do not send it. */
+  targetSubscription?: { startsAt: string; expiresAt?: string } | null;
   deviceInfoText: string;
   purchaseProofAttachments: AccessRequestAttachment[];
   customerNote?: string;

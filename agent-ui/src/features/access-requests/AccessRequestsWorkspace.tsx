@@ -2,6 +2,7 @@ import {
   Alert,
   AutoComplete,
   Button,
+  Checkbox,
   Drawer,
   Empty,
   Input,
@@ -38,6 +39,7 @@ import {
   ACCESS_REQUEST_STATUS_FILTERS,
   accessRequestActionAvailability,
   inviteNotice,
+  trialShiftPreview,
   buildAccessRequestHash,
   deliveryTypeLabel,
   formatFileSize,
@@ -464,13 +466,13 @@ export function AccessRequestsWorkspace() {
     }
   }
 
-  async function handleResendInvite() {
+  async function handleResendInvite(shiftTrial: boolean) {
     if (!selectedRequest) return;
     setResendingInvite(true);
     setErrorText("");
     try {
-      const detail = await resendAdminAccessRequestInvite(selectedRequest.id);
-      applyDetail(detail, `新邀请已发送给 ${detail.applicantEmail}`);
+      const detail = await resendAdminAccessRequestInvite(selectedRequest.id, { shiftTrial });
+      applyDetail(detail, shiftTrial ? `新邀请已发送给 ${detail.applicantEmail}，试用期已顺延` : `新邀请已发送给 ${detail.applicantEmail}`);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "重新发送邀请失败，请重试");
     } finally {
@@ -480,12 +482,31 @@ export function AccessRequestsWorkspace() {
 
   function confirmResendInvite() {
     if (!selectedRequest) return;
+    const preview = trialShiftPreview(selectedRequest.targetSubscription);
+    // The applicant never signed in, so by default the unused time is given back.
+    let shiftTrial = Boolean(preview);
     Modal.confirm({
       title: "重新发送邀请？",
-      content: `会给 ${selectedRequest.applicantEmail} 发送一封新的邀请邮件（有效期 7 天），旧邀请链接随即失效。套餐和组织不变。`,
+      content: (
+        <div className="access-admin-confirm-body">
+          <p>会给 {selectedRequest.applicantEmail} 发送一封新的邀请邮件（有效期 7 天），旧邀请链接随即失效。</p>
+          {preview ? (
+            <Checkbox
+              defaultChecked
+              onChange={(event) => {
+                shiftTrial = event.target.checked;
+              }}
+            >
+              试用期从今天重新计算：{preview.fromStart} – {preview.fromEnd} 改为 {preview.toStart} – {preview.toEnd}
+            </Checkbox>
+          ) : (
+            <p className="access-admin-muted">套餐时间不变。</p>
+          )}
+        </div>
+      ),
       okText: "发送新邀请",
       cancelText: "取消",
-      onOk: () => handleResendInvite()
+      onOk: () => handleResendInvite(shiftTrial)
     });
   }
 

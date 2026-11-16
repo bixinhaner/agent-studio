@@ -159,6 +159,11 @@ export type AdminAccessRequestSummary = {
   invite: AccessRequestInviteView | null;
 };
 
+export type AccessRequestResendInviteInput = {
+  /** Restart the unused trial from now, keeping its original length. */
+  shiftTrial?: boolean;
+};
+
 export type AccessRequestInviteView = {
   status: "pending" | "expired" | "accepted" | "revoked";
   expiresAt: string;
@@ -190,6 +195,8 @@ export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
   adminNote?: string;
   reviewSummary?: string;
   rejectionReason?: string;
+  /** Package period of the target organization, so admins can see what re-sending with a shifted trial changes. */
+  targetSubscription: { startsAt: string; expiresAt?: string } | null;
   publicAccessUrl?: string;
   reviewersList: Array<{
     id: string;
@@ -836,6 +843,41 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     };
   }
 
+  /**
+   * Restarts a package nobody has used yet from now, keeping its length, so time the applicant could not
+   * sign in is not lost. Refuses when someone already holds a seat, because their period would move too.
+   */
+  async function shiftUnusedTrial(organizationId: string): Promise<{
+    from: { startsAt: string; expiresAt: string };
+    to: { startsAt: string; expiresAt: string };
+  } | undefined> {
+    const grant = await options.subscriptionGrants.getByPrincipal("organization", organizationId);
+    if (!grant?.expiresAt) {
+      throw new Error("The organization has no package with an end date to shift");
+    }
+    if (await options.memberships.hasActiveMembers(organizationId)) {
+      throw new Error("Someone in this organization has already signed in, so the package period cannot be shifted");
+    }
+    const now = new Date();
+    const startsAt = new Date(grant.startsAt);
+    const expiresAt = new Date(grant.expiresAt);
+    if (startsAt.getTime() >= now.getTime()) return undefined;
+    const nextExpiresAt = new Date(now.getTime() + Math.max(0, expiresAt.getTime() - startsAt.getTime()));
+    await options.subscriptionGrants.upsertForPrincipal({
+      principalType: "organization",
+      principalId: organizationId,
+      planId: grant.planId ?? null,
+      status: grant.status,
+      startsAt: now,
+      expiresAt: nextExpiresAt,
+      cycleAnchorAt: now
+    });
+    return {
+      from: { startsAt: grant.startsAt, expiresAt: grant.expiresAt },
+      to: { startsAt: now.toISOString(), expiresAt: nextExpiresAt.toISOString() }
+    };
+  }
+
   async function revokePendingInvite(inviteId: string | undefined): Promise<void> {
     if (!inviteId) return;
     const previous = await options.invites.getById(inviteId);
@@ -1042,7 +1084,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     attachmentRoute: "admin" | "reviewer" = "admin",
     reviewToken?: string
   ): Promise<AdminAccessRequestDetail> {
-    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand, invite] = await Promise.all([
+    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments, brand, invite, grant] = await Promise.all([
       options.reviewers.listForRequest(request.id),
       options.events.listForRequest(request.id),
       resolveRelatedUsers(options.users, [request.ownerUserId ?? "", request.targetUserId ?? ""]),
@@ -1051,7 +1093,10 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       loadInternalDirectory(),
       listPurchaseProofViews(request, attachmentRoute),
       requestBrand(request),
-      request.organizationInviteId ? options.invites.getById(request.organizationInviteId) : Promise.resolve(undefined)
+      request.organizationInviteId ? options.invites.getById(request.organizationInviteId) : Promise.resolve(undefined),
+      request.targetOrganizationId
+        ? options.subscriptionGrants.getByPrincipal("organization", request.targetOrganizationId)
+        : Promise.resolve(null)
     ]);
 
     const owner = request.ownerUserId ? ownerMap.get(request.ownerUserId) ?? null : null;
@@ -1131,6 +1176,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       adminNote: request.adminNote,
       reviewSummary: request.reviewSummary,
       rejectionReason: request.rejectionReason,
+      targetSubscription: grant ? { startsAt: grant.startsAt, expiresAt: grant.expiresAt } : null,
       publicAccessUrl: buildUrl(await requestBaseUrl(request), `/access/apply/${request.publicToken}`),
       reviewersList: reviewers.map((reviewer) => ({
         id: reviewer.id,
@@ -1965,7 +2011,11 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       return buildAdminDetail(updated);
     },
 
-    async resendInvite(requestId: string, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {
+    async resendInvite(
+      requestId: string,
+      actor: AccessRequestActor,
+      input: AccessRequestResendInviteInput = {}
+    ): Promise<AdminAccessRequestDetail> {
       const request = await ensureRequestExists(requestId);
       if (!INVITE_RESENDABLE_STATUSES.has(request.status)) {
         throw new Error(
@@ -1983,6 +2033,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const plan = planId ? await options.subscriptionPlans.getById(planId) : undefined;
       const previous = request.organizationInviteId ? await options.invites.getById(request.organizationInviteId) : undefined;
       const previousTemplate = previous?.roleTemplate as { membershipType?: string } | undefined;
+      const shiftedTrial = input.shiftTrial ? await shiftUnusedTrial(organization.id) : undefined;
       const invite = await issueInvite(
         request,
         organization,
@@ -2000,7 +2051,13 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         "invite_resent",
         actor,
         "Invite re-sent",
-        `Sent a new invite to ${request.applicantEmail}, valid for ${INVITE_VALID_DAYS} days.`
+        [
+          `Sent a new invite to ${request.applicantEmail}, valid for ${INVITE_VALID_DAYS} days.`,
+          shiftedTrial
+            ? `Trial moved from ${shiftedTrial.from.startsAt} – ${shiftedTrial.from.expiresAt} to ${shiftedTrial.to.startsAt} – ${shiftedTrial.to.expiresAt}.`
+            : ""
+        ].filter(Boolean).join(" "),
+        shiftedTrial ? { shiftedTrial } : undefined
       );
       return buildAdminDetail(updated);
     },

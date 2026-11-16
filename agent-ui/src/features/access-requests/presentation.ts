@@ -245,7 +245,7 @@ export function inviteNotice(
     return {
       tone: "warning",
       message: `邀请已于 ${expiresAt} 过期，申请人现在无法登录`,
-      description: `套餐不受影响。重新发送邀请会给 ${request.applicantEmail} 发一封新邀请邮件，有效期 7 天。`
+      description: `重新发送邀请会给 ${request.applicantEmail} 发一封新邀请邮件，有效期 7 天；申请人没用过的试用期可以一并从今天重新计算。`
     };
   }
   if (request.invite.status === "pending") {
@@ -256,4 +256,25 @@ export function inviteNotice(
     };
   }
   return null;
+}
+
+export type TrialShiftPreview = { fromStart: string; fromEnd: string; toStart: string; toEnd: string };
+
+/** Mirrors the server: an already-started package restarts now and keeps its length. */
+export function trialShiftPreview(
+  subscription: { startsAt: string; expiresAt?: string } | null | undefined,
+  now = new Date(),
+  formatDate: (value: string) => string = formatLocalDate
+): TrialShiftPreview | null {
+  if (!subscription?.expiresAt) return null;
+  const startsAt = new Date(subscription.startsAt).getTime();
+  const expiresAt = new Date(subscription.expiresAt).getTime();
+  if (!Number.isFinite(startsAt) || !Number.isFinite(expiresAt) || startsAt >= now.getTime()) return null;
+  const nextEnd = new Date(now.getTime() + Math.max(0, expiresAt - startsAt));
+  return {
+    fromStart: formatDate(subscription.startsAt),
+    fromEnd: formatDate(subscription.expiresAt),
+    toStart: formatDate(now.toISOString()),
+    toEnd: formatDate(nextEnd.toISOString())
+  };
 }

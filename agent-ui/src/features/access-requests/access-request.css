@@ -628,3 +628,12 @@ body.access-request-route #root {
   font-size: 12px;
   word-break: break-all;
 }
+
+.access-admin-confirm-body {
+  display: grid;
+  gap: 8px;
+}
+
+.access-admin-confirm-body p {
+  margin: 0;
+}

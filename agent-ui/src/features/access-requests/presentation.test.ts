@@ -4,6 +4,7 @@ import {
   accessRequestActionAvailability,
   buildAccessRequestHash,
   inviteNotice,
+  trialShiftPreview,
   readAccessRequestHashState,
   reviewerCandidateMatches,
   reviewerCandidatesForBrand,
@@ -110,5 +111,22 @@ describe("inviteNotice", () => {
     expect(inviteNotice({ status: "activated", applicantEmail: "a@x.hr", invite: expired })).toBeNull();
     expect(inviteNotice({ status: "invited", applicantEmail: "a@x.hr" })).toBeNull();
     expect(inviteNotice({ status: "invited", applicantEmail: "a@x.hr", invite: { ...expired, status: "revoked" } })).toBeNull();
+  });
+});
+
+describe("trialShiftPreview", () => {
+  const now = new Date("2026-11-16T02:00:00.000Z");
+  const format = (value: string) => value.slice(0, 10);
+
+  it("restarts a started package from now and keeps its length", () => {
+    expect(
+      trialShiftPreview({ startsAt: "2026-11-06T05:51:00.000Z", expiresAt: "2027-01-06T05:51:00.000Z" }, now, format)
+    ).toEqual({ fromStart: "2026-11-06", fromEnd: "2027-01-06", toStart: "2026-11-16", toEnd: "2027-01-16" });
+  });
+
+  it("offers nothing for open-ended or not-yet-started packages", () => {
+    expect(trialShiftPreview({ startsAt: "2026-11-06T00:00:00.000Z" }, now, format)).toBeNull();
+    expect(trialShiftPreview({ startsAt: "2026-12-01T00:00:00.000Z", expiresAt: "2027-01-01T00:00:00.000Z" }, now, format)).toBeNull();
+    expect(trialShiftPreview(null, now, format)).toBeNull();
   });
 });

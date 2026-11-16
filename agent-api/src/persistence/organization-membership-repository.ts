@@ -126,6 +126,16 @@ export class OrganizationMembershipRepository {
     return rows.filter((row) => row.status === "active" && row.organization?.status === "active");
   }
 
+  /** True when anyone already holds an active seat in the organization. */
+  async hasActiveMembers(organizationId: string): Promise<boolean> {
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
+    if (!normalizedOrganizationId) return false;
+    const row = await this.db.organizationMembership.findFirst({
+      where: { organizationId: normalizedOrganizationId, status: "active" }
+    });
+    return Boolean(row);
+  }
+
   async getActiveForUserAndOrganization(userId: string, organizationId: string): Promise<OrganizationMembershipRecord | undefined> {
     const normalizedUserId = trimOrUndefined(userId);
     const normalizedOrganizationId = trimOrUndefined(organizationId);

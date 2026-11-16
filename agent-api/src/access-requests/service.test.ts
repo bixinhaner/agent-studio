@@ -99,6 +99,8 @@ function createServiceHarness() {
   const reviewers = new Map<string, AccessRequestReviewerRecord[]>();
   const attachments = new Map<string, AccessRequestAttachmentRecord[]>();
   const invites = new Map<string, OrganizationInviteRecord>();
+  const grants = new Map<string, { planId?: string; status: string; startsAt: string; expiresAt?: string; cycleAnchorAt: string }>();
+  const activeMemberOrgs = new Set<string>();
   const emailSender = {
     send: vi.fn(async (_input: { text?: string; [key: string]: unknown }) => ({ delivered: true, mode: "smtp" as const }))
   };
@@ -303,7 +305,9 @@ function createServiceHarness() {
       create: vi.fn(),
       getBySlug: vi.fn()
     } as never,
-    memberships: {} as never,
+    memberships: {
+      hasActiveMembers: vi.fn(async (organizationId: string) => activeMemberOrgs.has(organizationId))
+    } as never,
     invites: {
       create: vi.fn(async (input: Record<string, unknown>) => {
         const invite: OrganizationInviteRecord = {
@@ -337,7 +341,18 @@ function createServiceHarness() {
       getById: vi.fn(async () => null)
     } as never,
     subscriptionGrants: {
-      upsertForPrincipal: vi.fn()
+      getByPrincipal: vi.fn(async (_type: string, principalId: string) => grants.get(principalId) ?? null),
+      upsertForPrincipal: vi.fn(async (input: { principalId: string; planId?: string | null; status?: string; startsAt: Date; expiresAt?: Date; cycleAnchorAt?: Date }) => {
+        const next = {
+          planId: input.planId ?? undefined,
+          status: input.status ?? "active",
+          startsAt: input.startsAt.toISOString(),
+          expiresAt: input.expiresAt?.toISOString(),
+          cycleAnchorAt: (input.cycleAnchorAt ?? input.startsAt).toISOString()
+        };
+        grants.set(input.principalId, next);
+        return next;
+      })
     } as never,
     policies: {
       getOrCreate: vi.fn(async () => policy),
@@ -411,7 +426,7 @@ function createServiceHarness() {
     ])
   });
 
-  return { service, requests, reviewers, attachments, invites, emailSender, adminNotifier };
+  return { service, requests, reviewers, attachments, invites, grants, activeMemberOrgs, emailSender, adminNotifier };
 }
 
 function randomId(): string {
@@ -663,6 +678,68 @@ describe("access request invites", () => {
 
     harness.requests.set("request_1", buildRequest({ status: "approved_pending_provision" }));
     await expect(harness.service.resendInvite("request_1", { actorType: "admin" })).rejects.toThrow("Provision a package");
+    expect(harness.emailSender.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("re-sending an invite with a shifted trial", () => {
+  function seed(harness: ReturnType<typeof createServiceHarness>) {
+    harness.requests.set("request_1", buildRequest({
+      status: "invited",
+      publicBrandId: "brand_ranley",
+      targetOrganizationId: "org_1",
+      approvedPlanId: "plan_trial"
+    }));
+    harness.grants.set("org_1", {
+      planId: "plan_trial",
+      status: "active",
+      startsAt: "2026-11-06T05:51:00.000Z",
+      expiresAt: "2027-01-06T05:51:00.000Z",
+      cycleAnchorAt: "2026-11-06T05:51:00.000Z"
+    });
+  }
+
+  it("restarts an unused trial from now and keeps its length", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-16T02:00:00.000Z"), toFake: ["Date"] });
+    try {
+      const harness = createServiceHarness();
+      seed(harness);
+
+      const detail = await harness.service.resendInvite("request_1", { actorType: "admin" }, { shiftTrial: true });
+
+      expect(harness.grants.get("org_1")).toEqual({
+        planId: "plan_trial",
+        status: "active",
+        startsAt: "2026-11-16T02:00:00.000Z",
+        expiresAt: "2027-01-16T02:00:00.000Z",
+        cycleAnchorAt: "2026-11-16T02:00:00.000Z"
+      });
+      expect(detail.targetSubscription).toEqual({ startsAt: "2026-11-16T02:00:00.000Z", expiresAt: "2027-01-16T02:00:00.000Z" });
+      expect(harness.emailSender.send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the package alone unless asked", async () => {
+    const harness = createServiceHarness();
+    seed(harness);
+
+    await harness.service.resendInvite("request_1", { actorType: "admin" });
+
+    expect(harness.grants.get("org_1")?.startsAt).toBe("2026-11-06T05:51:00.000Z");
+  });
+
+  it("refuses to shift a package someone in the organization already uses, and sends nothing", async () => {
+    const harness = createServiceHarness();
+    seed(harness);
+    harness.activeMemberOrgs.add("org_1");
+
+    await expect(
+      harness.service.resendInvite("request_1", { actorType: "admin" }, { shiftTrial: true })
+    ).rejects.toThrow("already signed in");
+
+    expect(harness.grants.get("org_1")?.startsAt).toBe("2026-11-06T05:51:00.000Z");
     expect(harness.emailSender.send).not.toHaveBeenCalled();
   });
 });

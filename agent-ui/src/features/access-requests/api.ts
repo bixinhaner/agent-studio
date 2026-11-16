@@ -195,10 +195,13 @@ export async function submitReviewerAccessRequestDecision(
   return fetchReviewerAccessRequest(requestId, reviewToken);
 }
 
-export async function resendAdminAccessRequestInvite(requestId: string): Promise<AdminAccessRequestDetail> {
+export async function resendAdminAccessRequestInvite(
+  requestId: string,
+  input: { shiftTrial?: boolean } = {}
+): Promise<AdminAccessRequestDetail> {
   const payload = await api<{ request: AdminAccessRequestDetail }>(
     `/api/admin/access-requests/${encodeURIComponent(requestId)}/resend-invite`,
-    { method: "POST" }
+    { method: "POST", json: input }
   );
   return payload.request;
 }
