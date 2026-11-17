@@ -100,6 +100,37 @@ function extractRuntimeUsageFromStreamEvent(value) {
   return turn ?? parseUsageRecord(usage2, "cumulative_snapshot", { codexThreadId });
 }
 
+// src/operations/time-of-day-pricing.ts
+var WEEKDAYS = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+function minutes(value) {
+  const [hours, mins] = value.split(":").map(Number);
+  return hours * 60 + mins;
+}
+function pricingPeriodAt(pricing, at) {
+  if (!pricing) return { period: "peak", multiplier: 1 };
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: pricing.timezone,
+      weekday: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(at).map((part) => [part.type, part.value])
+  );
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const weekday = pricing.workdayDates?.includes(date) ? 1 : WEEKDAYS[parts.weekday];
+  const minuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
+  const offPeak = { period: "off_peak", multiplier: pricing.offPeakMultiplier };
+  if (pricing.offPeakDates?.includes(date)) return offPeak;
+  const inPeak = pricing.peakWindows.some(
+    (window) => window.weekdays.includes(weekday) && minuteOfDay >= minutes(window.start) && minuteOfDay < minutes(window.end)
+  );
+  return inPeak ? { period: "peak", multiplier: 1 } : offPeak;
+}
+
 // src/operations/usage-metrics.ts
 function billableUncachedInputTokens(inputTokens, cachedInputTokens) {
   return Math.max(0, inputTokens - cachedInputTokens);
@@ -167,7 +198,9 @@ function calculateEstimatedCost(input) {
       longContextInvocationCount: 0,
       maxInvocationInputTokens: 0,
       longContextPricingBasis,
-      longContextPricingComplete: longContextPricingBasis === "aggregate_request"
+      longContextPricingComplete: longContextPricingBasis === "aggregate_request",
+      pricingPeriod: "peak",
+      timeOfDayMultiplier: 1
     };
   }
   const inputTokenPrice = pricePerToken(parseDecimal(input.profile.inputTokenPrice));
@@ -205,7 +238,8 @@ function calculateEstimatedCost(input) {
     const normalOutputCost = invocation.outputTokens * outputTokenPrice;
     return sum + normalInputCost * (inputPriceMultiplier - 1) + normalOutputCost * (outputPriceMultiplier - 1);
   }, 0);
-  const estimated = baseEstimated + longContextExtra;
+  const timeOfDay = pricingPeriodAt(input.profile.timeOfDayPricing, input.pricedAt ?? /* @__PURE__ */ new Date());
+  const estimated = (baseEstimated + longContextExtra) * timeOfDay.multiplier;
   const internal = estimated * internalCostMultiplier;
   const maxInvocationInputTokens = candidates.reduce((max, invocation) => Math.max(max, invocation.inputTokens), 0);
   return {
@@ -215,7 +249,9 @@ function calculateEstimatedCost(input) {
     longContextInvocationCount: longInvocations.length,
     maxInvocationInputTokens,
     longContextPricingBasis,
-    longContextPricingComplete: longContextPricingBasis === "aggregate_request" || pricingInvocations.complete
+    longContextPricingComplete: longContextPricingBasis === "aggregate_request" || pricingInvocations.complete,
+    pricingPeriod: timeOfDay.period,
+    timeOfDayMultiplier: timeOfDay.multiplier
   };
 }
 
@@ -232,6 +268,8 @@ var MODEL_NOTES_SOURCE_URLS = [
 ];
 var PRICING = {
   standard: {
+    "gpt-6.2-sol": withLongContext({ input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 }),
+    "gpt-6.2-astra": withLongContext({ input: 8, cachedInput: 0.4, cacheWrite: 10, output: 40 }),
     "gpt-6.1-sol": withLongContext({ input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 }),
     "gpt-6-sol": withLongContext({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }),
     "gpt-6-luna": withLongContext({ input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 }),
@@ -261,6 +299,8 @@ var PRICING = {
     "o3-mini": { input: 1.1, cachedInput: 0.55, output: 4.4 }
   },
   batch: {
+    "gpt-6.2-sol": withLongContext({ input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 }),
+    "gpt-6.2-astra": withLongContext({ input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 }),
     "gpt-6.1-sol": withLongContext({ input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 }),
     "gpt-6-sol": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }),
     "gpt-6-luna": withLongContext({ input: 0.05, cachedInput: 5e-3, cacheWrite: 0.0625, output: 0.25 }),
@@ -309,6 +349,8 @@ var PRICING = {
     "o4-mini": { input: 0.55, cachedInput: 0.138, output: 2.2 }
   },
   priority: {
+    "gpt-6.2-sol": withLongContext({ input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 }),
+    "gpt-6.2-astra": withLongContext({ input: 16, cachedInput: 0.8, cacheWrite: 20, output: 80 }),
     "gpt-6.1-sol": withLongContext({ input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 }),
     "gpt-6-sol": withLongContext({ input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 }),
     "gpt-6-luna": withLongContext({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1 }),
@@ -545,6 +587,8 @@ function localDateTime(date, timezone) {
 function normalizeModel(model) {
   const normalized = model.trim();
   for (const base of [
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",

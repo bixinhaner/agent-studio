@@ -6,6 +6,13 @@ import {
 } from "./model-config.js";
 
 describe("model-config", () => {
+  it.each(["gpt-6.2-sol", "gpt-6.2-astra"])("normalizes %s efforts using the verified Codex capabilities", (id) => {
+    expect(normalizeReasoningEffortForModel(id, "high")).toBe("high");
+    expect(normalizeReasoningEffortForModel(id, "ultra")).toBe("ultra");
+    expect(normalizeReasoningEffortForModel(id, "none")).toBe("low");
+    expect(normalizeReasoningEffortForModel(id, "minimal")).toBe("low");
+  });
+
   it("normalizes GPT-6.1 Sol efforts using the verified Codex capabilities", () => {
     expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "high")).toBe("high");
     expect(normalizeReasoningEffortForModel("gpt-6.1-sol", "ultra")).toBe("ultra");

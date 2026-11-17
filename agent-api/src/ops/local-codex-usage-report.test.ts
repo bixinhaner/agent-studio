@@ -43,11 +43,19 @@ function snapshot(input: {
 
 describe("local Codex usage report pricing", () => {
   it.each([
+    ["gpt-6.2-sol", 2, .1, 2.5, 10],
+    ["gpt-6.2-astra", 8, .4, 10, 40],
     ["gpt-6.1-sol", 2, .1, 2.5, 10],
     ["gpt-6-sol", 2, .2, 2.5, 10],
     ["gpt-6-luna", .1, .01, .125, .5]
   ] as const)("prices %s cached reads, writes, snapshots and tiers", (model, input, cached, write, output) => {
+    // OpenAI publishes no Flex tier for GPT-6.2; keep it unpriced instead of guessing.
+    const noFlex = model.startsWith("gpt-6.2-");
+    if (noFlex) {
+      expect(estimatedCost({model, tier: "flex", inputTokens: 1000, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0}).cost).toBeUndefined();
+    }
     for (const [tier, multiplier] of [["standard", 1], ["batch", .5], ["flex", .5], ["priority", 2]] as const) {
+      if (noFlex && tier === "flex") continue;
       for (const tokens of [272000, 272001]) {
         const long = tokens > 272000;
         const expected = (((tokens - 50000) * input + 20000 * cached + 30000 * write) * (long ? 2 : 1) + 10000 * output * (long ? 1.5 : 1)) * multiplier / 1e6;

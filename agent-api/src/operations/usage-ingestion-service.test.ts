@@ -20,6 +20,18 @@ const profile: CostProfileRecord = {
 };
 
 describe("UsageIngestionService", () => {
+  it("prices GPT-6.2 Astra cached reads and long context at the 272K boundary", () => {
+    const astra62: CostProfileRecord = { ...profile, model: "gpt-6.2-astra",
+      inputTokenPrice: "8", cachedInputTokenPrice: "0.4", cacheWriteTokenPrice: "10", outputTokenPrice: "40",
+      internalCostMultiplier: "0.1", longContextThresholdTokens: 272000,
+      longContextInputMultiplier: "2", longContextOutputMultiplier: "1.5" };
+    const cost = (inputTokens: number) => calculateEstimatedCost({ profile: astra62, inputTokens,
+      cachedInputTokens: 20000, cacheWriteTokens: 10000, outputTokens: 10000, cacheWriteTelemetryAvailable: true });
+    expect(cost(100000)).toMatchObject({ estimatedCost: "1.068000", internalCost: "0.106800", longContextApplied: false });
+    expect(cost(272000)).toMatchObject({ estimatedCost: "2.444000", longContextApplied: false });
+    expect(cost(272001)).toMatchObject({ estimatedCost: "4.688016", longContextApplied: true });
+  });
+
   it("prices GPT-6.1 Sol cached reads separately and preserves the 272K boundary", () => {
     const sol61: CostProfileRecord = { ...profile, model: "gpt-6.1-sol",
       inputTokenPrice: "2", cachedInputTokenPrice: "0.1", cacheWriteTokenPrice: "2.5", outputTokenPrice: "10",
