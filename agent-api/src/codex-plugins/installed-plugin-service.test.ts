@@ -58,6 +58,29 @@ printf '%s\\n' 'pdf@office not installed /tmp/pdf'
     ]);
   });
 
+  it("ignores remote catalog rows and unreadable manifests instead of failing the whole list", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "installed-plugins-"));
+    roots.push(root);
+    const pluginPath = path.join(root, "documents");
+    await fs.mkdir(path.join(pluginPath, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(path.join(pluginPath, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "documents", version: "1.2.3" }));
+    const executable = path.join(root, "fake-codex");
+    // Shape of `codex plugin list` on Codex 0.169.0: a remote marketplace whose SOURCE is a catalog id.
+    await fs.writeFile(executable, `#!/bin/sh
+printf '%s\\n' 'PLUGIN                        STATUS              VERSION  SOURCE'
+printf '%s\\n' '${`documents@agentstudio-office  installed, enabled  1.2.3    ${pluginPath}`}'
+printf '%s\\n' 'Marketplace \`openai-curated-remote\`'
+printf '%s\\n' 'Remote catalog'
+printf '%s\\n' 'visualize@openai-curated-remote  installed, enabled  1.0.89  plugin_connector_1p_e27075fa9af48191968b90b68ab08ba3'
+printf '%s\\n' '${`pdf@agentstudio-office  installed, enabled  1.0.0  ${path.join(root, "missing-pdf")}`}'
+`);
+    await fs.chmod(executable, 0o755);
+
+    const service = new InstalledPluginService({ baseHome: root, executable, cacheTtlMs: 0 });
+    const records = await service.list();
+    expect(records.map((record) => record.pluginRef)).toEqual(["documents@agentstudio-office"]);
+  });
+
   async function visualizeFixture(input: { installedVersion: string; installedSkill: string; repoSkill: string; repoVersion: string }) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "installed-plugins-"));
     roots.push(root);

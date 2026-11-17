@@ -257,14 +257,27 @@ export class InstalledPluginService {
     const records: InstalledPluginRecord[] = [];
     for (const line of stdout.split(/\r?\n/)) {
       const installed = parseInstalledPluginLine(line);
-      if (!installed) continue;
+      // Codex 0.169+ also lists remote catalogs (e.g. openai-curated-remote) whose
+      // SOURCE column is a catalog id, not a directory; only local plugins have a manifest here.
+      if (!installed || !path.isAbsolute(installed.sourcePath)) continue;
       const separator = installed.pluginRef.lastIndexOf("@");
       const name = installed.pluginRef.slice(0, separator).trim();
       const marketplace = installed.pluginRef.slice(separator + 1).trim();
       if (!name || !marketplace || !this.visiblePluginNames.has(name.toLowerCase())) continue;
 
       const manifestPath = path.join(installed.sourcePath, ".codex-plugin", "plugin.json");
-      const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as PluginManifest;
+      let manifest: PluginManifest;
+      try {
+        manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as PluginManifest;
+      } catch (error) {
+        // One unreadable plugin must not take down portal runtime options for everyone.
+        console.warn("installed plugin manifest unreadable; skipping", {
+          pluginRef: installed.pluginRef,
+          manifestPath,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        continue;
+      }
       const manifestName = text(manifest.name) ?? name;
       const manifestVersion = text(manifest.version) ?? installed.version;
       const interfaceConfig = manifest.interface ?? {};
