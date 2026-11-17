@@ -10,6 +10,7 @@ import {
   ensureInternalOrganization,
   INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
 } from "./internal-organization.js";
+import { resolveCrestUser } from "./crest-user.js";
 import type { OAuthStateCookieManager, SessionCookieManager } from "./session-cookie.js";
 import type { AuthIdentityRepository } from "../persistence/auth-identity-repository.js";
 import type { CrestDelegationCredentialRepository } from "../persistence/crest-delegation-credential-repository.js";
@@ -302,73 +303,6 @@ async function exchangeCrestSsoCode(config: Required<CrestSsoConfig>, code: stri
     throw new Error(detail || "Crest SSO exchange failed");
   }
   return crestExchangeResponseSchema.parse(data);
-}
-
-export async function resolveCrestUser(options: {
-  users: UserRepositoryLike;
-  identities: AuthIdentityRepository;
-  memberships: OrganizationMembershipRepository;
-  organizations: OrganizationRepository;
-  identity: CrestExchangeIdentity;
-}) {
-  const internalOrganization = await ensureInternalOrganization(options.organizations);
-  const providerSubject = `crest:${options.identity.user.id}`;
-  const email = toEmail(options.identity.user.email ?? options.identity.user.domainName);
-  const displayName = trimOrUndefined(options.identity.user.fullName) ?? email ?? providerSubject;
-
-  const existingIdentity = await options.identities.getByProviderSubject("crest", providerSubject);
-  let user =
-    (existingIdentity ? await options.users.getById(existingIdentity.userId) : undefined) ??
-    (await options.users.getByExternalId(providerSubject)) ??
-    (email && options.users.getByEmail ? await options.users.getByEmail(email) : undefined);
-
-  if (!user) {
-    if (!options.users.createUser) {
-      throw new Error("user repository does not support creating users");
-    }
-    user = await options.users.createUser({
-      externalId: providerSubject,
-      email: email ?? null,
-      displayName,
-      userType: "internal_employee",
-      primaryOrganizationId: internalOrganization.id,
-      role: "employee"
-    });
-  } else if (options.users.updateUserProfile) {
-    user = await options.users.updateUserProfile({
-      userId: user.id,
-      externalId: providerSubject,
-      email: email ?? user.email ?? null,
-      displayName: displayName ?? user.displayName ?? null,
-      userType: "internal_employee",
-      primaryOrganizationId: user.primaryOrganizationId ?? internalOrganization.id
-    });
-  }
-
-  await options.identities.upsert({
-    userId: user.id,
-    provider: "crest",
-    providerSubject,
-    email: email ?? user.email ?? null,
-    emailVerifiedAt: email ? new Date() : null,
-    profileJson: {
-      crestUser: options.identity.user,
-      ...(options.identity.delegationRefreshToken ? {} : { delegationToken: options.identity.delegationToken }),
-      delegationExpiresAt: options.identity.delegationExpiresAt,
-      delegationRefreshExpiresAt: options.identity.delegationRefreshExpiresAt ?? null
-    },
-    lastLoginAt: new Date()
-  });
-
-  await options.memberships.upsert({
-    organizationId: internalOrganization.id,
-    userId: user.id,
-    membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
-    status: "active",
-    joinedAt: new Date()
-  });
-
-  return { user, organizationId: internalOrganization.id };
 }
 
 function canCreateInvite(req: Request): boolean {

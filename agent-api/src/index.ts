@@ -39,7 +39,8 @@ import { createAdminAccessRequestRouter } from "./access-requests/admin-router.j
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
 import { createAccessRequestService } from "./access-requests/service.js";
-import { createAuthRouter, resolveCrestUser } from "./auth/router.js";
+import { resolveCrestUser } from "./auth/crest-user.js";
+import { createAuthRouter } from "./auth/router.js";
 import {
   createCurrentUserMiddleware,
   requireCurrentOrganization,
