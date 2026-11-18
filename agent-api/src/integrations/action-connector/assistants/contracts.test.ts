@@ -101,3 +101,17 @@ describe("assistant check rule", () => {
     expect(acceptedWatch(watch, "finding", called, "/api/agent/")).toEqual(watch);
   });
 });
+
+describe("assistant result assessments", () => {
+  const base = { outcome: "finding", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [] };
+  it("accepts optional severity, confidence and details", () => {
+    expect(resultSchema.parse(base)).not.toHaveProperty("severity");
+    expect(resultSchema.parse({ ...base, severity: "critical", confidence: 1, details: { a: 1 } })).toMatchObject({ severity: "critical", confidence: 1, details: { a: 1 } });
+  });
+  it("rejects assessments outside their ranges", () => {
+    expect(() => resultSchema.parse({ ...base, severity: "urgent" })).toThrow();
+    expect(() => resultSchema.parse({ ...base, confidence: 1.5 })).toThrow();
+    expect(() => resultSchema.parse({ ...base, details: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`k${i}`, i])) })).toThrow();
+  });
+});
+

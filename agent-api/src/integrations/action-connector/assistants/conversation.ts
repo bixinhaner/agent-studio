@@ -10,11 +10,21 @@ export function assistantConversationId(request: ExecutionRequest, run: { id: st
   const grants = request.definition.apiAccess === "discover"
     ? (request.toolGrants ?? []).filter((g) => methods.includes(g.method)).map((g) => `${g.method}:${g.operationId}`)
     : request.definition.operations.map((id) => `GET:${id}`);
+  const blockedPaths = [...new Set(request.toolPolicy?.blockedPathPrefixes ?? [])].sort();
+  // A keyed conversation follows its subject across assistants of the same
+  // principal: the source's key already binds the principal, subject and
+  // methods, and each run's own grants still decide which tools it may call.
+  if (request.conversationKey) {
+    const keyed = createHash("sha256").update(JSON.stringify({
+      principal: request.contextScopeDigest, methods, blockedPaths, key: request.conversationKey,
+    })).digest("hex");
+    return `assistant-ctx-${keyed}`;
+  }
   const scope = createHash("sha256").update(JSON.stringify({
     principal: request.contextScopeDigest,
     resource: { kind: request.definition.scope.kind, deviceId: request.definition.scope.deviceId ?? null },
     methods, grants: [...new Set(grants)].sort(),
-    blockedPaths: [...new Set(request.toolPolicy?.blockedPathPrefixes ?? [])].sort(),
+    blockedPaths,
   })).digest("hex");
   // Connector and external owner are also part of the shared runtime's binding.
   // Goal, revision, trigger, run and attempt intentionally do not change it.
