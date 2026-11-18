@@ -120,6 +120,62 @@ describe("createTeamUsageService", () => {
     expect(result.totals).toEqual({ members: 4, active_members: 2, total_tokens: 700, turns: 7, tasks: 3 });
   });
 
+  it("leaves Codex background work and security reviews out of every portal total", async () => {
+    const { svc, ledger } = service();
+    await svc.ranking({ viewerId: "lead", period: "month" });
+    await svc.team({ viewerId: "lead", period: "month" });
+    await svc.company({ viewerId: "lead", period: "month" });
+    for (const [call] of ledger.sumByUserInRange.mock.calls) {
+      expect(call).toMatchObject({ excludeFeatureTypes: ["codex_background", "security_review"] });
+    }
+    expect(ledger.sumByUserInRange).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows every employee the company: top departments and a ranking of people who used it, without ids", async () => {
+    const { svc } = service();
+    const result = await svc.company({ viewerId: "c", period: "month", timezone: "Asia/Shanghai" });
+    expect(result.totals).toEqual({ members: 8, active_members: 3, total_tokens: 1600, turns: 16 });
+    expect(result.inactive_members).toBe(5);
+    // c sits in eng-fe, which rolls up into eng; b's secondary memberships count once (eng).
+    expect(result.departments).toEqual([
+      { id: "sales", name: "Sales", members: 1, active_members: 1, total_tokens: 900, turns: 9, led: false, mine: false },
+      { id: "eng", name: "Engineering", members: 4, active_members: 2, total_tokens: 700, turns: 7, led: false, mine: true }
+    ]);
+    expect(result.people).toEqual([
+      { rank: 1, user_id: null, name: "Zed", department: "Sales", total_tokens: 900, turns: 9, self: false },
+      { rank: 2, user_id: null, name: "Alice", department: "Engineering", total_tokens: 500, turns: 5, self: false },
+      { rank: 3, user_id: null, name: "Lead", department: "Engineering", total_tokens: 200, turns: 2, self: false }
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(/member_ids|last_active|lastActive/);
+    expect(result.team).toEqual({ available: false, size: 0 });
+  });
+
+  it("lets a leader open their own departments and in-scope people from the company view", async () => {
+    const { svc } = service();
+    const result = await svc.company({ viewerId: "lead", period: "month" });
+    expect(result.departments.map((item) => [item.id, item.led, item.mine])).toEqual([["sales", false, false], ["eng", true, true]]);
+    expect(result.people.map((item) => [item.name, item.user_id, item.self])).toEqual([
+      ["Zed", null, false],
+      ["Alice", "a", false],
+      ["Lead", "lead", true]
+    ]);
+  });
+
+  it("shares a rank between people with the same tokens", async () => {
+    const { svc, ledger } = service();
+    ledger.sumByUserInRange.mockImplementationOnce(async () => [
+      { userId: "a", totalTokens: 300, turns: 3, tasks: 1, lastActiveAt: null },
+      { userId: "z", totalTokens: 300, turns: 2, tasks: 1, lastActiveAt: null },
+      { userId: "c", totalTokens: 100, turns: 1, tasks: 1, lastActiveAt: null }
+    ]);
+    const result = await svc.company({ viewerId: "c", period: "month" });
+    expect(result.people.map((item) => [item.name, item.rank, item.user_id])).toEqual([
+      ["Alice", 1, null],
+      ["Zed", 1, null],
+      ["Carol", 3, "c"]
+    ]);
+  });
+
   it("leaves the viewer out when they are not inside the departments they see", async () => {
     const { svc } = service();
     const result = await svc.team({ viewerId: "boss", period: "month" });

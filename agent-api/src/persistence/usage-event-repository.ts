@@ -62,7 +62,16 @@ export type ListUsageEventsByExactRangeInput = {
   from: string | Date;
   to: string | Date;
   take?: number;
+  /** Feature types to leave out, e.g. Codex background work the user never asked for. */
+  excludeFeatureTypes?: string[];
 };
+
+function featureTypeWhere(featureType: string | undefined, excludeFeatureTypes: string[] | undefined) {
+  const included = trimOrUndefined(featureType);
+  const excluded = (excludeFeatureTypes ?? []).filter(Boolean);
+  if (excluded.length === 0) return included;
+  return included ? { equals: included, notIn: excluded } : { notIn: excluded };
+}
 
 type UsageEventRow = {
   id: string;
@@ -111,7 +120,7 @@ type UsageEventTable = {
       userId?: string;
       departmentIdSnapshot?: string;
       model?: string;
-      featureType?: string;
+      featureType?: string | { equals?: string; notIn?: string[] };
       resultStatus?: string;
       sessionId?: string;
       createdAt?: { gte?: Date; lt?: Date };
@@ -435,12 +444,19 @@ export class UsageEventRepository {
   }
 
   /** Per-user token / turn / task totals for an exact range; total tokens = input + output. */
-  async sumByUserInRange(input: { from: string | Date; to: string | Date; userIds?: string[] }): Promise<UsageUserTotals[]> {
+  async sumByUserInRange(input: {
+    from: string | Date;
+    to: string | Date;
+    userIds?: string[];
+    excludeFeatureTypes?: string[];
+  }): Promise<UsageUserTotals[]> {
     const groupBy = this.db.usageEvent.groupBy?.bind(this.db.usageEvent);
     if (!groupBy) throw new Error("usage aggregation requires groupBy support");
     if (input.userIds && input.userIds.length === 0) return [];
+    const featureType = featureTypeWhere(undefined, input.excludeFeatureTypes);
     const where = {
       userId: input.userIds ? { in: input.userIds } : { not: null },
+      ...(featureType ? { featureType } : {}),
       createdAt: { gte: toExactDate(input.from), lt: toExactDate(input.to) }
     };
     const [totals, threads] = await Promise.all([
@@ -472,7 +488,7 @@ export class UsageEventRepository {
         userId: trimOrUndefined(input.userId),
         departmentIdSnapshot: trimOrUndefined(input.departmentIdSnapshot),
         model: trimOrUndefined(input.model),
-        featureType: trimOrUndefined(input.featureType),
+        featureType: featureTypeWhere(input.featureType, input.excludeFeatureTypes),
         resultStatus: trimOrUndefined(input.resultStatus),
         sessionId: trimOrUndefined(input.sessionId),
         createdAt: {

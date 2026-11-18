@@ -137,7 +137,7 @@ export class UsageLedgerService {
     return this.deps.usageEvents.listByExactCreatedAtRange(input);
   }
 
-  async sumByUserInRange(input: { from: string | Date; to: string | Date; userIds?: string[] }) {
+  async sumByUserInRange(input: { from: string | Date; to: string | Date; userIds?: string[]; excludeFeatureTypes?: string[] }) {
     if (!this.deps.usageEvents.sumByUserInRange) throw new Error("usage aggregation is not available");
     return this.deps.usageEvents.sumByUserInRange(input);
   }

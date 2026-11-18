@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, Empty, Input, Segmented, Skeleton, Tooltip } from "antd";
-import { ArrowLeft, BarChart3, Building2, ChevronRight, Search, Trophy } from "lucide-react";
+import { ArrowLeft, BarChart3, Building2, ChevronRight, Search, Trophy, Users } from "lucide-react";
 
 import { formatListTimestamp } from "../../../lib/formatters";
 import { usePortalI18n, type PortalMessageKey } from "../i18n";
 import {
+  fetchCompanyUsage,
   fetchPersonalUsage,
   fetchTeamMemberUsage,
   fetchTeamUsage,
   fetchUsageRanking,
+  type CompanyPersonRow,
+  type CompanyUsageSummary,
   type PersonalUsagePeriod,
   type PersonalUsageSummary,
   type TeamDepartmentNode,
@@ -279,11 +282,18 @@ function UsageSummaryBody(props: {
   );
 }
 
-function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpenMember(userId: string): void; onOpenSelf(): void }) {
+function TeamView(props: {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  initialFocusId?: string | null;
+  onOpenMember(userId: string): void;
+  onOpenSelf(): void;
+  onBackToCompany(): void;
+}) {
   const { t, intlLocale } = usePortalI18n();
   const turnCount = useTurnCount();
   const [query, setQuery] = useState("");
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(props.initialFocusId ?? null);
   const fetcher = useCallback(() => fetchTeamUsage(props.period, props.timezone), [props.period, props.timezone]);
   const { data, error, loading, reload } = useLoader<TeamUsageSummary>(true, fetcher);
   const number = (value: number) => new Intl.NumberFormat(intlLocale).format(value);
@@ -331,11 +341,16 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
   const maxDepartmentTokens = Math.max(1, ...childDepartments.map((item) => item.total_tokens));
   return (
     <>
-      {departments.length ? (
-        <nav className="usage-team-trail" aria-label={t("usage.team.trail")}>
+      <nav className="usage-team-trail" aria-label={t("usage.team.trail")}>
+        <button type="button" onClick={props.onBackToCompany}>
+          {t("usage.company.backToCompany")}
+        </button>
+        <span>
+          <ChevronRight size={12} aria-hidden="true" />
           <button type="button" onClick={() => setFocusId(null)} aria-current={focus ? undefined : "page"}>
-            {t("usage.team.all")}
+            {t("usage.company.myTeam")}
           </button>
+        </span>
           {trail.map((node) => (
             <span key={node.id}>
               <ChevronRight size={12} aria-hidden="true" />
@@ -344,8 +359,7 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
               </button>
             </span>
           ))}
-        </nav>
-      ) : null}
+      </nav>
 
       <div className="usage-stats">
         <div>
@@ -458,7 +472,208 @@ function TeamView(props: { period: PersonalUsagePeriod; timezone: string; onOpen
   );
 }
 
-function MemberView(props: { userId: string; period: PersonalUsagePeriod; timezone: string; onBack(): void }) {
+const COMPANY_PAGE_SIZE = 50;
+
+function CompanyPersonItem(props: {
+  person: CompanyPersonRow;
+  maxTokens: number;
+  onOpenMember(userId: string): void;
+  onOpenSelf(): void;
+}) {
+  const { t, intlLocale } = usePortalI18n();
+  const turnCount = useTurnCount();
+  const { person } = props;
+  const openable = person.self || Boolean(person.user_id);
+  const content = (
+    <>
+      <span className="usage-team-person">
+        <span className="usage-team-name">
+          <span className="usage-team-rank">{person.rank}</span>
+          <span className="usage-team-label">{person.name}</span>
+          {person.self ? <span className="usage-team-relation is-self">{t("usage.team.relation.self")}</span> : null}
+        </span>
+        <span className="usage-team-meta usage-team-meta-indent">{person.department ?? "—"}</span>
+      </span>
+      <span className="usage-team-usage">
+        <span className="usage-team-tokens">{person.total_tokens > 0 ? formatTokens(person.total_tokens, intlLocale) : "—"}</span>
+        <span className="usage-breakdown-track" aria-hidden="true">
+          <span style={{ width: person.total_tokens > 0 ? `${Math.max(2, (person.total_tokens / props.maxTokens) * 100)}%` : 0 }} />
+        </span>
+        <span className="usage-team-meta">{turnCount(person.turns)}</span>
+      </span>
+      {openable ? <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" /> : <span aria-hidden="true" />}
+    </>
+  );
+  if (!openable) return <div className={`usage-team-row is-static${person.self ? " is-self" : ""}`}>{content}</div>;
+  return (
+    <button
+      type="button"
+      className={`usage-team-row${person.self ? " is-self" : ""}`}
+      onClick={() => (person.self ? props.onOpenSelf() : props.onOpenMember(person.user_id!))}
+    >
+      {content}
+    </button>
+  );
+}
+
+function CompanyView(props: {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  onOpenTeam(departmentId: string | null): void;
+  onOpenMember(userId: string): void;
+  onOpenSelf(): void;
+}) {
+  const { t, intlLocale } = usePortalI18n();
+  const turnCount = useTurnCount();
+  const [query, setQuery] = useState("");
+  const [visible, setVisible] = useState(COMPANY_PAGE_SIZE);
+  const fetcher = useCallback(() => fetchCompanyUsage(props.period, props.timezone), [props.period, props.timezone]);
+  const { data, error, loading, reload } = useLoader<CompanyUsageSummary>(true, fetcher);
+  const number = (value: number) => new Intl.NumberFormat(intlLocale).format(value);
+  const people = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (data?.people ?? []).filter((person) => !needle || [person.name, person.department].some((value) => value?.toLowerCase().includes(needle)));
+  }, [data, query]);
+
+  useEffect(() => setVisible(COMPANY_PAGE_SIZE), [query, props.period]);
+
+  if (error) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message={t("usage.company.loadFailed")}
+        action={<Button size="small" onClick={() => void reload()}>{t("usage.retry")}</Button>}
+      />
+    );
+  }
+  if (!data || (loading && data.period !== props.period)) return <Skeleton active paragraph={{ rows: 8 }} />;
+  const maxDepartmentTokens = Math.max(1, ...data.departments.map((item) => item.total_tokens));
+  const maxTokens = Math.max(1, ...data.people.map((person) => person.total_tokens));
+  const shown = people.slice(0, visible);
+  const self = people.find((person) => person.self);
+  const selfHidden = Boolean(self && !shown.includes(self));
+  return (
+    <>
+      <div className="usage-stats">
+        <div>
+          <span>{t("usage.team.members")}</span>
+          <strong>{number(data.totals.members)}</strong>
+        </div>
+        <div>
+          <span>{t("usage.team.active")}</span>
+          <strong>{number(data.totals.active_members)}</strong>
+          <small className="is-neutral">
+            {new Intl.NumberFormat(intlLocale, { style: "percent", maximumFractionDigits: 0 }).format(
+              data.totals.members ? data.totals.active_members / data.totals.members : 0
+            )}
+          </small>
+        </div>
+        <div>
+          <span>{t("usage.totalTokens")}</span>
+          <strong>{formatTokens(data.totals.total_tokens, intlLocale)}</strong>
+        </div>
+      </div>
+
+      {data.team.available ? (
+        <button type="button" className="usage-team-row usage-team-entry" onClick={() => props.onOpenTeam(null)}>
+          <span className="usage-team-person">
+            <span className="usage-team-name">
+              <Users size={14} aria-hidden="true" className="usage-team-dept-icon" />
+              <span className="usage-team-label">{t("usage.company.myTeam")}</span>
+            </span>
+            <span className="usage-team-meta">{t("usage.company.myTeamMeta", { count: number(data.team.size) })}</span>
+          </span>
+          <span aria-hidden="true" />
+          <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" />
+        </button>
+      ) : null}
+
+      {data.departments.length ? (
+        <section className="usage-breakdown">
+          <h3>{t("usage.company.departments")}</h3>
+          <ul className="usage-team-list">
+            {data.departments.map((node) => {
+              const content = (
+                <>
+                  <span className="usage-team-person">
+                    <span className="usage-team-name">
+                      <Building2 size={14} aria-hidden="true" className="usage-team-dept-icon" />
+                      <span className="usage-team-label">{node.name}</span>
+                      {node.mine ? <span className="usage-team-relation is-self">{t("usage.company.myDepartment")}</span> : null}
+                    </span>
+                    <span className="usage-team-meta">
+                      {t("usage.team.deptMeta", { active: number(node.active_members), members: number(node.members) })}
+                    </span>
+                  </span>
+                  <span className="usage-team-usage">
+                    <span className="usage-team-tokens">{node.total_tokens > 0 ? formatTokens(node.total_tokens, intlLocale) : "—"}</span>
+                    <span className="usage-breakdown-track" aria-hidden="true">
+                      <span style={{ width: node.total_tokens > 0 ? `${Math.max(2, (node.total_tokens / maxDepartmentTokens) * 100)}%` : 0 }} />
+                    </span>
+                    <span className="usage-team-meta">{node.turns > 0 ? turnCount(node.turns) : t("usage.team.noUsage")}</span>
+                  </span>
+                  {node.led ? <ChevronRight size={16} aria-hidden="true" className="usage-team-chevron" /> : <span aria-hidden="true" />}
+                </>
+              );
+              return (
+                <li key={node.id}>
+                  {node.led ? (
+                    <button type="button" className="usage-team-row" onClick={() => props.onOpenTeam(node.id)}>
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="usage-team-row is-static">{content}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="usage-breakdown">
+        <h3>{t("usage.company.people", { count: number(data.people.length) })}</h3>
+        <p className="usage-note">{t("usage.company.tokenNote")}</p>
+        <Input
+          allowClear
+          prefix={<Search size={14} aria-hidden="true" />}
+          placeholder={t("usage.team.search")}
+          aria-label={t("usage.team.search")}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {people.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("usage.team.noMatch")} />
+        ) : (
+          <ul className="usage-team-list">
+            {shown.map((person) => (
+              <li key={`${person.rank}-${person.name}-${person.user_id ?? ""}`}>
+                <CompanyPersonItem person={person} maxTokens={maxTokens} onOpenMember={props.onOpenMember} onOpenSelf={props.onOpenSelf} />
+              </li>
+            ))}
+            {selfHidden && self ? (
+              <li className="usage-team-pinned">
+                <CompanyPersonItem person={self} maxTokens={maxTokens} onOpenMember={props.onOpenMember} onOpenSelf={props.onOpenSelf} />
+              </li>
+            ) : null}
+          </ul>
+        )}
+        {people.length > shown.length ? (
+          <Button block onClick={() => setVisible((count) => count + COMPANY_PAGE_SIZE)}>
+            {t("usage.company.loadMore", { count: number(people.length - shown.length) })}
+          </Button>
+        ) : null}
+        {data.inactive_members > 0 && !query.trim() ? (
+          <p className="usage-note usage-team-footnote">{t("usage.company.inactive", { count: number(data.inactive_members) })}</p>
+        ) : null}
+      </section>
+      <p className="usage-note">{t("usage.company.note")}</p>
+    </>
+  );
+}
+
+function MemberView(props: { userId: string; period: PersonalUsagePeriod; timezone: string; backLabel: string; onBack(): void }) {
   const { t } = usePortalI18n();
   const fetcher = useCallback(
     () => fetchTeamMemberUsage(props.userId, props.period, props.timezone),
@@ -470,7 +685,7 @@ function MemberView(props: { userId: string; period: PersonalUsagePeriod; timezo
     <>
       <div className="usage-member-header">
         <Button type="text" size="small" icon={<ArrowLeft size={14} aria-hidden="true" />} onClick={props.onBack}>
-          {t("usage.team.back")}
+          {props.backLabel}
         </Button>
         {member ? (
           <div className="usage-member-title">
@@ -505,10 +720,16 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
   // Ranking is a side card; a failure just hides it instead of blocking the personal view.
   const ranking = useLoader<UsageRanking>(props.open, rankingFetcher);
   const rankingData = ranking.data?.period === period ? ranking.data : null;
-  const teamAvailable = Boolean(ranking.data?.team.available);
+  // Everyone sees the company view; leaders can open their own team from it.
+  const companyAvailable = Boolean(ranking.data && ranking.data.company.size > 0);
+  // undefined: company overview; null: the viewer's team root; id: a led department.
+  const [teamFocus, setTeamFocus] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (!props.open) setMemberId(null);
+    if (!props.open) {
+      setMemberId(null);
+      setTeamFocus(undefined);
+    }
   }, [props.open]);
 
   const number = (value: number) => new Intl.NumberFormat(intlLocale).format(value);
@@ -527,17 +748,18 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
       }
     >
       <div className="usage-drawer">
-        {teamAvailable ? (
+        {companyAvailable ? (
           <Segmented
             block
             value={view}
             onChange={(value) => {
               setView(value as UsageView);
               setMemberId(null);
+              setTeamFocus(undefined);
             }}
             options={[
               { value: "me", label: t("usage.view.me") },
-              { value: "team", label: t("usage.view.team", { count: number(ranking.data?.team.size ?? 0) }) }
+              { value: "team", label: t("usage.view.company", { count: number(ranking.data?.company.size ?? 0) }) }
             ]}
           />
         ) : null}
@@ -548,13 +770,39 @@ export function UsageDrawer(props: { open: boolean; onClose(): void }) {
           options={PERIODS.map((key) => ({ value: key, label: t(`usage.period.${key}` as PortalMessageKey) }))}
         />
 
-        {view === "team" && teamAvailable ? (
+        {view === "team" && companyAvailable ? (
           <>
             {/* Stays mounted under the member view so search and scroll survive "Back". */}
             <div className="usage-drawer" hidden={Boolean(memberId)}>
-              <TeamView period={period} timezone={timezone} onOpenMember={setMemberId} onOpenSelf={() => setView("me")} />
+              {teamFocus === undefined ? (
+                <CompanyView
+                  period={period}
+                  timezone={timezone}
+                  onOpenTeam={setTeamFocus}
+                  onOpenMember={setMemberId}
+                  onOpenSelf={() => setView("me")}
+                />
+              ) : (
+                <TeamView
+                  key={teamFocus ?? "root"}
+                  period={period}
+                  timezone={timezone}
+                  initialFocusId={teamFocus}
+                  onOpenMember={setMemberId}
+                  onOpenSelf={() => setView("me")}
+                  onBackToCompany={() => setTeamFocus(undefined)}
+                />
+              )}
             </div>
-            {memberId ? <MemberView userId={memberId} period={period} timezone={timezone} onBack={() => setMemberId(null)} /> : null}
+            {memberId ? (
+              <MemberView
+                userId={memberId}
+                period={period}
+                timezone={timezone}
+                backLabel={teamFocus === undefined ? t("usage.company.back") : t("usage.team.back")}
+                onBack={() => setMemberId(null)}
+              />
+            ) : null}
           </>
         ) : (
           <UsageSummaryBody

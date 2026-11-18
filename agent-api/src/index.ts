@@ -12615,6 +12615,16 @@ app.get("/api/portal/me/usage/ranking", requireInternalPortalActorForFeature, as
   }
 });
 
+app.get("/api/portal/me/usage/company", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
+  try {
+    const actor = currentActorFromRequest(req);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await teamUsage.company({ viewerId: actor.id, ...usageQuery(req) }));
+  } catch (error) {
+    res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to load company usage" });
+  }
+});
+
 app.get("/api/portal/me/team-usage", requireInternalPortalActorForFeature, async (req: Request, res: Response) => {
   try {
     const actor = currentActorFromRequest(req);

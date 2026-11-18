@@ -132,6 +132,24 @@ describe("UsageEventRepository.sumByUserInRange", () => {
     await expect(repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", userIds: [] })).resolves.toEqual([]);
   });
 
+  it("can leave feature types out of the sums and the exact-range listing", async () => {
+    const groupBy = vi.fn(async (_args: { where: Record<string, unknown> }) => []);
+    const findMany = vi.fn(async (_args: { where: Record<string, unknown> }) => []);
+    const repository = new UsageEventRepository({ usageEvent: { groupBy, create: vi.fn(), findMany } } as never);
+    await repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", excludeFeatureTypes: ["codex_background"] });
+    expect(groupBy.mock.calls[0][0]).toMatchObject({ where: { featureType: { notIn: ["codex_background"] } } });
+    expect(groupBy.mock.calls[1][0]).toMatchObject({ where: { featureType: { notIn: ["codex_background"] }, threadId: { not: null } } });
+
+    await repository.listByExactCreatedAtRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", excludeFeatureTypes: ["codex_background"] });
+    expect(findMany.mock.calls[0][0]).toMatchObject({ where: { featureType: { notIn: ["codex_background"] } } });
+    await repository.listByExactCreatedAtRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", featureType: "chat", excludeFeatureTypes: ["codex_background"] });
+    expect(findMany.mock.calls[1][0]).toMatchObject({ where: { featureType: { equals: "chat", notIn: ["codex_background"] } } });
+    await repository.listByExactCreatedAtRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z", featureType: "chat" });
+    expect(findMany.mock.calls[2][0]).toMatchObject({ where: { featureType: "chat" } });
+    await repository.sumByUserInRange({ from: "2026-10-01T00:00:00Z", to: "2026-10-06T00:00:00Z" });
+    expect(groupBy.mock.calls[2]?.[0].where).not.toHaveProperty("featureType");
+  });
+
   it("lists operations-insight events with only the metadata keys the analytics reads", async () => {
     const createdAt = new Date("2026-10-20T08:00:00.000Z");
     const row = {

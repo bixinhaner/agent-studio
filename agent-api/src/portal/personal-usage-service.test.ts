@@ -41,9 +41,14 @@ function fakeDb(events: FakeEvent[], files: Array<{ name: string; mimeType: stri
     }
   } as never;
   const ledger = {
-    listEventsByExactCreatedAtRange: async (args: { userId?: string; from: Date | string; to: Date | string }) =>
+    listEventsByExactCreatedAtRange: async (args: { userId?: string; from: Date | string; to: Date | string; excludeFeatureTypes?: string[] }) =>
       events
-        .filter((item) => item.userId === args.userId && inRange(item.createdAt, { gte: new Date(args.from), lt: new Date(args.to) }))
+        .filter(
+          (item) =>
+            item.userId === args.userId &&
+            !(args.excludeFeatureTypes ?? []).includes(item.featureType) &&
+            inRange(item.createdAt, { gte: new Date(args.from), lt: new Date(args.to) })
+        )
         .map((item) => ({ ...item, id: "e", threadId: item.threadId ?? undefined, estimatedCost: "0", internalCost: "0", createdAt: item.createdAt.toISOString() }))
   };
   return { db, ledger };
@@ -130,6 +135,31 @@ describe("createPersonalUsageService", () => {
       { type: "spreadsheet", count: 1 }
     ]);
     expect(summary.previous).toEqual({ total_tokens: 100, turns: 1 });
+  });
+
+  it("leaves Codex background work (memory, prewarm) and security reviews out of tokens, turns and breakdowns", async () => {
+    const now = new Date("2026-10-05T03:00:00.000Z");
+    const service = createPersonalUsageService({
+      now: () => now,
+      ...fakeDb([
+        event({ createdAt: new Date("2026-10-02T02:00:00.000Z") }),
+        event({
+          createdAt: new Date("2026-10-02T03:00:00.000Z"),
+          threadId: null,
+          model: "gpt-5.6-terra",
+          featureType: "codex_background",
+          inputTokens: 50_000,
+          metadata: { source: "codex_otel", backgroundKind: "memory_agent" }
+        }),
+        event({ createdAt: new Date("2026-10-03T03:00:00.000Z"), featureType: "security_review", metadata: { source: "conversation_security_review" } }),
+        event({ createdAt: new Date("2026-09-10T03:00:00.000Z"), featureType: "codex_background", threadId: null })
+      ])
+    });
+    const summary = await service.summarize({ userId: "u1", period: "month", timezone: "Asia/Shanghai" });
+    expect(summary.totals).toMatchObject({ total_tokens: 1100, turns: 1 });
+    expect(summary.by_channel).toEqual([{ key: "portal", total_tokens: 1100, turns: 1 }]);
+    expect(summary.by_model.map((item) => item.model)).toEqual(["gpt-6.1-sol"]);
+    expect(summary.previous).toEqual({ total_tokens: 0, turns: 0 });
   });
 
   it("falls back to this month and Asia/Shanghai for invalid input", async () => {

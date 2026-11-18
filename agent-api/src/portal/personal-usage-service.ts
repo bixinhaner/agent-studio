@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 import type { ListUsageEventsByExactRangeInput, UsageEventRecord } from "../persistence/usage-event-repository.js";
+import { CODEX_BACKGROUND_FEATURE_TYPE } from "../operations/codex-background-usage.js";
 import { isValidTimezone } from "../scheduled-tasks/schedule.js";
 
 /**
@@ -14,6 +15,13 @@ export type PersonalUsagePeriod = (typeof PERSONAL_USAGE_PERIODS)[number];
 export type PersonalUsageChannel = "portal" | "dingtalk" | "scheduled" | "api" | "other";
 
 const MAX_EVENTS = 50_000;
+
+/**
+ * Usage the person never asked for stays out of every portal number (my usage, team and company rankings):
+ * Codex background work (memory extraction/consolidation, session prewarm) and conversation security reviews.
+ * They are still metered and shown in the admin operations analytics.
+ */
+export const PORTAL_USAGE_EXCLUDED_FEATURE_TYPES = [CODEX_BACKGROUND_FEATURE_TYPE, "security_review"];
 const MAX_OUTPUT_FILES = 5_000;
 
 type Db = Pick<PrismaClient, "workspaceNode" | "scheduledTaskRun">;
@@ -171,8 +179,20 @@ export function createPersonalUsageService(deps: { db: Db; ledger: UsageLedger; 
       const prev = previousRange(period, range, current, timezone);
 
       const [events, previousEvents, outputs, scheduledRuns] = await Promise.all([
-        deps.ledger.listEventsByExactCreatedAtRange({ userId: input.userId, from: range.from, to: range.to, take: MAX_EVENTS }),
-        deps.ledger.listEventsByExactCreatedAtRange({ userId: input.userId, from: prev.from, to: prev.to, take: MAX_EVENTS }),
+        deps.ledger.listEventsByExactCreatedAtRange({
+          userId: input.userId,
+          from: range.from,
+          to: range.to,
+          take: MAX_EVENTS,
+          excludeFeatureTypes: PORTAL_USAGE_EXCLUDED_FEATURE_TYPES
+        }),
+        deps.ledger.listEventsByExactCreatedAtRange({
+          userId: input.userId,
+          from: prev.from,
+          to: prev.to,
+          take: MAX_EVENTS,
+          excludeFeatureTypes: PORTAL_USAGE_EXCLUDED_FEATURE_TYPES
+        }),
         deps.db.workspaceNode.findMany({
           where: {
             kind: "file",

@@ -1,6 +1,6 @@
 import type { UsageUserTotals } from "../persistence/usage-event-repository.js";
 import { isValidTimezone } from "../scheduled-tasks/schedule.js";
-import { PERSONAL_USAGE_PERIODS, periodRange, type PersonalUsagePeriod, type PersonalUsageSummary } from "./personal-usage-service.js";
+import { PERSONAL_USAGE_PERIODS, PORTAL_USAGE_EXCLUDED_FEATURE_TYPES, periodRange, type PersonalUsagePeriod, type PersonalUsageSummary } from "./personal-usage-service.js";
 
 /**
  * Usage ranking and manager (team) views for the portal "my usage" drawer.
@@ -33,7 +33,9 @@ type Db = {
   department: { findMany(args: unknown): Promise<DirectoryDepartment[]> };
 };
 
-type Ledger = { sumByUserInRange(input: { from: Date; to: Date; userIds?: string[] }): Promise<UsageUserTotals[]> };
+type Ledger = {
+  sumByUserInRange(input: { from: Date; to: Date; userIds?: string[]; excludeFeatureTypes?: string[] }): Promise<UsageUserTotals[]>;
+};
 type PersonalUsage = { summarize(input: { userId: string; period?: string; timezone?: string }): Promise<PersonalUsageSummary> };
 
 export type UsageRankEntry = { rank: number | null; size: number; active: number };
@@ -68,6 +70,46 @@ export type TeamUsageResponse = {
   members: TeamUsageMember[];
   /** Empty unless the viewer leads departments in DingTalk. */
   departments: TeamDepartmentNode[];
+};
+
+/** A top-level department in the company-wide view: aggregates only, never member ids. */
+export type CompanyDepartmentRow = {
+  id: string;
+  name: string;
+  members: number;
+  active_members: number;
+  total_tokens: number;
+  turns: number;
+  /** The viewer leads it (or a preview grant covers it), so it opens into the team view. */
+  led: boolean;
+  /** The department the viewer's own usage counts toward. */
+  mine: boolean;
+};
+
+/**
+ * A person with usage in the period. `user_id` is only set for rows the viewer may open
+ * (themselves, or people in their team scope); everyone else is a name and numbers only.
+ */
+export type CompanyPersonRow = {
+  rank: number;
+  user_id: string | null;
+  name: string;
+  department: string | null;
+  total_tokens: number;
+  turns: number;
+  self: boolean;
+};
+
+export type CompanyUsageResponse = {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  totals: { members: number; active_members: number; total_tokens: number; turns: number };
+  departments: CompanyDepartmentRow[];
+  /** Only people with usage in the period, ranked by total tokens ("1, 2, 2, 4"). */
+  people: CompanyPersonRow[];
+  /** Active employees with no usage in the period; counted, never named. */
+  inactive_members: number;
+  team: { available: boolean; size: number };
 };
 
 export class TeamUsageAccessError extends Error {}
@@ -374,7 +416,7 @@ export function createTeamUsageService(deps: {
       const timezone = normalizeTimezone(input.timezone);
       const directory = await loadDirectory();
       const companyIds = directory.users.map((user) => user.id);
-      const totals = await deps.ledger.sumByUserInRange({ ...range(period, timezone), userIds: companyIds });
+      const totals = await deps.ledger.sumByUserInRange({ ...range(period, timezone), userIds: companyIds, excludeFeatureTypes: PORTAL_USAGE_EXCLUDED_FEATURE_TYPES });
       const tokensByUser = new Map(totals.map((row) => [row.userId, row.totalTokens]));
 
       const departmentId = primaryDepartmentId(directory, input.viewerId);
@@ -396,6 +438,97 @@ export function createTeamUsageService(deps: {
       };
     },
 
+    /**
+     * The whole company for every internal employee: top-level department totals and a ranking of
+     * people who used Bailey. Only rows the viewer could already open (self, team scope) carry ids.
+     */
+    async company(input: { viewerId: string; period?: string; timezone?: string }): Promise<CompanyUsageResponse> {
+      requireViewer(input.viewerId);
+      const period = normalizePeriod(input.period);
+      const timezone = normalizeTimezone(input.timezone);
+      const directory = await loadDirectory();
+      const companyIds = directory.users.map((user) => user.id);
+      const totals = await deps.ledger.sumByUserInRange({
+        ...range(period, timezone),
+        userIds: companyIds,
+        excludeFeatureTypes: PORTAL_USAGE_EXCLUDED_FEATURE_TYPES
+      });
+      const totalsByUser = new Map(totals.map((row) => [row.userId, row]));
+
+      const everyone = new Map<string, TeamRelation>(companyIds.map((id) => [id, "department"]));
+      const companyTree = ledDepartmentTree(directory, "", ["*"]);
+      const topDepartments = buildDepartmentBreakdown(directory, companyTree, everyone, totalsByUser).filter((node) => !node.parent_id);
+      const scope = scopeFor(directory, input.viewerId);
+      const viewerLed = ledDepartmentTree(directory, input.viewerId, previewDepartments(input.viewerId)).led;
+      const attributed = attributeDepartments(directory, new Set(companyIds));
+      const parentById = new Map(directory.departments.map((item) => [item.id, item.parentDepartmentId]));
+      const topOf = (departmentId: string | undefined) => {
+        const seen = new Set<string>();
+        let current = departmentId;
+        while (current && parentById.get(current) && !seen.has(current)) {
+          seen.add(current);
+          current = parentById.get(current) ?? undefined;
+        }
+        return current ?? null;
+      };
+      const myTop = topOf(attributed.get(input.viewerId));
+
+      const departments: CompanyDepartmentRow[] = topDepartments.map((node) => ({
+        id: node.id,
+        name: node.name,
+        members: node.members,
+        active_members: node.active_members,
+        total_tokens: node.total_tokens,
+        turns: node.turns,
+        led: viewerLed.has(node.id),
+        mine: node.id === myTop
+      }));
+
+      const usersById = new Map(directory.users.map((user) => [user.id, user]));
+      const departmentNames = new Map(directory.departments.map((item) => [item.id, item.name]));
+      const active = companyIds
+        .map((userId) => ({ userId, usage: totalsByUser.get(userId) }))
+        .filter((row): row is { userId: string; usage: UsageUserTotals } => Boolean(row.usage && row.usage.turns > 0))
+        .sort(
+          (left, right) =>
+            right.usage.totalTokens - left.usage.totalTokens ||
+            right.usage.turns - left.usage.turns ||
+            (usersById.get(left.userId)?.displayName ?? "").localeCompare(usersById.get(right.userId)?.displayName ?? "", "zh")
+        );
+      const people: CompanyPersonRow[] = [];
+      active.forEach((row, index) => {
+        const previous = people[index - 1];
+        const rank = previous && active[index - 1].usage.totalTokens === row.usage.totalTokens ? previous.rank : index + 1;
+        const user = usersById.get(row.userId);
+        const departmentId = primaryDepartmentId(directory, row.userId);
+        const self = row.userId === input.viewerId;
+        people.push({
+          rank,
+          user_id: self || scope.has(row.userId) ? row.userId : null,
+          name: user?.displayName?.trim() || user?.email?.trim() || "—",
+          department: departmentId ? departmentNames.get(departmentId) ?? null : null,
+          total_tokens: row.usage.totalTokens,
+          turns: row.usage.turns,
+          self
+        });
+      });
+
+      return {
+        period,
+        timezone,
+        totals: {
+          members: companyIds.length,
+          active_members: people.length,
+          total_tokens: people.reduce((sum, item) => sum + item.total_tokens, 0),
+          turns: people.reduce((sum, item) => sum + item.turns, 0)
+        },
+        departments,
+        people,
+        inactive_members: companyIds.length - people.length,
+        team: { available: scope.size > 0, size: scope.size }
+      };
+    },
+
     async team(input: { viewerId: string; period?: string; timezone?: string }): Promise<TeamUsageResponse> {
       requireViewer(input.viewerId);
       const period = normalizePeriod(input.period);
@@ -403,7 +536,11 @@ export function createTeamUsageService(deps: {
       const directory = await loadDirectory();
       const scope = scopeFor(directory, input.viewerId);
       if (scope.size === 0) throw new TeamUsageAccessError("No team members in your DingTalk directory scope");
-      const totals = await deps.ledger.sumByUserInRange({ ...range(period, timezone), userIds: [...scope.keys(), input.viewerId] });
+      const totals = await deps.ledger.sumByUserInRange({
+        ...range(period, timezone),
+        userIds: [...scope.keys(), input.viewerId],
+        excludeFeatureTypes: PORTAL_USAGE_EXCLUDED_FEATURE_TYPES
+      });
       const totalsByUser = new Map(totals.map((row) => [row.userId, row]));
       const departments = buildDepartmentBreakdown(
         directory,

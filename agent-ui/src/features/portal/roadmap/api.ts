@@ -347,12 +347,48 @@ export type TeamMemberUsage = {
   usage: PersonalUsageSummary;
 };
 
+/** Company-wide view for every employee: aggregates and a ranking, with ids only on rows the viewer may open. */
+export type CompanyDepartmentRow = {
+  id: string;
+  name: string;
+  members: number;
+  active_members: number;
+  total_tokens: number;
+  turns: number;
+  led: boolean;
+  mine: boolean;
+};
+
+export type CompanyPersonRow = {
+  rank: number;
+  user_id: string | null;
+  name: string;
+  department: string | null;
+  total_tokens: number;
+  turns: number;
+  self: boolean;
+};
+
+export type CompanyUsageSummary = {
+  period: PersonalUsagePeriod;
+  timezone: string;
+  totals: { members: number; active_members: number; total_tokens: number; turns: number };
+  departments: CompanyDepartmentRow[];
+  people: CompanyPersonRow[];
+  inactive_members: number;
+  team: { available: boolean; size: number };
+};
+
 function usageParams(period: PersonalUsagePeriod, timezone: string) {
   return new URLSearchParams({ period, tz: timezone }).toString();
 }
 
 export function fetchUsageRanking(period: PersonalUsagePeriod, timezone: string) {
   return api<UsageRanking>(`/api/portal/me/usage/ranking?${usageParams(period, timezone)}`);
+}
+
+export function fetchCompanyUsage(period: PersonalUsagePeriod, timezone: string) {
+  return api<CompanyUsageSummary>(`/api/portal/me/usage/company?${usageParams(period, timezone)}`);
 }
 
 export function fetchTeamUsage(period: PersonalUsagePeriod, timezone: string) {

@@ -472,6 +472,16 @@
 .usage-team-relation.is-self { border-color: var(--roadmap-text); color: var(--roadmap-text); font-weight: 500; }
 .usage-team-relation.is-secondary { border-style: dashed; }
 .usage-team-chevron { color: var(--roadmap-muted); }
+.usage-team-row:not(.is-static):active { transform: scale(0.99); }
+.usage-team-row { -webkit-tap-highlight-color: transparent; }
+.usage-team-row.is-static { cursor: default; }
+.usage-team-row.is-static:hover { background: transparent; }
+.usage-team-row.is-self, .usage-team-row.is-self:hover { background: var(--roadmap-surface-soft); }
+.usage-team-rank { flex: none; min-width: 22px; color: var(--roadmap-muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-team-meta-indent { padding-left: 28px; }
+.usage-team-pinned { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--roadmap-line); }
+.usage-team-entry { border: 1px solid var(--roadmap-line); }
+.usage-team-footnote { text-align: center; }
 .usage-member-header { display: grid; gap: 6px; justify-items: start; }
 .usage-member-title { display: grid; gap: 2px; padding: 0 8px; }
 .usage-member-title strong { color: var(--roadmap-text); font-size: 16px; font-weight: 650; }
