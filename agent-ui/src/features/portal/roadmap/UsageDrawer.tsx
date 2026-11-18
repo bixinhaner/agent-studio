@@ -668,7 +668,6 @@ function CompanyView(props: {
           <p className="usage-note usage-team-footnote">{t("usage.company.inactive", { count: number(data.inactive_members) })}</p>
         ) : null}
       </section>
-      <p className="usage-note">{t("usage.company.note")}</p>
     </>
   );
 }
