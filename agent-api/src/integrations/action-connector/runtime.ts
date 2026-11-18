@@ -1,3 +1,4 @@
+import type { UpstreamWaitNotice } from "../../operations/upstream-wait.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
@@ -119,6 +120,8 @@ export type ActionConnectorCodexRunnerInput = {
   request: ActionConnectorChatRequest;
   signal?: AbortSignal;
   emit(event: AgentStreamEvent): void;
+  /** Internal: Codex is waiting out an upstream model rejection. Never sent to the client. */
+  onUpstreamWait?(notice: UpstreamWaitNotice): void;
 };
 
 function policyDigest(policy: ActionConnectorConfig["policy"]): string {
@@ -193,6 +196,7 @@ export class ActionConnectorRuntimeService {
       Partial<Pick<ActionConnectorConfig["policy"], "blockedPathPrefixes" | "toolTimeoutSeconds" | "maxResponseBytes">>;
     signal?: AbortSignal;
     emit(event: AgentStreamEvent): void;
+    onUpstreamWait?(notice: UpstreamWaitNotice): void;
   }): Promise<void> {
     if (!this.codexRunner) {
       throw new Error("Codex-backed action connector runtime is not configured.");
@@ -228,7 +232,8 @@ export class ActionConnectorRuntimeService {
       delegationHeaderValue: input.delegationHeaderValue,
       request,
       signal: input.signal,
-      emit: input.emit
+      emit: input.emit,
+      onUpstreamWait: input.onUpstreamWait
     });
   }
 }

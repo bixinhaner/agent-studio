@@ -678,6 +678,11 @@ function SessionTable(props: {
                       <strong>{row.sessionId}</strong>
                     )}
                     <span>{row.threadId || "无 thread"}</span>
+                    {row.upstreamWaitCount ? (
+                      <span title="模型服务拒绝请求（容量不足或限流）后等待重试的次数；详情见对话记录">
+                        模型繁忙等待 {formatCount(row.upstreamWaitCount)} 次
+                      </span>
+                    ) : null}
                   </div>
                 </td>
                 <td>
@@ -923,7 +928,11 @@ export function OperationsAnalyticsView() {
             <SummaryCard
               label="回答成功率"
               value={summary.successfulRequestCount + summary.failedRequestCount ? formatPercent(summary.successRate) : "—"}
-              caption="成功 ÷（成功 + 失败），用户中止不计入"
+              caption={
+                summary.upstreamWaitedRequestCount
+                  ? `成功 ÷（成功 + 失败），用户中止不计入；${formatCount(summary.upstreamWaitedRequestCount)} 个回答因模型繁忙等待重试 ${formatCount(summary.upstreamWaitCount ?? 0)} 次，约 ${formatCount(Math.round((summary.upstreamWaitTotalMs ?? 0) / 60_000))} 分钟`
+                  : "成功 ÷（成功 + 失败），用户中止不计入"
+              }
               bar={
                 finishedAnswers
                   ? {

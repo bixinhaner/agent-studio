@@ -123,6 +123,7 @@ type UsageEventTable = {
       featureType?: string | { equals?: string; notIn?: string[] };
       resultStatus?: string;
       sessionId?: string;
+      threadId?: string;
       createdAt?: { gte?: Date; lt?: Date };
     };
     orderBy?: { createdAt?: "asc" | "desc" };
@@ -152,7 +153,11 @@ const OPERATIONS_INSIGHT_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(
   'actorName', metadata -> 'actorName',
   'reviewId', metadata -> 'reviewId',
   '_costProfile', jsonb_strip_nulls(jsonb_build_object('costCompleteness', metadata -> '_costProfile' -> 'costCompleteness')),
-  '_usageAccounting', jsonb_strip_nulls(jsonb_build_object('status', metadata -> '_usageAccounting' -> 'status'))
+  '_usageAccounting', jsonb_strip_nulls(jsonb_build_object('status', metadata -> '_usageAccounting' -> 'status')),
+  'upstreamWaits', jsonb_strip_nulls(jsonb_build_object(
+    'count', metadata -> 'upstreamWaits' -> 'count',
+    'totalWaitMs', metadata -> 'upstreamWaits' -> 'totalWaitMs'
+  ))
 ))`;
 
 function slimOperationsInsightMetadata(metadata: unknown): unknown {
@@ -164,6 +169,9 @@ function slimOperationsInsightMetadata(metadata: unknown): unknown {
   }
   slim._costProfile = record._costProfile?.costCompleteness ? { costCompleteness: record._costProfile.costCompleteness } : {};
   slim._usageAccounting = record._usageAccounting?.status ? { status: record._usageAccounting.status } : {};
+  if (record.upstreamWaits?.count !== undefined && record.upstreamWaits?.count !== null) {
+    slim.upstreamWaits = { count: record.upstreamWaits.count, totalWaitMs: record.upstreamWaits.totalWaitMs ?? 0 };
+  }
   return slim;
 }
 

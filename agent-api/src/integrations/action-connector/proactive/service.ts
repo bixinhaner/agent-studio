@@ -1,3 +1,4 @@
+import { createUpstreamWaitDeadline, UPSTREAM_WAIT_MAX_EXTENSION_MS } from "../../../operations/upstream-wait.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { ActionConnectorRuntimeService, type ActionConnectorCodexRunner, type AgentStreamEvent } from "../runtime.js";
@@ -274,9 +275,18 @@ export class ProactiveActionConnectorService {
         event: sourceEvent,
         locale: reportLocale
       });
+      // The budget excludes time Codex spends waiting out upstream model rejections
+      // (capacity / 429 retries honour multi-minute server delays), bounded in total.
+      const deadline = createUpstreamWaitDeadline({
+        budgetMs: spec.agent.timeoutSeconds * 1000,
+        maxExtensionMs: UPSTREAM_WAIT_MAX_EXTENSION_MS,
+        onExtend: (deadlineAtMs) => this.bridge.extendBackgroundRunDeadline(run.connectorId, run.id, deadlineAtMs),
+      });
+      try {
       await this.runtime.streamChat({
         connectorId: run.connectorId, delegationHeaderValue: `Bearer proactive:${run.id}`,
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(spec.agent.timeoutSeconds * 1000)]),
+        signal: AbortSignal.any([controller.signal, deadline.signal]),
+        onUpstreamWait: (notice) => deadline.onUpstreamWait(notice),
         request: {
           message: `${spec.agent.prompt}\n\n触发事件：${JSON.stringify(sourceEvent)}\n\nWrite every human-readable report field in ${reportLanguage}, including title, summary, facts, hypotheses, detail values, and action labels. Keep JSON keys, enum values, resource identifiers, and verbatim evidence unchanged.`, clientRunId: run.id,
           conversationId, mode: "execute", locale: reportLocale, timezone: "Asia/Shanghai", attachments: [],
@@ -285,6 +295,7 @@ export class ProactiveActionConnectorService {
           } },
         }, emit,
       });
+      } finally { deadline.dispose(); }
       controller.signal.throwIfAborted();
       if (runtimeError) throw runtimeError;
       const validating = await this.db.proactiveAgentRun.updateMany({ where: guard, data: { status: "VALIDATING" } });

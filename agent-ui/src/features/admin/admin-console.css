@@ -8223,7 +8223,8 @@ button.admin-menu-item:focus-visible {
 .admin-turn-outcome.is-auto_closed,
 .admin-turn-outcome.is-system_update,
 .admin-turn-outcome.is-deployment_drain,
-.admin-turn-outcome.is-unknown {
+.admin-turn-outcome.is-unknown,
+.admin-turn-outcome.is-upstream_wait {
   border-color: rgba(217, 119, 6, 0.28);
   background: rgba(255, 251, 235, 0.8);
 }
@@ -8262,6 +8263,18 @@ button.admin-menu-item:focus-visible {
 
 .admin-turn-outcome-raw {
   margin-top: 6px;
+}
+
+.admin-upstream-wait-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #475569;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-upstream-wait-list li + li {
+  margin-top: 2px;
 }
 
 .admin-turn-outcome-raw summary {

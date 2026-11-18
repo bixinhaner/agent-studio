@@ -1,3 +1,4 @@
+import { createUpstreamWaitDeadline, UPSTREAM_WAIT_MAX_EXTENSION_MS } from "../../../operations/upstream-wait.js";
 import type { PrismaClient, ProactiveAgentRun } from "@prisma/client";
 import type { ActionConnectorRuntimeService } from "../runtime.js";
 import type { DurableActionConnectorToolBridge } from "../proactive/durable-tool-bridge.js";
@@ -50,12 +51,20 @@ export async function executeAssistant(input: {
   const outputLimit = new AbortController();
   let text = "";
   let failure: Error | undefined;
+  // Upstream model waits (capacity / 429 retries inside Codex) do not consume the budget.
+  const deadline = createUpstreamWaitDeadline({
+    budgetMs: request.limits.timeoutSeconds * 1000,
+    maxExtensionMs: UPSTREAM_WAIT_MAX_EXTENSION_MS,
+    onExtend: (deadlineAtMs) => bridge.extendBackgroundRunDeadline(run.connectorId, run.id, deadlineAtMs),
+  });
+  try {
   await runtime.streamChat({
     connectorId: run.connectorId, delegationHeaderValue: `Bearer assistant:${run.id}`,
     authorizedToolPolicy: discovering
       ? { ...request.toolPolicy!, allowedMethods: methods.filter((method) => request.toolPolicy!.allowedMethods.includes(method)) }
       : { allowedMethods: ["GET"] },
-    signal: AbortSignal.any([signal, outputLimit.signal, AbortSignal.timeout(request.limits.timeoutSeconds * 1000)]),
+    signal: AbortSignal.any([signal, outputLimit.signal, deadline.signal]),
+    onUpstreamWait: (notice) => deadline.onUpstreamWait(notice),
     request: {
       clientRunId: run.id, conversationId: assistantConversationId(request, run),
       mode: "execute", locale: request.locale, timezone: request.timezone, attachments: [],
@@ -109,6 +118,7 @@ export async function executeAssistant(input: {
       if (event.type === "error") failure = new Error(event.error.code);
     },
   });
+  } finally { deadline.dispose(); }
   signal.throwIfAborted();
   if (failure) throw failure;
   const result = resultSchema.parse(parseModelJSON(text));

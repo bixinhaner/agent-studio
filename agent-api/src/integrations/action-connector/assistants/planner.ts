@@ -1,3 +1,4 @@
+import { createUpstreamWaitDeadline, UPSTREAM_WAIT_MAX_EXTENSION_MS } from "../../../operations/upstream-wait.js";
 import { randomUUID } from "node:crypto";
 import type { ActionConnectorToolBridgeLike } from "../tool-bridge.js";
 import type { ActionConnectorCodexRunner } from "../runtime.js";
@@ -26,7 +27,9 @@ export class AssistantPlanner {
     const { config } = await loadConnector(this.db, connectorId);
     assertCapabilityPaths(input, resolveApiProfile(config.apiProfile).pathPrefix);
     const outputLimit = new AbortController();
-    const deadline = AbortSignal.any([AbortSignal.timeout(120_000), outputLimit.signal]);
+    // Upstream model waits (capacity / 429 retries inside Codex) do not consume the budget.
+    const waitDeadline = createUpstreamWaitDeadline({ budgetMs: 120_000, maxExtensionMs: UPSTREAM_WAIT_MAX_EXTENSION_MS });
+    const deadline = AbortSignal.any([waitDeadline.signal, outputLimit.signal]);
     const abort = signal ? AbortSignal.any([signal, deadline]) : deadline;
     let correction = "";
     // Planning cannot execute business actions. One bounded correction keeps
@@ -38,6 +41,7 @@ export class AssistantPlanner {
       const id = randomUUID();
       await this.runtime.streamChat({
         connectorId, delegationHeaderValue: `Bearer assistant-planner:${id}`, signal: abort,
+        onUpstreamWait: (notice) => waitDeadline.onUpstreamWait(notice),
         request: {
           clientRunId: id, conversationId: `assistant-planner-${id}`, mode: "preview",
           locale: input.locale, timezone: input.timezone, attachments: [],

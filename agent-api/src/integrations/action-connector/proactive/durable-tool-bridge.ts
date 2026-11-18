@@ -165,6 +165,12 @@ export class DurableActionConnectorToolBridge implements ActionConnectorToolBrid
     return await this.interactive.resolve(input);
   }
 
+  /** Push a background run's tool deadline out while Codex waits on an upstream model retry. */
+  extendBackgroundRunDeadline(connectorId: string, runId: string, deadlineAtMs: number): void {
+    const registration = this.background.get(this.key(connectorId, runId));
+    if (registration && deadlineAtMs > (registration.deadlineAt ?? 0)) registration.deadlineAt = deadlineAtMs;
+  }
+
   disposeRun(connectorId: string, runId: string): void {
     const key = this.key(connectorId, runId);
     if (this.background.delete(key)) return;

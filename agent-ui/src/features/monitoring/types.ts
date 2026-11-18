@@ -32,6 +32,10 @@ export type OperationsInsightsSummary = {
   cancelledRequestCount: number;
   /** success / (success + failed); user cancellations are excluded. */
   successRate: number;
+  /** Answers delayed because the model service rejected requests and Codex waited to retry. */
+  upstreamWaitedRequestCount?: number;
+  upstreamWaitCount?: number;
+  upstreamWaitTotalMs?: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
@@ -152,6 +156,8 @@ export type OperationsInsightsSessionRow = {
   internalCost: string;
   avgTokensPerRequest: number;
   cacheShare: number;
+  /** Times answers in this session waited on the model service (capacity / rate limit retries). */
+  upstreamWaitCount?: number;
   firstActiveAt: string;
   lastActiveAt: string;
 };

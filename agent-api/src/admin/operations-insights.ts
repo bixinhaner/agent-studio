@@ -59,6 +59,10 @@ export type OperationsInsightsSummary = {
   cancelledRequestCount: number;
   /** success / (success + failed); user cancellations are excluded. */
   successRate: number;
+  /** Answers delayed because the model service rejected requests and Codex waited to retry (admin only). */
+  upstreamWaitedRequestCount: number;
+  upstreamWaitCount: number;
+  upstreamWaitTotalMs: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
@@ -179,6 +183,8 @@ export type OperationsInsightsSessionRow = {
   internalCost: string;
   avgTokensPerRequest: number;
   cacheShare: number;
+  /** Times answers in this session waited on the model service (capacity / rate limit retries). */
+  upstreamWaitCount: number;
   firstActiveAt: string;
   lastActiveAt: string;
 };
@@ -267,6 +273,8 @@ type NormalizedEvent = {
   estimatedCost: number;
   internalCost: number;
   incompleteCost: boolean;
+  upstreamWaitCount: number;
+  upstreamWaitMs: number;
   resultStatus: string;
 };
 
@@ -305,6 +313,7 @@ type SessionAggregateState = {
   totalTokens: number;
   estimatedCost: number;
   internalCost: number;
+  upstreamWaitCount: number;
   firstActiveAt: string;
   firstActiveAtMs: number;
   lastActiveAt: string;
@@ -742,6 +751,13 @@ function matchesQuery(record: NormalizedEvent, query: string): boolean {
   return haystacks.some((item) => item.includes(query));
 }
 
+function upstreamWaitFromMetadata(metadata: Record<string, unknown> | undefined): { upstreamWaitCount: number; upstreamWaitMs: number } {
+  const waits = asRecord(metadata?.upstreamWaits);
+  const count = typeof waits?.count === "number" && Number.isFinite(waits.count) ? Math.max(0, waits.count) : 0;
+  const totalWaitMs = typeof waits?.totalWaitMs === "number" && Number.isFinite(waits.totalWaitMs) ? Math.max(0, waits.totalWaitMs) : 0;
+  return { upstreamWaitCount: count, upstreamWaitMs: count > 0 ? totalWaitMs : 0 };
+}
+
 function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[] {
   const now = input.now ?? new Date();
   const cutoffMs = now.getTime() - input.filters.days * 24 * 60 * 60 * 1000;
@@ -808,6 +824,7 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
       estimatedCost: toNumber(record.estimatedCost),
       internalCost: toNumber(record.internalCost),
       incompleteCost: hasIncompleteCost(record.metadata),
+      ...upstreamWaitFromMetadata(metadata),
       resultStatus: record.resultStatus
     };
 
@@ -917,6 +934,9 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
   const successfulRequestCount = summaryRequests.filter((record) => record.resultStatus === "success").length;
   const failedRequestCount = summaryRequests.filter((record) => isUsageFailure(record.resultStatus)).length;
   const cancelledRequestCount = summaryRequests.filter((record) => record.resultStatus === USAGE_RESULT_CANCELLED).length;
+  const upstreamWaitedRequests = summaryRequests.filter((record) => record.upstreamWaitCount > 0);
+  const upstreamWaitCount = upstreamWaitedRequests.reduce((sum, record) => sum + record.upstreamWaitCount, 0);
+  const upstreamWaitTotalMs = upstreamWaitedRequests.reduce((sum, record) => sum + record.upstreamWaitMs, 0);
   const sessionBuckets = new Map<string, SessionAggregateState>();
   const organizationBuckets = new Map<string, OrganizationAggregateState>();
   const userBuckets = new Map<string, UserAggregateState>();
@@ -984,6 +1004,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       sessionExisting.totalTokens += record.totalTokens;
       sessionExisting.estimatedCost += record.estimatedCost;
       sessionExisting.internalCost += record.internalCost;
+      sessionExisting.upstreamWaitCount += record.upstreamWaitCount;
       if (record.createdAtMs < sessionExisting.firstActiveAtMs) {
         sessionExisting.firstActiveAt = record.createdAt;
         sessionExisting.firstActiveAtMs = record.createdAtMs;
@@ -1015,6 +1036,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
         totalTokens: record.totalTokens,
         estimatedCost: record.estimatedCost,
         internalCost: record.internalCost,
+        upstreamWaitCount: record.upstreamWaitCount,
         firstActiveAt: record.createdAt,
         firstActiveAtMs: record.createdAtMs,
         lastActiveAt: record.createdAt,
@@ -1273,6 +1295,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       internalCost: formatDecimal(bucket.internalCost),
       avgTokensPerRequest: formatAverage(bucket.requestCount ? bucket.totalTokens / bucket.requestCount : 0),
       cacheShare: formatRatio(usageCacheShare(bucket.inputTokens, bucket.cachedInputTokens)),
+      upstreamWaitCount: bucket.upstreamWaitCount,
       firstActiveAt: bucket.firstActiveAt,
       lastActiveAt: bucket.lastActiveAt
     }))
@@ -1361,6 +1384,9 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       successRate: formatRatio(
         successfulRequestCount + failedRequestCount ? successfulRequestCount / (successfulRequestCount + failedRequestCount) : 0
       ),
+      upstreamWaitedRequestCount: upstreamWaitedRequests.length,
+      upstreamWaitCount,
+      upstreamWaitTotalMs,
       avgRequestsPerSession: formatAverage(totalSessions ? summaryRequestCount / totalSessions : 0),
       avgTokensPerSession: formatAverage(totalSessions ? totalTokens / totalSessions : 0),
       avgInternalCostPerSession: formatDecimal(totalSessions ? internalCost / totalSessions : 0),

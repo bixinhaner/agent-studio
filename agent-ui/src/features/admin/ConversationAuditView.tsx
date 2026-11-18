@@ -34,6 +34,7 @@ import { formatAdminDateTime, formatListTimestamp, formatUsdAmount, plainTextPre
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { useAuth } from "../auth/AuthProvider";
 import { ConversationSendFailures } from "./ConversationSendFailures";
+import { ConversationUpstreamWaits } from "./ConversationUpstreamWaits";
 import {
   currentWorkspaceSummary,
   localOperationStatusLabel,
@@ -1605,6 +1606,7 @@ function TranscriptMessageBubble(props: {
             </span>
           )}
           {turnOutcome && props.message.turnStatus !== "completed" ? <TranscriptTurnOutcomePanel outcome={turnOutcome} /> : null}
+          {isAssistant && props.message.upstreamWaits?.length ? <ConversationUpstreamWaits waits={props.message.upstreamWaits} /> : null}
           {userInputRequests.map((request) => (
             <TranscriptUserInputRequestCard key={request.id} request={request} />
           ))}

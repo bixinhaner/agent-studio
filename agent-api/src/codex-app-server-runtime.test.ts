@@ -1316,6 +1316,11 @@ describe("Codex app-server runtime", () => {
     expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join("")).toBe(
       "Hello"
     );
+    // The willRetry notice becomes a text-free internal event (admin analytics, deadline extension).
+    const waits = events.filter((event) => event.type === "agent_studio.upstream_wait");
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).not.toHaveProperty("text");
+    expect(waits[0]?.raw).toMatchObject({ attempt: 2, maxAttempts: 5 });
     expect(events.some((event) => event.type === "error")).toBe(false);
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
     expect(warnSpy).not.toHaveBeenCalledWith("codex app-server turn failed", expect.anything());

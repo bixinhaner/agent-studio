@@ -33,6 +33,7 @@ import {
   type TranscriptUserInputRequest
 } from "./conversation-transcript-interactions.js";
 import { childrenByParent, computeTranscriptBranches, type TranscriptBranchInfo } from "./conversation-transcript-branches.js";
+import { attachUpstreamWaits } from "./conversation-upstream-waits.js";
 import { extractTranscriptTurnOutcome, type TranscriptTurnOutcome } from "./conversation-transcript-outcome.js";
 import { ThreadArtifactRepository, type ThreadArtifactRepositoryDb } from "../persistence/thread-artifact-repository.js";
 import { sendOfficePdfPreview } from "../files/office-preview-service.js";
@@ -2901,7 +2902,17 @@ export function createConversationAuditRouter(options: {
       });
       const localActivity = await loadLocalActivity(thread.id);
       const local = attachLocalActivity(baseTranscript, thread.messages, localActivity);
-      const transcript = local.messages;
+      // Admin-only: answers that waited on the model service (capacity / rate-limit retries).
+      const upstreamWaitRows = await db.usageEvent
+        .findMany({ where: { threadId: thread.id }, orderBy: { createdAt: "desc" }, take: 200 })
+        .catch((error: unknown) => {
+          console.warn("conversation audit failed to load upstream waits", {
+            threadId: thread.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+          return [];
+        });
+      const transcript = attachUpstreamWaits(local.messages, upstreamWaitRows);
 
       res.json({
         conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap), agentModeMap),

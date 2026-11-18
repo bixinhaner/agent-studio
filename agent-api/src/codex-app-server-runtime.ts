@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { upstreamWaitEvent, upstreamWaitNoticeFromAppServerError } from "./operations/upstream-wait.js";
 import { findThreadRollout, readRolloutUsage, sumInvocations } from "./operations/codex-usage-ledger.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isolatedWorkloadCommand, releaseWorkload, workloadOutOfMemory, workloadScopeIdentity } from "./workload-isolation.js";
@@ -1733,6 +1734,10 @@ class CodexAppServerManager {
       if (lastEvents.length > MAX_DIAGNOSTIC_EVENTS) lastEvents.shift();
       resetIdleTimer();
       if (isRetryableRuntimeError(event)) {
+        // Codex is waiting out an upstream rejection (e.g. model at capacity) and will
+        // retry itself. Surface it as a text-free internal event so callers can stop
+        // counting the wait against their budget and record it for admin analytics.
+        queue.push(upstreamWaitEvent(upstreamWaitNoticeFromAppServerError(asRecord(event.raw) ?? {})));
         return;
       }
       if (!isTransientAiServiceFailureEvent(event)) {

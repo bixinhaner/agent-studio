@@ -496,6 +496,8 @@ export type AdminConversationTranscriptMessage = {
   turnStatusReason?: string | null;
   /** Concrete stop/failure cause for unfinished assistant turns. */
   turnOutcome?: AdminConversationTranscriptTurnOutcome;
+  /** Admin only: the model service rejected requests and the run waited for retries. */
+  upstreamWaits?: AdminConversationUpstreamWait[];
   /** The portal showed "used your memory" on this answer. */
   memoryUsed?: boolean;
   /** Mirrors the portal's visible branch; absent for legacy/unresolvable graphs. */
@@ -591,6 +593,27 @@ export type AdminConversationTranscriptTurnOutcome = {
   reasonCode: string | null;
   rawDetail: string | null;
   autoRecoveryAttempted: boolean;
+};
+
+export type AdminConversationUpstreamWaitEntry = {
+  at: string;
+  attempt: number | null;
+  maxAttempts: number | null;
+  kind: string;
+  message: string;
+  waitedMs: number | null;
+  resumedAt: string | null;
+};
+
+export type AdminConversationUpstreamWait = {
+  usageEventId: string;
+  recordedAt: string;
+  resultStatus: string;
+  source: string | null;
+  count: number;
+  totalWaitMs: number;
+  kinds: string[];
+  entries: AdminConversationUpstreamWaitEntry[];
 };
 
 export type AdminConversationSendFailure = {

@@ -198,6 +198,52 @@ describe("buildOperationsInsights", () => {
     });
   });
 
+  it("counts answers that waited on the model service without changing the success rate", () => {
+    const usageEvents = [
+      makeUsageEvent({
+        id: "evt-waited",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "gpt-6.2-sol",
+        featureType: "chat",
+        resultStatus: "success",
+        metadata: { source: "action_connector_chat_stream", upstreamWaits: { count: 2, totalWaitMs: 630_000 } },
+        createdAt: "2026-04-15T02:00:00.000Z"
+      }),
+      makeUsageEvent({
+        id: "evt-plain",
+        organizationId: "org-a",
+        userId: "user-a",
+        threadId: "thread-a",
+        sessionId: "session-a",
+        model: "gpt-6.2-sol",
+        featureType: "chat",
+        resultStatus: "success",
+        metadata: { source: "chat_stream", upstreamWaits: {} },
+        createdAt: "2026-04-15T03:00:00.000Z"
+      })
+    ];
+    const response = buildOperationsInsights({
+      usageEvents,
+      sessionsById: new Map(),
+      organizationsById: new Map(),
+      usersById: new Map(),
+      departmentsById: new Map(),
+      filters: { days: 30, timeZone: "Asia/Shanghai", sessionPage: 1, sessionPageSize: 20 },
+      now: new Date("2026-04-16T00:00:00.000Z")
+    });
+    expect(response.summary).toMatchObject({
+      successfulRequestCount: 2,
+      successRate: 1,
+      upstreamWaitedRequestCount: 1,
+      upstreamWaitCount: 2,
+      upstreamWaitTotalMs: 630_000
+    });
+    expect(response.sessions.items[0]).toMatchObject({ sessionId: "session-a", upstreamWaitCount: 2 });
+  });
+
   it("aggregates chat and external API usage into user, organization, path, and session views", () => {
     const usageEvents = [
       makeUsageEvent({

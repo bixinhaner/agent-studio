@@ -262,6 +262,11 @@ import {
   type UpstreamTransientErrorKind
 } from "./operations/upstream-transient-error.js";
 import {
+  UpstreamWaitTracker,
+  upstreamWaitUsageMetadata,
+  type UpstreamWaitNotice
+} from "./operations/upstream-wait.js";
+import {
   preserveCompletedPortalAssistantMessage,
   repairPortalAssistantCompletionStatus
 } from "./portal/chat-message-precedence.js";
@@ -4448,6 +4453,8 @@ type CodexChannelTurnInput = {
   onRetry?: (input: { error: unknown; session: SessionRecord }) => Promise<void> | void;
   /** The model service was busy; the turn runs again after `delayMs`. */
   onUpstreamRetry?: (input: { kind: UpstreamTransientErrorKind; attempt: number; maxAttempts: number; delayMs: number }) => Promise<void> | void;
+  /** Codex itself is waiting out an upstream rejection before retrying (not shown to users). */
+  onUpstreamWait?: (notice: UpstreamWaitNotice) => void;
   onTelemetryError?: (error: unknown) => void;
 };
 
@@ -4465,6 +4472,7 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
   let runtimeOutputStarted = false;
   let runtimeTurnStarted = false;
   let upstreamRetryPrompt: string | undefined;
+  const upstreamWaits = new UpstreamWaitTracker();
 
   const recordTurnUsage = async (
     usage: RuntimeUsageSnapshot,
@@ -4493,7 +4501,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
       metadata: {
         source: input.usageSource,
         ...extraMetadata,
-        ...(failureKind ? { upstreamFailureKind: failureKind } : {})
+        ...(failureKind ? { upstreamFailureKind: failureKind } : {}),
+        ...upstreamWaitUsageMetadata(upstreamWaits)
       }
     });
   };
@@ -4539,6 +4548,16 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
         metadata: input.memoryMetadata
       } satisfies CodexCompletionMemoryInput,
       onEvent(event) {
+        const upstreamWait = upstreamWaits.observe(event);
+        if (upstreamWait) {
+          console.warn(`${input.logLabel} upstream model wait`, {
+            threadId: input.thread.id,
+            sessionId: currentSession.sessionId,
+            ...upstreamWait
+          });
+          input.onUpstreamWait?.(upstreamWait);
+          return;
+        }
         const projection = runProjection.push(event);
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         if (runtimeEventHasTurnSideEffect(event)) {
@@ -6153,6 +6172,7 @@ async function runActionConnectorCodexChatUnlocked(input: ActionConnectorCodexRu
     artifactScanStartedAt: new Date(startedAt - 2000),
     logLabel: "action connector chat",
     shouldSkipRetry: () => true,
+    onUpstreamWait: input.onUpstreamWait,
     hasExternalContext: () => true,
     onEvent({ projection }) {
       emitActionConnectorRuntimeEvent(input.emit, projection);
@@ -15151,6 +15171,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const runtimeFileChanges: RuntimeFileChange[] = [];
     const portalRunProjection = new CodexRunProjection({ captureUserInputRequests: true, localWorkspace: portalLocalWorkspace });
     const portalPartialAnswer = new PortalPartialAnswerCollector();
+    // Upstream model waits are recorded for admins only; the portal display is unchanged.
+    const portalUpstreamWaits = new UpstreamWaitTracker();
     let firstCodexEventSeen = false;
     const portalThread = await timing.time("chat_stream.load_bound_thread", () =>
       getPortalOwnedThread(currentSession.threadId!, currentUser)
@@ -15244,7 +15266,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         metadata: {
           source: "chat_stream",
           autoRecoveryAttempt: portalLastRunAttempt,
-          ...(failureKind ? { upstreamFailureKind: failureKind } : {})
+          ...(failureKind ? { upstreamFailureKind: failureKind } : {}),
+          ...upstreamWaitUsageMetadata(portalUpstreamWaits)
         }
       });
     };
@@ -15288,6 +15311,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           }
         },
         onEvent(event) {
+          const upstreamWait = portalUpstreamWaits.observe(event);
+          if (upstreamWait) {
+            logPortalStream("upstream_model_wait", { ...upstreamWait, lifecycle: streamAbort.snapshot() });
+            return;
+          }
           const eventProjection = portalRunProjection.push(event);
           portalPartialAnswer.push(eventProjection);
           if (eventProjection.userInputRequest) {
