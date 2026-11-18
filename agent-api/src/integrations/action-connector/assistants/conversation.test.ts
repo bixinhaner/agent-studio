@@ -82,7 +82,7 @@ describe("assistant conversation continuity", () => {
 });
 
 describe("workflow evidence and assessments", () => {
-  it("tells the model how to treat device history and passes assessments through", async () => {
+  it("treats source-provided history as background and passes assessments through", async () => {
     const r = executionRequestSchema.parse({ ...request(), triggerContext: { deviceHistory: [{ title: "Earlier", summary: "s", scenarioKey: "k", createdAt: "2026-11-01T00:00:00Z" }] } });
     const result = { outcome: "finding", title: "t", summary: "s", facts: [{ text: "f", evidenceRefs: ["tool:get.devices"] }], hypotheses: [], nextSteps: [], severity: "high", confidence: 0.8, details: { probableCause: "power" } };
     const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
@@ -93,14 +93,9 @@ describe("workflow evidence and assessments", () => {
     // One workflow is one conversation, whatever the event is about.
     expect(sent.conversationId).toBe(assistantConversationId(r, run()));
     expect(sent.conversationId.startsWith(`assistant-${r.assistantId}-`)).toBe(true);
+    // The runtime knows no source's business: history is background by rule,
+    // whatever the source calls it.
     expect(sent.message).toContain("never evidence of the current state");
-  });
-  it("leaves device history out of the prompt when there is none", async () => {
-    const result = { outcome: "no_change", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [] };
-    const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
-    await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany: vi.fn(async () => [{ operationId: "get.devices" }]) } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
-      run: { ...run(), connectorId: "c" }, request: request(), signal: new AbortController().signal } as never);
-    const sent = (streamChat.mock.calls[0][0] as unknown as { request: { message: string } }).request;
-    expect(sent.message).not.toContain("deviceHistory");
+    expect(sent.message).not.toContain("triggerContext.deviceHistory");
   });
 });

@@ -118,10 +118,11 @@ export const resultSchema = z.object({
   facts: z.array(z.object({ text: z.string().max(2000), evidenceRefs: z.array(z.string().max(180)).min(1).max(20) })).max(30),
   hypotheses: z.array(z.string().max(2000)).max(20),
   nextSteps: z.array(z.string().max(1000)).max(15),
-  // Optional assessments a source may show with the result.
-  severity: z.enum(["info", "low", "medium", "high", "critical"]).optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  details: z.record(z.unknown()).refine((d) => Object.keys(d).length <= 30).optional(),
+  // Optional assessments a source may show with the result. An unusable one
+  // is dropped, never fails the report.
+  severity: z.enum(["info", "low", "medium", "high", "critical"]).optional().catch(undefined),
+  confidence: z.number().min(0).max(1).optional().catch(undefined),
+  details: z.record(z.unknown()).refine((d) => Object.keys(d).length <= 30).optional().catch(undefined),
 });
 export type AssistantDefinition = z.infer<typeof definitionSchema>;
 export type PlanningRequest = z.infer<typeof planningRequestSchema>;

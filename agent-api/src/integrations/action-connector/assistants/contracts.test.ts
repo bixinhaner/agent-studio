@@ -108,10 +108,15 @@ describe("assistant result assessments", () => {
     expect(resultSchema.parse(base)).not.toHaveProperty("severity");
     expect(resultSchema.parse({ ...base, severity: "critical", confidence: 1, details: { a: 1 } })).toMatchObject({ severity: "critical", confidence: 1, details: { a: 1 } });
   });
-  it("rejects assessments outside their ranges", () => {
-    expect(() => resultSchema.parse({ ...base, severity: "urgent" })).toThrow();
-    expect(() => resultSchema.parse({ ...base, confidence: 1.5 })).toThrow();
-    expect(() => resultSchema.parse({ ...base, details: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`k${i}`, i])) })).toThrow();
+  it("drops assessments outside their ranges without failing the report", () => {
+    const tooMany = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`k${i}`, i]));
+    const parsed = resultSchema.parse({ ...base, severity: "major", confidence: 80, details: tooMany });
+    expect(parsed).toMatchObject(base);
+    expect(parsed.severity).toBeUndefined();
+    expect(parsed.confidence).toBeUndefined();
+    expect(parsed.details).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(parsed))).toEqual(base);
+    expect(resultSchema.parse({ ...base, severity: "major", confidence: 0.6 })).toMatchObject({ confidence: 0.6 });
   });
 });
 
