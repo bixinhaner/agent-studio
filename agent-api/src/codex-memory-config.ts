@@ -84,13 +84,25 @@ export function codexMemoryGenerationActive(
  * consolidation call is billed per token, and consolidation runs as a multi-turn agent, so generation is off
  * unless `generateMemoriesWithApiProvider` opts in. Existing memories are still read (use_memories untouched).
  * When it is on, Codex's default memory models are OpenAI names (e.g. gpt-5.6-luna) that such providers
- * reject, so both phases are pinned to the provider's default model. ChatGPT sign-in keeps Codex's own choice.
+ * reject, so both phases are pinned to the provider's default model.
+ *
+ * With ChatGPT sign-in both phases are pinned to CHATGPT_MEMORY_MODEL. Codex 0.169.0 still defaults to
+ * gpt-5.6-luna (extraction) and gpt-5.6-terra (consolidation); terra costs about as much as gpt-6.1-sol and
+ * consolidation alone used ~9% of the weekly Codex quota (2026-11-15..17), while gpt-6-luna is the cheapest
+ * current model. When that model is retired, update the constant.
  */
+export const CHATGPT_MEMORY_MODEL = "gpt-6-luna";
+
 export function buildCodexMemoryModelOverrides(
   snapshot: Pick<ManagedCodexProviderSnapshot, "kind" | "config">,
   settings: SystemSettingsCodexMemory | undefined
 ): Record<string, unknown> | undefined {
-  if (!settings?.enabled || snapshot.kind === "chatgpt") return undefined;
+  if (!settings?.enabled) return undefined;
+  if (snapshot.kind === "chatgpt") {
+    return settings.generateMemories
+      ? { memories: { extract_model: CHATGPT_MEMORY_MODEL, consolidation_model: CHATGPT_MEMORY_MODEL } }
+      : undefined;
+  }
   if (!codexMemoryGenerationActive(snapshot.kind, settings)) {
     return { memories: { generate_memories: false } };
   }

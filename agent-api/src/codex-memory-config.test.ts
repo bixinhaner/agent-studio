@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyCodexMemoryToProviderSnapshot, codexMemoryGenerationActive } from "./codex-memory-config.js";
+import { applyCodexMemoryToProviderSnapshot, CHATGPT_MEMORY_MODEL, codexMemoryGenerationActive } from "./codex-memory-config.js";
 import { createLocalAuthProviderSnapshot, createManagedCodexProviderSnapshot } from "./managed-codex-provider.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 
@@ -41,11 +41,36 @@ describe("applyCodexMemoryToProviderSnapshot", () => {
     });
   });
 
-  it("keeps Codex's own memory models for ChatGPT sign-in", () => {
+  it("pins both memory phases to gpt-6-luna for ChatGPT sign-in", () => {
     const snapshot = applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), { ...memorySettings, enabled: true });
     const memories = (snapshot.runtimeOptions.config as { memories: Record<string, unknown> }).memories;
+    expect(CHATGPT_MEMORY_MODEL).toBe("gpt-6-luna");
     expect(memories.generate_memories).toBe(true);
     expect(codexMemoryGenerationActive("chatgpt", memorySettings)).toBe(true);
+    expect(memories.extract_model).toBe("gpt-6-luna");
+    expect(memories.consolidation_model).toBe("gpt-6-luna");
+  });
+
+  it("replaces memory models persisted on an existing ChatGPT thread snapshot", () => {
+    const existing = createLocalAuthProviderSnapshot();
+    existing.runtimeOptions = {
+      ...existing.runtimeOptions,
+      config: { memories: { extract_model: "gpt-5.6-luna", consolidation_model: "gpt-5.6-terra" } }
+    };
+    const snapshot = applyCodexMemoryToProviderSnapshot(existing, { ...memorySettings, enabled: true });
+    expect(snapshot.runtimeOptions.config).toMatchObject({
+      memories: { extract_model: "gpt-6-luna", consolidation_model: "gpt-6-luna" }
+    });
+  });
+
+  it("does not pin memory models for ChatGPT sign-in when generation is off", () => {
+    const snapshot = applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), {
+      ...memorySettings,
+      enabled: true,
+      generateMemories: false
+    });
+    const memories = (snapshot.runtimeOptions.config as { memories: Record<string, unknown> }).memories;
+    expect(memories.generate_memories).toBe(false);
     expect(memories.extract_model).toBeUndefined();
     expect(memories.consolidation_model).toBeUndefined();
   });
