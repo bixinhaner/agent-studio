@@ -61,7 +61,7 @@ python3 scripts/preprocess-knowledge-docx.py \
   --workers 2
 ```
 
-To annotate images inline with Codex `gpt-5.4-mini`:
+To annotate images inline with Codex (default model `gpt-6-luna`):
 
 ```bash
 python3 scripts/preprocess-knowledge-docx.py \
@@ -70,7 +70,7 @@ python3 scripts/preprocess-knowledge-docx.py \
   --output-root /path/to/preprocessed-docs \
   --workers 2 \
   --annotate-images \
-  --image-annotation-model gpt-5.4-mini \
+  --image-annotation-model gpt-6-luna \
   --image-annotation-limit-per-doc 8 \
   --image-annotation-fail-on-error
 ```
@@ -113,6 +113,9 @@ When `--annotate-images` is enabled:
 - repeated image annotations are reused from `<output-root>/.image-annotation-cache.jsonl` when the image content hash, model and prompt/schema versions match
 - images created from `INCLUDEPICTURE` fields keep the original field URL in `images[].field_source_url`
 - budget/rate/token-limit failures stop the current document so the next run can skip already completed documents and resume from the first incomplete one
+- before any document is processed, one generated test image is annotated with the configured model; if Codex rejects the model, is signed out, or the command is missing, the run stops immediately with the reason (use `--skip-image-annotation-preflight` to bypass)
+- model/login errors (`model_not_found`, unsupported model, unauthorized) also stop the current document instead of silently skipping every image
+- the cache is keyed by model, so changing `--image-annotation-model` re-annotates images of newly processed documents; use `--force` only when a full re-annotation is intended
 
 Inline Markdown shape:
 

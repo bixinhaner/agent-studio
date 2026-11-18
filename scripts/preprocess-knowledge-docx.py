@@ -15,6 +15,8 @@ import sys
 import tempfile
 import threading
 import zipfile
+import zlib
+import struct
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -578,6 +580,82 @@ def extract_json_object(text: str) -> dict[str, object]:
     raise ValueError("no JSON object found in codex output")
 
 
+# Must be a model the Codex ChatGPT login accepts with image input. gpt-5.4-mini was retired for
+# ChatGPT accounts in 2026 (400 model_not_found), which silently skipped every annotation.
+DEFAULT_IMAGE_ANNOTATION_MODEL = "gpt-6-luna"
+DEFAULT_IMAGE_ANNOTATION_REASONING_EFFORT = "low"
+
+
+def codex_error_summary(output: str) -> str:
+    """Codex prints a long banner first; the actionable part is the ERROR lines (or the tail)."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    errors = [line for line in lines if line.startswith("ERROR")]
+    picked = errors[-2:] if errors else lines[-3:]
+    return clean_text(" ".join(dict.fromkeys(picked))) or "codex exec failed"
+
+
+def is_annotation_setup_error(message: str) -> bool:
+    """Errors that will hit every image (wrong model, signed out, missing CLI): stop instead of skipping."""
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "model_not_found",
+            "model is not supported",
+            "not supported when using codex",
+            "does not exist or you do not have access",
+            "unauthorized",
+            "not logged in",
+            "please log in",
+            "refresh_token",
+            "no such file or directory",
+        )
+    )
+
+
+def _tiny_png_bytes(width: int = 48, height: int = 24) -> bytes:
+    row = b"\x00" + bytes([220, 40, 40]) * width
+    raw = row * height
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def preflight_image_annotation(config: "ImageAnnotationConfig") -> None:
+    """Annotate one generated image before touching documents, so a retired model or a signed-out
+    Codex fails the run up front with a clear message instead of leaving every image unannotated."""
+    with tempfile.TemporaryDirectory(prefix="docx-image-annotation-preflight-") as temp_dir:
+        workspace = Path(temp_dir)
+        image_path = workspace / "preflight.png"
+        image_bytes = _tiny_png_bytes()
+        image_path.write_bytes(image_bytes)
+        annotator = CodexImageAnnotator(config, workspace)
+        try:
+            annotator.annotate(
+                image_path,
+                image_sha256=hashlib.sha256(image_bytes).hexdigest(),
+                document_title="preflight",
+                document_path="preflight.docx",
+                heading_context=[],
+                caption="",
+                previous_text="",
+                next_text="",
+                alt_text="solid red rectangle",
+                annotation_cache=None,
+            )
+        except Exception as exc:
+            raise SystemExit(
+                "Image annotation preflight failed with model "
+                f"{config.model!r} via {config.command!r}: {clean_text(str(exc))[:400]}\n"
+                "Pick a model this Codex login lists (codex app-server model/list, or try one with `codex exec -m <model>`) "
+                "and pass --image-annotation-model, check `codex login status`, "
+                "or rerun with --skip-image-annotation-preflight to bypass this check."
+            ) from exc
+
+
 def is_annotation_budget_error(message: str) -> bool:
     lowered = message.lower()
     return any(
@@ -680,7 +758,9 @@ class ImageAnnotationCache:
 @dataclass(frozen=True)
 class ImageAnnotationConfig:
     enabled: bool
-    model: str = "gpt-5.4-mini"
+    model: str = DEFAULT_IMAGE_ANNOTATION_MODEL
+    # Pinned so annotations don't inherit a costly default (e.g. xhigh) from the user's Codex config.
+    reasoning_effort: str = DEFAULT_IMAGE_ANNOTATION_REASONING_EFFORT
     command: str = "codex"
     timeout_seconds: int = 180
     limit_per_doc: int | None = None
@@ -748,8 +828,12 @@ class CodexImageAnnotator:
             self.config.command,
             "exec",
             "--ephemeral",
+            # The workspace is a temp/output folder, not a git repo; without this Codex refuses to run.
+            "--skip-git-repo-check",
             "-m",
             self.config.model,
+            "-c",
+            f"model_reasoning_effort={self.config.reasoning_effort}",
             "-C",
             str(self.workspace_root),
             "--output-schema",
@@ -771,7 +855,7 @@ class CodexImageAnnotator:
             if prepared_temp_dir is not None:
                 prepared_temp_dir.cleanup()
         if completed.returncode != 0:
-            stderr = clean_text(completed.stderr or completed.stdout or "codex exec failed")
+            stderr = codex_error_summary(f"{completed.stderr or ''}\n{completed.stdout or ''}")
             raise RuntimeError(stderr)
         parsed = extract_json_object(completed.stdout)
         summary = clean_text(str(parsed.get("summary") or ""))
@@ -3454,7 +3538,7 @@ def annotate_document_images(
             doc_warnings.append(
                 f"image annotation failed for {image_rel_path}: {error_message}"
             )
-            if config.fail_on_error or is_annotation_budget_error(error_message):
+            if config.fail_on_error or is_annotation_budget_error(error_message) or is_annotation_setup_error(error_message):
                 raise RuntimeError(f"image annotation failed for {image_rel_path}: {error_message}") from exc
 
     updated_markdown = "\n\n".join(block.rstrip() for block in inserted_blocks if block and block.strip()).strip() + "\n"
@@ -3514,7 +3598,7 @@ def annotate_document_images(
             doc_warnings.append(
                 f"image annotation failed for {image_rel_path}: {error_message}"
             )
-            if config.fail_on_error or is_annotation_budget_error(error_message):
+            if config.fail_on_error or is_annotation_budget_error(error_message) or is_annotation_setup_error(error_message):
                 raise RuntimeError(f"image annotation failed for {image_rel_path}: {error_message}") from exc
 
     updated_markdown = replace_table_image_annotation_placeholders(updated_markdown, sequence_to_occurrence)
@@ -4002,8 +4086,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--image-annotation-model",
-        default="gpt-5.4-mini",
-        help="Model used for image annotation when --annotate-images is enabled. Default: gpt-5.4-mini.",
+        default=DEFAULT_IMAGE_ANNOTATION_MODEL,
+        help=f"Model used for image annotation when --annotate-images is enabled. Default: {DEFAULT_IMAGE_ANNOTATION_MODEL}.",
+    )
+    parser.add_argument(
+        "--image-annotation-reasoning-effort",
+        default=DEFAULT_IMAGE_ANNOTATION_REASONING_EFFORT,
+        help=f"Codex reasoning effort for image annotation. Default: {DEFAULT_IMAGE_ANNOTATION_REASONING_EFFORT}.",
     )
     parser.add_argument(
         "--image-annotation-command",
@@ -4024,7 +4113,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--image-annotation-fail-on-error",
         action="store_true",
-        help="Fail the current document when any image annotation request fails. Budget/rate/token errors fail regardless.",
+        help="Fail the current document when any image annotation request fails. Budget/rate/token and model/login errors fail regardless.",
+    )
+    parser.add_argument(
+        "--skip-image-annotation-preflight",
+        action="store_true",
+        help="Skip the one-image Codex check that runs before documents when --annotate-images is enabled.",
     )
     parser.add_argument(
         "--clean-deleted",
@@ -4085,12 +4179,15 @@ def main() -> int:
     image_annotation = ImageAnnotationConfig(
         enabled=bool(args.annotate_images),
         model=args.image_annotation_model,
+        reasoning_effort=args.image_annotation_reasoning_effort,
         command=args.image_annotation_command,
         timeout_seconds=args.image_annotation_timeout,
         limit_per_doc=args.image_annotation_limit_per_doc,
         fail_on_error=bool(args.image_annotation_fail_on_error),
     )
     image_annotation_cache = ImageAnnotationCache(output_root / ".image-annotation-cache.jsonl") if image_annotation.enabled else None
+    if image_annotation.enabled and not args.rebuild_summary_only and not args.skip_image_annotation_preflight:
+        preflight_image_annotation(image_annotation)
 
     if args.rebuild_summary_only:
         results = rebuild_summary_results(
