@@ -80,10 +80,6 @@ export const executionRequestSchema = z.object({
   replyToRunId: z.string().uuid().optional(),
   // Optional for stored requests and source deployments predating continuity.
   contextScopeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
-  // The source's name for the conversation this run continues: the subject
-  // the work is about within the context boundary. Runs of different
-  // assistants about the same subject share it. Bound only with a scope digest.
-  conversationKey: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   limits: z.object({
     timeoutSeconds: z.number().int().min(10).max(300).default(120),
     maxToolCalls: z.number().int().min(1).max(40).default(18),

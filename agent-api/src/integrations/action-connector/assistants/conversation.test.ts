@@ -81,45 +81,26 @@ describe("assistant conversation continuity", () => {
   });
 });
 
-describe("subject conversations keyed by the source", () => {
-  const key = (n: string) => n.repeat(64);
-  const keyed = () => executionRequestSchema.parse({ ...request(), conversationKey: key("a") });
-  it("lets assistants of one principal continue one conversation about the same subject", () => {
-    const r = keyed(); const expected = assistantConversationId(r, run());
-    expect(expected).toMatch(/^assistant-ctx-[a-f0-9]{64}$/);
-    const other = structuredClone(r);
-    other.assistantId = randomUUID(); other.runId = randomUUID(); other.definition.goal = "Explain the alarm";
-    other.definition.operations = ["get.alarms.active"]; other.toolGrants = [{ operationId: "get.alarms.active", method: "GET" }];
-    other.triggerContext = { eventType: "alarm" };
-    expect(assistantConversationId(other, { id: other.runId, runAttempt: 2 })).toBe(expected);
-  });
-  it("separates subjects, principals, effective methods and blocked paths", () => {
-    const r = keyed(); const expected = assistantConversationId(r, run());
-    for (const change of [
-      (v: typeof r) => { v.conversationKey = key("b"); },
-      (v: typeof r) => { v.contextScopeDigest = `sha256:${"3".repeat(64)}`; },
-      (v: typeof r) => { v.toolPolicy!.allowedMethods = ["GET"]; },
-      (v: typeof r) => { v.toolPolicy!.blockedPathPrefixes.push("/api/v1/devices"); },
-    ]) { const changed = structuredClone(r); change(changed); expect(assistantConversationId(changed, run())).not.toBe(expected); }
-    const unkeyed = structuredClone(r); delete unkeyed.conversationKey;
-    // Requests without a key keep their assistant's own conversation.
-    expect(assistantConversationId(unkeyed, run()).startsWith(`assistant-${r.assistantId}-`)).toBe(true);
-  });
-  it("needs a scope digest and a well-formed key", () => {
-    const r = keyed(); delete r.contextScopeDigest;
-    const a = run(); expect(assistantConversationId(r, a)).toBe(`assistant-${a.id}-${a.runAttempt}`);
-    expect(() => executionRequestSchema.parse({ ...request(), conversationKey: "device:1" })).toThrow();
-  });
-  it("tells the model how to treat other workflows' turns and device history", async () => {
-    const r = executionRequestSchema.parse({ ...keyed(), triggerContext: { deviceHistory: [{ title: "Earlier", summary: "s", scenarioKey: "k", createdAt: "2026-11-01T00:00:00Z" }] } });
+describe("workflow evidence and assessments", () => {
+  it("tells the model how to treat device history and passes assessments through", async () => {
+    const r = executionRequestSchema.parse({ ...request(), triggerContext: { deviceHistory: [{ title: "Earlier", summary: "s", scenarioKey: "k", createdAt: "2026-11-01T00:00:00Z" }] } });
     const result = { outcome: "finding", title: "t", summary: "s", facts: [{ text: "f", evidenceRefs: ["tool:get.devices"] }], hypotheses: [], nextSteps: [], severity: "high", confidence: 0.8, details: { probableCause: "power" } };
     const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
     const output = await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany: vi.fn(async () => [{ operationId: "get.devices" }]) } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
       run: { ...run(), connectorId: "c" }, request: r, signal: new AbortController().signal } as never);
     expect(output).toMatchObject({ severity: "high", confidence: 0.8, details: { probableCause: "power" } });
-    const message = (streamChat.mock.calls[0][0] as unknown as { request: { message: string; conversationId: string } }).request;
-    expect(message.conversationId).toBe(assistantConversationId(r, run()));
-    expect(message.message).toContain("earlier turns may come from other workflows about the same subject");
-    expect(message.message).toContain("never evidence of the current state");
+    const sent = (streamChat.mock.calls[0][0] as unknown as { request: { message: string; conversationId: string } }).request;
+    // One workflow is one conversation, whatever the event is about.
+    expect(sent.conversationId).toBe(assistantConversationId(r, run()));
+    expect(sent.conversationId.startsWith(`assistant-${r.assistantId}-`)).toBe(true);
+    expect(sent.message).toContain("never evidence of the current state");
+  });
+  it("leaves device history out of the prompt when there is none", async () => {
+    const result = { outcome: "no_change", title: "t", summary: "s", facts: [], hypotheses: [], nextSteps: [] };
+    const streamChat = vi.fn(async (input: { emit: (e: unknown) => void }) => input.emit({ type: "delta", text: JSON.stringify(result) }));
+    await executeAssistant({ db: { ...connectorDb(), connectorToolInvocation: { findMany: vi.fn(async () => [{ operationId: "get.devices" }]) } }, runtime: { streamChat }, bridge: { prepareBackgroundRun: vi.fn() },
+      run: { ...run(), connectorId: "c" }, request: request(), signal: new AbortController().signal } as never);
+    const sent = (streamChat.mock.calls[0][0] as unknown as { request: { message: string } }).request;
+    expect(sent.message).not.toContain("deviceHistory");
   });
 });

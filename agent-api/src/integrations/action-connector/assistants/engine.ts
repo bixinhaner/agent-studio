@@ -91,9 +91,6 @@ export async function executeAssistant(input: {
           `Owner's follow-up: ${JSON.stringify(request.userMessage)}`,
           ...(request.replyToRunId ? [`Referenced prior run: ${request.replyToRunId}`] : []),
         ] : []),
-        ...(request.conversationKey ? [
-          "This conversation follows one subject across the source's workflows: earlier turns may come from other workflows about the same subject. Use them as background for relating problems; this turn's definition, goal and tool grants are the ones that apply, and earlier results are not current evidence.",
-        ] : []),
         `Authorized trigger context: ${JSON.stringify(request.triggerContext)}`,
         ...(request.triggerContext.deviceHistory ? [
           "triggerContext.deviceHistory lists earlier findings about this device with their dates. It is background for spotting related or recurring problems, never evidence of the current state.",
