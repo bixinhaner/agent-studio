@@ -223,6 +223,8 @@ export class InstalledPluginService {
   private readonly cacheTtlMs: number;
   private readonly managedPluginSourceRoot?: string;
   private cached?: { expiresAt: number; records: InstalledPluginRecord[] };
+  private lastGood?: InstalledPluginRecord[];
+  private inFlight?: Promise<InstalledPluginRecord[]>;
 
   constructor(options: InstalledPluginServiceOptions) {
     this.baseHome = path.resolve(options.baseHome);
@@ -240,8 +242,30 @@ export class InstalledPluginService {
     if (this.cached && this.cached.expiresAt > Date.now()) {
       return this.cached.records.map((record) => ({ ...record }));
     }
+    // Concurrent portal loads share one `codex plugin list` run.
+    this.inFlight ??= this.load().finally(() => {
+      this.inFlight = undefined;
+    });
+    try {
+      const records = await this.inFlight;
+      return records.map((record) => ({ ...record }));
+    } catch (error) {
+      // Plugin metadata only decorates portal runtime options; a slow or failing CLI must not
+      // block the portal. Serve the last good list (or none) and retry after the TTL.
+      const stale = this.lastGood ?? [];
+      console.warn("installed plugin list failed; serving last known plugins", {
+        error: error instanceof Error ? error.message : String(error),
+        stalePlugins: stale.length
+      });
+      this.cached = { expiresAt: Date.now() + this.cacheTtlMs, records: stale };
+      return stale.map((record) => ({ ...record }));
+    }
+  }
 
-    const { stdout } = await execFileAsync(this.executable, ["plugin", "list"], {
+  private async load(): Promise<InstalledPluginRecord[]> {
+    // Codex 0.169+ also fetches the remote plugin catalog here (seen taking 48s on prod).
+    // Only local marketplace plugins are listed, so skip the network round trip.
+    const { stdout } = await execFileAsync(this.executable, ["plugin", "list", "-c", "features.remote_plugin=false"], {
       env: {
         ...process.env,
         CODEX_HOME: this.baseHome
@@ -315,6 +339,7 @@ export class InstalledPluginService {
       return leftIndex - rightIndex || left.name.localeCompare(right.name);
     });
     this.cached = { expiresAt: Date.now() + this.cacheTtlMs, records: sorted };
-    return sorted.map((record) => ({ ...record }));
+    this.lastGood = sorted;
+    return sorted;
   }
 }

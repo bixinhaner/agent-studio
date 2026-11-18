@@ -81,6 +81,33 @@ printf '%s\\n' '${`pdf@agentstudio-office  installed, enabled  1.0.0  ${path.joi
     expect(records.map((record) => record.pluginRef)).toEqual(["documents@agentstudio-office"]);
   });
 
+  it("lists local plugins only and serves the last good list when the CLI fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "installed-plugins-"));
+    roots.push(root);
+    const pluginPath = path.join(root, "documents");
+    await fs.mkdir(path.join(pluginPath, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(path.join(pluginPath, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "documents", version: "1.2.3" }));
+    const argsFile = path.join(root, "args");
+    const failFlag = path.join(root, "fail");
+    const executable = path.join(root, "fake-codex");
+    await fs.writeFile(executable, `#!/bin/sh
+echo "$@" > '${argsFile}'
+if [ -f '${failFlag}' ]; then exit 1; fi
+printf '%s\\n' '${`documents@agentstudio-office  installed, enabled  1.2.3  ${pluginPath}`}'
+`);
+    await fs.chmod(executable, 0o755);
+
+    const service = new InstalledPluginService({ baseHome: root, executable, cacheTtlMs: 0 });
+    const [first, second] = await Promise.all([service.list(), service.list()]);
+    expect(first.map((record) => record.pluginRef)).toEqual(["documents@agentstudio-office"]);
+    expect(second).toEqual(first);
+    expect((await fs.readFile(argsFile, "utf8")).trim()).toBe("plugin list -c features.remote_plugin=false");
+
+    await fs.writeFile(failFlag, "");
+    expect((await service.list()).map((record) => record.pluginRef)).toEqual(["documents@agentstudio-office"]);
+    await expect(new InstalledPluginService({ baseHome: root, executable, cacheTtlMs: 0 }).list()).resolves.toEqual([]);
+  });
+
   async function visualizeFixture(input: { installedVersion: string; installedSkill: string; repoSkill: string; repoVersion: string }) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "installed-plugins-"));
     roots.push(root);
