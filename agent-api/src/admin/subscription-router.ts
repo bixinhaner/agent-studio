@@ -73,6 +73,12 @@ function parseOptionalNonNegativeInteger(value: unknown, fieldLabel: string): nu
   return parsed;
 }
 
+function parseOptionalPositiveInteger(value: unknown, fieldLabel: string): number | null | undefined {
+  const parsed = parseOptionalNonNegativeInteger(value, fieldLabel);
+  if (parsed === 0) throw new Error(`${fieldLabel}至少为 1，留空表示不限`);
+  return parsed;
+}
+
 function normalizeStatus(value: unknown): string | undefined {
   const status = trimOrUndefined(typeof value === "string" ? value : undefined);
   if (!status) return undefined;
@@ -273,7 +279,8 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         status: normalizeStatus(req.body?.status) ?? "active",
         featureType: "chat",
         monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月 AI Request"),
-        monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度")
+        monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度"),
+        maxMembers: parseOptionalPositiveInteger(req.body?.maxMembers, "成员上限")
       });
       res.status(201).json({
         plan: {
@@ -295,7 +302,8 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         description: req.body?.description === undefined ? undefined : trimOrUndefined(req.body?.description) ?? null,
         status: req.body?.status === undefined ? undefined : normalizeStatus(req.body?.status),
         monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月 AI Request"),
-        monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度")
+        monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度"),
+        maxMembers: parseOptionalPositiveInteger(req.body?.maxMembers, "成员上限")
       });
       const relatedGrants = await getGrants().list({ planId: plan.id });
       res.json({

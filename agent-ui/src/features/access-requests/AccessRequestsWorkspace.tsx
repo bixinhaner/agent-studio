@@ -1118,6 +1118,11 @@ export function AccessRequestsWorkspace() {
                             { value: "customer_member", label: "普通成员" }
                           ]}
                         />
+                        <small className="access-admin-field-hint">
+                          {provisionDraft.membershipType === "customer_admin"
+                            ? "组织管理员可在 Portal 账户菜单“团队”中邀请同域名同事、处理加入申请，成员共享该组织套餐额度。"
+                            : "普通成员不能邀请同事；同事申请加入时只会通知平台管理员。"}
+                        </small>
                       </label>
                       <label className="access-admin-field">
                         <span>套餐</span>

@@ -18,6 +18,7 @@ import type { SubscriptionPlanRecord, SubscriptionPlanRepository } from "../pers
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 import type { PurchaseProofStorage, PurchaseProofUploadFile } from "./purchase-proof-storage.js";
 import type { PublicBrandService } from "../public-brands/service.js";
+import { PUBLIC_EMAIL_DOMAINS } from "./public-email-domains.js";
 
 export type AccessRequestStatus =
   | "submitted"
@@ -290,27 +291,6 @@ type AccessRequestServiceOptions = {
   findBrandEmployees?: () => Promise<Array<InternalAccessUser & { publicBrandId: string }>>;
 };
 
-const PUBLIC_EMAIL_DOMAINS = new Set([
-  "126.com",
-  "163.com",
-  "aliyun.com",
-  "aol.com",
-  "foxmail.com",
-  "gmail.com",
-  "hotmail.com",
-  "icloud.com",
-  "live.com",
-  "msn.com",
-  "outlook.com",
-  "proton.me",
-  "protonmail.com",
-  "qq.com",
-  "sina.com",
-  "sohu.com",
-  "yahoo.com",
-  "ymail.com"
-]);
-
 function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -464,11 +444,25 @@ function accessRequestStatus(value: string): AccessRequestStatus {
   ] as string[]).includes(value) ? value as AccessRequestStatus : "submitted";
 }
 
+/**
+ * Thrown instead of the generic "domain already has a trial" error when the colleague's workspace is
+ * still active in the same brand, so the apply page can offer "ask to join" without naming anyone.
+ */
+export class CompanyWorkspaceExistsError extends Error {
+  readonly code = "company_workspace_exists";
+  constructor() {
+    super("Your company already has a workspace. Ask to join it instead of starting another trial.");
+    this.name = "CompanyWorkspaceExistsError";
+  }
+}
+
 async function ensureTrialNotRepeated(options: {
   requests: AccessRequestRepository;
+  organizations: Pick<OrganizationRepository, "getById">;
   applicantEmail: string;
   applicantEmailDomain: string;
   snNumber: string;
+  publicBrandId?: string | null;
 }) {
   const applicantEmail = normalizedTrialFingerprint(options.applicantEmail);
   const applicantEmailDomain = normalizedTrialFingerprint(options.applicantEmailDomain);
@@ -488,6 +482,16 @@ async function ensureTrialNotRepeated(options: {
   }
   if (snNumber && normalizedTrialFingerprint(conflict.snNumber) === snNumber) {
     throw new Error("This device SN already has trial access history. Sign in or renew from the Portal instead of opening another trial.");
+  }
+  if (
+    conflict.targetOrganizationId &&
+    PROVISIONED_TRIAL_STATUSES.has(accessRequestStatus(conflict.status)) &&
+    (trimOrUndefined(conflict.publicBrandId) ?? null) === (trimOrUndefined(options.publicBrandId ?? undefined) ?? null)
+  ) {
+    const organization = await options.organizations.getById(conflict.targetOrganizationId);
+    if (organization?.status === "active" && organization.type === "customer") {
+      throw new CompanyWorkspaceExistsError();
+    }
   }
   throw new Error("This company domain already has trial access history. Sign in or renew from the Portal instead of opening another trial.");
 }
@@ -1310,9 +1314,11 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       }
       await ensureTrialNotRepeated({
         requests: options.requests,
+        organizations: options.organizations,
         applicantEmail,
         applicantEmailDomain: emailDomain(applicantEmail),
-        snNumber
+        snNumber,
+        publicBrandId: input.publicBrandId
       });
 
       const rawToken = issuePublicToken();

@@ -3,7 +3,14 @@ import { FileText, UploadCloud } from "lucide-react";
 
 import { BrandMark } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
-import { accessRequestFileUrl, createPublicAccessRequest, fetchPublicAccessRequest, updatePublicAccessRequest } from "./api";
+import {
+  accessRequestFileUrl,
+  createPublicAccessRequest,
+  fetchPublicAccessRequest,
+  isCompanyWorkspaceExistsError,
+  submitOrganizationJoinRequest,
+  updatePublicAccessRequest
+} from "./api";
 import { formatFileSize, formatLocalTime } from "./presentation";
 import type { PublicAccessRequest, PublicAccessRequestInput } from "./types";
 import "./access-request.css";
@@ -74,6 +81,11 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
   const [request, setRequest] = useState<PublicAccessRequest | null>(null);
   const [form, setForm] = useState<AccessRequestFormState>(createFormState());
   const [errorText, setErrorText] = useState("");
+  // Set when the company already has a workspace: we offer "ask to join" instead of a second trial.
+  const [joinOffer, setJoinOffer] = useState<{ email: string; contactName: string } | null>(null);
+  const [joinMessage, setJoinMessage] = useState("");
+  const [joinState, setJoinState] = useState<"idle" | "sending" | "sent">("idle");
+  const [joinError, setJoinError] = useState("");
   const [successText, setSuccessText] = useState("");
 
   useEffect(() => {
@@ -160,9 +172,32 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
         setSuccessText("Your request has been submitted.");
       }
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to submit access request");
+      if (isCompanyWorkspaceExistsError(error)) {
+        setJoinOffer({ email: form.applicantEmail.trim(), contactName: (form.contactName ?? "").trim() });
+        setJoinState("idle");
+        setJoinError("");
+      } else {
+        setErrorText(error instanceof Error ? error.message : "Failed to submit access request");
+      }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleJoinRequest() {
+    if (!joinOffer) return;
+    setJoinState("sending");
+    setJoinError("");
+    try {
+      await submitOrganizationJoinRequest({
+        email: joinOffer.email,
+        contactName: joinOffer.contactName || undefined,
+        message: joinMessage.trim() || undefined
+      });
+      setJoinState("sent");
+    } catch (error) {
+      setJoinState("idle");
+      setJoinError(error instanceof Error ? error.message : "Failed to send the request");
     }
   }
 
@@ -188,7 +223,58 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
         ) : null}
         {request?.rejectionReason ? <div className="auth-modern-invite auth-access-danger">Rejection Reason: {request.rejectionReason}</div> : null}
 
-        {!loading && editable ? (
+        {joinOffer ? (
+          <section className="auth-access-join" aria-live="polite">
+            {joinState === "sent" ? (
+              <>
+                <h2>Request sent</h2>
+                <p>
+                  Your company&apos;s {branding.platformName} admin has been notified. If they approve, an invitation will be sent to{" "}
+                  <strong>{joinOffer.email}</strong>.
+                </p>
+                <div className="auth-access-actions">
+                  <button className="auth-modern-primary-btn auth-access-link-btn" onClick={() => updatePath("/")}>
+                    Back to Sign In
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>Your company already uses {branding.platformName}</h2>
+                <p>
+                  A colleague at <strong>@{joinOffer.email.split("@")[1] ?? ""}</strong> already has a workspace, so a separate trial is not
+                  available. Ask to join it instead: the workspace admin will review your request and can invite{" "}
+                  <strong>{joinOffer.email}</strong>. Everyone in the workspace shares one subscription.
+                </p>
+                <label className="auth-modern-field">
+                  <span>Message to the admin (optional)</span>
+                  <textarea
+                    className="auth-modern-input auth-access-textarea auth-access-textarea-sm"
+                    value={joinMessage}
+                    maxLength={1000}
+                    placeholder="e.g. I work with you on the RAN rollout team."
+                    onChange={(event) => setJoinMessage(event.target.value)}
+                  />
+                </label>
+                {joinError ? <p className="err-text auth-access-feedback">{joinError}</p> : null}
+                <div className="auth-access-actions">
+                  <button className="auth-modern-primary-btn auth-access-link-btn" onClick={() => setJoinOffer(null)}>
+                    Edit My Details
+                  </button>
+                  <button
+                    className="auth-modern-sso-btn auth-access-submit-btn"
+                    disabled={joinState === "sending"}
+                    onClick={() => void handleJoinRequest()}
+                  >
+                    {joinState === "sending" ? "Sending..." : "Ask to Join"}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {!loading && editable && !joinOffer ? (
           <div className="auth-access-form-grid">
             <label className="auth-modern-field">
               <span>{requiredFieldLabel("Business Email")}</span>

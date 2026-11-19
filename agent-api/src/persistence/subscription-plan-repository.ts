@@ -7,6 +7,8 @@ export type SubscriptionPlanRecord = {
   featureType: string;
   monthlyCompletedTurnLimit?: number;
   monthlyTokenLimit?: number;
+  /** Seats per organization (active members + pending invites); undefined means unlimited. */
+  maxMembers?: number;
   billingCurrency?: string;
   billingInterval?: string;
   billingIntervalCount?: number;
@@ -24,6 +26,7 @@ export type CreateSubscriptionPlanInput = {
   featureType?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  maxMembers?: number | null;
   billingCurrency?: string | null;
   billingInterval?: string | null;
   billingIntervalCount?: number | null;
@@ -39,6 +42,7 @@ export type UpdateSubscriptionPlanInput = {
   featureType?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  maxMembers?: number | null;
   billingCurrency?: string | null;
   billingInterval?: string | null;
   billingIntervalCount?: number | null;
@@ -55,6 +59,7 @@ type SubscriptionPlanRow = {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  maxMembers?: number | null;
   billingCurrency: string;
   billingInterval: string;
   billingIntervalCount: number;
@@ -78,6 +83,7 @@ type SubscriptionPlanTable = {
       featureType: string;
       monthlyCompletedTurnLimit: number | null;
       monthlyTokenLimit: number | null;
+      maxMembers?: number | null;
       billingCurrency?: string;
       billingInterval?: string;
       billingIntervalCount?: number;
@@ -95,6 +101,7 @@ type SubscriptionPlanTable = {
       featureType?: string;
       monthlyCompletedTurnLimit?: number | null;
       monthlyTokenLimit?: number | null;
+      maxMembers?: number | null;
       billingCurrency?: string;
       billingInterval?: string;
       billingIntervalCount?: number;
@@ -130,6 +137,7 @@ function mapPlan(row: {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  maxMembers?: number | null;
   billingCurrency: string;
   billingInterval: string;
   billingIntervalCount: number;
@@ -147,6 +155,7 @@ function mapPlan(row: {
     featureType: row.featureType,
     monthlyCompletedTurnLimit: row.monthlyCompletedTurnLimit ?? undefined,
     monthlyTokenLimit: row.monthlyTokenLimit ?? undefined,
+    maxMembers: row.maxMembers ?? undefined,
     billingCurrency: row.billingCurrency,
     billingInterval: row.billingInterval,
     billingIntervalCount: row.billingIntervalCount,
@@ -192,6 +201,7 @@ export class SubscriptionPlanRepository {
         featureType: trimOrUndefined(input.featureType) ?? "chat",
         monthlyCompletedTurnLimit: input.monthlyCompletedTurnLimit ?? null,
         monthlyTokenLimit: input.monthlyTokenLimit ?? null,
+        maxMembers: input.maxMembers ?? null,
         billingCurrency: trimOrUndefined(input.billingCurrency)?.toLowerCase() ?? "usd",
         billingInterval: trimOrUndefined(input.billingInterval) ?? "month",
         billingIntervalCount: input.billingIntervalCount ?? 1,
@@ -218,6 +228,7 @@ export class SubscriptionPlanRepository {
         featureType: input.featureType === undefined ? undefined : trimOrUndefined(input.featureType),
         monthlyCompletedTurnLimit: input.monthlyCompletedTurnLimit === undefined ? undefined : input.monthlyCompletedTurnLimit,
         monthlyTokenLimit: input.monthlyTokenLimit === undefined ? undefined : input.monthlyTokenLimit,
+        maxMembers: input.maxMembers === undefined ? undefined : input.maxMembers,
         billingCurrency: input.billingCurrency === undefined ? undefined : trimOrUndefined(input.billingCurrency)?.toLowerCase(),
         billingInterval: input.billingInterval === undefined ? undefined : trimOrUndefined(input.billingInterval),
         billingIntervalCount: input.billingIntervalCount === undefined || input.billingIntervalCount === null ? undefined : input.billingIntervalCount,

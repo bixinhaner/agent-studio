@@ -82,7 +82,11 @@ export const ADMIN_ONLY_ENTRY_MODULES = [
   "agent-api/src/auth/router.ts",
   // Mounted under /api/admin in app-routes.ts.
   "agent-api/src/public-brands/admin-router.ts",
-  "agent-api/src/skill-catalog/router.ts"
+  "agent-api/src/skill-catalog/router.ts",
+  // /api/org-team, /api/admin/org-team, /public-api/org-join-requests (customer admin team management).
+  "agent-api/src/org-team/router.ts",
+  "agent-api/src/org-team/service.ts",
+  "agent-api/src/org-team/store.ts"
 ];
 
 const ADMIN_ONLY_ENTRY_PATTERN = /^agent-api\/src\/(admin|org-sync|ops)\//;

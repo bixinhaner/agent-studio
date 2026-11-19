@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import multer, { MulterError } from "multer";
 import { z } from "zod";
 
-import type { createAccessRequestService } from "./service.js";
+import { CompanyWorkspaceExistsError, type createAccessRequestService } from "./service.js";
 import type { PurchaseProofUploadFile } from "./purchase-proof-storage.js";
 
 const publicAccessRequestSchema = z.object({
@@ -96,6 +96,10 @@ export function createPublicAccessRequestRouter(service: AccessRequestService): 
       });
       res.status(201).json(created);
     } catch (error) {
+      if (error instanceof CompanyWorkspaceExistsError) {
+        res.status(409).json({ detail: error.message, code: error.code });
+        return;
+      }
       res.status(400).json({ detail: detailFromError(error) });
     }
   });

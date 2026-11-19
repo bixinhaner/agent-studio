@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
+import { createOrgTeamService } from "./org-team/service.js";
+import { createPrismaOrgTeamStore } from "./org-team/store.js";
+import { createOrgJoinRequestPublicRouter, createOrgTeamAdminRouter, createOrgTeamPortalRouter } from "./org-team/router.js";
 import { createClientErrorReportRouter } from "./operations/client-error-report-router.js";
 import {
   createPortalSendFailureRecorder,
@@ -12708,6 +12711,42 @@ app.use(
 app.use(
   "/api/admin/access-requests",
   createAdminAccessRequestRouter(accessRequestService)
+);
+
+const orgTeamService = createOrgTeamService({
+  store: createPrismaOrgTeamStore(db),
+  getBrand: async (publicBrandId) => publicBrands.getById(publicBrandId),
+  getSubscription: async (organizationId) => {
+    const grant = await subscriptionGrants.getByPrincipal("organization", organizationId);
+    if (!grant) return undefined;
+    const evaluation = await subscriptionEntitlements.evaluateGrant({
+      principalType: "organization",
+      principalId: organizationId,
+      grant
+    });
+    return {
+      planName: evaluation.plan?.name,
+      maxMembers: evaluation.plan?.maxMembers,
+      completedTurnLimit: evaluation.limits.monthlyCompletedTurnLimit,
+      usedCompletedTurns: evaluation.usage?.usedCompletedTurns ?? null,
+      remainingCompletedTurns: evaluation.usage?.remainingCompletedTurns ?? null,
+      cycleEndsAt: evaluation.usage?.cycleEndsAt,
+      expiresAt: grant.expiresAt,
+      accessStatus: evaluation.access.status
+    };
+  },
+  emailSender: authEmailSender,
+  notifyPlatformAdmins: (input) => adminEmailNotifications.notifyPlatformAdmins(input),
+  appBaseUrl: appConfig.appBaseUrl,
+  defaultPlatformName: () => resolvePublicPlatformName(systemSettings),
+  logger: console
+});
+app.use("/api/admin/org-team", createOrgTeamAdminRouter(orgTeamService));
+app.use("/api/org-team", createOrgTeamPortalRouter(orgTeamService));
+app.use(
+  "/public-api/org-join-requests",
+  createPublicExternalWebGate(externalWebAccess),
+  createOrgJoinRequestPublicRouter(orgTeamService)
 );
 
 app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessRequestService));

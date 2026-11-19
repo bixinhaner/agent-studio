@@ -336,6 +336,12 @@ import {
 const EMPTY_RUNTIME_SKILLS: RuntimeSkillOption[] = [];
 const SKILL_CREATOR_SKILL_ID = "skill-creator";
 
+function portalInitialView(): "scheduled-tasks" | "team" | null {
+  if (typeof window === "undefined") return null;
+  const view = new URLSearchParams(window.location.search).get("view");
+  return view === "scheduled-tasks" || view === "team" ? view : null;
+}
+
 export function PortalShell(props: {
   currentUser?: AuthUser;
   onOpenAdmin?: () => void;
@@ -4923,11 +4929,8 @@ export function PortalShell(props: {
             modeLabel={roadmapModeLabel}
             onOpenThread={(threadId) => void openWorkspaceTask({ id: threadId })}
             prepareTour={prepareOnboardingTour}
-            initialView={
-              typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "scheduled-tasks"
-                ? "scheduled-tasks"
-                : null
-            }
+            teamEnabled={auth.activeOrganization?.type === "customer" && auth.activeOrganization?.membershipType === "customer_admin"}
+            initialView={portalInitialView()}
           >
             {runAttentionHolder}
             <div className={`portal-workbench-root${trainingReadOnly ? " is-training-readonly" : ""}`}>

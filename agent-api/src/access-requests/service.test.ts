@@ -478,6 +478,39 @@ describe("createAccessRequestService", () => {
     expect(reviewers.get(result.request.id)).toBeUndefined();
   });
 
+  it("offers to join when the company already has an active workspace on the same brand", async () => {
+    const { service, requests } = createServiceHarness();
+    requests.set(
+      "request_ali",
+      buildRequest({
+        id: "request_ali",
+        status: "activated",
+        applicantEmail: "ali@opticoms.de",
+        applicantEmailDomain: "opticoms.de",
+        snNumber: "SN-ALI",
+        publicBrandId: "brand_ranley",
+        targetOrganizationId: "org_1"
+      })
+    );
+    const submit = (publicBrandId: string | null) =>
+      service.submitPublicRequest({
+        applicantEmail: "batuhan@opticoms.de",
+        contactName: "Batuhan",
+        companyName: "Opticoms",
+        countryRegion: "Germany",
+        snNumber: "SN-NEW",
+        salesContactEmail: "Sales",
+        publicBrandId,
+        purchaseProofFiles: [proofFile()]
+      });
+
+    const error = await submit("brand_ranley").catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "company_workspace_exists" });
+    expect(String((error as Error).message)).not.toContain("ali@");
+    // Another brand's applicant still gets the plain one-trial-per-domain message.
+    await expect(submit(null)).rejects.toThrow("company domain already has trial access history");
+  });
+
   it("promotes the request to approved_pending_provision when a required reviewer approves", async () => {
     const { service, requests, reviewers } = createServiceHarness();
     requests.set("request_1", buildRequest());

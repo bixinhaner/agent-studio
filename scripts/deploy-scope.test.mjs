@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { adminOnlyFiles, classifyChanges, planDeploy, runtimeImports } from "./deploy-scope.mjs";
+import { ADMIN_ONLY_ENTRY_MODULES, adminOnlyFiles, classifyChanges, planDeploy, runtimeImports } from "./deploy-scope.mjs";
 
 test("frontend-only and documentation changes never touch the APIs", () => {
   const { targets } = classifyChanges([
@@ -194,5 +195,12 @@ test("the deploy plan reads the import graph at the deployed commit", () => {
     assert.match(reasons.admin.join("\n"), /not loaded by chat code/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("every admin-only entry module exists, so a typo cannot silently restart chat", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  for (const file of ADMIN_ONLY_ENTRY_MODULES) {
+    assert.ok(existsSync(path.join(root, file)), `${file} is listed in ADMIN_ONLY_ENTRY_MODULES but does not exist`);
   }
 });

@@ -4,6 +4,8 @@ import { Alert, Button, Drawer, Empty, Input, Segmented, Select, Space, Switch, 
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { UserRoleEditor } from "../rbac/UserRoleEditor";
+import { OrganizationTeamDrawer } from "./OrganizationTeamDrawer";
+import { fetchAdminPendingJoinRequests, type PendingJoinRequest } from "./org-team-api";
 import {
   createAdminCustomerOrganization,
   createAdminOrganizationInvite,
@@ -426,6 +428,8 @@ export function UsersView() {
   const [editingOrganizationName, setEditingOrganizationName] = useState("");
   const [editingOrganizationStatus, setEditingOrganizationStatus] = useState("active");
   const [savingOrganization, setSavingOrganization] = useState(false);
+  const [teamOrganizationId, setTeamOrganizationId] = useState<string | null>(null);
+  const [pendingJoinRequests, setPendingJoinRequests] = useState<PendingJoinRequest[]>([]);
   const isNarrowScreen = useIsNarrowScreen(980);
   // Size the virtual table body to the space left below it so the list uses the viewport
   // instead of a short fixed box (header row + bottom gap ≈ 72px).
@@ -478,6 +482,21 @@ export function UsersView() {
   }, []);
 
   const editingUser = useMemo(() => users.find((item) => item.id === editingUserId) ?? null, [editingUserId, users]);
+
+  async function refreshTeamData() {
+    const [organizationResponse, joinRequests] = await Promise.all([
+      fetchAdminCustomerOrganizations().catch(() => null),
+      fetchAdminPendingJoinRequests().catch(() => null)
+    ]);
+    if (organizationResponse) setOrganizations(organizationResponse.organizations);
+    if (joinRequests) setPendingJoinRequests(joinRequests);
+  }
+
+  useEffect(() => {
+    void fetchAdminPendingJoinRequests()
+      .then(setPendingJoinRequests)
+      .catch(() => undefined);
+  }, []);
   const editingOrganization = useMemo(
     () => organizations.find((item) => item.id === editingOrganizationId) ?? null,
     [editingOrganizationId, organizations]
@@ -855,6 +874,30 @@ export function UsersView() {
 
 
         <div style={{ display: activeTab === "orgs" ? "block" : "none" }}>
+          {pendingJoinRequests.length ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`有 ${pendingJoinRequests.length} 个加入已有客户组织的申请待处理`}
+              description={
+                <Space direction="vertical" size={4}>
+                  {pendingJoinRequests.slice(0, 5).map((request) => (
+                    <span key={request.id}>
+                      {request.contactName ? `${request.contactName} · ` : ""}
+                      {request.email} → {request.organizationName}{" "}
+                      <Button size="small" type="link" onClick={() => setTeamOrganizationId(request.organizationId)}>
+                        处理
+                      </Button>
+                    </span>
+                  ))}
+                  <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
+                    组织管理员会收到邮件并可在 Portal 中批准；客户组织没有管理员时需要在这里处理。
+                  </span>
+                </Space>
+              }
+            />
+          ) : null}
           <div
             style={{
               display: "grid",
@@ -1007,6 +1050,9 @@ export function UsersView() {
                 <div className="admin-entity-card-actions">
                   <Button block onClick={() => openOrganizationEditor(organization)}>
                     修改组织
+                  </Button>
+                  <Button block onClick={() => setTeamOrganizationId(organization.id)}>
+                    成员与团队
                   </Button>
                   <Button
                     block
@@ -1404,6 +1450,14 @@ export function UsersView() {
           </div>
         ) : null}
       </Drawer>
+
+      <OrganizationTeamDrawer
+        organizationId={teamOrganizationId}
+        organizationName={organizations.find((organization) => organization.id === teamOrganizationId)?.name}
+        isNarrowScreen={isNarrowScreen}
+        onClose={() => setTeamOrganizationId(null)}
+        onChanged={() => void refreshTeamData()}
+      />
 
       {roleEditorUserId ? (
         <UserRoleEditor

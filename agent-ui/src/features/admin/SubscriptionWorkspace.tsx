@@ -52,6 +52,7 @@ type PlanFormState = {
   status: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  maxMembers: number | null;
 };
 
 type GrantFormState = {
@@ -147,7 +148,8 @@ function createPlanFormState(plan?: AdminSubscriptionPlan | null): PlanFormState
     description: plan?.description ?? "",
     status: plan?.status ?? "active",
     monthlyCompletedTurnLimit: plan?.monthlyCompletedTurnLimit ?? null,
-    monthlyTokenLimit: plan?.monthlyTokenLimit ?? null
+    monthlyTokenLimit: plan?.monthlyTokenLimit ?? null,
+    maxMembers: plan?.maxMembers ?? null
   };
 }
 
@@ -775,6 +777,10 @@ export function SubscriptionWorkspace() {
                         <span>每月服务额度</span>
                         <strong>{formatCount(plan.monthlyTokenLimit)}</strong>
                       </div>
+                      <div>
+                        <span>组织成员上限</span>
+                        <strong>{formatCount(plan.maxMembers ?? null)}</strong>
+                      </div>
                     </div>
                     <div className="subscription-plan-footer">
                       <div className="subscription-plan-assignments">
@@ -890,6 +896,20 @@ export function SubscriptionWorkspace() {
               placeholder="留空表示不限制"
               onChange={(value) => setPlanForm((current) => ({ ...current, monthlyTokenLimit: value ?? null }))}
             />
+          </label>
+          <label className="subscription-form-field">
+            <span>组织成员上限</span>
+            <InputNumber
+              min={1}
+              precision={0}
+              style={{ width: "100%" }}
+              value={planForm.maxMembers}
+              placeholder="留空表示不限制"
+              onChange={(value) => setPlanForm((current) => ({ ...current, maxMembers: value ?? null }))}
+            />
+            <small style={{ color: "var(--admin-color-subtle)" }}>
+              分配给组织时生效：有效成员和未过期邀请都占席位，组织管理员自助邀请受此限制；试用建议 5。
+            </small>
           </label>
         </div>
       </Modal>

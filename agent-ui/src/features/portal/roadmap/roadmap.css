@@ -500,3 +500,30 @@
 /* Team lists sit inside .usage-breakdown sections; opt out of its 3-column bar rows. */
 .usage-breakdown .usage-team-list { gap: 2px; }
 .usage-breakdown .usage-team-list li { display: block; }
+
+/* ---- team (customer admins) ---- */
+.team-drawer { display: grid; gap: 16px; }
+.team-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.team-summary > div { display: grid; gap: 2px; align-content: start; padding: 12px; border: 1px solid var(--roadmap-line); border-radius: 10px; }
+.team-summary span { color: var(--roadmap-muted); font-size: 12px; }
+.team-summary strong { color: var(--roadmap-text); font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.team-summary small { color: var(--roadmap-muted); font-size: 11.5px; line-height: 1.5; }
+.team-invite { display: grid; gap: 6px; }
+.team-invite > label { color: var(--roadmap-text); font-size: 13px; font-weight: 600; }
+.team-invite-row { display: flex; gap: 8px; }
+.team-invite-row .ant-input { flex: 1 1 auto; min-width: 0; }
+.team-section { display: grid; gap: 8px; }
+.team-section h3 { margin: 0; color: var(--roadmap-text); font-size: 13px; font-weight: 600; }
+.team-section ul { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid var(--roadmap-line); border-radius: 10px; }
+.team-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
+.team-row + .team-row { border-top: 1px solid var(--roadmap-line); }
+.team-row-main { display: grid; gap: 2px; min-width: 0; }
+.team-row-main strong { display: inline-flex; align-items: center; gap: 6px; color: var(--roadmap-text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.team-row-main span { color: var(--roadmap-muted); font-size: 12px; overflow-wrap: anywhere; }
+.team-row-message { margin: 2px 0 0; color: var(--roadmap-text); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.team-row-actions { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.team-tag { margin-inline-start: 2px; }
+@media (max-width: 520px) {
+  .team-summary { grid-template-columns: minmax(0, 1fr); }
+  .team-row { flex-wrap: wrap; }
+}

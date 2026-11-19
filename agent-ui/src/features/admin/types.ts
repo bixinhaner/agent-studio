@@ -1102,6 +1102,8 @@ export type AdminSubscriptionPlan = {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  /** Seats per organization (members + pending invites); absent/null means unlimited. */
+  maxMembers?: number | null;
   billingCurrency?: string | null;
   billingInterval?: string | null;
   billingIntervalCount?: number | null;
@@ -1126,6 +1128,7 @@ export type AdminSubscriptionPlanInput = {
   status?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  maxMembers?: number | null;
   billingCurrency?: string | null;
   billingInterval?: string | null;
   billingIntervalCount?: number | null;

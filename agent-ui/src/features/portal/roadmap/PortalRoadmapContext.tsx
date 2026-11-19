@@ -4,6 +4,7 @@ import { updatePortalPreferences } from "./api";
 import { MemoryDrawer } from "./MemoryDrawer";
 import { NotificationSettingsDrawer } from "./NotificationSettingsDrawer";
 import { OnboardingTour } from "./OnboardingTour";
+import { TeamDrawer } from "./TeamDrawer";
 import { ScheduledTasksDrawer, type ScheduledTaskContext, type ScheduledTaskPrefill } from "./ScheduledTasksDrawer";
 import { UsageDrawer } from "./UsageDrawer";
 import type { PortalResolvedTheme, PortalThemePreference } from "./use-portal-theme";
@@ -12,6 +13,8 @@ export type PortalRoadmapApi = {
   /** Personal features (scheduled tasks, memory, notifications) are internal-employee only. */
   personalFeaturesEnabled: boolean;
   usageEnabled: boolean;
+  /** Customer organization admins manage their team. */
+  teamEnabled: boolean;
   tourEnabled: boolean;
   theme: { preference: PortalThemePreference; resolved: PortalResolvedTheme; setPreference(next: PortalThemePreference): void };
   /** Bumps whenever the scheduled tasks drawer closes so summaries can refresh. */
@@ -19,6 +22,7 @@ export type PortalRoadmapApi = {
   openScheduledTasks(prefill?: ScheduledTaskPrefill | null): void;
   openMemory(): void;
   openUsage(): void;
+  openTeam(): void;
   openNotificationSettings(): void;
   startTour(): void;
 };
@@ -34,6 +38,7 @@ export function PortalRoadmapProvider(props: {
   personalFeaturesEnabled: boolean;
   /** "My usage" is available to every signed-in portal user, including external ones. */
   usageEnabled: boolean;
+  teamEnabled?: boolean;
   tourEnabled: boolean;
   /** Undefined while the user is still loading; tour auto-shows once when empty. */
   onboardingCompletedAt: string | null | undefined;
@@ -42,7 +47,7 @@ export function PortalRoadmapProvider(props: {
   scheduledTaskContext: ScheduledTaskContext;
   modeLabel(modeId: string | null): string | undefined;
   onOpenThread(threadId: string): void;
-  initialView?: "scheduled-tasks" | null;
+  initialView?: "scheduled-tasks" | "team" | null;
   /** Switches to a view where the composer targets exist before the tour measures them. */
   prepareTour?(): void | Promise<unknown>;
 }) {
@@ -51,6 +56,9 @@ export function PortalRoadmapProvider(props: {
   const [tasksVersion, setTasksVersion] = useState(0);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const teamEnabled = Boolean(props.teamEnabled);
+  const teamViewHandled = useRef(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const autoTourDecided = useRef(false);
@@ -76,12 +84,20 @@ export function PortalRoadmapProvider(props: {
     }
   }, [props.initialView, props.personalFeaturesEnabled]);
 
+  // Join-request emails link to /?view=team so org admins land on the request.
+  useEffect(() => {
+    if (teamViewHandled.current || !teamEnabled || props.initialView !== "team") return;
+    teamViewHandled.current = true;
+    setTeamOpen(true);
+  }, [props.initialView, teamEnabled]);
+
   const openScheduledTasks = useCallback((next?: ScheduledTaskPrefill | null) => {
     setPrefill(next ?? null);
     setTasksOpen(true);
   }, []);
   const openMemory = useCallback(() => setMemoryOpen(true), []);
   const openUsage = useCallback(() => setUsageOpen(true), []);
+  const openTeam = useCallback(() => setTeamOpen(true), []);
   const openNotificationSettings = useCallback(() => setNotifyOpen(true), []);
   const startTour = useCallback(() => setTourOpen(true), []);
 
@@ -89,16 +105,18 @@ export function PortalRoadmapProvider(props: {
     () => ({
       personalFeaturesEnabled: props.personalFeaturesEnabled,
       usageEnabled: props.usageEnabled,
+      teamEnabled,
       tourEnabled: props.tourEnabled,
       theme: props.theme,
       scheduledTasksVersion: tasksVersion,
       openScheduledTasks,
       openMemory,
       openUsage,
+      openTeam,
       openNotificationSettings,
       startTour
     }),
-    [openMemory, openNotificationSettings, openScheduledTasks, openUsage, props.personalFeaturesEnabled, props.theme, props.tourEnabled, props.usageEnabled, startTour, tasksVersion]
+    [openMemory, openNotificationSettings, openScheduledTasks, openTeam, openUsage, props.personalFeaturesEnabled, teamEnabled, props.theme, props.tourEnabled, props.usageEnabled, startTour, tasksVersion]
   );
 
   const onOpenThread = props.onOpenThread;
@@ -133,6 +151,7 @@ export function PortalRoadmapProvider(props: {
           />
         </>
       ) : null}
+      {teamEnabled ? <TeamDrawer open={teamOpen} onClose={() => setTeamOpen(false)} /> : null}
       {props.usageEnabled ? <UsageDrawer open={usageOpen} onClose={() => setUsageOpen(false)} /> : null}
       {props.tourEnabled ? (
         <OnboardingTour

@@ -411,6 +411,10 @@ model Organization {
   userWorkspaces UserWorkspace[] @relation("UserWorkspaceOrganization")
   portalTrainingConfiguration PortalTrainingConfiguration?
   portalTrainingTranslations PortalTrainingTranslation[]
+  /// Extra email domains (besides the admins' own) that customer admins may invite from.
+  teamInviteDomains String[]                  @default([]) @map("team_invite_domains")
+  teamEvents      OrganizationTeamEvent[]
+  joinRequests    OrganizationJoinRequest[]
 
   @@index([type, status])
   @@index([publicBrandId, type, status])
@@ -603,6 +607,8 @@ model SubscriptionPlan {
   billingIntervalCount      Int                  @default(1) @map("billing_interval_count")
   billingPriceCents         Int?                 @map("billing_price_cents")
   billingStatus             String               @default("not_configured") @map("billing_status")
+  /// Seats per organization (active members + pending invites); null means unlimited.
+  maxMembers                Int?                 @map("max_members")
   createdAt                 DateTime             @default(now()) @map("created_at")
   updatedAt                 DateTime             @updatedAt @map("updated_at")
   grants                    SubscriptionGrant[]
@@ -849,6 +855,46 @@ model AccessRequestReviewer {
   @@index([reviewerUserId, decision])
   @@index([reviewerEmail, decision])
   @@map("access_request_reviewers")
+}
+
+model OrganizationTeamEvent {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  eventType      String       @map("event_type")
+  actorType      String       @map("actor_type")
+  actorUserId    String?      @map("actor_user_id")
+  actorEmail     String?      @map("actor_email")
+  targetEmail    String?      @map("target_email")
+  targetUserId   String?      @map("target_user_id")
+  detail         String?
+  metadata       Json?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, eventType, createdAt])
+  @@map("organization_team_events")
+}
+
+model OrganizationJoinRequest {
+  id              String       @id @default(cuid())
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publicBrandId   String?      @map("public_brand_id")
+  email           String
+  contactName     String?      @map("contact_name")
+  message         String?
+  status          String       @default("pending")
+  inviteId        String?      @map("invite_id")
+  decidedByUserId String?      @map("decided_by_user_id")
+  decidedAt       DateTime?    @map("decided_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([email, status])
+  @@index([status, createdAt])
+  @@map("organization_join_requests")
 }
 
 model AccessRequestEvent {

@@ -62,8 +62,70 @@ function eventLabel(event: AdminEmailNotificationEventKey): string {
   return event.replaceAll(".", "-");
 }
 
+export type PlatformAdminMessageInput = {
+  /** Stable key used for delivery records, e.g. "organization_join_request:<id>". */
+  targetRef: string;
+  eventType: string;
+  organizationId?: string;
+  subject: string;
+  text: string;
+  envelope?: AdminEmailNotificationInput["envelope"];
+};
+
 export class AdminEmailNotificationService {
   constructor(private readonly options: AdminEmailNotificationServiceOptions) {}
+
+  /**
+   * Sends a free-form FYI to the platform admins chosen in the notification policy. Used for events that
+   * have no access request (e.g. a join request to an existing customer workspace), so it has no
+   * per-event template and only honours the global switch and recipient mode.
+   */
+  async notifyPlatformAdmins(input: PlatformAdminMessageInput): Promise<boolean> {
+    const published = await this.options.settings.getCurrentPublished();
+    const policy = published?.payload.adminEmailNotifications ?? createDefaultSystemSettingsPayload().adminEmailNotifications;
+    if (!policy.enabled) return false;
+    const directory = await this.options.findInternalUsers();
+    const recipients = dedupeEmails(
+      policy.recipientMode === "all_super_admins"
+        ? directory.filter((user) => user.role === "super_admin").map((user) => user.email)
+        : policy.recipientMode === "all_admins"
+          ? directory.filter((user) => user.role === "admin" || user.role === "super_admin").map((user) => user.email)
+          : policy.recipientEmails
+    );
+    if (!recipients.length) return false;
+    const payload = { category: "system_admin", recipients, subject: input.subject, text: input.text };
+    const record = policy.recordDelivery
+      ? await this.options.notifications.create({
+          organizationId: input.organizationId,
+          channelType: "email",
+          targetRef: input.targetRef,
+          eventType: input.eventType,
+          status: "pending",
+          payload
+        })
+      : null;
+    try {
+      const delivery = await this.options.emailSender.send({
+        to: recipients,
+        ...input.envelope,
+        subject: input.subject,
+        text: input.text,
+        debugLabel: `admin-notification-${input.eventType.replaceAll(".", "-")}`
+      });
+      if (record) {
+        await this.options.notifications.update({ id: record.id, changes: { status: "sent", errorMessage: null, payload: { ...payload, delivery } } });
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (record) {
+        await this.options.notifications.update({ id: record.id, changes: { status: "failed", errorMessage: message, payload } });
+      } else {
+        console.error("[admin-email-notification] platform admin message failed", { eventType: input.eventType, error: message });
+      }
+      return false;
+    }
+  }
 
   async notify(input: AdminEmailNotificationInput): Promise<NotificationRecord | null> {
     const published = await this.options.settings.getCurrentPublished();

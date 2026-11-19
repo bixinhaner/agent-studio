@@ -1,4 +1,4 @@
-import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
+import { api, apiBase, ApiError, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 
 import type {
   AdminAccessRequestDetail,
@@ -48,9 +48,27 @@ async function publicAccessRequestFormApi<T>(path: string, method: "POST" | "PAT
   if (!res.ok) {
     notifyAuthInvalidStatus(res.status);
     const msg = (data && typeof data.detail === "string" && data.detail) || `Request failed (${res.status})`;
-    throw new Error(msg);
+    throw new ApiError({
+      message: msg,
+      status: res.status,
+      detail: msg,
+      code: data && typeof data.code === "string" && data.code ? data.code : undefined,
+      payload: data
+    });
   }
   return data as T;
+}
+
+/** Server code when the applicant's company already has an active workspace on this brand. */
+export const COMPANY_WORKSPACE_EXISTS = "company_workspace_exists";
+
+export function isCompanyWorkspaceExistsError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === COMPANY_WORKSPACE_EXISTS;
+}
+
+/** Asks the existing workspace's admins to invite this person. The response never reveals who they are. */
+export async function submitOrganizationJoinRequest(input: { email: string; contactName?: string; message?: string }): Promise<void> {
+  await api<{ ok: true }>("/public-api/org-join-requests", { method: "POST", json: input });
 }
 
 export function accessRequestFileUrl(contentUrl: string | undefined): string {

@@ -14,7 +14,8 @@ import {
   Monitor,
   Moon,
   Settings,
-  Sun
+  Sun,
+  Users
 } from "lucide-react";
 
 import { useAuth } from "../../auth/AuthProvider";
@@ -164,6 +165,15 @@ export function AccountMenu(props: {
               </div>
             ) : null}
           </>
+        ) : null}
+        {roadmap?.teamEnabled ? (
+          <MenuItem
+            icon={<Users size={17} />}
+            label={t("account.team")}
+            detail={t("account.teamDetail")}
+            trailing={<ChevronRight size={14} className="account-menu-chevron" />}
+            onClick={run(() => roadmap.openTeam())}
+          />
         ) : null}
         {props.onOpenBilling ? <MenuItem icon={<CreditCard size={17} />} label={t("account.billing")} onClick={run(props.onOpenBilling)} /> : null}
       </div>
