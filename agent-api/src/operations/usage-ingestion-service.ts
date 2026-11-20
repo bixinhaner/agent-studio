@@ -12,8 +12,15 @@ import type {
 } from "../persistence/usage-event-repository.js";
 import { billableUncachedInputTokens } from "./usage-metrics.js";
 
+/**
+ * How the model call was paid for. Codex signed in with ChatGPT is charged at the standard rate at any
+ * context length; only API-key usage pays OpenAI's long-context surcharge. Unknown keeps API pricing.
+ */
+export type UsageBilling = "chatgpt" | "api";
+
 export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "internalCost" | "resultStatus"> & {
   resultStatus?: string;
+  billing?: UsageBilling;
   codexRuntimeUsageKind?: "turn_delta" | "cumulative_snapshot";
   codexRuntimeCumulativeUsage?: {
     inputTokens: number;
@@ -177,6 +184,7 @@ function metadataWithCostProfile(input: {
   metadata?: unknown;
   profile: CostProfileRecord | null;
   cacheWriteTelemetryAvailable: boolean;
+  billing?: UsageBilling;
   pricing: Pick<CalculatedUsageCost,
     | "longContextApplied"
     | "longContextInvocationCount"
@@ -203,6 +211,7 @@ function metadataWithCostProfile(input: {
           longContextThresholdTokens: input.profile.longContextThresholdTokens,
           longContextInputMultiplier: input.profile.longContextInputMultiplier,
           longContextOutputMultiplier: input.profile.longContextOutputMultiplier,
+          billing: input.billing,
           longContextApplied: input.pricing.longContextApplied,
           longContextInvocationCount: input.pricing.longContextInvocationCount,
           maxInvocationInputTokens: input.pricing.maxInvocationInputTokens,
@@ -336,6 +345,7 @@ export function calculateEstimatedCost(input: {
   longContextPricingBasis?: "aggregate_request" | "model_invocation";
   /** When the usage happened; selects peak or off-peak prices for profiles with time-of-day pricing. */
   pricedAt?: Date;
+  billing?: UsageBilling;
 }): CalculatedUsageCost {
   const longContextPricingBasis = input.longContextPricingBasis ?? "aggregate_request";
   if (!input.profile) {
@@ -376,7 +386,7 @@ export function calculateEstimatedCost(input: {
   const candidates = longContextPricingBasis === "model_invocation"
     ? pricingInvocations.invocations
     : [aggregateUsage];
-  const longInvocations = longContextThresholdTokens > 0
+  const longInvocations = longContextThresholdTokens > 0 && input.billing !== "chatgpt"
     ? candidates.filter((invocation) => invocation.inputTokens > longContextThresholdTokens)
     : [];
   const longContextExtra = longInvocations.reduce((sum, invocation) => {
@@ -459,7 +469,8 @@ export class UsageIngestionService {
       longContextPricingBasis: input.codexRuntimeModelInvocations !== undefined
         ? "model_invocation"
         : "aggregate_request",
-      pricedAt: input.createdAt ? new Date(input.createdAt) : undefined
+      pricedAt: input.createdAt ? new Date(input.createdAt) : undefined,
+      billing: input.billing
     });
 
     const create = input.codexThreadId && input.codexTurnId && this.dependencies.usageEvents.createCodexTurn
@@ -481,6 +492,7 @@ export class UsageIngestionService {
         metadata: input.metadata,
         profile,
         cacheWriteTelemetryAvailable: input.cacheWriteTokens !== undefined,
+        billing: input.billing,
         pricing: costs
       })
     });
@@ -568,7 +580,8 @@ export class UsageIngestionService {
             cacheWriteTelemetryAvailable: deltaInput.cacheWriteTokens !== undefined,
             modelInvocations: deltaInput.codexRuntimeModelInvocations,
             longContextPricingBasis: "model_invocation",
-            pricedAt: deltaInput.createdAt ? new Date(deltaInput.createdAt) : undefined
+            pricedAt: deltaInput.createdAt ? new Date(deltaInput.createdAt) : undefined,
+            billing: deltaInput.billing
           });
           return {
             ...deltaInput,
@@ -583,6 +596,7 @@ export class UsageIngestionService {
               metadata: deltaInput.metadata,
               profile,
               cacheWriteTelemetryAvailable: deltaInput.cacheWriteTokens !== undefined,
+              billing: deltaInput.billing,
               pricing: costs
             })
           };

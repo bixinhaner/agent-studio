@@ -1,6 +1,7 @@
 import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
 import type { UsageEventRecord } from "../persistence/usage-event-repository.js";
-import type { RecordUsageInput, UsageIngestionService } from "./usage-ingestion-service.js";
+import type { ManagedCodexProviderKind } from "../managed-codex-provider.js";
+import type { RecordUsageInput, UsageBilling, UsageIngestionService } from "./usage-ingestion-service.js";
 
 export type UsageResultStatus = "success" | "failed" | string;
 
@@ -12,6 +13,11 @@ export type RecordCodexUsageInput = {
   sessionId?: string;
   model: string;
   featureType?: string;
+  /**
+   * The provider the Codex runtime ran on (falls back to metadata.provider); decides whether OpenAI's
+   * API long-context surcharge applies.
+   */
+  provider?: ManagedCodexProviderKind;
   usage?: RuntimeUsageSnapshot;
   codexThreadId?: string;
   resultStatus?: UsageResultStatus;
@@ -57,6 +63,13 @@ function metadataWithCodexThread(input: {
   };
 }
 
+/** ChatGPT sign-in is plan usage; API key and Azure providers are billed at API prices. */
+export function billingForProvider(provider: string | undefined): UsageBilling | undefined {
+  if (provider === "chatgpt") return "chatgpt";
+  if (provider === "openai_api" || provider === "azure_openai") return "api";
+  return undefined;
+}
+
 export class UsageRecorder {
   constructor(private readonly deps: { usageIngestion: UsageIngestion }) {}
 
@@ -70,6 +83,7 @@ export class UsageRecorder {
       sessionId: input.sessionId,
       model: input.model,
       featureType: input.featureType ?? "chat",
+      billing: billingForProvider(input.provider ?? (typeof input.metadata?.provider === "string" ? input.metadata.provider : undefined)),
       inputTokens: input.usage?.inputTokens ?? 0,
       cachedInputTokens: input.usage?.cachedInputTokens ?? 0,
       cacheWriteTokens: input.usage?.cacheWriteTokens,

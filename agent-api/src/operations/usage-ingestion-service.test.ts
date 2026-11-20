@@ -44,6 +44,38 @@ describe("UsageIngestionService", () => {
     expect(cost(272001)).toMatchObject({ estimatedCost: "1.172004", longContextApplied: true });
   });
 
+  it("charges Codex signed in with ChatGPT the standard rate past 272K; only API billing pays the surcharge", async () => {
+    const sol62: CostProfileRecord = { ...profile, model: "gpt-6.2-sol",
+      inputTokenPrice: "2", cachedInputTokenPrice: "0.1", cacheWriteTokenPrice: "2.5", outputTokenPrice: "10",
+      internalCostMultiplier: "0.1", longContextThresholdTokens: 272000,
+      longContextInputMultiplier: "2", longContextOutputMultiplier: "1.5" };
+    const cost = (billing?: "chatgpt" | "api") => calculateEstimatedCost({ profile: sol62, inputTokens: 272001,
+      cachedInputTokens: 20000, cacheWriteTokens: 10000, outputTokens: 10000, cacheWriteTelemetryAvailable: true, billing });
+    expect(cost("chatgpt")).toMatchObject({ estimatedCost: "0.611002", longContextApplied: false, longContextInvocationCount: 0,
+      maxInvocationInputTokens: 272001 });
+    expect(cost("api")).toMatchObject({ estimatedCost: "1.172004", longContextApplied: true });
+    expect(cost(undefined)).toMatchObject({ estimatedCost: "1.172004", longContextApplied: true });
+
+    let stored: any;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return sol62; } },
+      usageEvents: {
+        async list() { return []; },
+        async create() { throw new Error("must use turn key"); },
+        async createCodexTurn(input) { stored = input; return { ...input, createdAt: "2026-11-20T10:00:00Z" } as any; }
+      }
+    });
+    await service.recordCodexRuntimeUsage({ model: "gpt-6.2-sol", featureType: "chat", billing: "chatgpt",
+      codexThreadId: "thread", codexTurnId: "turn", codexRuntimeUsageKind: "turn_delta", accountingSource: "response_id",
+      inputTokens: 300000, cachedInputTokens: 290000, cacheWriteTokens: 0, outputTokens: 1000,
+      codexRuntimeModelInvocations: [{ inputTokens: 300000, cachedInputTokens: 290000, cacheWriteTokens: 0, outputTokens: 1000 }]
+    });
+    // 10K uncached * 2 + 290K cached * 0.1 + 1K output * 10 per 1M tokens, no long-context multiplier.
+    expect(stored.estimatedCost).toBe("0.059000");
+    expect(stored.metadata._costProfile).toMatchObject({ billing: "chatgpt", longContextApplied: false,
+      maxInvocationInputTokens: 300000 });
+  });
+
   it("persists canonical call receipts with a durable turn key instead of the high-water path", async () => {
     let stored: any;
     const service = new UsageIngestionService({

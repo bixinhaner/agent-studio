@@ -31,3 +31,15 @@ node --env-file=.env dist/ops/reconcile-codex-usage.js \
 ```
 
 回滚也校验当前值，拒绝覆盖后续修改。验收必须比较修改后明细、计划、日汇总；重复执行应全部为 unchanged，并检查价格档指纹、新生产请求的 `_usageAccounting`、API/chat 健康状态。无法恢复的记录需保留并报告。
+
+## ChatGPT 登录不计长上下文附加费
+
+OpenAI 只对 API key 用量收取超过 272K 输入的长上下文附加费；Codex 以 ChatGPT 登录时任何长度都按标准价。新记录按运行所用 provider 写入 `_costProfile.billing`（`chatgpt` / `api`，未知按 API 计）。历史记录用下面的脚本去掉附加费：每条记录沿用它当时的价格快照，先用快照复算出原费用才修改，复算不一致或标为 API provider 的跳过。
+
+```sh
+node --env-file=.env dist/ops/reprice-chatgpt-long-context.js --from 2026-01-01T00:00:00Z --dry-run
+node --env-file=.env dist/ops/reprice-chatgpt-long-context.js --from 2026-01-01T00:00:00Z --apply --backup <备份目录>/chatgpt-long-context.jsonl
+node --env-file=.env dist/ops/reprice-chatgpt-long-context.js --restore <备份目录>/chatgpt-long-context.jsonl
+```
+
+`--apply` 先把原行写入备份文件（文件已存在则拒绝），再更新费用与审计 metadata（`_usageCorrection.reason=chatgpt_sign_in_no_long_context_surcharge`，原有校正记录保留在 `previous`），最后重建受影响的 UTC 日汇总。`--restore` 按备份还原并重建汇总。

@@ -47,6 +47,21 @@ describe("UsageRecorder", () => {
     }
   );
 
+  it("bills ChatGPT sign-in as plan usage and API providers at API prices", async () => {
+    const recorded: RecordUsageInput[] = [];
+    const recorder = new UsageRecorder({usageIngestion: {
+      async recordCodexRuntimeUsage(input) { recorded.push(input); return usageEventFromInput(input); },
+      async record() { throw new Error("Codex must use the runtime recorder"); }
+    }});
+    const usage = {inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, kind: "turn_delta" as const};
+    await recorder.recordCodexUsage({model: "gpt-6.2-sol", provider: "chatgpt", usage});
+    await recorder.recordCodexUsage({model: "gpt-6.2-sol", provider: "openai_api", usage});
+    await recorder.recordCodexUsage({model: "gpt-6.2-sol", provider: "azure_openai", usage});
+    await recorder.recordCodexUsage({model: "gpt-6.2-sol", metadata: {provider: "chatgpt"}, usage});
+    await recorder.recordCodexUsage({model: "gpt-6.2-sol", usage});
+    expect(recorded.map((entry) => entry.billing)).toEqual(["chatgpt", "api", "api", "chatgpt", undefined]);
+  });
+
   it("centralizes Codex runtime usage conversion before ingestion", async () => {
     let codexInput: RecordUsageInput | undefined;
     const recorder = new UsageRecorder({

@@ -421,10 +421,15 @@ function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown
   return mergeConfig(fromOptions, { openai_base_url: baseUrl });
 }
 
-let telemetryLaunchArgs: ((codexHome: string) => string[] | undefined) | undefined;
+/** How an app-server's model calls are paid for: an API key in its environment, or the ChatGPT sign-in. */
+export type CodexAppServerBilling = "chatgpt" | "api";
+
+let telemetryLaunchArgs: ((codexHome: string, billing: CodexAppServerBilling) => string[] | undefined) | undefined;
 
 /** Lets the host add per-CODEX_HOME telemetry export (background usage metering) to every app-server it starts. */
-export function configureCodexAppServerTelemetry(provider: ((codexHome: string) => string[] | undefined) | undefined): void {
+export function configureCodexAppServerTelemetry(
+  provider: ((codexHome: string, billing: CodexAppServerBilling) => string[] | undefined) | undefined
+): void {
   telemetryLaunchArgs = provider;
 }
 
@@ -1190,7 +1195,7 @@ class CodexAppServerProcess {
     const codexHome = trimOrUndefined(this.scope.env.CODEX_HOME) ?? path.join(os.homedir(), ".codex");
     let telemetryArgs: string[] = [];
     try {
-      telemetryArgs = telemetryLaunchArgs?.(codexHome) ?? [];
+      telemetryArgs = telemetryLaunchArgs?.(codexHome, this.scope.env.CODEX_API_KEY ? "api" : "chatgpt") ?? [];
     } catch {
       // Metering must never block a conversation; start without telemetry export.
     }

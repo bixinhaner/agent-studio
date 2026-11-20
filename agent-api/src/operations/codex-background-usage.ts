@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { findThreadRollout } from "./codex-usage-ledger.js";
+import type { UsageBilling } from "./usage-ingestion-service.js";
 import type { RecordDirectUsageInput } from "./usage-recorder.js";
 
 /**
@@ -21,6 +22,12 @@ import type { RecordDirectUsageInput } from "./usage-recorder.js";
 export const CODEX_OTEL_PATH = "/internal/codex-otel/v1/logs";
 export const CODEX_OTEL_HOME_HEADER = "x-agent-studio-codex-home";
 export const CODEX_OTEL_SIGNATURE_HEADER = "x-agent-studio-otel-signature";
+/** chatgpt or api: how the exporting app-server pays for model calls (see CodexAppServerBilling). */
+export const CODEX_OTEL_BILLING_HEADER = "x-agent-studio-codex-billing";
+
+export function parseCodexOtelBilling(value: string | undefined): UsageBilling | undefined {
+  return value === "chatgpt" || value === "api" ? value : undefined;
+}
 export const CODEX_BACKGROUND_FEATURE_TYPE = "codex_background";
 
 export type CodexOtelTokenEvent = {
@@ -139,11 +146,12 @@ export function verifyCodexHomeSignature(secret: string, codexHome: string, sign
  * with its CODEX_HOME. The exporter is set up once per process, so this cannot go in thread config.
  * Values are TOML; JSON string literals are valid TOML basic strings.
  */
-export function buildCodexOtelLaunchArgs(input: { endpoint: string; secret: string; codexHome: string }): string[] {
+export function buildCodexOtelLaunchArgs(input: { endpoint: string; secret: string; codexHome: string; billing?: UsageBilling }): string[] {
   const codexHome = path.resolve(input.codexHome);
   const headers = [
     `${JSON.stringify(CODEX_OTEL_HOME_HEADER)} = ${JSON.stringify(codexHome)}`,
-    `${JSON.stringify(CODEX_OTEL_SIGNATURE_HEADER)} = ${JSON.stringify(signCodexHome(input.secret, codexHome))}`
+    `${JSON.stringify(CODEX_OTEL_SIGNATURE_HEADER)} = ${JSON.stringify(signCodexHome(input.secret, codexHome))}`,
+    ...(input.billing ? [`${JSON.stringify(CODEX_OTEL_BILLING_HEADER)} = ${JSON.stringify(input.billing)}`] : [])
   ].join(", ");
   return [
     "-c", "otel.log_user_prompt=false",
@@ -279,12 +287,12 @@ export class CodexBackgroundUsageCollector {
   }
 
   /** Accepts one OTLP/JSON export; returns how many token events were queued for classification. */
-  accept(codexHome: string, body: unknown): number {
+  accept(codexHome: string, body: unknown, billing?: UsageBilling): number {
     const events = parseCodexOtelTokenEvents(body);
     for (const event of events) {
       const timer = setTimeout(() => {
         this.pending.delete(timer);
-        void this.classify(codexHome, event);
+        void this.classify(codexHome, event, billing);
       }, this.rolloutDelayMs);
       timer.unref?.();
       this.pending.add(timer);
@@ -298,7 +306,7 @@ export class CodexBackgroundUsageCollector {
   }
 
   /** Records the event unless its conversation is a rollout-backed thread (already metered). */
-  async classify(codexHome: string, event: CodexOtelTokenEvent): Promise<"recorded" | "skipped_rollout" | "skipped_thread" | "duplicate" | "failed"> {
+  async classify(codexHome: string, event: CodexOtelTokenEvent, billing?: UsageBilling): Promise<"recorded" | "skipped_rollout" | "skipped_thread" | "duplicate" | "failed"> {
     try {
       const rollout = await (this.deps.findRollout ?? findThreadRollout)(codexHome, event.conversationId);
       if (rollout && await this.rolloutCalls.has(rollout, event)) return "skipped_rollout";
@@ -312,6 +320,7 @@ export class CodexBackgroundUsageCollector {
         userId: owner?.userId,
         model: event.model,
         featureType: CODEX_BACKGROUND_FEATURE_TYPE,
+        billing,
         inputTokens: event.inputTokens,
         cachedInputTokens: event.cachedInputTokens,
         cacheWriteTokens: event.cacheWriteTokens,

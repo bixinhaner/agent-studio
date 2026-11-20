@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CODEX_BACKGROUND_FEATURE_TYPE,
+  CODEX_OTEL_BILLING_HEADER,
   CODEX_OTEL_HOME_HEADER,
   CODEX_OTEL_SIGNATURE_HEADER,
   CodexBackgroundUsageCollector,
   RolloutCallIndex,
   buildCodexOtelLaunchArgs,
   readCodexHomeManifest,
+  parseCodexOtelBilling,
   parseCodexOtelTokenEvents,
   signCodexHome,
   verifyCodexHomeSignature
@@ -129,6 +131,16 @@ describe("codex OTEL launch args", () => {
     expect(verifyCodexHomeSignature("s3cret", "/srv/homes/a \"b\"", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(true);
     expect(verifyCodexHomeSignature("other", "/srv/homes/a \"b\"", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(false);
     expect(verifyCodexHomeSignature("s3cret", "/srv/homes/other", signCodexHome("s3cret", "/srv/homes/a \"b\""))).toBe(false);
+    expect(exporter).not.toContain(CODEX_OTEL_BILLING_HEADER);
+  });
+
+  it("tells the collector how the app-server pays for model calls", () => {
+    const exporter = buildCodexOtelLaunchArgs({ endpoint: "http://127.0.0.1:8791/x", secret: "s", codexHome: "/h", billing: "chatgpt" }).at(-1)!;
+    expect(exporter).toContain(`"${CODEX_OTEL_BILLING_HEADER}" = "chatgpt"`);
+    expect(parseCodexOtelBilling("chatgpt")).toBe("chatgpt");
+    expect(parseCodexOtelBilling("api")).toBe("api");
+    expect(parseCodexOtelBilling("free")).toBeUndefined();
+    expect(parseCodexOtelBilling(undefined)).toBeUndefined();
   });
 });
 
@@ -181,8 +193,8 @@ describe("CodexBackgroundUsageCollector", () => {
     // 2026-10-21 13:31 Beijing (Wednesday) is off-peak: 100K uncached * 0.3 + 900K cached * 0.006 + 100K output * 1.2 = 0.1554, halved.
     const event = parseCodexOtelTokenEvents(otlpExport([completed("01a15cf6-e4f2-7a11-b42d-3453b6636e5b",
       { input: "1000000", cached: "900000", output: "100000" })]))[0];
-    await expect(collector.classify(home, event)).resolves.toBe("recorded");
-    await expect(collector.classify(home, event)).resolves.toBe("duplicate");
+    await expect(collector.classify(home, event, "chatgpt")).resolves.toBe("recorded");
+    await expect(collector.classify(home, event, "chatgpt")).resolves.toBe("duplicate");
 
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({
@@ -203,7 +215,7 @@ describe("CodexBackgroundUsageCollector", () => {
         codexHomeScope: "user_agent",
         backgroundKind: "memory_agent",
         reasoningTokens: 7,
-        _costProfile: expect.objectContaining({ pricingPeriod: "off_peak", timeOfDayMultiplier: 0.5 })
+        _costProfile: expect.objectContaining({ pricingPeriod: "off_peak", timeOfDayMultiplier: 0.5, billing: "chatgpt" })
       }
     });
     expect(rolledUp.map((item) => item.id)).toEqual([stored[0].id]);

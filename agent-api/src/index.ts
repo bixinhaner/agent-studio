@@ -374,10 +374,12 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import {
   CODEX_OTEL_HOME_HEADER,
+  CODEX_OTEL_BILLING_HEADER,
   CODEX_OTEL_PATH,
   CODEX_OTEL_SIGNATURE_HEADER,
   CodexBackgroundUsageCollector,
   buildCodexOtelLaunchArgs,
+  parseCodexOtelBilling,
   verifyCodexHomeSignature,
   type CodexHomeManifest,
   type CodexHomeOwner
@@ -1253,8 +1255,8 @@ const codexBackgroundUsage = runsChatService
   : undefined;
 const codexOtelSecret = randomBytes(32).toString("hex");
 if (codexBackgroundUsage) {
-  configureCodexAppServerTelemetry((codexHome) =>
-    buildCodexOtelLaunchArgs({ endpoint: `http://127.0.0.1:${appConfig.port}${CODEX_OTEL_PATH}`, secret: codexOtelSecret, codexHome })
+  configureCodexAppServerTelemetry((codexHome, billing) =>
+    buildCodexOtelLaunchArgs({ endpoint: `http://127.0.0.1:${appConfig.port}${CODEX_OTEL_PATH}`, secret: codexOtelSecret, codexHome, billing })
   );
 }
 
@@ -1881,6 +1883,8 @@ const zendesk = new ZendeskIntegrationService({
       sessionId: `zendesk:${input.instanceId || "legacy"}:ticket:${input.ticketId}`,
       model: input.runtime.model,
       featureType: "chat",
+      // Zendesk runs on the active provider (see resolveRuntime above).
+      provider: (await codexProviders.resolveActiveProviderSnapshot()).kind,
       usage: input.usage,
       codexThreadId: input.codexThreadId,
       resultStatus: "success",
@@ -4498,6 +4502,8 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
       sessionId: currentSession.sessionId,
       model: currentSession.model,
       featureType: "chat",
+      // A session without a provider snapshot runs on the local ChatGPT sign-in.
+      provider: currentSession.providerSnapshot?.kind ?? "chatgpt",
       usage,
       codexThreadId,
       resultStatus,
@@ -11954,7 +11960,7 @@ app.post(CODEX_OTEL_PATH, express.json({ limit: "16mb" }), (req: Request, res: R
     res.status(404).json({ detail: "Not found" });
     return;
   }
-  codexBackgroundUsage.accept(codexHome, req.body);
+  codexBackgroundUsage.accept(codexHome, req.body, parseCodexOtelBilling(req.header(CODEX_OTEL_BILLING_HEADER)));
   res.json({});
 });
 // Codex app-servers reach DeepSeek through here so image-heavy threads stay under its body limit.
@@ -12785,7 +12791,11 @@ app.use(
     runProfiles,
     knowledgeSets,
     knowledgeSetStorage,
-    usageRecorder,
+    usageRecorder: {
+      // Requests run on the active provider (see createRuntimeForRequest above).
+      recordCodexUsage: async (input) =>
+        usageRecorder.recordCodexUsage({ ...input, provider: input.provider ?? (await resolveProviderSnapshot()).kind })
+    },
     codexExecution,
     systemSettings,
     sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot,
@@ -15299,6 +15309,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sessionId: currentSession.sessionId,
         model: currentSession.model,
         featureType: "chat",
+        provider: currentSession.providerSnapshot?.kind ?? "chatgpt",
         usage,
         codexThreadId,
         resultStatus,
