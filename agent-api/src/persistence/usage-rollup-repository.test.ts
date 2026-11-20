@@ -38,6 +38,38 @@ function createDb(overrides: Partial<UsageRollupRepositoryDb["usageDailyRollup"]
 }
 
 describe("UsageRollupRepository", () => {
+  it("reads BIGINT token sums past the int4 limit as exact numbers", async () => {
+    const repo = new UsageRollupRepository(createDb({
+      async findMany() {
+        return [{
+          id: "rollup-big",
+          organizationId: null,
+          rollupDate: new Date("2026-10-26T00:00:00.000Z"),
+          scopeType: "platform",
+          scopeId: "platform",
+          model: "gpt-6.1-sol",
+          featureType: "chat",
+          requestCount: 4000,
+          successCount: 4000,
+          failureCount: 0,
+          inputTokens: 3_000_000_123n,
+          cachedInputTokens: 2_900_000_456n,
+          cacheWriteTokens: 0n,
+          outputTokens: 12_345_678n,
+          estimatedCost: "100.000000",
+          internalCost: "10.000000",
+          createdAt: new Date("2026-10-27T00:00:00.000Z"),
+          updatedAt: new Date("2026-10-27T00:00:00.000Z")
+        }];
+      }
+    }));
+
+    const [rollup] = await repo.list({ rollupDate: "2026-10-26" });
+
+    expect(rollup).toMatchObject({ inputTokens: 3_000_000_123, cachedInputTokens: 2_900_000_456, cacheWriteTokens: 0, outputTokens: 12_345_678 });
+    expect(JSON.stringify(rollup)).toContain('"inputTokens":3000000123');
+  });
+
   it("uses UTC Date values for replacing daily rollups", async () => {
     let deletedRollupDate: unknown;
     let createdRollupDate: unknown;

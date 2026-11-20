@@ -67,15 +67,18 @@ type UsageDailyRollupRow = {
   requestCount: number;
   successCount: number;
   failureCount: number;
-  inputTokens: number;
-  cachedInputTokens: number;
-  cacheWriteTokens?: number;
-  outputTokens: number;
+  /** BIGINT columns: Prisma returns bigint, test doubles return number. */
+  inputTokens: TokenSum;
+  cachedInputTokens: TokenSum;
+  cacheWriteTokens?: TokenSum;
+  outputTokens: TokenSum;
   estimatedCost: unknown;
   internalCost: unknown;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+type TokenSum = number | bigint;
 
 type UsageDailyRollupTable = {
   create(args: { data: Record<string, unknown> }): Promise<UsageDailyRollupRow>;
@@ -156,10 +159,11 @@ function mapUsageDailyRollup(row: UsageDailyRollupRow): UsageDailyRollupRecord {
     requestCount: row.requestCount,
     successCount: row.successCount,
     failureCount: row.failureCount,
-    inputTokens: row.inputTokens,
-    cachedInputTokens: row.cachedInputTokens,
-    cacheWriteTokens: row.cacheWriteTokens ?? 0,
-    outputTokens: row.outputTokens,
+    // Daily sums stay far below Number.MAX_SAFE_INTEGER (9e15), so number is exact for API consumers.
+    inputTokens: Number(row.inputTokens),
+    cachedInputTokens: Number(row.cachedInputTokens),
+    cacheWriteTokens: Number(row.cacheWriteTokens ?? 0),
+    outputTokens: Number(row.outputTokens),
     estimatedCost: formatDecimal(row.estimatedCost),
     internalCost: formatDecimal(row.internalCost),
     createdAt: toIsoString(row.createdAt),
