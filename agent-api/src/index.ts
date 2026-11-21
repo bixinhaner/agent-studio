@@ -95,6 +95,7 @@ import {
 } from "./artifacts/runtime-generated-artifacts.js";
 import {
   collectGeneratedArtifactChanges,
+  collectSkillDraftChanges,
   extractReferencedArtifactChanges,
   selectGeneratedArtifactChanges
 } from "./artifacts/generated-artifact-discovery.js";
@@ -11312,11 +11313,16 @@ async function registerGeneratedArtifactsForThread(input: {
     changedAfter: input.changedAfter,
     allowedExtensions: policy.allowedExtensions
   });
+  const skillDraftChanges = await collectSkillDraftChanges({
+    workspacePath,
+    changedAfter: input.changedAfter
+  });
   const candidates = selectGeneratedArtifactChanges({
     publishedChanges,
     referencedChanges,
     runtimeChanges,
-    scannedChanges
+    scannedChanges,
+    skillDraftChanges
   });
   if (candidates.length === 0) return [];
 

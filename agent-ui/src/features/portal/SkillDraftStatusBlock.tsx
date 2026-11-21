@@ -32,7 +32,10 @@ Platform skill install workflow:
 - Use the normal skill-creator workflow to create or update a standard Codex Skill directory with a valid SKILL.md.
 - Do not install or copy the skill into CODEX_HOME, ~/.codex, or any global Codex skills directory.
 - Create the generated skill inside this thread workspace, preferably under ./skill-drafts/<skill-name>.
-- When the skill files are ready, stop at the generated files. The platform will offer an Install skill action that installs the skill through the backend and makes it available in new chats.`;
+- To update an existing skill, edit ./skill-drafts/<skill-name>/ in this workspace. If it is not there, first copy the installed version (its folder is listed with your available skills) into ./skill-drafts/<skill-name>/, keep the same skill name, then edit it.
+- To install a skill the user uploaded as a .zip, extract it so the folder holding SKILL.md lands at ./skill-drafts/<skill-name>/, validate it, and change nothing else.
+- Always write skill folders in this cloud workspace with native file tools, even when the task is bound to the user's computer. Skills written only on the user's computer cannot be installed; add a local copy or zip only if the user asks.
+- When the skill files are ready, stop at the generated files. Do not say the skill is installed or updated. Tell the user to click "Install skill" under your reply; it installs the skill (or replaces the installed version with the same name) and makes it available in new chats.`;
 }
 
 /** Folder (relative to the task workspace) where external users' generated Skills are written. */
@@ -48,6 +51,7 @@ export function buildExternalSkillCreatorPrompt(prompt: string): string {
 Skill (SOP) creation workflow:
 - Use the skill-creator workflow to turn the request into a reusable Skill with a valid SKILL.md (name and description in front matter, clear numbered steps, inputs and expected outputs).
 - Write the Skill files only under ./${EXTERNAL_SKILL_DRAFT_DIR}/<skill-name>/ in the current working directory. Do not install, copy or register it anywhere else.
+- To update an existing Skill or install one the user uploaded as a .zip, put the complete Skill folder (with its SKILL.md and the same skill name) under ./${EXTERNAL_SKILL_DRAFT_DIR}/<skill-name>/ the same way.
 - Keep SKILL.md under 500 lines and do not include secrets, credentials or personal data.
 - When the files are ready, reply with a short summary of what the Skill does and its steps so the user can review it. Tell the user to click "Install Skill" below to use it in new chats.
 - In the reply, call it a Skill or SOP. Do not mention file system paths, directories, internal tool names, runtimes or model providers.`;
@@ -89,10 +93,12 @@ export function toExternalSkillFileChangeData(data: unknown): { at: string; skil
 }
 
 export function isSkillCreationIntent(prompt: string): boolean {
-  const normalized = prompt.trim().toLowerCase();
+  // A selected-skill chip ("[name](skill:...)") only means "use this skill", not "edit it".
+  const normalized = prompt.replace(/\]\(skill:[^)\s]*\)/gi, "]").trim().toLowerCase();
   if (!normalized) return false;
   const hasSkillWord = /\bskills?\b|\bsop\b|技能|能力/.test(normalized);
-  const hasCreateWord = /创建|生成|做成|固化|保存|沉淀|封装|复用|create|make|build|turn.+into/.test(normalized);
+  const hasCreateWord =
+    /创建|生成|做成|固化|保存|沉淀|封装|复用|更新|修改|改进|优化|升级|安装|新增|新做|再做|做一[个份套]|来一[个份套]|create|make|build|turn.+into|update|revise|improve|install/.test(normalized);
   return hasSkillWord && hasCreateWord;
 }
 

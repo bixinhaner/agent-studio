@@ -196,17 +196,86 @@ export async function collectGeneratedArtifactChanges(input: {
     .map((candidate) => candidate.change);
 }
 
+const SKILL_DRAFT_DIR = "skill-drafts";
+const SKILL_MANIFEST_FILE = "SKILL.md";
+const SKILL_DRAFT_DIR_LIMIT = 50;
+const SKILL_DRAFT_FILE_VISIT_LIMIT = 500;
+
+function isSkillManifestChange(change: RuntimeFileChange): boolean {
+  const normalizedPath = trimOrUndefined(change.path)?.replace(/\\/g, "/");
+  if (!normalizedPath) return false;
+  const kind = (change.kind || "").trim().toLowerCase();
+  if (kind === "delete" || kind === "deleted" || kind === "remove" || kind === "removed") return false;
+  return path.posix.basename(normalizedPath) === SKILL_MANIFEST_FILE;
+}
+
+/**
+ * Finds `skill-drafts/<name>/SKILL.md` whose Skill folder changed during this turn.
+ * Skills are often written by scripts (no runtime file-change event) or only have
+ * their references edited, so the folder is checked as a whole. The SKILL.md path is
+ * what the portal needs to offer the Install skill action.
+ */
+export async function collectSkillDraftChanges(input: {
+  workspacePath: string;
+  changedAfter?: Date;
+}): Promise<RuntimeFileChange[]> {
+  const draftRoot = path.join(path.resolve(input.workspacePath), SKILL_DRAFT_DIR);
+  // Without a turn start time every old draft would look new, so nothing is scanned.
+  const sinceMs = input.changedAfter?.getTime() ?? 0;
+  if (sinceMs <= 0) return [];
+  const entries = await fs.readdir(draftRoot, { withFileTypes: true }).catch(() => []);
+  const out: RuntimeFileChange[] = [];
+  for (const entry of entries.slice(0, SKILL_DRAFT_DIR_LIMIT)) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const skillDir = path.join(draftRoot, entry.name);
+    const manifestPath = path.join(skillDir, SKILL_MANIFEST_FILE);
+    const manifestStat = await fs.stat(manifestPath).catch(() => null);
+    if (!manifestStat?.isFile()) continue;
+    if (!(await directoryChangedSince(skillDir, sinceMs))) continue;
+    out.push({ path: manifestPath, kind: "skill_draft" });
+  }
+  return out;
+}
+
+async function directoryChangedSince(dir: string, sinceMs: number): Promise<boolean> {
+  let visited = 0;
+  const visit = async (current: string): Promise<boolean> => {
+    const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (visited >= SKILL_DRAFT_FILE_VISIT_LIMIT) return false;
+      const absolutePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (await visit(absolutePath)) return true;
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      visited += 1;
+      const stat = await fs.stat(absolutePath).catch(() => null);
+      if (stat && stat.mtimeMs + 2000 >= sinceMs) return true;
+    }
+    return false;
+  };
+  return await visit(dir);
+}
+
 export function selectGeneratedArtifactChanges(input: {
   publishedChanges?: RuntimeFileChange[];
   referencedChanges: RuntimeFileChange[];
   runtimeChanges: RuntimeFileChange[];
   scannedChanges: RuntimeFileChange[];
+  skillDraftChanges?: RuntimeFileChange[];
 }): RuntimeFileChange[] {
+  // Skill manifests always stay with the reply, even when the answer links a zip or
+  // publishes other files: without them the saved message loses its Install skill action.
+  const skillChanges = [
+    ...input.runtimeChanges.filter(isSkillManifestChange),
+    ...(input.skillDraftChanges ?? [])
+  ];
   if ((input.publishedChanges?.length ?? 0) > 0) {
-    return mergeRuntimeFileChanges([input.publishedChanges!]);
+    return mergeRuntimeFileChanges([input.publishedChanges!, skillChanges]);
   }
   if (input.referencedChanges.length > 0) {
-    return mergeRuntimeFileChanges([input.referencedChanges]);
+    return mergeRuntimeFileChanges([input.referencedChanges, skillChanges]);
   }
-  return mergeRuntimeFileChanges([input.runtimeChanges, input.scannedChanges]);
+  return mergeRuntimeFileChanges([input.runtimeChanges, input.scannedChanges, skillChanges]);
 }

@@ -54,5 +54,11 @@ describe("external Skill creation", () => {
     expect(isSkillCreationIntent("把这个排查流程做成 sop")).toBe(true);
     expect(isSkillCreationIntent("帮我创建一个技能")).toBe(true);
     expect(isSkillCreationIntent("总结这份 SOP 文档")).toBe(false);
+    expect(isSkillCreationIntent("那帮更新到skills")).toBe(true);
+    expect(isSkillCreationIntent("小区无法激活的skills 也来一份")).toBe(true);
+    expect(isSkillCreationIntent("新做一个skills 峰值业务不达标")).toBe(true);
+    expect(isSkillCreationIntent("给我安装这个skills")).toBe(true);
+    expect(isSkillCreationIntent("[ran-dl-throughput-analysis](skill:managed%3Acmwm194fs003jp1x8fu28a2z0) 使用这个skills 分析下")).toBe(false);
+    expect(isSkillCreationIntent("[ran-dl](skill:managed%3Aabc) 看下要不要优化这个参数")).toBe(false);
   });
 });
