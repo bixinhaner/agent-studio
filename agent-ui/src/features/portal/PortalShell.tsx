@@ -106,7 +106,7 @@ import { WorkspaceTaskFilesPanel } from "./workbench/WorkspaceTaskFilesPanel";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
-import { inlineReferencePlainText } from "./inline-references";
+import { steerMessageForServer } from "./message-file-blocks";
 import {
   closeWorkbenchDrawer,
   openWorkbenchDrawer,
@@ -696,7 +696,7 @@ export function PortalShell(props: {
         ...(run?.sessionId ? { session_id: run.sessionId, client_run_id: run.runId } : {}),
         thread_id: threadId,
         client_steer_id: clientSteerId,
-        message: inlineReferencePlainText(message),
+        message: steerMessageForServer(message),
         ...(options?.userInputRequestId ? { user_input_request_id: options.userInputRequestId } : {})
       }
     });

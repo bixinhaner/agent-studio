@@ -15,6 +15,7 @@ import { api } from "../../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 import { usePortalI18n } from "./i18n";
 import { type PortalSteerEvent, PortalSteerEventList, usePortalComposerWorkflow } from "./composer-workflow";
+import { splitMessageFiles, withAttachmentReferences } from "./message-file-blocks";
 import { type InlineAttachment, inlineAttachmentIds } from "./inline-attachments";
 import { InlineMessageReferences } from "./InlineMessageReferences";
 import { formatRelativeMessageTime } from "./message-time";
@@ -491,16 +492,23 @@ export const PortalSteerEventsView: FC<{ events: PortalSteerEvent[] }> = ({ even
   const aui = useAui();
   const workflow = usePortalComposerWorkflow();
   const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const preview = useInlineAttachmentPreview();
+  // A failed steer goes back to the composer with its files, restored as already uploaded.
   const editMessage = useCallback((message: string) => {
-    aui.composer().setText(message);
+    const { text, attachments } = splitMessageFiles(message);
+    const composer = aui.composer();
+    composer.setText(withAttachmentReferences(text, attachments));
+    for (const attachment of attachments) {
+      if (!composer.getState().attachments.some((item) => item.id === attachment.id)) void composer.addAttachment(attachment);
+    }
   }, [aui]);
   const queueMessage = useCallback((message: string) => {
     try {
       workflow.enqueue(message);
     } catch {
-      aui.composer().setText(message);
+      editMessage(message);
     }
-  }, [aui, workflow]);
+  }, [editMessage, workflow]);
 
   return (
     <PortalSteerEventList
@@ -508,6 +516,7 @@ export const PortalSteerEventsView: FC<{ events: PortalSteerEvent[] }> = ({ even
       threadRunning={threadRunning}
       onEdit={editMessage}
       onQueue={queueMessage}
+      onPreviewFile={preview}
     />
   );
 };

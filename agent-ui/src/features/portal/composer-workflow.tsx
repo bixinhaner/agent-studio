@@ -35,6 +35,10 @@ import {
 } from "./composer-workflow-state";
 import { usePortalI18n } from "./i18n";
 import { inlineReferencePlainText } from "./inline-references";
+import type { CreateAttachment } from "@assistant-ui/react";
+import { InlineMessageReferences } from "./InlineMessageReferences";
+import type { InlineAttachment } from "./inline-attachments";
+import { joinMessageFiles, splitMessageFiles, withAttachmentReferences } from "./message-file-blocks";
 import { takeTextKeptForReload } from "../../lib/build-version-refresh";
 
 type QueueState = Pick<PortalComposerStoredState, "queue" | "pausedReason">;
@@ -713,9 +717,11 @@ export function usePortalQueueDispatcher(input: {
   blocked: boolean;
   getComposerText(): string;
   setComposerText(text: string): void;
+  /** Restores a queued file; it is already uploaded, so this adds it as complete. */
+  addAttachment(attachment: CreateAttachment): void;
   send(): void;
 }) {
-  const { workflow, threadRunning, blocked, getComposerText, setComposerText, send } = input;
+  const { workflow, threadRunning, blocked, getComposerText, setComposerText, addAttachment, send } = input;
   const dispatchLockRef = useRef("");
   const orphanTimerRef = useRef<number | null>(null);
 
@@ -745,7 +751,9 @@ export function usePortalQueueDispatcher(input: {
     workflow.beginDispatch(nextItem.id);
     const preservedDraft = getComposerText();
     try {
-      setComposerText(nextItem.text);
+      const { text, attachments } = splitMessageFiles(nextItem.text);
+      setComposerText(withAttachmentReferences(text, attachments));
+      for (const attachment of attachments) addAttachment(attachment);
       send();
       window.setTimeout(() => setComposerText(preservedDraft), 0);
     } catch {
@@ -753,11 +761,32 @@ export function usePortalQueueDispatcher(input: {
       workflow.markOrphanedDispatch(nextItem.id);
       setComposerText(preservedDraft);
     }
-  }, [blocked, getComposerText, send, setComposerText, threadRunning, workflow]);
+  }, [addAttachment, blocked, getComposerText, send, setComposerText, threadRunning, workflow]);
 
   useEffect(() => () => {
     if (orphanTimerRef.current !== null) window.clearTimeout(orphanTimerRef.current);
   }, []);
+}
+
+/** Queue rows are one line: files show by name where they were referenced. */
+function queueItemLabel(message: string): string {
+  const { text, attachments } = splitMessageFiles(message);
+  return inlineReferencePlainText(withAttachmentReferences(text, attachments));
+}
+
+/** A steering message with its uploaded files as read-only chips. */
+function MessageWithFilesText({ message, onPreview }: { message: string; onPreview?(attachment: InlineAttachment): void }) {
+  const { text, attachments } = splitMessageFiles(message);
+  if (attachments.length === 0) return <>{inlineReferencePlainText(message)}</>;
+  const chips = attachments.map((attachment): InlineAttachment => ({
+    id: attachment.id!,
+    name: attachment.name,
+    type: attachment.type ?? "document",
+    contentType: attachment.contentType,
+    content: attachment.content ?? [],
+    status: { type: "complete" }
+  } as InlineAttachment));
+  return <InlineMessageReferences text={withAttachmentReferences(text, attachments)} attachments={chips} onPreview={onPreview} />;
 }
 
 export function PortalSteerEventList(props: {
@@ -765,6 +794,7 @@ export function PortalSteerEventList(props: {
   threadRunning: boolean;
   onEdit(message: string): void;
   onQueue(message: string): void;
+  onPreviewFile?(attachment: InlineAttachment): void;
 }) {
   const { t } = usePortalI18n();
   const workflow = usePortalComposerWorkflow();
@@ -783,7 +813,7 @@ export function PortalSteerEventList(props: {
             role={event.status === "failed" ? "alert" : "status"}
           >
             <div className="portal-steer-event-label">{t("thread.steerLabel")}</div>
-            <p className="portal-steer-event-message">{inlineReferencePlainText(event.message)}</p>
+            <div className="portal-steer-event-message"><MessageWithFilesText message={event.message} onPreview={props.onPreviewFile} /></div>
             <div className="portal-steer-event-footer">
               <div className="portal-steer-event-status">
                 {pending ? (
@@ -859,7 +889,9 @@ export function PortalQueueTray(props: {
 
   const saveEdit = () => {
     if (!editingId || !editingText.trim()) return;
-    workflow.updateItem(editingId, editingText);
+    // Only the text is editable; the item's files stay attached.
+    const files = splitMessageFiles(workflow.queue.find((item) => item.id === editingId)?.text ?? "").attachments;
+    workflow.updateItem(editingId, joinMessageFiles(editingText, files));
     setEditingId("");
     setEditingText("");
   };
@@ -973,7 +1005,7 @@ export function PortalQueueTray(props: {
                       aria-label={t("thread.queueEditLabel")}
                     />
                   ) : (
-                    <span className="portal-queue-text">{inlineReferencePlainText(item.text)}</span>
+                    <span className="portal-queue-text">{queueItemLabel(item.text)}</span>
                   )}
                   <div className="portal-queue-row-actions">
                     {editing ? (
@@ -1018,7 +1050,7 @@ export function PortalQueueTray(props: {
                           disabled={busy}
                           onClick={() => {
                             setEditingId(item.id);
-                            setEditingText(inlineReferencePlainText(item.text));
+                            setEditingText(inlineReferencePlainText(splitMessageFiles(item.text).text));
                           }}
                           aria-label={t("thread.queueEdit")}
                         >

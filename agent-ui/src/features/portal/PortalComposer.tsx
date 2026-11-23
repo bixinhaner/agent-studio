@@ -10,7 +10,7 @@ import {
   useRef,
   useState
 } from "react";
-import { useAui } from "@assistant-ui/react";
+import { useAui, type CreateAttachment } from "@assistant-ui/react";
 import { Composer } from "@assistant-ui/react-ui";
 import { PlusIcon, SendHorizontalIcon, SquareIcon } from "lucide-react";
 import { useAuiState } from "@assistant-ui/store";
@@ -31,6 +31,7 @@ import { PortalBackgroundRunContext } from "./user-input-request";
 import { PortalSkillPicker } from "./workbench/SkillPicker";
 import { type InlineAttachment, missingInlineAttachments } from "./inline-attachments";
 import { hasInlineComposerRequest } from "./inline-references";
+import { composerMessageWithFiles } from "./message-file-blocks";
 import { resolvePortalComposerKeyDownAction } from "./composer-keyboard";
 import { THREAD_ATTACHMENT_MAX_BYTES } from "./attachment-upload-messages";
 import { InlineAttachmentComposer } from "./InlineAttachmentComposer";
@@ -361,6 +362,9 @@ export const UploadAwareComposer: FC = () => {
   const getComposerText = useCallback(() => aui.composer().getState().text, [aui]);
   const setComposerText = useCallback((text: string) => aui.composer().setText(text), [aui]);
   const sendComposer = useCallback(() => aui.composer().send(), [aui]);
+  const addComposerAttachment = useCallback((attachment: CreateAttachment) => {
+    void aui.composer().addAttachment(attachment);
+  }, [aui]);
   const { clearStoredDraft } = usePortalComposerDraftPersistence({
     text: composerText,
     threadId: workflow.threadId,
@@ -377,6 +381,7 @@ export const UploadAwareComposer: FC = () => {
     blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByUpload || sendBlockedByLargeText || hasAttachments || composerSkills.busy,
     getComposerText,
     setComposerText,
+    addAttachment: addComposerAttachment,
     send: sendComposer
   });
 
@@ -461,40 +466,57 @@ export const UploadAwareComposer: FC = () => {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [hasAttachments]);
 
+  // Queued and steering messages carry the composer's uploaded files (message-file-blocks).
+  const composerFilesMessage = useCallback((text: string): string | null => {
+    const attachments = aui.composer().getState().attachments as readonly InlineAttachment[];
+    if (sendBlockedByUpload) {
+      showWorkflowNotice(uploadBlockReason === "uploading" ? t("thread.waitUploads") : t("thread.fixUploads"));
+      return null;
+    }
+    const composed = composerMessageWithFiles(text, attachments);
+    if (!composed.ok) {
+      showWorkflowNotice(t("thread.fixUploads"));
+      return null;
+    }
+    if (composed.message.length > DIRECT_MESSAGE_TEXT_MAX_CHARS) {
+      showWorkflowNotice(t("thread.errorMessageTooLarge"));
+      return null;
+    }
+    return composed.message;
+  }, [aui, sendBlockedByUpload, showWorkflowNotice, t, uploadBlockReason]);
+
   const enqueueCurrent = useCallback(() => {
     const text = getComposerText().trim();
-    if (!hasInlineComposerRequest(text) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
-    if (hasAttachments) {
-      showWorkflowNotice(t("thread.queueTextOnly"));
-      return;
-    }
+    if (!hasInlineComposerRequest(text, aui.composer().getState().attachments.length) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
+    const queued = composerFilesMessage(text);
+    if (!queued) return;
     try {
-      workflow.enqueue(text);
+      workflow.enqueue(queued);
       setComposerText("");
+      void aui.composer().clearAttachments();
       clearStoredDraft();
       setWorkflowNotice("");
     } catch {
       showWorkflowNotice(t("thread.queueLimit"));
     }
-  }, [accessBlock.blocked, clearStoredDraft, composerSkills.busy, getComposerText, hasAttachments, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, aui, clearStoredDraft, composerFilesMessage, composerSkills.busy, getComposerText, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
 
   const steerCurrent = useCallback(async () => {
     const text = getComposerText().trim();
-    if (!hasInlineComposerRequest(text) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
-    if (hasAttachments) {
-      showWorkflowNotice(t("thread.queueTextOnly"));
-      return;
-    }
+    if (!hasInlineComposerRequest(text, aui.composer().getState().attachments.length) || composerSkills.busy || accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText) return;
+    const steering = composerFilesMessage(text);
+    if (!steering) return;
     setComposerText("");
+    void aui.composer().clearAttachments();
     clearStoredDraft();
     setWorkflowNotice("");
     notifyUserSendIntent();
     try {
-      await workflow.steer(text);
+      await workflow.steer(steering);
     } catch {
       // The persistent steer event keeps the text visible and offers retry/edit recovery.
     }
-  }, [accessBlock.blocked, clearStoredDraft, composerSkills.busy, getComposerText, hasAttachments, notifyUserSendIntent, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, showWorkflowNotice, t, workflow]);
+  }, [accessBlock.blocked, aui, clearStoredDraft, composerFilesMessage, composerSkills.busy, getComposerText, notifyUserSendIntent, sendBlockedByLargeText, sendBlockedByRuntime, setComposerText, workflow]);
 
   const continueAnswer = useCallback(() => {
     if (accessBlock.blocked || sendBlockedByRuntime || threadRunning) return;
@@ -607,8 +629,8 @@ export const UploadAwareComposer: FC = () => {
                   <button
                     type="button"
                     className="portal-running-action"
-                    disabled={sendDisabled || hasAttachments || workflow.isSteering}
-                    title={hasAttachments ? t("thread.queueTextOnly") : t("thread.steerHelp")}
+                    disabled={sendDisabled || workflow.isSteering}
+                    title={sendDisabled ? sendTitle : t("thread.steerHelp")}
                     onClick={() => void steerCurrent()}
                   >
                     {t("thread.steerNow")}
@@ -616,8 +638,8 @@ export const UploadAwareComposer: FC = () => {
                   <button
                     type="button"
                     className="portal-running-action is-primary"
-                    disabled={sendDisabled || hasAttachments}
-                    title={hasAttachments ? t("thread.queueTextOnly") : t("thread.addQueue")}
+                    disabled={sendDisabled}
+                    title={sendDisabled ? sendTitle : t("thread.addQueue")}
                     onClick={enqueueCurrent}
                   >
                     {t("thread.addQueue")}
@@ -700,6 +722,9 @@ export const MobileAwareComposer: FC = () => {
   const getComposerText = useCallback(() => aui.composer().getState().text, [aui]);
   const setComposerText = useCallback((text: string) => aui.composer().setText(text), [aui]);
   const sendComposer = useCallback(() => aui.composer().send(), [aui]);
+  const addComposerAttachment = useCallback((attachment: CreateAttachment) => {
+    void aui.composer().addAttachment(attachment);
+  }, [aui]);
   const { clearStoredDraft } = usePortalComposerDraftPersistence({
     text: composerText,
     threadId: workflow.threadId,
@@ -715,6 +740,7 @@ export const MobileAwareComposer: FC = () => {
     blocked: accessBlock.blocked || sendBlockedByRuntime || sendBlockedByLargeText,
     getComposerText,
     setComposerText,
+    addAttachment: addComposerAttachment,
     send: sendComposer
   });
 

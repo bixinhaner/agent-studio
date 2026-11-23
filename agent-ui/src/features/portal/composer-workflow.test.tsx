@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   usePortalComposerDraftPersistence,
   usePortalComposerWorkflowController,
+  usePortalQueueDispatcher,
   type PortalSteerEvent
 } from "./composer-workflow";
+import { attachmentReference, uploadedAttachmentHint } from "./inline-attachments";
+import { joinMessageFiles } from "./message-file-blocks";
 
 function acceptedSteerEvent(message: string, id = "portal-steer-test"): PortalSteerEvent {
   return {
@@ -200,6 +203,56 @@ describe("portal composer workflow controller", () => {
 
     expect(result.current.contextValue.pausedReason).toBe("interrupted");
     expect(result.current.contextValue.queue.map((item) => item.text)).toEqual(["queued after stop"]);
+  });
+
+  it("sends a queued instruction with its uploaded files restored as attachments", () => {
+    const meta = {
+      id: "upl_queue1",
+      name: "sites.csv",
+      path: "/workspace/uploads/upl_queue1/sites.csv",
+      relativePath: "uploads/upl_queue1/sites.csv",
+      mimeType: "text/csv",
+      size: 10
+    };
+    const calls: string[] = [];
+    const setComposerText = vi.fn((text: string) => calls.push(`text:${text}`));
+    const addAttachment = vi.fn((attachment: { id?: string }) => calls.push(`file:${attachment.id}`));
+    const send = vi.fn(() => calls.push("send"));
+    const { result, rerender } = renderHook(({ running }: { running: boolean }) => {
+      const controller = usePortalComposerWorkflowController({
+        userId: "user-1",
+        activeThreadId: "thread-1",
+        onSteer: unusedSteer
+      });
+      usePortalQueueDispatcher({
+        workflow: controller.contextValue,
+        threadRunning: running,
+        blocked: false,
+        getComposerText: () => "",
+        setComposerText,
+        addAttachment,
+        send
+      });
+      return controller;
+    }, { initialProps: { running: true } });
+
+    const queued = joinMessageFiles(`${attachmentReference(meta.id, meta.name)} summarize`, [
+      { content: [{ type: "text", text: uploadedAttachmentHint(meta) }] }
+    ]);
+    act(() => {
+      result.current.contextValue.enqueue(queued);
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(result.current.contextValue.queue[0].text).toBe(queued);
+
+    rerender({ running: false });
+    expect(calls).toEqual([`text:${attachmentReference(meta.id, meta.name)} summarize`, `file:${meta.id}`, "send"]);
+    expect(addAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      id: meta.id,
+      name: meta.name,
+      content: [{ type: "text", text: uploadedAttachmentHint(meta) }]
+    }));
+    expect(result.current.contextValue.queue[0].status).toBe("sending");
   });
 
   it("puts a send rejected by a still-running response back at the head of the queue", () => {
