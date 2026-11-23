@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import {
   AssistantRuntimeProvider, ComposerPrimitive, RuntimeAdapterProvider,
@@ -8,6 +8,7 @@ import {
   type AttachmentAdapter, type ChatModelAdapter
 } from "@assistant-ui/react";
 import { InlineAttachmentComposer } from "./InlineAttachmentComposer";
+import { readAttachmentDraft } from "./inline-attachments";
 import { usePortalComposerDraftPersistence, usePortalComposerWorkflowController } from "./composer-workflow";
 import { PortalI18nProvider } from "./i18n";
 
@@ -16,6 +17,8 @@ beforeAll(() => {
     matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}
   })) });
 });
+let draftScope = "";
+beforeEach(() => { draftScope = `case-${Math.random().toString(36).slice(2)}`; });
 afterEach(() => { cleanup(); window.localStorage.clear(); });
 const model: ChatModelAdapter = { async *run() {} };
 type Identity = { localId?: string; remoteId?: string };
@@ -33,6 +36,10 @@ function UploadProvider({ children, onChange }: PropsWithChildren<{ onChange(ide
       const base = { id: "remote-file", name: file.name, type: "document" as const, contentType: "text/markdown", file };
       yield { ...base, status: { type: "running", reason: "uploading", progress: 0 } };
       await aui.threadListItem().initialize();
+      for (const progress of [0.3, 0.6, 1]) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        yield { ...base, status: { type: "running", reason: "uploading", progress } };
+      }
       yield { ...base, status: { type: "requires-action", reason: "composer-send" } };
     },
     async send(attachment) { return { ...attachment, status: { type: "complete" }, content: [] }; },
@@ -51,7 +58,7 @@ function Body({ workflow }: { workflow: Workflow }) {
   return <ComposerPrimitive.Root>
     <button type="button" onClick={() => aui.composer().setText("请读取这个附件：")}>输入正文</button>
     <button type="button" onClick={() => void aui.composer().addAttachment(new File(["test content"], "sample.md"))}>上传</button>
-    <InlineAttachmentComposer key={runtimeThreadId} draftKey={workflow.threadId} threadId={workflow.threadId} />
+    <InlineAttachmentComposer key={runtimeThreadId} draftKey={`${draftScope}:${workflow.threadId}`} threadId={workflow.threadId} />
     <output data-testid="state">{JSON.stringify({ text, attachments })}</output>
   </ComposerPrimitive.Root>;
 }
@@ -105,5 +112,19 @@ describe("first upload with remote task initialization", () => {
     expect(state.attachments).toHaveLength(1);
     expect(state.attachments[0].id).toBe("remote-file");
     expect(state.attachments[0].name).toBe("sample.md");
+  });
+
+  it.each([false, true])("shows a file attached to an empty new task once: %s", async remount => {
+    render(<Harness remount={remount} />);
+    await waitFor(() => expect(document.querySelector('[data-draft-ready="true"]')).not.toBeNull());
+    fireEvent.click(screen.getByText("上传"));
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toContain("requires-action"));
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const state = JSON.parse(screen.getByTestId("state").textContent!);
+    expect(state.text.split("(attachment:remote-file)")).toHaveLength(2);
+    expect(state.attachments).toHaveLength(1);
+    expect(document.querySelectorAll(".inline-file-chip")).toHaveLength(1);
+    // The file now belongs to the created task; nothing is left for the next new task.
+    await waitFor(async () => expect((await readAttachmentDraft(`${draftScope}:__new_task__`))?.attachments ?? []).toEqual([]));
   });
 });

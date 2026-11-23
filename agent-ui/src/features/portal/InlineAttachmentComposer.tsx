@@ -13,7 +13,7 @@ import { useLexicalNodeSelection } from "@lexical/react/useLexicalNodeSelection"
 import { mergeRegister } from "@lexical/utils";
 import {
   $createParagraphNode, $createTextNode, $createLineBreakNode, $getRoot, $getSelection, $setSelection, $isRangeSelection,
-  $isNodeSelection, $createNodeSelection, $getNodeByKey, $isTextNode,
+  $isNodeSelection, $createNodeSelection, $getNodeByKey, $isTextNode, $isElementNode,
   DecoratorNode, COMMAND_PRIORITY_HIGH, COMMAND_PRIORITY_LOW, COPY_COMMAND, CUT_COMMAND, PASTE_COMMAND,
   KEY_BACKSPACE_COMMAND, KEY_DELETE_COMMAND, KEY_ENTER_COMMAND, CLEAR_HISTORY_COMMAND, HISTORY_PUSH_TAG, HISTORY_MERGE_TAG,
   type LexicalNode, type NodeKey, type SerializedLexicalNode, type RangeSelection
@@ -128,6 +128,25 @@ export class InlineAttachmentNode extends DecoratorNode<ReactNode> {
   decorate() { return <AttachmentDecoration id={this.__id} name={this.__name} nodeKey={this.getKey()} />; }
 }
 
+/** Attachment chips in document order; read inside an editor read or update. */
+function $attachmentNodes(): InlineAttachmentNode[] {
+  const found: InlineAttachmentNode[] = [];
+  const walk = (node: LexicalNode) => {
+    if (node instanceof InlineAttachmentNode) found.push(node);
+    else if ($isElementNode(node)) node.getChildren().forEach(walk);
+  };
+  walk($getRoot());
+  return found;
+}
+
+/**
+ * The first task upload remounts the composer under the new task, and the unmounting
+ * composer saves its draft under the old "new task" key. That copy then came back in every
+ * later new task (re-uploading the file) and could show the same file twice. The next
+ * composer that holds those attachments clears it.
+ */
+let unmountedDraft: { key: string; ids: Set<string> } | null = null;
+
 function AttachmentDecoration({ id, name, nodeKey }: { id: string; name: string; nodeKey: NodeKey }) {
   const [selected] = useLexicalNodeSelection(nodeKey);
   return <span className={selected ? "inline-file-selection is-selected" : "inline-file-selection"}><InlineFileChip id={id} name={name} /></span>;
@@ -232,7 +251,11 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
     const fresh = actions.attachments.filter(item => !inlineAttachmentIds(aui.composer().getState().text).has(item.id) && !suppressed.current.has(item.id));
     if (!fresh.length) return;
     editor.update(() => {
-      const nodes = fresh.map(item => new InlineAttachmentNode(item.id, item.name));
+      // Composer text lags behind queued editor updates; the editor itself is the source of truth.
+      const present = new Set($attachmentNodes().map(node => node.__id));
+      const missing = fresh.filter(item => !present.has(item.id));
+      if (!missing.length) return;
+      const nodes = missing.map(item => new InlineAttachmentNode(item.id, item.name));
       const current = $getSelection();
       if (!$isRangeSelection(current) && selection.current) {
         try { $setSelection(selection.current.clone()); } catch { /* The old paragraph may have been replaced. */ }
@@ -285,6 +308,11 @@ function EditorBridge({ autoFocus }: Pick<ComposerProps, "autoFocus">) {
       return true;
     };
     return mergeRegister(
+      // One chip per attachment: a second reference to the same file is dropped.
+      editor.registerNodeTransform(InlineAttachmentNode, node => {
+        const first = $attachmentNodes().find(candidate => candidate.__id === node.__id);
+        if (first && !first.is(node)) node.remove();
+      }),
       editor.registerCommand(KEY_ENTER_COMMAND, event => {
         if (!event || resolvePortalComposerKeyDownAction({ key: event.key, keyCode: event.keyCode, shiftKey: event.shiftKey,
           isComposing: event.isComposing || editor.isComposing(), threadRunning: aui.thread().getState().isRunning }) !== "submit") return false;
@@ -369,6 +397,11 @@ export function InlineAttachmentComposer(props: ComposerProps) {
   useEffect(() => {
     let active = true;
     setReady(false);
+    const moved = unmountedDraft;
+    unmountedDraft = null;
+    if (moved && moved.key !== props.draftKey && aui.composer().getState().attachments.some(item => moved.ids.has(item.id))) {
+      void writeAttachmentDraft(moved.key, makeAttachmentDraft("", [])).catch(() => setDraftError(true));
+    }
     if (previousDraftKey.current !== props.draftKey) {
       // The parent keys by local conversation identity, so a key change here is task creation.
       void writeAttachmentDraft(previousDraftKey.current, makeAttachmentDraft("", [])).catch(() => setDraftError(true));
@@ -380,10 +413,15 @@ export function InlineAttachmentComposer(props: ComposerProps) {
       if (composer.getState().attachments.length) return;
       // Existing text persistence owns newer edits; only restore the matching draft.
       if (composer.getState().text && composer.getState().text !== draft.text) return;
+      // A file the text no longer references is a leftover, not part of this draft.
+      const referenced = inlineAttachmentIds(draft.text);
+      const items = draft.attachments.filter(item => referenced.has(item.id));
+      if (!draft.text && !items.length) return;
       restoringDraftText.current = draft.text;
       composer.setText(draft.text);
-      for (const item of draft.attachments) {
+      for (const item of items) {
         if (!active) return;
+        if (composer.getState().attachments.some(existing => existing.id === item.id)) continue;
         if (item.attachment) await composer.addAttachment(item.attachment);
         else if (item.file) { reserveAttachmentId(item.file, item.id); void composer.addAttachment(item.file); }
       }
@@ -409,7 +447,11 @@ export function InlineAttachmentComposer(props: ComposerProps) {
     if (!ready) return;
     const save = () => { void writeAttachmentDraft(props.draftKey, snapshot.current).catch(() => setDraftError(true)); };
     window.addEventListener("pagehide", save);
-    return () => { window.removeEventListener("pagehide", save); save(); };
+    return () => {
+      window.removeEventListener("pagehide", save);
+      save();
+      unmountedDraft = { key: props.draftKey, ids: new Set(snapshot.current.attachments.map(item => item.id)) };
+    };
   }, [props.draftKey, ready]);
   useEffect(() => {
     const restore = (event: Event) => {

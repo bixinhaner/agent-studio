@@ -3,8 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { AssistantRuntimeProvider, ComposerPrimitive, ThreadPrimitive, ActionBarPrimitive, useAui, useAuiState, useLocalRuntime, type ChatModelAdapter, type CreateAttachment, type AttachmentAdapter } from "@assistant-ui/react";
-import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineFileChip } from "./InlineAttachmentComposer";
-import { $getRoot, getNearestEditorFromDOMNode } from "lexical";
+import { InlineAttachmentComposer, InlineAttachmentEditComposer, InlineAttachmentNode, InlineFileChip } from "./InlineAttachmentComposer";
+import { $getRoot, getNearestEditorFromDOMNode, type ElementNode } from "lexical";
 import { attachmentReference, makeAttachmentDraft, writeAttachmentDraft, missingInlineAttachments, takeAttachmentId } from "./inline-attachments";
 import { usePortalComposerDraftPersistence } from "./composer-workflow";
 import { PortalI18nProvider } from "./i18n";
@@ -130,6 +130,26 @@ describe("inline attachment editor with the existing composer runtime", () => {
     expect(state().attachments[0].id).toBe(file.id);
     expect(drafts["new-local-task"]).toBe("");
     expect(drafts["created-server-task"]).toBe(sentence);
+  });
+  it("does not bring back a file the draft text no longer references", async () => {
+    drafts["leftover-draft"] = "";
+    await writeAttachmentDraft("leftover-draft", makeAttachmentDraft("", [{ ...file, id: file.id!, type: "document", status: { type: "complete" } }]));
+    render(<Harness scope="leftover-draft" />); await hydrated();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(state().attachments).toEqual([]);
+    expect(screen.queryByRole("button", { name: "文档.md" })).toBeNull();
+  });
+  it("shows one chip when the same file is referenced twice", async () => {
+    render(<Harness scope="duplicate-reference" />); await hydrated();
+    fireEvent.click(screen.getByText("sample"));
+    await screen.findByRole("button", { name: "文档.md" });
+    const editor = getNearestEditorFromDOMNode(document.querySelector(".portal-inline-editor")!)!;
+    await act(async () => {
+      editor.update(() => { $getRoot().getFirstChildOrThrow<ElementNode>().append(new InlineAttachmentNode(file.id!, file.name)); });
+    });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "文档.md" })).toHaveLength(1));
+    expect(state().text.split(`(attachment:${file.id})`)).toHaveLength(2);
+    expect(state().attachments).toHaveLength(1);
   });
   it("editing an already sent message retains real files and saves another revision", async () => {
     render(<Harness scope="edit-thread" />); await hydrated();
