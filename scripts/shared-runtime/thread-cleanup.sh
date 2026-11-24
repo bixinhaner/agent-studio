@@ -1,7 +1,7 @@
 #!/bin/bash
 # Remove regenerable per-thread data of idle agent-studio threads (installed by the
 # deploy script as /usr/local/sbin/agent-studio-thread-tmp-cleanup, run daily by systemd):
-#  - <thread>/workspace-files      idle WORKSPACE_COPY_DAYS (3): copy of the selected workspace
+#  - <thread>/workspace-files      idle WORKSPACE_COPY_DAYS (1): copy of the selected workspace
 #    folder that the app deletes and re-copies at the start of every turn.
 #  - <thread>/.agent-studio/tmp    idle TMP_IDLE_DAYS: home/cache/config; the app recreates it
 #    (plus runtime symlinks) on the next request. Defaults to the "临时目录保留天数" published
@@ -11,7 +11,7 @@
 #  - node_modules, virtualenvs, __pycache__, .gradle, .m2, .nuget, .npm, .cache, .tools and similar
 #    dependency/build caches anywhere inside the thread (outside .agent-studio and
 #    workspace-files)   idle TMP_IDLE_DAYS: reinstalled on demand.
-#  - <workspace>/.agent-studio/omc-handbooks   idle WORKSPACE_COPY_DAYS: OMC API handbook that the
+#  - <workspace>/.agent-studio/omc-handbooks   idle HANDBOOK_DAYS (3): OMC API handbook that the
 #    omc-operations skill downloads again when missing (~7MB and 1,000+ files per conversation).
 # "Thread" covers every workspace kind: thread-* dirs, action-connector conversations
 # (.../agent-*/conversations/<id>) and legacy shared agent dirs (sessions/<org>/<user>/agent-*).
@@ -21,7 +21,8 @@
 set -uo pipefail
 ROOT="${AGENT_STUDIO_DATA_ROOT:-/var/lib/agent-studio}"
 STATE_DIR="${SHARED_RUNTIME_STATE_ROOT:-$ROOT/shared/state}"
-WORKSPACE_COPY_DAYS=3
+WORKSPACE_COPY_DAYS=1
+HANDBOOK_DAYS=3
 DRY_RUN=0; [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
 policy_days() {
@@ -119,7 +120,7 @@ REMOVED_SCRATCH=$LAST_COUNT
 clean_regex dependency-caches "$TMP_IDLE_DAYS" \
   ".*/$OWNER_RE/"'(.+/)?(node_modules|\.venv|venv|__pycache__|\.gradle|\.gradle-cache|gradle-home|\.m2|\.nuget|\.npm|\.pnpm-store|\.cache|\.tools|\.uv-cache|uv-cache|pip-cache)'
 REMOVED_DEPENDENCY_CACHES=$LAST_COUNT
-clean omc-handbooks "$WORKSPACE_COPY_DAYS" '*/.agent-studio/omc-handbooks' 2
+clean omc-handbooks "$HANDBOOK_DAYS" '*/.agent-studio/omc-handbooks' 2
 REMOVED_DEPENDENCY_CACHES=$((REMOVED_DEPENDENCY_CACHES+LAST_COUNT))
 
 # Write the summary through a fresh temp file and rename it, so a link planted in the

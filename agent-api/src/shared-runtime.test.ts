@@ -137,7 +137,7 @@ describe("shared runtime", () => {
     const paths = await makeSharedRoot();
     expect(await syncSharedRuntimeCleanupPolicy(enabledSettings, paths)).toBe(true);
     const policy = JSON.parse(await fs.readFile(path.join(paths.stateRoot, "cleanup-policy.json"), "utf8"));
-    expect(policy).toMatchObject({ tmpRetentionDays: 14, workspaceCopyRetentionDays: 3 });
+    expect(policy).toMatchObject({ tmpRetentionDays: 14, workspaceCopyRetentionDays: 1 });
 
     expect(await syncSharedRuntimeCleanupPolicy(enabledSettings, paths)).toBe(false);
     expect(
@@ -162,7 +162,7 @@ describe("shared runtime", () => {
         finishedAt: "2026-10-08T19:40:00Z",
         dryRun: false,
         tmpRetentionDays: 14,
-        workspaceCopyRetentionDays: 3,
+        workspaceCopyRetentionDays: 1,
         removedThreadTmp: 4,
         removedWorkspaceCopies: 10,
         removedScratchDirs: 2,
@@ -199,7 +199,7 @@ describe("shared runtime", () => {
       expect.arrayContaining(["PIP_CACHE_DIR", "PLAYWRIGHT_BROWSERS_PATH", "npm_config_cache", "UV_CACHE_DIR"])
     );
     expect(status.caches.find((cache) => cache.key === "playwright")?.exists).toBe(true);
-    expect(status.cleanup).toMatchObject({ tmpRetentionDays: 14, workspaceCopyRetentionDays: 3 });
+    expect(status.cleanup).toMatchObject({ tmpRetentionDays: 14, workspaceCopyRetentionDays: 1 });
     expect(status.cleanup.lastRun).toMatchObject({
       removedThreadTmp: 4,
       removedWorkspaceCopies: 10,
@@ -262,7 +262,9 @@ describe("shared runtime", () => {
         reclaimedBytes: 10 * GB,
         pluginLogicalBytes: 11 * GB,
         pluginAllocatedBytes: 0.1 * GB,
-        catalogFilesRemoved: 340
+        catalogFilesRemoved: 340,
+        logFilesRemoved: 12,
+        logFreedBytes: 2 * GB
       })
     );
 
@@ -285,6 +287,8 @@ describe("shared runtime", () => {
       pluginLogicalBytes: 11 * GB,
       pluginAllocatedBytes: 0.1 * GB,
       catalogFilesRemoved: 340,
+      logFilesRemoved: 12,
+      logFreedBytes: 2 * GB,
       errors: 0
     });
   });

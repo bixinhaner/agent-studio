@@ -13,8 +13,12 @@ anything changed in the last hour (an install may be in progress) are left alone
 cache/remote_plugin_catalog/*.json are catalog snapshots Codex re-downloads when missing; files
 not refreshed for CATALOG_DAYS belong to homes that are no longer used and are removed.
 
+logs_*.sqlite (+ -wal/-shm) is Codex's local debug log store (used only for /feedback uploads).
+Codex deletes old rows but never shrinks the file, and it recreates the database on the next start
+when it is missing. Databases not written for LOG_DAYS and not held open by any process are removed.
+
 Usage: codex-home-dedupe.py --codex-homes DIR [--base-home DIR] [--state-dir DIR]
-                            [--catalog-days 7] [--settle-seconds 3600] [--dry-run]
+                            [--catalog-days 7] [--log-days 7] [--settle-seconds 3600] [--dry-run]
 """
 import argparse
 import hashlib
@@ -205,6 +209,72 @@ def prune_catalog(homes, days, dry_run):
     return {"catalogFilesRemoved": removed, "catalogFreedBytes": freed}
 
 
+def open_paths():
+    """Real paths of files any readable process holds open (the job runs as the app user)."""
+    held = set()
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return None
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        fd_dir = os.path.join("/proc", pid, "fd")
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                held.add(os.readlink(os.path.join(fd_dir, fd)))
+            except OSError:
+                continue
+    return held
+
+
+def prune_logs(homes, days, dry_run, held=None):
+    cutoff = time.time() - days * 86400
+    held = open_paths() if held is None else held
+    removed = freed = 0
+    if held is None:
+        # Without /proc a database in use cannot be told apart, so nothing is removed.
+        return {"logFilesRemoved": 0, "logFreedBytes": 0}
+    for home in homes:
+        try:
+            names = os.listdir(home)
+        except OSError:
+            continue
+        for name in names:
+            if not (name.startswith("logs_") and name.endswith(".sqlite")):
+                continue
+            files = []
+            for suffix in ("", "-wal", "-shm"):
+                path = os.path.join(home, name + suffix)
+                try:
+                    st = os.lstat(path)
+                except OSError:
+                    continue
+                files.append((path, st))
+            # Skip the whole database when any part is open, not a regular file, or holds recent writes.
+            # Opening the database (even read-only) touches -shm and an empty -wal, so only the main
+            # file and a non-empty -wal count as writes.
+            if not files or not files[0][0].endswith(".sqlite") or any(
+                not os.path.isfile(path) or os.path.islink(path) or os.path.realpath(path) in held
+                or (st.st_mtime > cutoff and not path.endswith("-shm") and (st.st_size > 0 or not path.endswith("-wal")))
+                for path, st in files
+            ):
+                continue
+            for path, st in files:
+                if not dry_run:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        continue
+                removed += 1
+                freed += st.st_blocks * 512
+    return {"logFilesRemoved": removed, "logFreedBytes": freed}
+
+
 def write_state(state_dir, payload):
     if not state_dir or not os.path.isdir(state_dir):
         return
@@ -222,6 +292,7 @@ def main():
     parser.add_argument("--base-home")
     parser.add_argument("--state-dir")
     parser.add_argument("--catalog-days", type=int, default=7)
+    parser.add_argument("--log-days", type=int, default=7)
     parser.add_argument("--settle-seconds", type=int, default=SETTLE_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -234,6 +305,8 @@ def main():
     homes.extend(find_homes(args.codex_homes))
     plugins = dedupe_plugins(homes, args.dry_run, max(0, args.settle_seconds))
     catalog = prune_catalog(homes, max(1, args.catalog_days), args.dry_run)
+    # The base home belongs to the app itself; only per-conversation homes are pruned.
+    logs = prune_logs([home for home in homes if home != args.base_home], max(1, args.log_days), args.dry_run)
     result = {
         "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "dryRun": args.dry_run,
@@ -241,6 +314,8 @@ def main():
         "catalogRetentionDays": max(1, args.catalog_days),
         **plugins,
         **catalog,
+        "logRetentionDays": max(1, args.log_days),
+        **logs,
         "durationSeconds": round(time.time() - started, 1),
     }
     print(json.dumps(result))

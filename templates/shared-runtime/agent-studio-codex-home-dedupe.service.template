@@ -1,11 +1,11 @@
 [Unit]
-Description=Hard-link identical Codex plugin files across agent-studio Codex homes and drop stale plugin catalogs
+Description=Hard-link identical Codex plugin files across agent-studio Codex homes and drop stale plugin catalogs and debug logs
 
 [Service]
 Type=oneshot
 User=__APP_USER__
 Group=__APP_GROUP__
-ExecStart=/usr/bin/python3 -I /usr/local/lib/agent-studio/codex-home-dedupe.py --codex-homes __CODEX_HOMES_ROOT__ --base-home __APP_HOME__/.codex --state-dir __STATE_ROOT__ --catalog-days 7
+ExecStart=/usr/bin/python3 -I /usr/local/lib/agent-studio/codex-home-dedupe.py --codex-homes __CODEX_HOMES_ROOT__ --base-home __APP_HOME__/.codex --state-dir __STATE_ROOT__ --catalog-days 7 --log-days 7
 Nice=19
 IOSchedulingClass=idle
 # Reading many files fills page cache; keep it reclaimable instead of crowding the chat service.

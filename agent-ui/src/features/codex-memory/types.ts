@@ -146,6 +146,8 @@ export type CodexHomeDedupeRun = {
   catalogRetentionDays: number;
   catalogFilesRemoved: number;
   catalogFreedBytes: number;
+  logFilesRemoved?: number;
+  logFreedBytes?: number;
   errors: number;
 };
 

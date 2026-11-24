@@ -276,6 +276,9 @@ export type CodexHomeDedupeRun = {
   catalogRetentionDays: number;
   catalogFilesRemoved: number;
   catalogFreedBytes: number;
+  logRetentionDays: number;
+  logFilesRemoved: number;
+  logFreedBytes: number;
   errors: number;
 };
 
@@ -311,7 +314,7 @@ export type SharedRuntimeStatus = {
 };
 
 /** Thread workspace copies are always removed after this many idle days by the server cleaner. */
-export const WORKSPACE_COPY_RETENTION_DAYS = 3;
+export const WORKSPACE_COPY_RETENTION_DAYS = 1;
 export const MIN_TMP_RETENTION_DAYS = 3;
 export const MAX_TMP_RETENTION_DAYS = 90;
 
@@ -678,6 +681,9 @@ async function readCodexHomeDedupe(paths: SharedRuntimePaths): Promise<CodexHome
     catalogRetentionDays: toNumber(raw.catalogRetentionDays),
     catalogFilesRemoved: toNumber(raw.catalogFilesRemoved),
     catalogFreedBytes: toNumber(raw.catalogFreedBytes),
+    logRetentionDays: toNumber(raw.logRetentionDays),
+    logFilesRemoved: toNumber(raw.logFilesRemoved),
+    logFreedBytes: toNumber(raw.logFreedBytes),
     errors: toNumber(raw.errors)
   };
 }

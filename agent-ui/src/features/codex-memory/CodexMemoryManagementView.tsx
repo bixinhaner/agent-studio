@@ -1823,7 +1823,7 @@ export function CodexMemoryManagementView() {
               <div style={{ paddingTop: 14 }}>
                 <SettingNumber
                   title="临时目录保留天数"
-                  description={`会话空闲超过 ${formatCount(retentionDays)} 天后，删除它的临时目录（下载的包、缓存和中间文件），下次对话会自动重建。工作区副本固定在空闲 ${status?.cleanup.workspaceCopyRetentionDays ?? 3} 天后删除。`}
+                  description={`会话空闲超过 ${formatCount(retentionDays)} 天后，删除它的临时目录（下载的包、缓存和中间文件），下次对话会自动重建。工作区副本固定在空闲 ${status?.cleanup.workspaceCopyRetentionDays ?? 1} 天后删除。`}
                   value={retentionDays}
                   min={3}
                   max={90}
@@ -1938,7 +1938,10 @@ export function CodexMemoryManagementView() {
                         dedupe.pluginLogicalBytes > 0
                           ? `${formatCount(dedupe.homes)} 个会话的插件文件 ${formatBytes(dedupe.pluginLogicalBytes)}，实际占用 ${formatBytes(dedupe.pluginAllocatedBytes)}`
                           : null,
-                        `${formatLocalDateTime(dedupe.finishedAt)} 合并 ${formatCount(dedupe.filesLinked)} 个文件，删除 ${formatCount(dedupe.catalogFilesRemoved)} 个过期目录缓存`
+                        `${formatLocalDateTime(dedupe.finishedAt)} 合并 ${formatCount(dedupe.filesLinked)} 个文件，删除 ${formatCount(dedupe.catalogFilesRemoved)} 个过期目录缓存`,
+                        dedupe.logFilesRemoved
+                          ? `清理闲置会话的调试日志 ${formatBytes(dedupe.logFreedBytes ?? 0)}`
+                          : null
                       ]
                         .filter(Boolean)
                         .join(" · ")
