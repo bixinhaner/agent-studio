@@ -61,6 +61,12 @@ export const planningResponseSchema = z.object({
   definition: definitionSchema.nullable(),
 });
 export const operationGrantSchema = z.object({ operationId: z.string().min(1).max(160), method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) });
+/** Used when the source sends no deadline: background runs are not interactive, so favour completion. */
+export const DEFAULT_ASSISTANT_TIMEOUT_SECONDS = 600;
+export const MAX_ASSISTANT_TIMEOUT_SECONDS = 3600;
+export const MAX_ASSISTANT_TOOL_CALLS = 1000;
+const unsetLimit = (value: unknown) => (value === 0 || value === null ? undefined : value);
+
 export const executionRequestSchema = z.object({
   toolGrants: z.array(operationGrantSchema).max(5000).optional(),
   toolPolicy: z.object({ allowedMethods: z.array(z.string()), blockedPathPrefixes: z.array(z.string()), toolTimeoutSeconds: z.number(), maxResponseBytes: z.number() }).optional(),
@@ -80,12 +86,23 @@ export const executionRequestSchema = z.object({
   replyToRunId: z.string().uuid().optional(),
   // Optional for stored requests and source deployments predating continuity.
   contextScopeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  // Agent Studio owns how long a run may take (model speed, upstream waits and
+  // retries are only visible here). A source may still send a business
+  // deadline or its own tool-call cap; both are optional and 0 means unset.
   limits: z.object({
-    timeoutSeconds: z.number().int().min(10).max(300).default(120),
-    maxToolCalls: z.number().int().min(1).max(40).default(18),
+    timeoutSeconds: z.preprocess(unsetLimit, z.number().int().min(10).max(MAX_ASSISTANT_TIMEOUT_SECONDS).optional()),
+    maxToolCalls: z.preprocess(unsetLimit, z.number().int().min(1).max(MAX_ASSISTANT_TOOL_CALLS).optional()),
     maxOutputBytes: z.number().int().min(1024).max(65536).default(32768),
   }).default({}),
 });
+
+/** Run budget Agent Studio applies to an assistant run. */
+export function assistantRunBudget(limits: ExecutionRequest["limits"]): { timeoutSeconds: number; maxToolCalls?: number } {
+  return {
+    timeoutSeconds: limits.timeoutSeconds ?? DEFAULT_ASSISTANT_TIMEOUT_SECONDS,
+    ...(limits.maxToolCalls !== undefined ? { maxToolCalls: limits.maxToolCalls } : {}),
+  };
+}
 // A check rule the model may attach to a result. The source system re-runs it
 // with the owner's permissions to repeat a routine check without the model, so
 // it only describes data: one read, where the items are, how each is

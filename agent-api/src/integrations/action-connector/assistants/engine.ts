@@ -4,7 +4,7 @@ import type { ActionConnectorRuntimeService } from "../runtime.js";
 import type { DurableActionConnectorToolBridge } from "../proactive/durable-tool-bridge.js";
 import { loadConnector } from "../runtime.js";
 import { discoveryOperationIds, handbookOperationIds, resolveApiProfile } from "../api-profile.js";
-import { acceptedWatch, executionRequestSchema, parseModelJSON, resultSchema, type ExecutionRequest } from "./contracts.js";
+import { acceptedWatch, assistantRunBudget, executionRequestSchema, parseModelJSON, resultSchema, type ExecutionRequest } from "./contracts.js";
 import { assistantConversationId } from "./conversation.js";
 
 export const ASSISTANT_SNAPSHOT_KIND = "connector-assistant/v1";
@@ -39,13 +39,15 @@ export async function executeAssistant(input: {
   const handbookOperations = new Set(handbookOperationIds(profile));
   const discoveryOperations = new Set(discoveryOperationIds(profile));
   const methods = discovering ? (request.definition.allowedMethods ?? ["GET"]) : ["GET"];
+  const budget = assistantRunBudget(request.limits);
   const grants = discovering ? request.toolGrants!.filter((g) => methods.includes(g.method) && request.toolPolicy!.allowedMethods.includes(g.method)) : undefined;
   bridge.prepareBackgroundRun({
     connectorId: run.connectorId, runId: run.id, scenarioKey: run.scenarioKey,
     packageDigest: run.packageDigest, handbookDigest: request.handbookDigest,
     resourceScope: [], traceId: run.traceId, allowedOperations: grants?.map((g) => g.operationId) ?? request.definition.operations,
     operationGrants: grants, allowDiscovery: true, handbookOperations, discoveryOperations,
-    timeoutSeconds: request.limits.timeoutSeconds, maxToolCalls: request.limits.maxToolCalls,
+    // Without a source cap the source's own tool policy is the only call limit.
+    timeoutSeconds: budget.timeoutSeconds, maxToolCalls: budget.maxToolCalls ?? Number.POSITIVE_INFINITY,
     runAttempt: run.runAttempt, signal,
   });
   const outputLimit = new AbortController();
@@ -53,7 +55,7 @@ export async function executeAssistant(input: {
   let failure: Error | undefined;
   // Upstream model waits (capacity / 429 retries inside Codex) do not consume the budget.
   const deadline = createUpstreamWaitDeadline({
-    budgetMs: request.limits.timeoutSeconds * 1000,
+    budgetMs: budget.timeoutSeconds * 1000,
     maxExtensionMs: UPSTREAM_WAIT_MAX_EXTENSION_MS,
     onExtend: (deadlineAtMs) => bridge.extendBackgroundRunDeadline(run.connectorId, run.id, deadlineAtMs),
   });
@@ -103,7 +105,7 @@ export async function executeAssistant(input: {
         ] : []),
         `Authorized trigger context: ${JSON.stringify(request.triggerContext)}`,
         `Run time: ${new Date().toISOString()}; user timezone: ${request.timezone}`,
-        `Total execution budget, including discovery: ${request.limits.timeoutSeconds} seconds and ${request.limits.maxToolCalls} tool calls. Reserve time to finish a valid evidence-backed report. Reuse verified contracts, batch independent reads, narrow oversized responses, and stop exploration in time to report any remaining limits truthfully.`,
+        `Total execution budget, including discovery: ${budget.timeoutSeconds} seconds${budget.maxToolCalls !== undefined ? ` and ${budget.maxToolCalls} tool calls` : ""}. Reserve time to finish a valid evidence-backed report. Reuse verified contracts, batch independent reads, narrow oversized responses, and stop exploration in time to report any remaining limits truthfully.`,
       ].join("\n"),
     },
     emit(event) {
