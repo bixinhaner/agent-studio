@@ -13,6 +13,9 @@
 #    workspace-files)   idle TMP_IDLE_DAYS: reinstalled on demand.
 #  - <workspace>/.agent-studio/omc-handbooks   idle HANDBOOK_DAYS (3): OMC API handbook that the
 #    omc-operations skill downloads again when missing (~7MB and 1,000+ files per conversation).
+#  - /tmp entries owned by the app user (AGENT_STUDIO_APP_USER)   untouched SYSTEM_TMP_DAYS (1):
+#    scratch that agents create with absolute /tmp paths (Wine prefixes, unpacked builds) instead of
+#    their thread $TMPDIR; the system /tmp rule only removes them after 7 days.
 # "Thread" covers every workspace kind: thread-* dirs, action-connector conversations
 # (.../agent-*/conversations/<id>) and legacy shared agent dirs (sessions/<org>/<user>/agent-*).
 # A thread counts as idle when no file under its directory changed for the given days.
@@ -23,6 +26,8 @@ ROOT="${AGENT_STUDIO_DATA_ROOT:-/var/lib/agent-studio}"
 STATE_DIR="${SHARED_RUNTIME_STATE_ROOT:-$ROOT/shared/state}"
 WORKSPACE_COPY_DAYS=1
 HANDBOOK_DAYS=3
+SYSTEM_TMP_DAYS=1
+APP_USER="${AGENT_STUDIO_APP_USER:-agentstudio}"
 DRY_RUN=0; [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
 policy_days() {
@@ -122,6 +127,29 @@ clean_regex dependency-caches "$TMP_IDLE_DAYS" \
 REMOVED_DEPENDENCY_CACHES=$LAST_COUNT
 clean omc-handbooks "$HANDBOOK_DAYS" '*/.agent-studio/omc-handbooks' 2
 REMOVED_DEPENDENCY_CACHES=$((REMOVED_DEPENDENCY_CACHES+LAST_COUNT))
+
+# Top-level /tmp entries of the app user: skipped while any process has a file open or its working
+# directory inside, or while anything under them changed within SYSTEM_TMP_DAYS.
+clean_system_tmp() {
+  local count=0 skipped=0 freed_kb=0 d name kb held
+  id -u "$APP_USER" >/dev/null 2>&1 || { echo "done system-tmp skipped: no user $APP_USER"; return; }
+  held=$(mktemp)
+  { lsof -nP -Fn 2>/dev/null | sed -n 's/^n//p'; for p in /proc/[0-9]*; do readlink "$p/cwd" 2>/dev/null; done; } \
+    | sed -n 's|^/tmp/\([^/]*\).*|\1|p' | sort -u > "$held"
+  while IFS= read -r -d '' d; do
+    name="${d#/tmp/}"
+    if grep -qxF -- "$name" "$held"; then skipped=$((skipped+1)); continue; fi
+    find "$d" -newermt "-$SYSTEM_TMP_DAYS days" -print -quit 2>/dev/null | grep -q . && continue
+    kb=$(du -sk -- "$d" 2>/dev/null | cut -f1)
+    if [ "$DRY_RUN" = 1 ]; then echo "would remove: $d (${kb}K)"; else rm -rf -- "$d"; fi
+    count=$((count+1)); freed_kb=$((freed_kb+${kb:-0}))
+  done < <(find /tmp -mindepth 1 -maxdepth 1 -user "$APP_USER" -mmin +$((SYSTEM_TMP_DAYS*1440)) -print0 2>/dev/null)
+  rm -f "$held"
+  echo "done system-tmp dry_run=$DRY_RUN idle_days=$SYSTEM_TMP_DAYS removed=$count skipped_in_use=$skipped freed=$((freed_kb/1024))MB"
+  TOTAL_FREED_KB=$((TOTAL_FREED_KB+freed_kb))
+  TOTAL_SKIPPED=$((TOTAL_SKIPPED+skipped))
+}
+clean_system_tmp
 
 # Write the summary through a fresh temp file and rename it, so a link planted in the
 # app-owned state directory is replaced instead of followed.

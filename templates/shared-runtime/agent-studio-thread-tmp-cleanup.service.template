@@ -1,10 +1,11 @@
 [Unit]
-Description=Remove regenerable data of idle agent-studio threads (workspace copies 3d, temp dirs per admin retention)
+Description=Remove regenerable data of idle agent-studio threads (workspace copies 1d, temp dirs per admin retention, app-user /tmp 1d)
 
 [Service]
 Type=oneshot
 Environment=AGENT_STUDIO_DATA_ROOT=__DATA_ROOT__
 Environment=SHARED_RUNTIME_STATE_ROOT=__STATE_ROOT__
+Environment=AGENT_STUDIO_APP_USER=__APP_USER__
 ExecStart=/usr/local/sbin/agent-studio-thread-tmp-cleanup
 Nice=19
 IOSchedulingClass=idle
